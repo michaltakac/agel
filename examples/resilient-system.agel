@@ -1,0 +1,49 @@
+; A supervisor observes a child that is allowed one clean restart.
+; The child deliberately sends a "ghost" message before crashing. Per-turn
+; transactions erase that message, proving partial effects cannot escape.
+(def audit (spawn "audit-boundary"))
+
+(defprotocol supervisor-protocol)
+(def supervisor-behavior
+  (fn (self heap message)
+    (begin
+      (send audit
+        (list 'supervisor-observed
+          (car (cdr message))
+          (get (car (cdr (cdr message))) 'kind)))
+      (+ heap 1))))
+(def supervisor
+  (spawn "supervisor" supervisor-behavior 0 supervisor-protocol))
+
+(defprotocol worker-protocol
+  (work string)
+  (crash))
+(def worker-behavior
+  (fn (self heap message)
+    (if (= (car message) 'work)
+        (begin
+          (send audit (list 'completed (car (cdr message))))
+          (cons (car (cdr message)) heap))
+        (begin
+          (send audit '(ghost-this-must-rollback))
+          (/ 1 0)))))
+
+(def worker
+  (spawn "fragile-worker" worker-behavior nil worker-protocol
+    supervisor 'restart 1))
+
+(send worker '(work "before-failure"))
+(send worker '(crash))
+(send worker '(work "after-restart"))
+(send worker '(crash))
+(run)
+
+; Only completed messages and the final supervisor report exist—never a ghost.
+(recv audit)
+(recv audit)
+(recv audit)
+(recv audit)
+(agent-info worker)
+(agent-info supervisor)
+:events
+:quit

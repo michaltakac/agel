@@ -1,0 +1,56 @@
+; Run with both explicitly enabled:
+; cargo run -q -p agel-cli -- --enable-claude --enable-codex \
+;   --claude-max-budget-usd 0.25 < examples/model-swarm.agel
+;
+; This creates two genuine Agel agents. Each has authority for exactly one
+; provider. Their turns only commit durable inference intents; :dispatch is the
+; explicit host-side gate that invokes the real local CLIs.
+
+(def claude-cap (request-capability 'model/infer "claude"))
+(def codex-cap (request-capability 'model/infer "codex"))
+
+(defprotocol thinker-protocol (ask string))
+
+(def make-thinker
+  (fn (name provider capability)
+    (spawn name
+      (fn (self heap message)
+        (if (= (car message) 'ask)
+            (begin
+              (model-request provider (car (cdr message)) self)
+              (assoc heap 'status 'thinking))
+            (if (= (car message) 'system/model-result)
+                (assoc
+                  (assoc heap 'status 'answered)
+                  'answer
+                  (car (cdr (cdr (cdr message)))))
+                (assoc
+                  (assoc heap 'status 'failed)
+                  'error
+                  (car (cdr (cdr (cdr (cdr message)))))))))
+      (dict 'status 'idle)
+      thinker-protocol nil 'stop 0 (list capability))))
+
+(def claude-thinker (make-thinker "claude-thinker" 'claude claude-cap))
+(def codex-thinker (make-thinker "codex-thinker" 'codex codex-cap))
+
+(send claude-thinker
+  '(ask "Invent one surprising capability for a safe homoiconic agent OS. Answer in two sentences."))
+(send codex-thinker
+  '(ask "Invent one surprising capability for a safe homoiconic agent OS. Answer in two sentences."))
+
+; Agent turns atomically create two requests, but no external process runs yet.
+(run)
+(pending-model-requests)
+:requests
+
+; This is the visible, irreversible-effect gate.
+:dispatch
+
+; Exact model outputs are now committed inputs. Deliver them to agent heaps.
+(run)
+(list
+  (get (agent-info claude-thinker) 'heap)
+  (get (agent-info codex-thinker) 'heap))
+:events
+:quit

@@ -1,0 +1,15 @@
+[workspace]
+members = ["crates/agel-core", "crates/agel-model", "crates/agel-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.4.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+rust-version = "1.75"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

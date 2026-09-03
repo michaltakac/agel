@@ -1,0 +1,25 @@
+; Branch a live agent world, then return to the snapshot and take another path.
+(defprotocol accumulator-protocol (add int))
+(def accumulator-behavior
+  (fn (self heap message) (+ heap (car (cdr message)))))
+(def accumulator
+  (spawn "timeline-accumulator" accumulator-behavior 0 accumulator-protocol))
+
+(send accumulator '(add 10))
+:snapshot fork-point
+(run)
+(get (agent-info accumulator) 'heap)
+
+(send accumulator '(add 32))
+(run)
+; First future => 42
+(get (agent-info accumulator) 'heap)
+
+:restore fork-point
+(send accumulator '(add 90))
+(run)
+; Alternate future => 100, restored as a new monotonic world revision.
+(get (agent-info accumulator) 'heap)
+:snapshots
+:events
+:quit

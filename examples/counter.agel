@@ -1,0 +1,26 @@
+; A typed stateful service with an isolated integer heap.
+(defprotocol counter-protocol
+  (add int)
+  (read agent))
+
+(def counter-behavior
+  (fn (self heap message)
+    (if (= (car message) 'add)
+        (+ heap (car (cdr message)))
+        (begin
+          (send (car (cdr message)) (list 'value heap))
+          heap))))
+
+(def observer (spawn "human-observer"))
+(def counter (spawn "counter" counter-behavior 0 counter-protocol))
+
+(send counter '(add 20))
+(send counter '(add 22))
+(send counter (list 'read observer))
+(run)
+
+; => (value 42), followed by structured agent metadata.
+(recv observer)
+(agent-info counter)
+:events
+:quit
