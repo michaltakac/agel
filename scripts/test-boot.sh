@@ -12,9 +12,10 @@ cmp "$first_image" "$kernel"
 
 set +e
 perl -e 'alarm shift; exec @ARGV' 15 qemu-system-x86_64 \
-  -machine pc -m 64M -display none -monitor none -serial stdio -no-reboot \
+  -machine pc,accel=tcg -m 64M -display none -monitor none -serial stdio -no-reboot \
   -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
-  -drive format=raw,file="$kernel" > "$output_file" 2>&1
+  -boot order=c,strict=on \
+  -drive format=raw,file="$kernel",snapshot=on > "$output_file" 2>&1
 status=$?
 set -e
 

@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v1.0: a bootable, recoverable agent-language seed**. It provides:
+The current repository is **v1.1: a native Agel workshop**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -39,10 +39,14 @@ The current repository is **v1.0: a bootable, recoverable agent-language seed**.
 - a reproducible 64 KiB BIOS disk seed that enters x86-64 long mode in QEMU;
 - a freestanding Rust serial HAL and interactive recovery monitor; and
 - boot-time A/B denial, verification, promotion, and watchdog rollback checks;
+- a fixed-memory Agel reader and evaluator running inside the VM;
+- native transactional definitions, functions, recursion, quote/eval, monotonic
+  revisions, and one-step world rollback; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
-This is the first independently bootable substrate, not yet a general-purpose
-operating-system kernel: the Agel evaluator still runs as a hosted process. See
+This is the first Agel evaluator running on the independently bootable
+substrate, not yet a general-purpose operating system. The full agent runtime,
+filesystem, compiler, and persistent images still run as hosted components. See
 [`docs/architecture.md`](docs/architecture.md) for the trust boundaries and
 bootstrap plan.
 
@@ -134,7 +138,26 @@ Two-lane human interaction and the bootable recovery monitor:
 cargo run -q -p agel-interaction --example two_lane
 ./scripts/test-boot.sh
 ./scripts/test-monitor.sh
-./scripts/run-qemu.sh       # then type: help, status, verify, promote, fault
+./scripts/run-qemu.sh       # boots directly to agel-native[0]>
+```
+
+The VM now opens directly into Agel. Try this inside `run-qemu.sh`:
+
+```lisp
+(def fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1))))))
+(fact 10)
+(eval '(+ 20 22))
+(begin (def answer 99) (/ 1 0))
+answer
+:defs
+:rollback
+```
+
+Run the prompt-synchronized native language conformance session with:
+
+```sh
+./scripts/test-native.sh
+./scripts/test-native-repl.sh
 ```
 
 The boot scripts require `qemu-system-x86_64`, `clang`, GNU `objcopy`, and the
@@ -159,5 +182,7 @@ The v0.9 bootstrap trust story and its current limits are in
 The native seed and recovery boundary are documented in
 [`docs/native-boot.md`](docs/native-boot.md); text/voice scheduling and authority
 are specified in [`docs/interaction.md`](docs/interaction.md).
+The native subset, fixed limits, transactions, and workshop commands are in
+[`docs/native-workshop.md`](docs/native-workshop.md).
 External inspirations and the exact ideas Agel adopts from them are recorded in
 [`docs/design-lineage.md`](docs/design-lineage.md).

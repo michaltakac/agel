@@ -91,12 +91,15 @@ Each rung must be runnable and differentially testable against the rung below:
 10. **Bootable recovery seed (complete at v1.0):** a reproducible BIOS image
    enters x86-64 long mode, runs a freestanding Rust serial HAL, and exposes an
    independent A/B recovery monitor whose policy is testable under QEMU.
-11. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
+11. **Native language workshop (complete at v1.1):** a fixed-memory Agel reader,
+   evaluator, transactional world, definitions, recursive functions, and serial
+   REPL execute inside QEMU while recovery state remains outside the language.
+12. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
    and compiler in Agel; extend diverse comparison to every kernel semantic.
-12. **Native agent world:** allocator, interrupt/trap entry, drivers, the Agel
-   evaluator, and persistent images inside the VM. Keep device access outside
-   mutable language heaps.
-13. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+13. **Native agent world:** allocator, interrupt/trap entry, drivers, the full
+   Agel agent runtime, and persistent images inside the VM. Keep device access
+   outside mutable language heaps.
+14. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
 
 ## Change protocol for privileged code

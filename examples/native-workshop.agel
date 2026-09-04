@@ -1,0 +1,11 @@
+; Enter these forms after ./scripts/run-qemu.sh.
+(def fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1))))))
+(fact 10)
+(eval '(+ 20 22))
+(def answer 42)
+(begin (def answer 99) (/ 1 0))
+answer
+(def evolve (fn (x) (+ x 1)))
+(evolve 41)
+(def evolve (fn (x) (+ x 2)))
+; Enter :rollback immediately, then (evolve 41) returns 42 from the old definition.

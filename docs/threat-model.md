@@ -131,3 +131,38 @@ allocator, interrupts, storage, networking, audio, or isolation for hostile
 native binaries. QEMU emulation is a conformance target, not a proof of hardware
 correctness. Cryptographic boot, real watchdog hardware, and signed system
 images remain required before this is a secure autonomous OS.
+
+## v1.1
+
+- **Failed native evaluation destroys rollback history:** three fixed world
+  banks separate active, previous, and scratch state. Evaluation mutates only
+  scratch; failure discards it without touching either committed bank.
+- **Unbounded syntax or computation:** source length, syntax nodes, nesting,
+  names, parameters, arguments, globals, stored function bodies, call depth,
+  and evaluator fuel have deterministic limits. Capacity errors abort the
+  candidate transaction.
+- **Arithmetic faults halt a kernel without an IDT:** parsing and arithmetic use
+  checked operations. Division rejects zero and overflow before executing a
+  faulting instruction.
+- **Language state mutates recovery policy:** recovery state is owned by the
+  native shell, not stored in an Agel world. The language has no primitive for
+  serial ports, debug exit, page tables, or slot mutation.
+- **Repeated promotion destroys the rollback slot:** promoting while B is
+  already active is denied and clears stale candidate evidence, so retained A
+  cannot be replaced by B. A fault reports the slot actually restored.
+- **Persisted closure loses lexical authority or data:** v1.1 stored functions
+  do not yet encode captured environments. Defining one from a nonempty lexical
+  context is rejected transactionally instead of committing broken semantics.
+- **Argument side effects replace the selected callee:** function values carry
+  a snapshot of their fixed representation. Application does not reread a
+  mutable global binding after evaluating arguments.
+- **UART tests pass without testing input:** CI waits for the native-ready token,
+  sends each byte only after its echo, frames every result by the next revision
+  prompt, and requires QEMU's debug-exit status. This covers the actual normal
+  REPL rather than only a compile-time self-test path.
+
+Definitions last for the current VM session only. There is no native filesystem,
+editor, persistent image, macro expander, agent scheduler, capability system,
+interrupt table, memory protection, or compiler yet. The fixed evaluator shares
+the kernel address space, so its checked implementation is a robustness boundary,
+not hardware isolation from hostile native code.

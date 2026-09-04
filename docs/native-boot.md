@@ -1,8 +1,8 @@
 # Native boot seed and recovery monitor
 
-Agel v1.0 adds a small, reproducible path from a raw disk image to freestanding
-Rust on x86-64. It exists to make the trust boundary executable early; it is not
-yet the hosted Agel runtime transplanted into a VM.
+Agel v1.0 added a small, reproducible path from a raw disk image to freestanding
+Rust on x86-64. v1.1 places a fixed-memory Agel evaluator and transactional REPL
+on that substrate while retaining the recovery boundary.
 
 ## Boot path
 
@@ -12,8 +12,8 @@ yet the hosted Agel runtime transplanted into a VM.
 3. It enables A20, PAE, long mode, protected mode, and paging.
 4. It jumps through a 64-bit GDT entry and calls the fixed kernel entry at
    `0x10000`.
-5. The `no_std`, `no_main` Rust seed initializes COM1 and starts the recovery
-   monitor.
+5. The `no_std`, `no_main` Rust seed initializes COM1 and starts the native Agel
+   workshop. Recovery policy remains separate from the evaluator's world banks.
 
 The linker keeps `.text.entry` first so helper-function reordering cannot move
 the address called by the BIOS stage. The raw image is always exactly 128
@@ -29,7 +29,9 @@ watchdog rollback. The normal serial shell supports:
 help status verify promote fault agents shutdown
 ```
 
-Build and enter it with `./scripts/run-qemu.sh`. `./scripts/test-boot.sh`
+Build and enter the Agel REPL with `./scripts/run-qemu.sh`; recovery operations
+are colon commands such as `:recovery-status`, `:verify`, and `:fault`.
+`./scripts/test-boot.sh`
 rebuilds the disk twice, requires byte equality, boots it, and checks a serial
 success token. `./scripts/test-monitor.sh` boots a deterministic monitor scenario
 and asserts denial, verification, promotion, and rollback.
@@ -40,7 +42,8 @@ and asserts denial, verification, promotion, and rollback.
 operations are x86 port I/O and `cli; hlt`; BIOS transition assembly lives in
 `boot/bios`. The main hosted workspace still has `unsafe_code = "forbid"`.
 
-The v1.0 monitor does not persist slots or verify signatures, and there is no
-IDT, allocator, driver model, Agel evaluator, or hardware watchdog in the VM.
-Those are subsequent native rungs. The important v1 invariant is already real:
-mutable agent code cannot be the only component capable of recovering it.
+The monitor does not persist slots or verify signatures, and there is no IDT,
+allocator, driver model, hardware watchdog, or full agent runtime in the VM.
+The native evaluator is intentionally fixed-memory and session-only. The
+important invariant remains: mutable language state is not the only component
+capable of recovering it.

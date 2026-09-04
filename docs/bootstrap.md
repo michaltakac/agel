@@ -53,10 +53,11 @@ rollback.
 cargo run -q -p agel-supervisor --example ab_upgrade
 ```
 
-## What remains for v1.0
+## What remains after v1.1
 
 The independent and metacircular evaluators cover a meaningful functional
-kernel, not all Agel semantics. The next trust step is a bootable supervisor and
-recovery path, followed by expanding cross-implementation conformance. v0.9 does
-not claim the Rust host has disappeared or that the A/B selector survives a
-hostile disk controller.
+kernel, not all Agel semantics. v1.0 added a bootable recovery path and v1.1
+added a fixed-memory native evaluator. The next trust steps are native persistent
+images, expanding cross-implementation conformance, and moving the agent runtime
+and compiler into the VM. The Rust seed has not disappeared, and the A/B
+selector does not yet survive a hostile disk controller.
