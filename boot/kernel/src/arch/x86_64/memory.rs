@@ -29,6 +29,7 @@ const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
 const HUGE: u64 = 1 << 7;
+const CACHE_DISABLE: u64 = 1 << 4;
 const NO_EXECUTE: u64 = 1 << 63;
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 
@@ -36,6 +37,11 @@ const fn leaf_bits(access: Access) -> u64 {
     match access {
         Access::UserCode => PRESENT | USER,
         Access::UserData => PRESENT | WRITABLE | USER | NO_EXECUTE,
+        // x86-64 reaches its console through I/O ports rather than a mapping,
+        // so a device grant here is a bitmap entry in the task-state segment,
+        // not a page. The variant exists for the other two architectures; a
+        // mapping request for it would be a caller confusing the two.
+        Access::UserDevice => PRESENT | WRITABLE | USER | NO_EXECUTE | CACHE_DISABLE,
     }
 }
 

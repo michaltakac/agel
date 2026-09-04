@@ -28,10 +28,10 @@ requires the same toolchain.
 |---|---|
 | Rust | `rustc 1.89.0 (29483883e 2025-08-04)` |
 | Bootable image | `1fea4bbe3f467131a814622d5dc35170ed361793540f290ae933b040b2be37c6` |
-| Protection domain `serial` | `027e9e5f85f944c98913e51f084dc2846a7389110635712f9edf2d8f76e02a75` |
-| Protection domain `broker` | `1a9eb16c727afed30cf4cd9602289ed3d80336332d35b7c1457d891019c7fea2` |
-| Protection domain `recovery` | `9798633ec3767db07cd0923620646a205a82ba12892373f25fdf6d4038f08e43` |
-| Protection domain `world` | `b90929cb98dfe9c91dfa75e7d4c1435c1b4a41e54685708a6100c2c5d6411dc5` |
+| Protection domain `serial` | `842c8312b9578fdd5af02ea3e779ef7af395aab5672ca4ce5a7e1af22032528c` |
+| Protection domain `broker` | `0c6b19251f221ec12714f6eaa858da615f6abd55d51d240a5602ba494744de9d` |
+| Protection domain `recovery` | `3ea4fb87dff72486f99da0e242a401f9ab172f0e5e6d58f7e099719c384cdb72` |
+| Protection domain `world` | `a6c3a28fd29b92a538d85e3e6e2c4f93b089dff82c948abe9acb157fba9161cd` |
 
 Protection domains are built for `aarch64-unknown-none-softfloat`. The seL4
 kernel and `libmicrokit.a` are the published release binaries: nothing in

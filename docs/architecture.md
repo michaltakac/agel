@@ -121,27 +121,33 @@ Each rung must be runnable and differentially testable against the rung below:
    from one source, with byte-identical transcripts. Only address spaces,
    register frames, trap entry, and the privilege transition are
    per-architecture.
-15. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
+15. **Split privileged services (started at v1.5):** the console driver runs in
+   its own unprivileged, restartable domain on all three research backends,
+   holding the device by whatever mechanism the architecture uses to grant one.
+   The supervisor prints through it, can lose it, replaces it at a new
+   generation, and refuses handles issued before the restart. Timers, storage,
+   networking and model brokering are still the supervisor's.
+16. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
    and compiler in Agel; extend diverse comparison to every kernel semantic.
-16. **Native agent world:** move the evaluator and the full Agel agent runtime
+17. **Native agent world:** move the evaluator and the full Agel agent runtime
    into ring-3 domains, then add an allocator, drivers, and persistent images.
    Keep device access outside mutable language heaps.
-17. **seL4 backend (complete at v1.4):** the same kernel contract over an
+18. **seL4 backend (complete at v1.4):** the same kernel contract over an
    unmodified seL4 kernel, composed with Microkit on AArch64. Four protection
    domains — recovery, world, broker, serial — where the contract is answered
    by an unprivileged server and the kernel knows nothing about Agel. The
    configuration is MCS and therefore not a proved one; the release manifest
    says so.
-18. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+19. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-19. **GPU plane:** a Linux domain holding the NVIDIA stack, with GPUs assigned
+20. **GPU plane:** a Linux domain holding the NVIDIA stack, with GPUs assigned
    through the IOMMU or SMMU and granted by the system manifest. Permanent, not
    transitional: CUDA user space and GSP firmware are proprietary, so there is
    no native equivalent to write. Large, and deliberately without authority.
-20. **Training as an effect:** admitted with a resource grant and a deadline,
+21. **Training as an effect:** admitted with a resource grant and a deadline,
    checkpointed into the tamper-evident log, cancellable, and replayable as the
    decision and the checkpoints rather than as the arithmetic.
-21. **Multi-node:** per-node ownership and explicit distributed state across an
+22. **Multi-node:** per-node ownership and explicit distributed state across an
    NVLink or InfiniBand fabric that is treated as a device class with a trust
    boundary rather than as a fast network.
 

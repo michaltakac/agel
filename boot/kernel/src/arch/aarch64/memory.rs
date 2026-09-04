@@ -51,12 +51,25 @@ const TCR: u64 = 25            // T0SZ: 64 - 39
     | (2 << 32); // IPS: 40-bit physical addresses
 
 const fn leaf_bits(access: Access) -> u64 {
-    let common = VALID | TABLE_OR_PAGE | ATTR_NORMAL | SH_INNER | ACCESS_FLAG;
+    let common = VALID | TABLE_OR_PAGE | ACCESS_FLAG;
     match access {
         // EL0 may read and execute; nobody may write, and EL1 may not execute.
-        Access::UserCode => common | AP_RO_ANY | PRIVILEGED_EXECUTE_NEVER,
+        Access::UserCode => common | ATTR_NORMAL | SH_INNER | AP_RO_ANY | PRIVILEGED_EXECUTE_NEVER,
         // EL0 and EL1 may read and write; nobody may execute.
-        Access::UserData => common | AP_RW_ANY | PRIVILEGED_EXECUTE_NEVER | USER_EXECUTE_NEVER,
+        Access::UserData => {
+            common
+                | ATTR_NORMAL
+                | SH_INNER
+                | AP_RW_ANY
+                | PRIVILEGED_EXECUTE_NEVER
+                | USER_EXECUTE_NEVER
+        }
+        // A device granted to one domain: device-nGnRnE rather than normal
+        // memory, because a UART is not somewhere the processor may reorder or
+        // combine accesses.
+        Access::UserDevice => {
+            common | ATTR_DEVICE | AP_RW_ANY | PRIVILEGED_EXECUTE_NEVER | USER_EXECUTE_NEVER
+        }
     }
 }
 

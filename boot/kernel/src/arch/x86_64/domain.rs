@@ -20,6 +20,9 @@ pub struct Domain {
     space: AddressSpace,
     frame: TrapFrame,
     core: DomainCore,
+    /// Whether this domain is the console driver. The device is granted for
+    /// the duration of its entries and withheld for everyone else's.
+    console: bool,
 }
 
 impl Domain {
@@ -30,6 +33,7 @@ impl Domain {
         identity_pdpt: u64,
         entry: u64,
         tick_budget: u32,
+        console: bool,
     ) -> Result<Self, MemoryError> {
         let mut space = AddressSpace::new(pool, identity_pdpt)?;
         for page in 0..STACK_PAGES {
@@ -46,6 +50,7 @@ impl Domain {
             space,
             frame: TrapFrame::user(entry, stack_top, SHARED_BASE),
             core: DomainCore::new(shared_physical, tick_budget),
+            console,
         })
     }
 
@@ -76,13 +81,16 @@ impl Domain {
         }
         self.core.begin_entry();
         // Safety: the domain's address space maps the whole kernel window, so
-        // the trap path stays reachable across the switch.
+        // the trap path stays reachable across the switch, and the port grant
+        // is installed and withdrawn around this entry alone.
         unsafe {
+            cpu::grant_console_ports(self.console);
             self.space.activate();
             CURRENT = self;
             cpu::enter_domain(&raw mut self.frame);
             CURRENT = core::ptr::null_mut();
             restore_kernel_space();
+            cpu::grant_console_ports(false);
         }
         self.core.outcome()
     }
@@ -90,6 +98,11 @@ impl Domain {
     /// The domain's recorded stop reason, if it has one.
     pub fn stopped(&self) -> Option<Stop> {
         self.core.stopped()
+    }
+
+    /// The architecture-neutral half of this domain.
+    pub fn core(&mut self) -> &mut DomainCore {
+        &mut self.core
     }
 }
 

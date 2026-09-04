@@ -134,6 +134,11 @@ pub const PROVOCATIONS: &[Provocation] = &[
         description: "dividing by zero",
     },
     Provocation {
+        command: crate::world::shared::COMMAND_FAULT_DEVICE,
+        expected: Some("general-protection"),
+        description: "touching a device it was not granted",
+    },
+    Provocation {
         command: crate::world::shared::COMMAND_SPIN,
         expected: None,
         description: "that never yields",
@@ -180,7 +185,14 @@ impl Machine {
 
     /// Build a protection domain entered in ring 3 at `entry`.
     pub fn create_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(&mut self.pool, self.identity, entry, ticks).map_err(|error| error.name())
+        Domain::new(&mut self.pool, self.identity, entry, ticks, false)
+            .map_err(|error| error.name())
+    }
+
+    /// Build a protection domain that is additionally granted the console
+    /// device: on x86-64, eight I/O ports and nothing else.
+    pub fn create_console_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
+        Domain::new(&mut self.pool, self.identity, entry, ticks, true).map_err(|error| error.name())
     }
 
     /// Frames the pool has not handed out.

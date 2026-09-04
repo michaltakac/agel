@@ -697,15 +697,34 @@ either a Microkit board built against a proved configuration or dropping to the
 raw seL4 SDK, and that is the next assurance step rather than something this
 phase quietly claims.
 
-### Phase 3 — split privileged services
+### Phase 3 — split privileged services — **started (v1.5)**
 
 - Serial/input and timers first, then storage/image, networking and model/tool
-  brokering.
-- Put each risky driver in its own restartable domain.
+  brokering. → the **console driver has left the supervisor** on all three
+  research backends. It runs unprivileged, holds the device, and prints the
+  conformance transcript on the supervisor's behalf: if the driver does not
+  work, the transcript does not appear and the frozen-transcript diff fails.
+  Timers are not split — preemption is the supervisor's own mechanism for
+  containing a world, so moving it out is a later question rather than an
+  obvious next step. Storage, networking and model/tool brokering are untouched.
+- Put each risky driver in its own restartable domain. → done for the one driver
+  that exists. Losing it, replacing it at a new generation, and refusing a
+  handle from before the restart with `stale-generation` are all asserted in CI
+  on every architecture. That status had been in the contract since v1.2 with no
+  backend able to produce it; a driver that can die is what made it real.
 - Stand up the Linux GPU domain. This was written as "before writing native
   equivalents"; there are no native equivalents to write. The CUDA user-space
   stack and the GSP firmware are proprietary binaries, so the Linux domain is
-  permanent. What is transitional is only how much else lives in it.
+  permanent. What is transitional is only how much else lives in it. → not
+  started, and not startable on this hardware.
+
+The device is granted the way each architecture actually grants devices, which
+is the part worth having built once: an I/O permission bitmap in the
+task-state segment on x86-64 handing the driver eight ports and nothing else;
+a mapped device page on AArch64 and RISC-V. Every other world runs the same
+`.user_text` instruction that touches the console and is refused — by
+general protection on x86-64, by a page fault on the other two — so the device
+is a capability rather than a convention, and CI asserts that on all three.
 
 ### Phase 4 — durable worlds and effects
 
@@ -876,7 +895,8 @@ Open architecture decisions needing experiments or ADRs:
 | Derivation is monotonic; revocation is transitive and fails closed | enforced and corpus-tested |
 | Every queue is bounded with defined backpressure | `queue-full` at capacity, corpus-tested |
 | A kernel-neutral component contract, in Genode's sense | the shared driver, corpus and world program are architecture-neutral across three machines |
-| The evaluator does not belong in the privileged kernel | machinery built on three architectures; the evaluator has not moved yet |
+| Drivers belong in restartable domains, not in the supervisor | the console driver, on three architectures, with generations and fail-closed stale handles |
+| The evaluator does not belong in the privileged kernel | machinery built on three architectures, and now a console it can print through; the evaluator has not moved yet |
 | seL4 as the assurance backend | running: four PDs on an unmodified kernel, same corpus, same transcript |
 | The contract answered by a server, never by the kernel | the broker PD; seL4 is unmodified and unaware of Agel |
 | Release manifest naming what is proved, assumed and out of scope | [`sel4-manifest.md`](sel4-manifest.md), regenerated and checked in CI |

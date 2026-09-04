@@ -14,6 +14,8 @@ use agel_kernel_abi::{Request, Response, Status};
 const STACK_BASE: u64 = DOMAIN_BASE;
 /// Virtual address of the page a domain shares with the supervisor.
 const SHARED_BASE: u64 = DOMAIN_BASE + 0x0010_0000;
+/// Virtual address of the console device, mapped only into the driver domain.
+pub const DEVICE_BASE: u64 = DOMAIN_BASE + 0x0020_0000;
 
 /// An unprivileged world.
 pub struct Domain {
@@ -30,6 +32,7 @@ impl Domain {
         identity: IdentityWindow,
         entry: u64,
         tick_budget: u32,
+        console: Option<u64>,
     ) -> Result<Self, MemoryError> {
         let mut space = AddressSpace::new(pool, identity)?;
         for page in 0..STACK_PAGES {
@@ -38,6 +41,12 @@ impl Domain {
         }
         let shared_physical = pool.allocate()?;
         space.map(pool, SHARED_BASE, shared_physical, Access::UserData)?;
+        // The console device is mapped into exactly one domain. Every other
+        // world has no translation for it at all, so reaching it is not a
+        // permission failure but an absence.
+        if let Some(device) = console {
+            space.map(pool, DEVICE_BASE, device, Access::UserDevice)?;
+        }
         // The stack grows down from the top of the last mapped stack page. The
         // page above is deliberately absent, so an overflowing world faults
         // instead of walking into whatever the allocator handed out next.
@@ -90,6 +99,11 @@ impl Domain {
     /// The domain's recorded stop reason, if it has one.
     pub fn stopped(&self) -> Option<Stop> {
         self.core.stopped()
+    }
+
+    /// The architecture-neutral half of this domain.
+    pub fn core(&mut self) -> &mut DomainCore {
+        &mut self.core
     }
 }
 

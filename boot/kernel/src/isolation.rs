@@ -13,9 +13,11 @@ use crate::arch;
 use crate::console;
 use crate::kprint;
 use crate::monitor::RecoveryMonitor;
+use crate::service::{ServiceDomain, ServiceError, ServiceWriter};
 use crate::world::{shared, Stop};
 use agel_kernel_abi::model::ModelKernel;
 use agel_kernel_abi::{conformance, write_step, Kernel};
+use core::fmt::Write as _;
 
 /// Report a condition that makes the isolation test meaningless and stop.
 fn failed(reason: &str) -> ! {
@@ -42,8 +44,24 @@ pub fn run() -> ! {
         failed("the unprivileged entry point is not in user-executable text");
     }
 
-    run_conformance(&mut machine);
+    // Phase 3: the console driver leaves the supervisor before anything else
+    // uses it, so that the conformance transcript below is printed by an
+    // unprivileged domain. If the driver does not work, the transcript does not
+    // appear, and the frozen-transcript diff fails. That is a stronger check
+    // than any assertion about the driver could be.
+    let mut console = match machine.create_console_world(entry, 8) {
+        Ok(domain) => ServiceDomain::new(domain, entry, 8),
+        Err(reason) => failed(reason),
+    };
+    kprint!(
+        "isolation[{}]: console driver in an unprivileged domain, generation {}\n",
+        arch::NAME,
+        console.generation()
+    );
+
+    run_conformance(&mut machine, &mut console);
     run_containment(&mut machine);
+    run_driver_restart(&mut machine, &mut console);
 
     // The recovery plane must still work after everything above. A supervisor
     // that survives a hostile world but loses its own recovery policy has not
@@ -67,7 +85,7 @@ pub fn run() -> ! {
 
 /// Run the frozen corpus inside an unprivileged world and compare every answer
 /// against the reference model running in the supervisor.
-fn run_conformance(machine: &mut arch::Machine) {
+fn run_conformance(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
     let mut world = match machine.create_world(crate::user::agel_world_main as usize as u64, 8) {
         Ok(world) => world,
         Err(reason) => failed(reason),
@@ -76,23 +94,38 @@ fn run_conformance(machine: &mut arch::Machine) {
     reference.reset_to_conformance_domain();
 
     let mut agreed = 0_usize;
-    console::write("---BEGIN AGEL CONTRACT TRANSCRIPT---\n");
-    kprint!(
-        "agel-kernel-contract v{}.{}.{} corpus={} steps\n",
-        agel_kernel_abi::VERSION_MAJOR,
-        agel_kernel_abi::VERSION_MINOR,
-        agel_kernel_abi::VERSION_PATCH,
-        conformance::CORPUS.len()
-    );
-    for step in conformance::CORPUS {
-        let observed = world.invoke_in_world(&step.request);
-        let expected = reference.invoke(&step.request);
-        let _ = write_step(&mut console::Writer, step.label, &step.request, &observed);
-        if observed == expected {
-            agreed += 1;
+    {
+        // Every byte below is written by a domain that holds the device, on
+        // behalf of a supervisor that no longer reaches it directly.
+        let mut out = ServiceWriter::new(driver);
+        let _ = writeln!(out, "---BEGIN AGEL CONTRACT TRANSCRIPT---");
+        let _ = writeln!(
+            out,
+            "agel-kernel-contract v{}.{}.{} corpus={} steps",
+            agel_kernel_abi::VERSION_MAJOR,
+            agel_kernel_abi::VERSION_MINOR,
+            agel_kernel_abi::VERSION_PATCH,
+            conformance::CORPUS.len()
+        );
+        for step in conformance::CORPUS {
+            let observed = world.invoke_in_world(&step.request);
+            let expected = reference.invoke(&step.request);
+            let _ = write_step(&mut out, step.label, &step.request, &observed);
+            if observed == expected {
+                agreed += 1;
+            }
+        }
+        let _ = writeln!(out, "---END AGEL CONTRACT TRANSCRIPT---");
+        out.flush();
+        if let Some(error) = out.failure() {
+            kprint!(
+                "isolation[{}]: the console driver failed: {}\n",
+                arch::NAME,
+                error.name()
+            );
+            failed("the console driver did not print the transcript");
         }
     }
-    console::write("---END AGEL CONTRACT TRANSCRIPT---\n");
 
     if agreed != conformance::CORPUS.len() {
         // A disagreement is almost always the world having been stopped rather
@@ -178,4 +211,71 @@ fn run_containment(machine: &mut arch::Machine) {
         }
     }
     let _ = shared::COMMAND_INVOKE;
+}
+
+/// Lose the console driver on purpose, replace it, and require the supervisor
+/// to have noticed.
+///
+/// This is the half of "its own restartable domain" that a driver merely living
+/// somewhere else does not give you. The old handle is kept deliberately: a
+/// caller that has not noticed a restart must be refused, not quietly served by
+/// a server that no longer remembers the conversation.
+fn run_driver_restart(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
+    let stale = driver.handle();
+
+    match driver.provoke(shared::COMMAND_FAULT_WRITE) {
+        Stop::Faulted(fault) => kprint!(
+            "isolation[{}]: the console driver faulted: {} at {:#x}\n",
+            arch::NAME,
+            fault.name(),
+            fault.pc
+        ),
+        _ => failed("the console driver was not contained"),
+    }
+
+    // The supervisor is still here, and can still say so, because its own
+    // last-resort path does not run through the component that just died.
+    if driver.stopped().is_none() {
+        failed("the console driver did not latch its stop reason");
+    }
+
+    if let Err(reason) = driver.restart(machine) {
+        failed(reason);
+    }
+    kprint!(
+        "isolation[{}]: replaced it; generation {} after {} restart\n",
+        arch::NAME,
+        driver.generation(),
+        driver.restarts()
+    );
+
+    // A handle from before the restart must fail closed.
+    let mut refused = ServiceWriter::with_handle(driver, stale);
+    let _ = writeln!(refused, "this line must never appear");
+    refused.flush();
+    match refused.failure() {
+        Some(ServiceError::Stale) => kprint!(
+            "isolation[{}]: a handle from generation {} was refused: {}\n",
+            arch::NAME,
+            stale.generation(),
+            ServiceError::Stale.status().name()
+        ),
+        Some(other) => {
+            kprint!("isolation[{}]: unexpected {}\n", arch::NAME, other.name());
+            failed("a stale handle failed in the wrong way");
+        }
+        None => failed("a stale handle was accepted after a restart"),
+    }
+
+    // The replacement works, and says so through the device it now holds.
+    let mut out = ServiceWriter::new(driver);
+    let _ = writeln!(
+        out,
+        "isolation[{}]: the replacement console driver is printing this line",
+        arch::NAME
+    );
+    out.flush();
+    if out.failure().is_some() {
+        failed("the replacement console driver did not print");
+    }
 }

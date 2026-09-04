@@ -32,6 +32,8 @@ mod isolation;
 #[cfg(feature = "isolation-selftest")]
 mod memory;
 #[cfg(feature = "isolation-selftest")]
+mod service;
+#[cfg(feature = "isolation-selftest")]
 mod user;
 
 #[cfg(all(
@@ -57,7 +59,7 @@ mod repl;
 /// exists and `.bss` has been zeroed.
 pub fn agel_main() -> ! {
     console::initialize();
-    console::write("\nAgel v1.4 research kernel: ");
+    console::write("\nAgel v1.5 research kernel: ");
     console::write(arch::NAME);
     console::write("\n");
     console::write("recovery monitor is outside the mutable agent world\n");

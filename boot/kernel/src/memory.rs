@@ -16,12 +16,24 @@ pub const PAGE: u64 = 4096;
 /// construct one: write-xor-execute is enforced by the type rather than by
 /// review. Supervisor mappings are not expressible here at all; they are built
 /// once during bring-up and are never derived from a domain's request.
+// The shared prefix is the point: every variant is a *user* mapping, because
+// supervisor mappings are not expressible here at all.
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Access {
     /// User read/execute, never writable. Shared program text.
     UserCode,
     /// User read/write, never executable. Stacks, heaps, shared buffers.
     UserData,
+    /// A device register window granted to exactly one domain. Read/write,
+    /// never executable, and never cached or reordered.
+    ///
+    /// x86-64 never constructs this: its console lives behind I/O ports, so a
+    /// device grant there is a task-state-segment bitmap entry rather than a
+    /// mapping. The variant is still part of the shared vocabulary because the
+    /// other two architectures grant devices by mapping them.
+    #[cfg_attr(target_arch = "x86_64", allow(dead_code))]
+    UserDevice,
 }
 
 /// Why a memory request could not be satisfied.

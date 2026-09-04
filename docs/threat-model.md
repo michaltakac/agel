@@ -313,6 +313,38 @@ system description, which grants the authority and has been reviewed by nobody
 but its author. The seL4 backend also runs only the contract: the Agel evaluator
 is not in it, and is still privileged on x86-64.
 
+## v1.5
+
+- **A driver fault is a kernel fault:** the console driver runs unprivileged in
+  its own domain on all three research backends. It faults where every other
+  world faults, into the supervisor, and the supervisor keeps running. CI
+  provokes exactly that and requires the system to continue.
+- **A device reachable by anything that asks:** the device is granted the way
+  each architecture grants one — eight I/O ports through a task-state-segment
+  bitmap on x86-64, one mapped page on AArch64 and RISC-V. Every other world
+  executes the same instruction that touches the console and is refused by
+  hardware. The grant is installed around the driver's entry alone, so it is
+  per-entry rather than ambient.
+- **A restart nobody notices:** a replaced service gets a new generation, and a
+  handle issued before the restart is refused with the contract's
+  `stale-generation`. A caller that has not noticed a restart is a caller whose
+  assumptions about the service are stale too, so it fails closed rather than
+  being served by a server that no longer remembers the conversation. CI checks
+  both the refusal and that the refused text never reached the device.
+- **A recovery plane that depends on what it must report:** the supervisor keeps
+  its own direct path to the console, used for its own reports and the panic
+  handler. Routing those through the driver would mean losing the ability to say
+  the driver had died at exactly the moment it died. That path is deliberate,
+  not a leftover, and it is the reason the supervisor is still able to print the
+  restart sequence at all.
+
+What this does not do: the driver is one driver. Timers are still the
+supervisor's, and deliberately — preemption is how a world gets contained, so
+moving it out is a question rather than an obvious improvement. Storage,
+networking and model brokering have not been split. The frame pool still never
+reclaims, so a restarted domain's frames are lost; a system that restarts
+drivers in a loop would exhaust it. And the evaluator still runs privileged.
+
 ## Surfaces the DGX target adds
 
 These are recorded now, before any of the code exists, because the deployment

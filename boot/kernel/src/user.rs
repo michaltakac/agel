@@ -167,6 +167,44 @@ unsafe fn divide_by_zero() {
     };
 }
 
+/// Emit one byte on the console device this domain was granted.
+///
+/// Only the driver domain has the device: an I/O permission bitmap entry on
+/// x86-64, a mapped device page on the other two. Every other world executing
+/// this same code is refused by hardware rather than by a check, which is what
+/// makes the device a capability rather than a convention.
+///
+/// # Safety
+/// Faults unless this domain was granted the console device.
+#[inline(always)]
+unsafe fn console_byte(byte: u8) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        // Poll the line-status register, then write the transmit holding
+        // register. Both ports are inside the eight this domain was granted.
+        let mut status: u8;
+        loop {
+            asm!("in al, dx", in("dx") 0x3fd_u16, out("al") status, options(nomem, nostack));
+            if status & 0x20 != 0 {
+                break;
+            }
+        }
+        asm!("out dx, al", in("dx") 0x3f8_u16, in("al") byte, options(nomem, nostack));
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let base = crate::arch::CONSOLE_DEVICE_VADDR;
+        while ((base + 0x18) as *const u32).read_volatile() & (1 << 5) != 0 {}
+        (base as *mut u8).write_volatile(byte);
+    }
+    #[cfg(target_arch = "riscv64")]
+    unsafe {
+        let base = crate::arch::CONSOLE_DEVICE_VADDR;
+        while ((base + 5) as *const u8).read_volatile() & (1 << 5) == 0 {}
+        (base as *mut u8).write_volatile(byte);
+    }
+}
+
 /// One `nop`, kept opaque so an empty loop is not optimized into a trap.
 #[inline(always)]
 unsafe fn pause() {
@@ -215,6 +253,22 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
             unsafe { execute_privileged() };
         } else if command == shared::COMMAND_FAULT_ILLEGAL {
             unsafe { execute_undefined() };
+        } else if command == shared::COMMAND_WRITE_CONSOLE {
+            let count = unsafe { page.add(shared::ARGUMENTS).read_volatile() } as usize;
+            let payload = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *const u8;
+            let mut offset = 0;
+            while offset < count && offset < crate::world::PAYLOAD_BYTES {
+                // Safety: the payload area is inside the page the supervisor
+                // mapped writable for this domain, and the count is bounded by
+                // the payload size regardless of what the supervisor wrote.
+                let byte = unsafe { payload.add(offset).read_volatile() };
+                unsafe { console_byte(byte) };
+                offset += 1;
+            }
+        } else if command == shared::COMMAND_FAULT_DEVICE {
+            // The same instruction the driver domain runs, in a world that was
+            // never granted the device.
+            unsafe { console_byte(b'!') };
         } else if command == shared::COMMAND_SPIN {
             // No trap, no memory fault, no cooperation. Only the timer can end
             // this, which is the property the test exists to demonstrate.

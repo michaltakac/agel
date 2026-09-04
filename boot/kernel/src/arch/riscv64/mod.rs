@@ -26,6 +26,12 @@ pub const POOL_START: u64 = 0x8100_0000;
 /// is a deliberate fixed resource policy, not a probe result.
 pub const POOL_END: u64 = 0x8400_0000;
 
+/// Physical base of the console device, granted to the driver domain alone.
+pub const CONSOLE_DEVICE_PHYSICAL: u64 = 0x1000_0000;
+
+/// Where the driver domain sees the console device in its own address space.
+pub const CONSOLE_DEVICE_VADDR: u64 = domain::DEVICE_BASE;
+
 /// A supervisor-only address a world may try to write: the kernel's own text.
 pub const KERNEL_PROBE_ADDRESS: u64 = 0x8020_0000;
 
@@ -111,6 +117,11 @@ pub const PROVOCATIONS: &[Provocation] = &[
         description: "executing an undefined instruction",
     },
     Provocation {
+        command: crate::world::shared::COMMAND_FAULT_DEVICE,
+        expected: Some("page-fault"),
+        description: "touching a device it was not granted",
+    },
+    Provocation {
         command: crate::world::shared::COMMAND_SPIN,
         expected: None,
         description: "that never yields",
@@ -155,7 +166,20 @@ impl Machine {
 
     /// Build a protection domain entered in U-mode at `entry`.
     pub fn create_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(&mut self.pool, self.identity, entry, ticks).map_err(|error| error.name())
+        Domain::new(&mut self.pool, self.identity, entry, ticks, None).map_err(|error| error.name())
+    }
+
+    /// Build a protection domain that is additionally granted the console
+    /// device: one page of device memory, and nothing else.
+    pub fn create_console_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            Some(CONSOLE_DEVICE_PHYSICAL),
+        )
+        .map_err(|error| error.name())
     }
 
     /// Frames the pool has not handed out.

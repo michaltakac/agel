@@ -145,7 +145,25 @@ run_architecture() {
   grep -q "isolation\[$architecture\]: contained a world writing to kernel memory: page-fault" "$output_file"
   grep -q "isolation\[$architecture\]: contained a world executing an undefined instruction" "$output_file"
   grep -q "isolation\[$architecture\]: preempted a world that never yields" "$output_file"
+  grep -q "isolation\[$architecture\]: contained a world touching a device it was not granted" \
+    "$output_file"
   grep -q 'watchdog fault: rolled back to slot A' "$output_file"
+
+  # Phase 3: the console driver is an unprivileged domain the supervisor can
+  # lose and replace. The transcript diffed above was printed by it, so the
+  # driver working is already load-bearing; these check the rest of the claim.
+  grep -q "isolation\[$architecture\]: console driver in an unprivileged domain, generation 1" \
+    "$output_file"
+  grep -q "isolation\[$architecture\]: the console driver faulted" "$output_file"
+  grep -q "isolation\[$architecture\]: replaced it; generation 2 after 1 restart" "$output_file"
+  grep -q "isolation\[$architecture\]: a handle from generation 1 was refused: stale-generation" \
+    "$output_file"
+  grep -q "isolation\[$architecture\]: the replacement console driver is printing this line" \
+    "$output_file"
+  if grep -q 'this line must never appear' "$output_file"; then
+    printf '%s\n' "$architecture: a stale handle printed anyway" >&2
+    exit 1
+  fi
 
   contained=$(grep -c "isolation\[$architecture\]: contained a world" "$output_file")
   if test "$contained" -lt 3; then
@@ -153,7 +171,7 @@ run_architecture() {
     exit 1
   fi
 
-  printf '%s\n' "  $architecture: 81 contract steps from an unprivileged world, $contained faults contained, 1 preemption [ok]"
+  printf '%s\n' "  $architecture: 81 contract steps printed by an unprivileged driver, $contained faults contained, 1 preemption, 1 driver restart [ok]"
   rm -f "$output_file" "$transcript_file"
 }
 

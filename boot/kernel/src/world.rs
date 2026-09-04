@@ -46,6 +46,14 @@ pub mod shared {
     pub const COMMAND_FAULT_ILLEGAL: u64 = 0x3000;
     /// Never return.
     pub const COMMAND_SPIN: u64 = 0x4000;
+    /// Write the console payload to the device this domain owns.
+    ///
+    /// Only the driver domain is granted the device; every other world that
+    /// tries this is refused by hardware, which is the point of the command
+    /// existing for all of them.
+    pub const COMMAND_WRITE_CONSOLE: u64 = 0x6000;
+    /// Touch the console device without having been granted it.
+    pub const COMMAND_FAULT_DEVICE: u64 = 0x7000;
     /// Divide by zero. Only x86-64 traps on this; RISC-V defines a result and
     /// AArch64 has no integer divide exception at all, so the command exists
     /// only where a machine can actually be provoked by it.
@@ -243,5 +251,28 @@ impl DomainCore {
     /// What [`Stop`] a completed entry should report.
     pub fn outcome(&self) -> Stop {
         self.stop.unwrap_or(Stop::Replied)
+    }
+}
+
+/// Byte offset in the shared page where console payload bytes begin.
+///
+/// The handshake words occupy the start of the page; bytes a domain is asked to
+/// print start well past them so a long line cannot walk into the protocol.
+pub const PAYLOAD_OFFSET: usize = 128;
+
+/// Bytes of console payload one request may carry.
+pub const PAYLOAD_BYTES: usize = 256;
+
+impl DomainCore {
+    /// Write one byte of the console payload area.
+    pub fn write_payload(&mut self, offset: usize, byte: u8) {
+        let offset = PAYLOAD_OFFSET + (offset % PAYLOAD_BYTES);
+        // Safety: the frame came from the pool, is identity mapped for the
+        // kernel, and the offset is inside the payload area of the page.
+        unsafe {
+            (self.shared_physical as *mut u8)
+                .add(offset)
+                .write_volatile(byte)
+        };
     }
 }

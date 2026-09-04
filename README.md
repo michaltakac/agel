@@ -4,9 +4,10 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v1.4: a native Agel workshop with a frozen kernel
-contract, a portable isolation backend, and the same contract running on an
-unmodified seL4 kernel**. It provides:
+The current repository is **v1.5: a native Agel workshop with a frozen kernel
+contract, a portable isolation backend, the same contract running on an
+unmodified seL4 kernel, and the first privileged service split out into a
+restartable domain**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -59,7 +60,12 @@ unmodified seL4 kernel**. It provides:
 - a release manifest naming the exact kernel, configuration and toolchain, and
   stating plainly that the configuration is not a proved one;
 - containment, on every architecture, of worlds that write kernel memory,
-  execute instructions they are not allowed to, or never yield; and
+  execute instructions they are not allowed to, touch a device they were not
+  granted, or never yield;
+- a console driver in its own unprivileged, restartable domain, holding the
+  device by whatever mechanism the architecture grants one, which the supervisor
+  can lose and replace at a new generation while handles from before the restart
+  fail closed; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 Agel's primary deployment target is a bare-metal NVIDIA DGX node, single or

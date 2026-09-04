@@ -1,9 +1,18 @@
-//! The kernel's only output device, and the one place formatting happens.
+//! The supervisor's own last-resort path to the console.
 //!
-//! Each architecture provides a byte sink; everything above this line is shared.
-//! The kernel has no console *capability* to hand out: a protection domain that
-//! wants to say something says it to its supervisor through the contract, and
-//! the supervisor decides whether to print it.
+//! Since v1.5 this is *not* how most output happens. The console driver runs in
+//! its own unprivileged domain and holds the device; ordinary output goes
+//! through [`crate::service::ServiceWriter`], and if that driver does not work
+//! nothing is printed.
+//!
+//! What remains here is the path the supervisor keeps for itself: its own
+//! reports, and the panic handler. That is deliberate rather than a leftover. A
+//! recovery plane whose ability to report a failure runs through the component
+//! that failed cannot report that component failing, which is the one moment it
+//! most needs to. So the supervisor retains a direct route it uses sparingly,
+//! and the driver domain owns the device for everything else.
+//!
+//! Each architecture provides the byte sink; everything above that is shared.
 
 use crate::arch;
 #[cfg(feature = "isolation-selftest")]
