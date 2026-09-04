@@ -145,12 +145,14 @@ cargo test -p agel-kernel-abi        # reference model = frozen transcript
 ./scripts/test-kernel-contract.sh    # the same, as a diff you can read
 ./scripts/test-isolation.sh          # three machines = frozen transcript
 ./scripts/test-isolation.sh aarch64  # or just one
+./scripts/test-sel4.sh               # an unmodified seL4 kernel
 ```
 
-`bootstrap/kernel-contract.trace` is the frozen canonical transcript. Five
+`bootstrap/kernel-contract.trace` is the frozen canonical transcript. Six
 artifacts share one set of bytes: the hosted reference model, the checked-in
-freeze, and an unprivileged protection domain on each of x86-64, AArch64, and
-RISC-V, each talking to its kernel through that machine's trap gate. This is the
+freeze, an unprivileged protection domain on each of x86-64, AArch64, and
+RISC-V talking to its kernel through that machine's trap gate, and a protection
+domain on seL4 talking to a *server* through a protected procedure. This is the
 same comparison discipline the Common Lisp reference uses for the language
 kernel.
 
@@ -193,6 +195,46 @@ assembler reserves them.
 Slot 31 is a backend convention rather than part of the contract: a send on it
 is how a world hands control back to its supervisor. It sits above every slot
 the corpus touches, so the corpus never observes that it exists.
+
+## Backend notes: seL4
+
+The seL4 backend is where the contract earns its shape. seL4 is unmodified and
+knows nothing about Agel, so the contract cannot be answered by the kernel: it
+is answered by an ordinary unprivileged **broker** protection domain, and an
+invocation is a protected procedure call to it. That is exactly what
+[`microkernel-research.md`](microkernel-research.md) requires — Lisp objects,
+mailboxes and policy belong in isolated servers, not in a kernel whose value is
+that nobody changed it.
+
+The whole invocation fits in the four message registers AArch64 seL4 passes in
+hardware registers, because the 52-bit message label carries the operation code
+and the capability slot:
+
+```text
+request   label = operation | (capability << 16)     words = arguments
+reply     label = status                             words = values
+```
+
+Four protection domains, and the system description is the security
+architecture:
+
+| Domain | Priority | Holds | Cannot |
+|---|---|---|---|
+| `serial` | 200 | the only device capability in the system | reach any other domain except by being called |
+| `broker` | 150 | every object the contract defines | reach the device, or its callers |
+| `recovery` | 100 | parent of `world`, so seL4 delivers its faults here | run any Agel code; it holds no contract capability |
+| `world` | 50 | two channels, one page | everything else |
+
+Protected procedures run toward higher priority, so those numbers are also the
+call graph, and it is checked by the kernel rather than by convention. The world
+finishes by faulting on purpose; `recovery` reports the containment and declines
+to reply, which leaves the world stopped. Containment there is a property of
+seL4 and of `agel.system`, not of a supervisor loop this project wrote.
+
+What this does **not** claim: a verified configuration. Microkit ships MCS
+kernels and MCS proofs are ongoing. [`sel4-manifest.md`](sel4-manifest.md)
+records the exact kernel, configuration and toolchain, and states the
+verification status in those terms.
 
 ### What the architectures do not agree about
 

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Agel kernel contract as an seL4 system.
+
+  This file is the security architecture. Every authority any domain has is
+  written here and nowhere else: seL4 hands each protection domain exactly the
+  capabilities this description names, and there is no call by which a domain
+  can obtain another. Read top to bottom it says:
+
+    - only `serial` can touch a device;
+    - only `broker` holds the contract's objects;
+    - `world` can ask both of them questions and do nothing else;
+    - `recovery` is `world`'s parent, so seL4 delivers `world`'s faults to it
+      rather than ending the system, and `recovery` runs no Agel code at all.
+
+  Protected procedures run toward higher priority, so the priorities below are
+  also the call graph: world(50) may call broker(150) and serial(200);
+  recovery(100) may call serial(200); nothing may call world.
+-->
+<system>
+    <!-- The PL011 on QEMU's virt machine. One domain gets this. -->
+    <memory_region name="uart" size="0x1_000" phys_addr="0x9000000" />
+
+    <!-- Bulk text crosses domain boundaries here, never through the contract's
+         control path. Each writer has its own page; the reader has both. -->
+    <memory_region name="world_output" size="0x1_000" />
+    <memory_region name="recovery_output" size="0x1_000" />
+
+    <protection_domain name="serial" priority="200">
+        <program_image path="agel-serial.elf" />
+        <map mr="uart" vaddr="0x2_000_000" perms="rw" cached="false" />
+        <map mr="world_output" vaddr="0x3_000_000" perms="r" />
+        <map mr="recovery_output" vaddr="0x3_010_000" perms="r" />
+    </protection_domain>
+
+    <protection_domain name="broker" priority="150">
+        <program_image path="agel-broker.elf" />
+    </protection_domain>
+
+    <protection_domain name="recovery" priority="100">
+        <program_image path="agel-recovery.elf" />
+        <map mr="recovery_output" vaddr="0x3_010_000" perms="rw" />
+
+        <protection_domain name="world" priority="50" id="1">
+            <program_image path="agel-world.elf" />
+            <map mr="world_output" vaddr="0x3_000_000" perms="rw" />
+        </protection_domain>
+    </protection_domain>
+
+    <channel>
+        <end pd="serial" id="0" />
+        <end pd="world" id="0" pp="true" />
+    </channel>
+
+    <channel>
+        <end pd="broker" id="1" />
+        <end pd="world" id="1" pp="true" />
+    </channel>
+
+    <channel>
+        <end pd="serial" id="1" />
+        <end pd="recovery" id="0" pp="true" />
+    </channel>
+</system>

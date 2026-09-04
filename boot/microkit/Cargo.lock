@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
-name = "agel-boot"
+name = "agel-kernel-abi"
+version = "1.4.0"
+
+[[package]]
+name = "agel-microkit"
 version = "1.4.0"
 dependencies = [
  "agel-kernel-abi",
 ]
-
-[[package]]
-name = "agel-kernel-abi"
-version = "1.4.0"

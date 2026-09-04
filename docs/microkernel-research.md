@@ -651,27 +651,37 @@ Agel's user-level policy or evaluator is correct.
 
 Run it with `./scripts/test-isolation.sh`.
 
-### Phase 2 — seL4/Microkit spike — **groundwork done (v1.3)**
+### Phase 2 — seL4/Microkit spike — **done (v1.4)**
 
-- Select one QEMU target with strong verified-configuration coverage. Per the
-  coverage table, this is `qemu-arm-virt` (AArch64) or `qemu-riscv-virt`
-  (RISCV64), not x86-64. → the research backend now **runs on both**, so the
-  target choice is no longer blocked on porting work; `./scripts/build-kernel.sh
-  aarch64` and `riscv64` produce booting images today.
+- Select one QEMU target with strong verified-configuration coverage. → done:
+  `qemu_virt_aarch64`, chosen from the coverage table rather than from
+  familiarity. RISC-V remains available in the same SDK.
+- Boot a Rust root/recovery PD, Agel world PD and serial PD. → done, plus a
+  broker PD, because the contract has to be answered by *something* and it must
+  not be the kernel. Four protection domains, described in
+  `boot/microkit/agel.system`, on an unmodified published seL4 kernel.
 - Pass the same kernel-contract conformance messages as the research backend. →
-  the corpus, the reference model, the containment driver and the unprivileged
-  world program are already architecture-neutral, and all three backends emit
-  byte-identical transcripts. An seL4 backend has to implement
-  `Machine`/`Domain` and nothing else.
-- Boot a Rust root/recovery PD, Agel world PD and serial PD. → not started; this
-  is the actual seL4 work.
-- Record binary, configuration, proof and toolchain hashes. → not started.
+  done, and byte for byte: the world runs the shared corpus through a
+  `Kernel` implementation whose `invoke` is an seL4 protected procedure, and
+  emits the same frozen transcript the hosted model and all three research
+  backends emit.
+- Record binary, configuration, proof and toolchain hashes. → done:
+  `./scripts/sel4-manifest.sh` reads them out of the artifacts and
+  [`sel4-manifest.md`](sel4-manifest.md) is the checked-in result. CI regenerates
+  it and requires the trusted base and the kernel configuration to match.
 
-Agel's x86-64 QEMU work continues alongside rather than instead: the same
-source builds the raw BIOS seed and the two ELF images, and CI boots all three.
-The assurance spike still chooses architecture and configuration by proof
-coverage rather than familiarity, but that choice is now a decision rather than
-a porting project.
+Run it with `./scripts/test-sel4.sh`. The SDK is fetched and checksum-verified
+on first use; nothing in this repository compiles, patches, or configures the
+kernel, which is the entire point.
+
+**The configuration is not a verified one, and the manifest says so.** Every
+Microkit board ships an MCS kernel, and this one additionally enables hypervisor
+support; MCS proofs are ongoing rather than complete. Running on an unmodified
+verified kernel *implementation* is not the same as running a verified
+*configuration*, and this spike does the former. Reaching the latter means
+either a Microkit board built against a proved configuration or dropping to the
+raw seL4 SDK, and that is the next assurance step rather than something this
+phase quietly claims.
 
 ### Phase 3 — split privileged services
 
@@ -817,7 +827,10 @@ Open architecture decisions needing experiments or ADRs:
 | Every queue is bounded with defined backpressure | `queue-full` at capacity, corpus-tested |
 | A kernel-neutral component contract, in Genode's sense | the shared driver, corpus and world program are architecture-neutral across three machines |
 | The evaluator does not belong in the privileged kernel | machinery built on three architectures; the evaluator has not moved yet |
-| seL4 as the assurance backend | not started, but both candidate targets now run the research backend |
+| seL4 as the assurance backend | running: four PDs on an unmodified kernel, same corpus, same transcript |
+| The contract answered by a server, never by the kernel | the broker PD; seL4 is unmodified and unaware of Agel |
+| Release manifest naming what is proved, assumed and out of scope | [`sel4-manifest.md`](sel4-manifest.md), regenerated and checked in CI |
+| Running a *verified configuration* | no: Microkit ships MCS kernels and MCS proofs are ongoing |
 | Firecracker as an optional outer envelope | not started; Phase 6 |
 
 ## Bottom line

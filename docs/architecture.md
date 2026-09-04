@@ -117,9 +117,12 @@ Each rung must be runnable and differentially testable against the rung below:
 16. **Native agent world:** move the evaluator and the full Agel agent runtime
    into ring-3 domains, then add an allocator, drivers, and persistent images.
    Keep device access outside mutable language heaps.
-17. **seL4 backend:** the same kernel contract over an unmodified verified seL4
-   configuration, composed with Microkit, on AArch64 or RISC-V — both of which
-   the research backend now already runs on.
+17. **seL4 backend (complete at v1.4):** the same kernel contract over an
+   unmodified seL4 kernel, composed with Microkit on AArch64. Four protection
+   domains — recovery, world, broker, serial — where the contract is answered
+   by an unprivileged server and the kernel knows nothing about Agel. The
+   configuration is MCS and therefore not a proved one; the release manifest
+   says so.
 18. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
 

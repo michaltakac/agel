@@ -57,7 +57,7 @@ mod repl;
 /// exists and `.bss` has been zeroed.
 pub fn agel_main() -> ! {
     console::initialize();
-    console::write("\nAgel v1.3 research kernel: ");
+    console::write("\nAgel v1.4 research kernel: ");
     console::write(arch::NAME);
     console::write("\n");
     console::write("recovery monitor is outside the mutable agent world\n");

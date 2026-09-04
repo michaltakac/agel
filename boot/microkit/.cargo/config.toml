@@ -1,0 +1,7 @@
+# Protection domains are linked by the Microkit SDK's own linker script against
+# its prebuilt `libmicrokit`, so the link arguments depend on where the SDK is
+# unpacked and are supplied through `RUSTFLAGS` by ./scripts/build-sel4.sh.
+# That script is the only supported way to build this crate: the SDK is a large
+# third-party download and is deliberately not vendored.
+[build]
+target = "aarch64-unknown-none-softfloat"

@@ -1,0 +1,40 @@
+[package]
+name = "agel-microkit"
+version = "1.4.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+description = "The Agel kernel contract as a Microkit system on an unmodified seL4 kernel."
+
+[dependencies]
+agel-kernel-abi = { path = "../../crates/agel-kernel-abi" }
+
+[lib]
+name = "agel_microkit"
+path = "src/lib.rs"
+
+[[bin]]
+name = "agel-broker"
+path = "src/bin/broker.rs"
+
+[[bin]]
+name = "agel-serial"
+path = "src/bin/serial.rs"
+
+[[bin]]
+name = "agel-recovery"
+path = "src/bin/recovery.rs"
+
+[[bin]]
+name = "agel-world"
+path = "src/bin/world.rs"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+
+[profile.dev]
+panic = "abort"
+
+[workspace]

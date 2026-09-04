@@ -44,3 +44,39 @@ jobs:
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features isolation-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features isolation-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target riscv64imac-unknown-none-elf --features isolation-selftest -- -D warnings
+
+  sel4:
+    # The assurance backend: the same contract on an unmodified seL4 kernel.
+    # It is a separate job because it downloads a 66 MiB SDK and boots a 2 GiB
+    # machine, and because a failure here means something different from a
+    # failure above: the research backends are ours, this one is not.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-unknown-none-softfloat
+      - run: sudo apt-get update && sudo apt-get install -y qemu-system-arm
+      - name: Cache the Microkit SDK
+        uses: actions/cache@v4
+        with:
+          path: target/sel4/microkit-sdk-2.3.0
+          key: microkit-sdk-2.3.0-linux-x86-64
+      - run: cargo fmt --manifest-path boot/microkit/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path boot/microkit/Cargo.toml --release --lib --bins -- -D warnings
+      - run: ./scripts/test-sel4.sh
+      - name: The manifest must describe the kernel that was actually booted
+        run: |
+          ./scripts/sel4-manifest.sh > /tmp/sel4-manifest.md
+          # Only the trusted base and the kernel configuration are checked. The
+          # protection-domain hashes depend on the compiler that built them, so
+          # requiring those to match would only assert that CI and a developer
+          # run the same rustc.
+          for section in '## Trusted base' '## Kernel configuration'; do
+            awk -v s="$section" '$0==s{f=1} f&&/^$/&&n++>1{exit} f' \
+              docs/sel4-manifest.md > /tmp/expected.md
+            awk -v s="$section" '$0==s{f=1} f&&/^$/&&n++>1{exit} f' \
+              /tmp/sel4-manifest.md > /tmp/actual.md
+            diff -u /tmp/expected.md /tmp/actual.md
+          done

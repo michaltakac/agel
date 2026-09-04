@@ -4,8 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v1.3: a native Agel workshop with a frozen kernel
-contract and a portable isolation backend**. It provides:
+The current repository is **v1.4: a native Agel workshop with a frozen kernel
+contract, a portable isolation backend, and the same contract running on an
+unmodified seL4 kernel**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -52,6 +53,11 @@ contract and a portable isolation backend**. It provides:
   trap gate, holding capability slots rather than references;
 - byte-identical conformance transcripts from all three, checked against one
   frozen reference;
+- the same contract on an **unmodified seL4 kernel** under Microkit: four
+  protection domains where an unprivileged world asks an unprivileged broker,
+  and the kernel is never taught what Agel is;
+- a release manifest naming the exact kernel, configuration and toolchain, and
+  stating plainly that the configuration is not a proved one;
 - containment, on every architecture, of worlds that write kernel memory,
   execute instructions they are not allowed to, or never yield; and
 - a Rust CLI and test suite with no third-party crate dependencies.
@@ -177,6 +183,8 @@ kernel-contract transcript, and the isolation suite with:
 ./scripts/test-isolation.sh              # x86-64, AArch64 and RISC-V
 ./scripts/test-isolation.sh aarch64      # or one of them
 ./scripts/build-kernel.sh riscv64        # just build an image
+./scripts/test-sel4.sh                   # the same contract on seL4
+./scripts/sel4-manifest.sh               # what that was built from
 ```
 
 For each architecture the isolation suite boots a protection domain that answers
@@ -187,7 +195,9 @@ losing the recovery monitor.
 
 The AArch64 and RISC-V suites need `qemu-system-aarch64` and
 `qemu-system-riscv64` and the `aarch64-unknown-none-softfloat` and
-`riscv64imac-unknown-none-elf` Rust targets.
+`riscv64imac-unknown-none-elf` Rust targets. The seL4 suite additionally fetches
+and checksum-verifies the Microkit SDK on first use; set `MICROKIT_SDK` to use
+one you already have.
 
 The boot scripts require `qemu-system-x86_64`, `clang`, GNU `objcopy`, and the
 Rust `x86_64-unknown-none` target. On macOS: `brew install qemu binutils`.
@@ -213,6 +223,8 @@ The native seed and recovery boundary are documented in
 are specified in [`docs/interaction.md`](docs/interaction.md).
 The native subset, fixed limits, transactions, and workshop commands are in
 [`docs/native-workshop.md`](docs/native-workshop.md).
+What the seL4 backend was built from, and what is and is not verified about it,
+is in [`docs/sel4-manifest.md`](docs/sel4-manifest.md).
 The evaluated microkernel foundations, the seL4/Microkit decision, and the
 staged native roadmap are in
 [`docs/microkernel-research.md`](docs/microkernel-research.md); the versioned

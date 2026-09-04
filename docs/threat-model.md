@@ -268,3 +268,47 @@ seL4 backend is for. Nothing here is a formal claim: these are QEMU tests, on
 emulated machines, of a kernel whose frame allocator never reclaims and which
 has no IOMMU, no SMP, no signature verification, and no hardware watchdog. The
 Agel evaluator still runs privileged, and only on x86-64.
+
+## v1.4
+
+- **A kernel we wrote is the only thing that has ever enforced our boundary:**
+  the same contract now runs on an unmodified seL4 kernel, in four protection
+  domains, with the same corpus and the same frozen transcript. Every previous
+  isolation claim rested on code from this repository being correct. This one
+  does not.
+- **Teaching the kernel about Agel:** the contract is answered by an ordinary
+  unprivileged broker domain. seL4 gains no Agel object, no Agel syscall, and no
+  patch, so the reason for choosing it survives being used.
+- **A device capability spreading:** exactly one domain can reach the UART.
+  Every other domain that needs to print writes into a page it shares with that
+  domain and asks. The serial domain clamps the requested byte count rather than
+  believing a caller.
+- **An unbounded control path:** an invocation fits in the four message
+  registers seL4 passes in hardware registers, with the operation and capability
+  in the 52-bit label. The control path touches no shared memory at all, so
+  there is no shared-memory step in it to get wrong.
+- **A reply believed because it came from inside:** the world validates the
+  broker's status code and turns an unrecognised one into a recognised failure.
+  Another protection domain's output is input.
+- **Containment that depends on our own supervisor loop:** the world faults on
+  purpose at the end of its work; the recovery domain is its parent, so seL4
+  delivers the fault there, and declining to reply leaves the world stopped. The
+  containment is a property of the kernel and of `agel.system`.
+- **An assurance claim that outruns the artifact:** `./scripts/sel4-manifest.sh`
+  reads the kernel, loader, monitor, library, system description and toolchain
+  out of what was actually built, and prints the verification status. CI
+  regenerates it and requires the trusted base and the kernel configuration to
+  match what is checked in.
+- **A substituted kernel:** the SDK download is pinned by version and verified
+  against a checksum for every published platform, and refuses to proceed on a
+  mismatch.
+
+The configuration is **not** a verified one. Every Microkit board ships an MCS
+kernel and this board also enables hypervisor support; MCS proofs are ongoing
+rather than complete. Running on an unmodified verified kernel *implementation*
+is not the same as running a verified *configuration*, and only the former is
+claimed here. Nothing above says anything about the correctness of the Agel code
+in those protection domains, which is ordinary unverified Rust, or about the
+system description, which grants the authority and has been reviewed by nobody
+but its author. The seL4 backend also runs only the contract: the Agel evaluator
+is not in it, and is still privileged on x86-64.
