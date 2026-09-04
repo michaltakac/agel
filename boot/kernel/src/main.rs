@@ -165,12 +165,10 @@ fn read_line(buffer: &mut [u8]) -> usize {
                 length -= 1;
                 Serial::write("\x08 \x08");
             }
-            byte if byte.is_ascii_graphic() || byte == b' ' => {
-                if length < buffer.len() {
-                    buffer[length] = byte;
-                    length += 1;
-                    Serial::write_byte(byte);
-                }
+            byte if (byte.is_ascii_graphic() || byte == b' ') && length < buffer.len() => {
+                buffer[length] = byte;
+                length += 1;
+                Serial::write_byte(byte);
             }
             _ => {}
         }
