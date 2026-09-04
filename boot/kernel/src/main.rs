@@ -2,17 +2,18 @@
 //!
 //! It has two jobs, and it is worth being clear about which is which.
 //!
-//! The first is the v1.1 Agel workshop: a fixed-memory evaluator and a serial
-//! REPL on a reproducible BIOS x86-64 seed. That still runs privileged, and it
-//! is a bootstrap implementation rather than a security boundary.
+//! The first is the native Agel workshop: a fixed-memory evaluator and a serial
+//! REPL on a reproducible BIOS x86-64 seed. The v1.6 isolation image also runs
+//! that evaluator in an unprivileged protection domain.
 //!
-//! The second is the Phase 1 isolation backend: address spaces, trap entry,
+//! The second is the isolation backend: address spaces, trap entry,
 //! preemption, and protection domains that answer the Agel kernel contract from
 //! the machine's lowest privilege level. That part is architecture-neutral and
 //! builds for x86-64, AArch64, and RISC-V from one source.
 
 #![no_std]
 #![no_main]
+#![cfg_attr(feature = "isolated-repl", allow(dead_code))]
 
 use core::panic::PanicInfo;
 
@@ -27,6 +28,8 @@ mod monitor;
 
 #[cfg(feature = "isolation-selftest")]
 mod contract;
+#[cfg(all(target_arch = "x86_64", feature = "isolated-repl"))]
+mod isolated_repl;
 #[cfg(feature = "isolation-selftest")]
 mod isolation;
 #[cfg(feature = "isolation-selftest")]
@@ -35,6 +38,9 @@ mod memory;
 mod service;
 #[cfg(feature = "isolation-selftest")]
 mod user;
+
+#[cfg(feature = "isolation-selftest")]
+mod native;
 
 #[cfg(all(
     target_arch = "x86_64",
@@ -59,7 +65,7 @@ mod repl;
 /// exists and `.bss` has been zeroed.
 pub fn agel_main() -> ! {
     console::initialize();
-    console::write("\nAgel v1.5 research kernel: ");
+    console::write("\nAgel v1.6 research kernel: ");
     console::write(arch::NAME);
     console::write("\n");
     console::write("recovery monitor is outside the mutable agent world\n");
@@ -89,10 +95,23 @@ pub fn agel_main() -> ! {
 
     #[cfg(all(
         feature = "isolation-selftest",
-        not(any(feature = "selftest", feature = "monitor-selftest"))
+        not(any(
+            feature = "selftest",
+            feature = "monitor-selftest",
+            feature = "isolated-repl"
+        ))
     ))]
     {
         isolation::run()
+    }
+
+    #[cfg(all(
+        target_arch = "x86_64",
+        feature = "isolated-repl",
+        not(any(feature = "selftest", feature = "monitor-selftest"))
+    ))]
+    {
+        isolated_repl::run()
     }
 
     #[cfg(all(

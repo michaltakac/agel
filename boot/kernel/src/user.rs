@@ -211,6 +211,200 @@ unsafe fn pause() {
     unsafe { asm!("nop", options(nomem, nostack)) };
 }
 
+// LLVM lowers slice equality and overlapping copies to these C ABI symbols.
+// Supplying tiny world-local implementations keeps valid evaluator execution
+// inside `.user_text`; the supervisor's compiler-builtins remain unreachable.
+#[no_mangle]
+#[link_section = ".user_text"]
+unsafe extern "C" fn memcmp(left: *const u8, right: *const u8, count: usize) -> i32 {
+    let mut offset = 0;
+    while offset < count {
+        let a = unsafe { left.add(offset).read() };
+        let b = unsafe { right.add(offset).read() };
+        if a != b {
+            return i32::from(a) - i32::from(b);
+        }
+        offset += 1;
+    }
+    0
+}
+
+#[no_mangle]
+#[link_section = ".user_text"]
+unsafe extern "C" fn memmove(destination: *mut u8, source: *const u8, count: usize) -> *mut u8 {
+    if (destination as usize) <= source as usize {
+        let mut offset = 0;
+        while offset < count {
+            unsafe { destination.add(offset).write(source.add(offset).read()) };
+            offset += 1;
+        }
+    } else {
+        let mut offset = count;
+        while offset > 0 {
+            offset -= 1;
+            unsafe { destination.add(offset).write(source.add(offset).read()) };
+        }
+    }
+    destination
+}
+
+/// Put one byte in the bounded evaluator response buffer.
+#[inline(always)]
+unsafe fn evaluator_push(page: *mut u64, length: &mut usize, byte: u8) {
+    if *length < crate::world::PAYLOAD_BYTES {
+        let payload = (page as usize + crate::world::PAYLOAD_OFFSET) as *mut u8;
+        unsafe { payload.add(*length).write_volatile(byte) };
+        *length += 1;
+    }
+}
+
+#[inline(always)]
+unsafe fn evaluator_text(page: *mut u64, length: &mut usize, text: &[u8]) {
+    let mut offset = 0;
+    while offset < text.len() {
+        unsafe { evaluator_push(page, length, text[offset]) };
+        offset += 1;
+    }
+}
+
+#[inline(always)]
+unsafe fn evaluator_u64(page: *mut u64, length: &mut usize, mut value: u64) {
+    let mut digits = [0_u8; 20];
+    let mut cursor = digits.len();
+    loop {
+        cursor -= 1;
+        digits[cursor] = b'0' + (value % 10) as u8;
+        value /= 10;
+        if value == 0 {
+            break;
+        }
+    }
+    unsafe { evaluator_text(page, length, &digits[cursor..]) };
+}
+
+#[inline(always)]
+unsafe fn evaluator_i64(page: *mut u64, length: &mut usize, value: i64) {
+    if value < 0 {
+        unsafe { evaluator_push(page, length, b'-') };
+    }
+    unsafe { evaluator_u64(page, length, value.unsigned_abs()) };
+}
+
+#[inline(always)]
+unsafe fn evaluator_finish(page: *mut u64, response_length: usize, error: bool, revision: u64) {
+    unsafe {
+        page.add(shared::STATUS).write_volatile(u64::from(error));
+        page.add(shared::VALUES)
+            .write_volatile(response_length as u64);
+        page.add(shared::VALUES + 1).write_volatile(revision);
+    }
+}
+
+/// The fixed-memory Agel evaluator as an unprivileged, persistent world.
+///
+/// Its `Session` lives on this domain's private stack and therefore survives
+/// cooperative entries while remaining absent from supervisor memory. Source
+/// and results cross through the one bounded shared page. The domain has no
+/// device mapping and no console-port grant.
+///
+/// # Safety
+/// Entered by the architecture's return-from-exception instruction with a
+/// private stack and a valid shared page.
+#[no_mangle]
+#[link_section = ".user_text"]
+pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
+    let page = shared_page as *mut u64;
+    let mut session = crate::native::Session::new();
+    loop {
+        let command = unsafe { page.add(shared::COMMAND).read_volatile() };
+        if command == shared::COMMAND_EVALUATE {
+            let requested = unsafe { page.add(shared::ARGUMENTS).read_volatile() } as usize;
+            let source_length = requested.min(crate::world::PAYLOAD_BYTES);
+            let source_pointer = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *const u8;
+            // Safety: the source is bounded to the shared page.
+            let source = unsafe { core::slice::from_raw_parts(source_pointer, source_length) };
+            let result = session.evaluate(source);
+            let mut response_length = 0;
+            match result {
+                Ok(crate::native::Value::Int(value)) => unsafe {
+                    evaluator_i64(page, &mut response_length, value)
+                },
+                Ok(crate::native::Value::Bool(true)) => unsafe {
+                    evaluator_text(page, &mut response_length, b"#t")
+                },
+                Ok(crate::native::Value::Bool(false)) => unsafe {
+                    evaluator_text(page, &mut response_length, b"#f")
+                },
+                Ok(crate::native::Value::Nil) => unsafe {
+                    evaluator_text(page, &mut response_length, b"nil")
+                },
+                Ok(crate::native::Value::Code { .. }) => unsafe {
+                    evaluator_text(page, &mut response_length, b"#<native-code>")
+                },
+                Ok(crate::native::Value::Function) => unsafe {
+                    evaluator_text(page, &mut response_length, b"#<native-function>")
+                },
+                Err(error) => unsafe {
+                    evaluator_text(page, &mut response_length, b"error: ");
+                    evaluator_text(page, &mut response_length, error.0.as_bytes());
+                },
+            }
+            unsafe { evaluator_finish(page, response_length, result.is_err(), session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_ROLLBACK {
+            let result = session.rollback();
+            let mut response_length = 0;
+            match result {
+                Ok(()) => unsafe {
+                    evaluator_text(
+                        page,
+                        &mut response_length,
+                        b"rolled back one committed native world",
+                    )
+                },
+                Err(error) => unsafe {
+                    evaluator_text(page, &mut response_length, b"error: ");
+                    evaluator_text(page, &mut response_length, error.0.as_bytes());
+                },
+            }
+            unsafe { evaluator_finish(page, response_length, result.is_err(), session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_DEFS {
+            let mut response_length = 0;
+            unsafe { evaluator_text(page, &mut response_length, b"definitions (") };
+            unsafe { evaluator_u64(page, &mut response_length, session.binding_count() as u64) };
+            unsafe { evaluator_text(page, &mut response_length, b"): ") };
+            let mut index = 0;
+            while index < session.binding_count() {
+                if index > 0 {
+                    unsafe { evaluator_push(page, &mut response_length, b' ') };
+                }
+                if let Some(name) = session.binding_name(index) {
+                    unsafe { evaluator_text(page, &mut response_length, name) };
+                }
+                index += 1;
+            }
+            unsafe { evaluator_finish(page, response_length, false, session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_LIMITS {
+            let mut response_length = 0;
+            unsafe { evaluator_text(page, &mut response_length, b"source=") };
+            unsafe {
+                evaluator_u64(
+                    page,
+                    &mut response_length,
+                    crate::world::PAYLOAD_BYTES as u64,
+                )
+            };
+            for (name, bound) in crate::native::LIMITS {
+                unsafe { evaluator_push(page, &mut response_length, b' ') };
+                unsafe { evaluator_text(page, &mut response_length, name.as_bytes()) };
+                unsafe { evaluator_push(page, &mut response_length, b'=') };
+                unsafe { evaluator_u64(page, &mut response_length, *bound) };
+            }
+            unsafe { evaluator_finish(page, response_length, false, session.revision()) };
+        }
+        unsafe { yield_to_supervisor() };
+    }
+}
+
 /// The unprivileged entry point.
 ///
 /// `shared_page` is the only address the supervisor tells the world about.

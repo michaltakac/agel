@@ -7,7 +7,7 @@
 use super::cpu::{self, TrapFrame};
 use super::memory::{AddressSpace, DOMAIN_BASE};
 use crate::memory::{Access, FramePool, MemoryError, PAGE};
-use crate::world::{DomainCore, Fault, Stop, STACK_PAGES};
+use crate::world::{DomainCore, Fault, Stop};
 use agel_kernel_abi::{Request, Response, Status};
 
 /// Virtual address of a domain's stack region.
@@ -34,9 +34,10 @@ impl Domain {
         entry: u64,
         tick_budget: u32,
         console: bool,
+        stack_pages: u64,
     ) -> Result<Self, MemoryError> {
         let mut space = AddressSpace::new(pool, identity_pdpt)?;
-        for page in 0..STACK_PAGES {
+        for page in 0..stack_pages {
             let frame = pool.allocate()?;
             space.map(pool, STACK_BASE + page * PAGE, frame, Access::UserData)?;
         }
@@ -45,7 +46,7 @@ impl Domain {
         // The stack grows down from the top of the last mapped stack page. The
         // page above is deliberately absent, so an overflowing world faults
         // instead of walking into whatever the allocator handed out next.
-        let stack_top = STACK_BASE + STACK_PAGES * PAGE;
+        let stack_top = STACK_BASE + stack_pages * PAGE;
         Ok(Self {
             space,
             frame: TrapFrame::user(entry, stack_top, SHARED_BASE),
@@ -149,6 +150,11 @@ pub unsafe extern "C" fn dispatch_trap(frame: *mut TrapFrame) -> *mut TrapFrame 
     if !saved.in_user_mode() {
         crate::report_supervisor_trap(saved.vector, saved.error, saved.rip);
     }
+    // Execute the whole supervisor policy under the kernel's own page tables.
+    // The domain mapping deliberately gives compiler helpers such as `memmove`
+    // user permissions; keeping it active while answering a syscall would make
+    // those permissions constrain the supervisor too.
+    unsafe { restore_kernel_space() };
     let domain = unsafe { &mut *CURRENT };
     match saved.vector {
         cpu::VECTOR_SYSCALL => {
@@ -159,6 +165,7 @@ pub unsafe extern "C" fn dispatch_trap(frame: *mut TrapFrame) -> *mut TrapFrame 
                 saved.rsi = response.values[1];
                 saved.rdx = response.values[2];
                 saved.r10 = response.values[3];
+                unsafe { domain.space.activate() };
                 return frame;
             }
         }
@@ -167,6 +174,7 @@ pub unsafe extern "C" fn dispatch_trap(frame: *mut TrapFrame) -> *mut TrapFrame 
             // also stop the clock the supervisor needs.
             unsafe { cpu::end_of_interrupt() };
             if domain.core.charge_tick() {
+                unsafe { domain.space.activate() };
                 return frame;
             }
         }
@@ -183,6 +191,12 @@ pub unsafe extern "C" fn dispatch_trap(frame: *mut TrapFrame) -> *mut TrapFrame 
             }));
         }
     }
-    domain.frame = *saved;
+    unsafe {
+        crate::world::copy_supervisor_words(
+            (&raw mut domain.frame).cast(),
+            (saved as *mut TrapFrame).cast(),
+            core::mem::size_of::<TrapFrame>(),
+        )
+    };
     unsafe { cpu::leave_domain() }
 }

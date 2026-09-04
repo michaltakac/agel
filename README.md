@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v1.5: a native Agel workshop with a frozen kernel
+The current repository is **v1.6: a native Agel workshop with a frozen kernel
 contract, a portable isolation backend, the same contract running on an
 unmodified seL4 kernel, and the first privileged service split out into a
 restartable domain**. It provides:
@@ -39,7 +39,7 @@ restartable domain**. It provides:
 - external A/B image canary, evidence-bound promotion, and rollback;
 - a modality-neutral text/voice interaction handoff with a 200 ms foreground
   acknowledgement contract, bounded background work, and verified human authority;
-- a reproducible 64 KiB BIOS disk seed that enters x86-64 long mode in QEMU;
+- a reproducible 128 KiB BIOS disk seed that enters x86-64 long mode in QEMU;
 - a freestanding Rust serial HAL and interactive recovery monitor; and
 - boot-time A/B denial, verification, promotion, and watchdog rollback checks;
 - a fixed-memory Agel reader and evaluator running inside the VM;
@@ -66,6 +66,9 @@ restartable domain**. It provides:
   device by whatever mechanism the architecture grants one, which the supervisor
   can lose and replace at a new generation while handles from before the restart
   fail closed; and
+- the fixed-memory native evaluator running unprivileged on x86-64, AArch64,
+  and RISC-V, with its transactional world on a private bounded stack and only
+  a shared-page request/reply boundary to the supervisor; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 Agel is a **Unix-like agentic operating system on a microkernel**. It does model
@@ -80,8 +83,9 @@ portable. Scope, tiers and what does not exist yet are in
 
 This is the first Agel evaluator running on the independently bootable
 substrate, and the first hardware protection boundary the project can point at,
-but not yet a general-purpose operating system. The evaluator itself still runs
-privileged in the default image, and the full agent runtime, filesystem,
+but not yet a general-purpose operating system. `run-qemu.sh` now places the
+evaluator and console output in separate unprivileged domains; serial input and
+recovery policy remain in the supervisor. The full agent runtime, filesystem,
 compiler, and persistent images still run as hosted components. See
 [`docs/architecture.md`](docs/architecture.md) for the trust boundaries and
 bootstrap plan.
@@ -174,14 +178,14 @@ Two-lane human interaction and the bootable recovery monitor:
 cargo run -q -p agel-interaction --example two_lane
 ./scripts/test-boot.sh
 ./scripts/test-monitor.sh
-./scripts/run-qemu.sh       # boots directly to agel-native[0]>
+./scripts/run-qemu.sh       # isolated evaluator -> restartable console driver
 ```
 
 The VM now opens directly into Agel. Try this inside `run-qemu.sh`:
 
 ```lisp
 (def fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1))))))
-(fact 10)
+(fact 6)
 (eval '(+ 20 22))
 (begin (def answer 99) (/ 1 0))
 answer
@@ -217,6 +221,7 @@ one you already have.
 
 The boot scripts require `qemu-system-x86_64`, `clang`, GNU `objcopy`, and the
 Rust `x86_64-unknown-none` target. On macOS: `brew install qemu binutils`.
+The prompt-synchronized REPL test additionally requires Python 3.10 or newer.
 
 See [`docs/language-core.md`](docs/language-core.md) and
 [`docs/agent-runtime.md`](docs/agent-runtime.md) for the implemented language.

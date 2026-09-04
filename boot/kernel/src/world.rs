@@ -7,8 +7,36 @@
 
 use crate::arch;
 
-/// Pages of stack given to a domain.
+/// Copy fixed supervisor state without calling a compiler-provided memory
+/// routine that may also be part of the user evaluator's executable image.
+/// Volatile words keep this boundary explicit on every architecture.
+///
+/// # Safety
+/// Both regions must be valid for `bytes`, aligned to eight bytes, and not
+/// overlap.
+pub unsafe fn copy_supervisor_words(destination: *mut u8, source: *const u8, bytes: usize) {
+    let mut offset = 0;
+    while offset + core::mem::size_of::<u64>() <= bytes {
+        let word = unsafe { source.add(offset).cast::<u64>().read_volatile() };
+        unsafe { destination.add(offset).cast::<u64>().write_volatile(word) };
+        offset += core::mem::size_of::<u64>();
+    }
+    while offset < bytes {
+        let byte = unsafe { source.add(offset).read_volatile() };
+        unsafe { destination.add(offset).write_volatile(byte) };
+        offset += 1;
+    }
+}
+
+/// Pages of stack given to a small contract or driver domain.
 pub const STACK_PAGES: u64 = 4;
+
+/// Pages reserved for a native evaluator domain.
+///
+/// The evaluator keeps its fixed transactional worlds and recursive parser on
+/// this private stack. 512 KiB is a hard bound, not a growable heap; the absent
+/// page beneath it still turns overflow into a contained fault.
+pub const EVALUATOR_STACK_PAGES: u64 = 128;
 
 /// Offsets, in 64-bit words, of the supervisor/world handshake block.
 ///
@@ -29,12 +57,11 @@ pub mod shared {
     /// First of four result words.
     pub const VALUES: usize = 8;
 
-    // The command codes are deliberately sparse. A dense set makes the ring-3
-    // dispatch compile to an indirect jump through a table in `.rodata`, and
-    // `.rodata` is supervisor-only: the world would fault reading its own
-    // switch statement. `./scripts/test-isolation.sh` checks the built
-    // `.user_text` of every architecture for indirect branches and calls, so
-    // this cannot silently come back.
+    // The original contract operations stay sparse so their tiny dispatcher
+    // remains easy to inspect. Evaluator domains additionally receive the
+    // kernel's immutable `.rodata` mapping because compiled Rust dispatch
+    // tables and language constants live there; it remains read-only and
+    // non-executable.
 
     /// Perform one contract invocation and report what came back.
     pub const COMMAND_INVOKE: u64 = 0x0001;
@@ -54,6 +81,15 @@ pub mod shared {
     pub const COMMAND_WRITE_CONSOLE: u64 = 0x6000;
     /// Touch the console device without having been granted it.
     pub const COMMAND_FAULT_DEVICE: u64 = 0x7000;
+    /// Evaluate the source bytes in the shared payload using the native Agel
+    /// session owned by this domain.
+    pub const COMMAND_EVALUATE: u64 = 0x8000;
+    /// Roll the evaluator's committed world back by one revision.
+    pub const COMMAND_EVALUATOR_ROLLBACK: u64 = 0x8100;
+    /// Render the evaluator's persistent definition names.
+    pub const COMMAND_EVALUATOR_DEFS: u64 = 0x8200;
+    /// Render the evaluator's enforced fixed resource limits.
+    pub const COMMAND_EVALUATOR_LIMITS: u64 = 0x8300;
     /// Divide by zero. Only x86-64 traps on this; RISC-V defines a result and
     /// AArch64 has no integer divide exception at all, so the command exists
     /// only where a machine can actually be provoked by it.
@@ -274,5 +310,16 @@ impl DomainCore {
                 .add(offset)
                 .write_volatile(byte)
         };
+    }
+
+    /// Read one untrusted byte from the shared payload area.
+    pub fn read_payload(&self, offset: usize) -> u8 {
+        let offset = PAYLOAD_OFFSET + (offset % PAYLOAD_BYTES);
+        // Safety: as in `write_payload`; the result remains untrusted data.
+        unsafe {
+            (self.shared_physical as *const u8)
+                .add(offset)
+                .read_volatile()
+        }
     }
 }

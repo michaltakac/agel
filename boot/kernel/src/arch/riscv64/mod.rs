@@ -80,6 +80,16 @@ pub fn user_text_range() -> core::ops::Range<u64> {
     (&raw const __user_text_start) as u64..(&raw const __user_text_end) as u64
 }
 
+/// Bounds of immutable data readable by evaluator domains.
+#[cfg(feature = "isolation-selftest")]
+pub fn user_rodata_range() -> core::ops::Range<u64> {
+    extern "C" {
+        static __rodata_start: u8;
+        static __rodata_end: u8;
+    }
+    (&raw const __rodata_start) as u64..(&raw const __rodata_end) as u64
+}
+
 /// The shared name for a RISC-V exception code.
 ///
 /// RISC-V genuinely does not distinguish a privileged instruction from an
@@ -145,10 +155,13 @@ impl Machine {
             return Err("kernel was not entered from a lower privilege");
         }
         let mut pool = crate::memory::FramePool::new();
-        let identity = memory::build_identity_window(&mut pool, user_text_range())
-            .map_err(|error| error.name())?;
+        let kernel_identity =
+            memory::build_identity_window(&mut pool, 0..0, 0..0).map_err(|error| error.name())?;
+        let identity =
+            memory::build_identity_window(&mut pool, user_text_range(), user_rodata_range())
+                .map_err(|error| error.name())?;
         let kernel_space =
-            memory::AddressSpace::new(&mut pool, identity).map_err(|error| error.name())?;
+            memory::AddressSpace::new(&mut pool, kernel_identity).map_err(|error| error.name())?;
         // Safety: the new tables map the kernel image, its stack, and the
         // device window, which is everything this code touches.
         unsafe {
@@ -166,7 +179,32 @@ impl Machine {
 
     /// Build a protection domain entered in U-mode at `entry`.
     pub fn create_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(&mut self.pool, self.identity, entry, ticks, None).map_err(|error| error.name())
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            None,
+            crate::world::STACK_PAGES,
+        )
+        .map_err(|error| error.name())
+    }
+
+    /// Build a domain with the fixed stack budget required by the native evaluator.
+    pub fn create_evaluator_world(
+        &mut self,
+        entry: u64,
+        ticks: u32,
+    ) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            None,
+            crate::world::EVALUATOR_STACK_PAGES,
+        )
+        .map_err(|error| error.name())
     }
 
     /// Build a protection domain that is additionally granted the console
@@ -178,6 +216,7 @@ impl Machine {
             entry,
             ticks,
             Some(CONSOLE_DEVICE_PHYSICAL),
+            crate::world::STACK_PAGES,
         )
         .map_err(|error| error.name())
     }

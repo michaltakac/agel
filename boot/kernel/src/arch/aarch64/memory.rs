@@ -55,6 +55,14 @@ const fn leaf_bits(access: Access) -> u64 {
     match access {
         // EL0 may read and execute; nobody may write, and EL1 may not execute.
         Access::UserCode => common | ATTR_NORMAL | SH_INNER | AP_RO_ANY | PRIVILEGED_EXECUTE_NEVER,
+        Access::UserReadOnly => {
+            common
+                | ATTR_NORMAL
+                | SH_INNER
+                | AP_RO_ANY
+                | PRIVILEGED_EXECUTE_NEVER
+                | USER_EXECUTE_NEVER
+        }
         // EL0 and EL1 may read and write; nobody may execute.
         Access::UserData => {
             common
@@ -191,8 +199,13 @@ impl AddressSpace {
 pub fn build_identity_window(
     pool: &mut FramePool,
     user_code: core::ops::Range<u64>,
+    user_rodata: core::ops::Range<u64>,
 ) -> Result<IdentityWindow, MemoryError> {
-    if user_code.start % PAGE != 0 || user_code.end % PAGE != 0 {
+    if user_code.start % PAGE != 0
+        || user_code.end % PAGE != 0
+        || user_rodata.start % PAGE != 0
+        || user_rodata.end % PAGE != 0
+    {
         return Err(MemoryError::Misaligned);
     }
 
@@ -219,6 +232,8 @@ pub fn build_identity_window(
         let bits = if user_code.contains(&address) {
             // EL0 program text: readable and executable there, never writable.
             leaf_bits(Access::UserCode)
+        } else if user_rodata.contains(&address) {
+            leaf_bits(Access::UserReadOnly)
         } else {
             // Kernel text, rodata, data, bss and the supervisor stack. It is
             // mapped writable and EL1-executable together only because the

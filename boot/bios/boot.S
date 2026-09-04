@@ -15,8 +15,17 @@ _start:
     orb $2, %al
     outb %al, $0x92
 
-    # Load 127 sectors beginning at LBA 1 to physical 0x10000.
+    # Load the kernel in two conservative 127-sector BIOS transfers. One DAP
+    # request is deliberately kept below the common firmware limit; together
+    # they leave 127 KiB for the isolated evaluator without making the seed
+    # depend on a filesystem.
     movw $disk_packet, %si
+    movb boot_drive, %dl
+    movb $0x42, %ah
+    int $0x13
+    jc disk_error
+    movw $0x1fe0, disk_packet + 6
+    movl $128, disk_packet + 8
     movb boot_drive, %dl
     movb $0x42, %ah
     int $0x13

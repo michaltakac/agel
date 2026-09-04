@@ -60,6 +60,7 @@ pub fn run() -> ! {
     );
 
     run_conformance(&mut machine, &mut console);
+    run_native_evaluator(&mut machine, &mut console);
     run_containment(&mut machine);
     run_driver_restart(&mut machine, &mut console);
 
@@ -81,6 +82,121 @@ pub fn run() -> ! {
 
     console::write("AGEL_ISOLATION_OK\n");
     arch::exit(true)
+}
+
+/// Run a persistent native Agel session entirely inside an unprivileged world.
+fn run_native_evaluator(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
+    let entry = crate::user::agel_evaluator_main as usize as u64;
+    if !arch::user_text_range().contains(&entry) {
+        failed("the evaluator entry point is not in user-executable text");
+    }
+    let mut evaluator = match machine.create_evaluator_world(entry, 20) {
+        Ok(world) => world,
+        Err(reason) => failed(reason),
+    };
+
+    expect_evaluation(&mut evaluator, b"(+ 20 22)", b"42", 1, false);
+    expect_evaluation(
+        &mut evaluator,
+        b"(def fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1))))))",
+        b"#<native-function>",
+        2,
+        false,
+    );
+    expect_evaluation(&mut evaluator, b"(fact 6)", b"720", 3, false);
+    expect_evaluation(
+        &mut evaluator,
+        b"(begin (def answer 42) answer)",
+        b"42",
+        4,
+        false,
+    );
+    expect_evaluation(
+        &mut evaluator,
+        b"(begin (def answer 99) (/ 1 0))",
+        b"error: division by zero",
+        4,
+        true,
+    );
+    expect_evaluation(&mut evaluator, b"answer", b"42", 5, false);
+
+    {
+        let mut out = ServiceWriter::new(driver);
+        let _ = writeln!(
+            out,
+            "isolation[{}]: native Agel evaluated factorial with transactional rollback in an unprivileged domain",
+            arch::NAME
+        );
+        out.flush();
+        if out.failure().is_some() {
+            failed("the console driver could not report evaluator success");
+        }
+    }
+
+    // Generic fault and non-yield containment run immediately below. The live
+    // evaluator corpus above is kept cooperative so every backend reaches the
+    // same subsequent adversarial sequence.
+}
+
+fn expect_evaluation(
+    evaluator: &mut arch::Domain,
+    source: &[u8],
+    expected: &[u8],
+    revision: u64,
+    error: bool,
+) {
+    if source.len() > crate::world::PAYLOAD_BYTES {
+        failed("native evaluator test source exceeds its shared buffer");
+    }
+    for (offset, byte) in source.iter().enumerate() {
+        evaluator.core().write_payload(offset, *byte);
+    }
+    evaluator
+        .core()
+        .write_shared(shared::ARGUMENTS, source.len() as u64);
+    evaluator.core().stage_command(shared::COMMAND_EVALUATE);
+    match evaluator.run() {
+        Stop::Replied => {}
+        Stop::Faulted(fault) => {
+            kprint!(
+                "isolation[{}]: native evaluator faulted: {} (cause {:#x}, detail {:#x}) at {:#x} touching {:#x}\n",
+                arch::NAME,
+                fault.name(),
+                fault.cause,
+                fault.detail,
+                fault.pc,
+                fault.address
+            );
+            failed("native evaluator did not yield a response");
+        }
+        Stop::BudgetExhausted => failed("native evaluator exhausted its tick budget"),
+    }
+    let observed_error = evaluator.core().read_shared(shared::STATUS) != 0;
+    let length = evaluator.core().read_shared(shared::VALUES) as usize;
+    let observed_revision = evaluator.core().read_shared(shared::VALUES + 1);
+    if observed_error != error || observed_revision != revision || length != expected.len() {
+        kprint!(
+            "isolation[{}]: evaluator metadata error={} length={} revision={}, expected error={} length={} revision={}\n",
+            arch::NAME,
+            observed_error,
+            length,
+            observed_revision,
+            error,
+            expected.len(),
+            revision
+        );
+        console::write("isolation: evaluator answered: ");
+        for offset in 0..length.min(crate::world::PAYLOAD_BYTES) {
+            console::write_byte(evaluator.core().read_payload(offset));
+        }
+        console::write("\n");
+        failed("native evaluator response metadata disagrees");
+    }
+    for (offset, byte) in expected.iter().enumerate() {
+        if evaluator.core().read_payload(offset) != *byte {
+            failed("native evaluator response bytes disagree");
+        }
+    }
 }
 
 /// Run the frozen corpus inside an unprivileged world and compare every answer

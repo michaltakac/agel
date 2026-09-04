@@ -1,10 +1,9 @@
 //! The serial Agel workshop: the v1.1 REPL that runs on the BIOS x86-64 seed.
 //!
 //! This is the one part of the kernel that is still architecture-bound, because
-//! it is also the one part that still runs privileged. Moving the evaluator
-//! into a protection domain is the next rung; until then it is honest to keep
-//! it beside the machine it was written for rather than to pretend it is
-//! portable.
+//! it is also the legacy privileged path used by the small evaluator self-test.
+//! The interactive v1.6 workshop lives in `isolated_repl` and runs the same
+//! evaluator in a protection domain.
 
 #[cfg(not(feature = "native-selftest"))]
 use crate::monitor::RecoveryMonitor;

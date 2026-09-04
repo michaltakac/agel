@@ -13,10 +13,9 @@
 //! real.
 //!
 //! Why the console first, when the roadmap could have started anywhere: the
-//! Agel evaluator still runs privileged, and moving it into a domain is the
-//! next rung after this one. An unprivileged evaluator needs somewhere to
-//! print, and it must not be handed the device to do it. The driver domain is
-//! what it will print through.
+//! Agel evaluator now runs in a domain in v1.6. An unprivileged evaluator needs
+//! somewhere to print, and it must not be handed the device to do it. The
+//! driver domain is what it prints through.
 
 use crate::arch;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};

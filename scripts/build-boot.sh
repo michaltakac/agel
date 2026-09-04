@@ -33,8 +33,8 @@ clang -target i386-none-elf -c "$project_dir/boot/bios/boot.S" -o "$boot_object"
 "$objcopy_bin" -O binary "$boot_elf" "$boot_bin"
 
 test "$(wc -c < "$boot_bin" | tr -d ' ')" -eq 512
-test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 65024
-dd if=/dev/zero of="$disk_image" bs=512 count=128 2>/dev/null
+test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 130048
+dd if=/dev/zero of="$disk_image" bs=512 count=256 2>/dev/null
 dd if="$boot_bin" of="$disk_image" conv=notrunc 2>/dev/null
 dd if="$kernel_bin" of="$disk_image" bs=512 seek=1 conv=notrunc 2>/dev/null
 

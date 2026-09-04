@@ -643,19 +643,19 @@ Agel's user-level policy or evaluator is correct.
   security boundary. → stated in [`native-boot.md`](native-boot.md),
   [`native-workshop.md`](native-workshop.md), and the threat model.
 
-### Phase 1 — research-kernel isolation — **substantially done (v1.2)**
+### Phase 1 — research-kernel isolation — **done (v1.6)**
 
 - Add IDT/trap handling, user mode, page tables and separate address spaces. →
   done. Kernel-owned four-level tables, a per-domain root at its own top-level
   slot, write-xor-execute with `EFER.NXE`, a GDT with ring-3 descriptors and a
   TSS, every architectural exception vector, a double-fault stack reached
   through IST, and a 100 Hz preemption timer on remapped 8259s.
-- Boot a minimal recovery/root task and move the Agel evaluator into ring 3. →
-  half done. The supervisor and the recovery monitor are outside every domain,
-  and worlds run in ring 3, but the *evaluator itself* is still in ring 0 in the
-  default image. Moving it needs its compiled code and its several tens of
-  kilobytes of transient parse state relocated into a domain, which is the next
-  concrete rung rather than something this phase claims.
+- Boot a minimal recovery/root task and move the Agel evaluator into the lowest
+  privilege level. → done in v1.6 on all three research backends. Evaluator code
+  is isolated in `.user_text`, immutable constants are read-only, and its fixed
+  transactional worlds and transient parse state live on a private bounded
+  stack. The x86-64 workshop is interactive through a shared-page request/reply
+  protocol and the separate console service.
 - Implement bounded endpoint IPC and opaque capability slots. → done. A world
   holds slot numbers; the object table is supervisor-only. Bulk data crosses on
   a shared page signalled through the contract, never through the control path.
@@ -715,8 +715,8 @@ phase quietly claims.
 - Then the **POSIX personality**: a Rust C library and the filesystem and
   process services beneath it, running unprivileged above the contract. That is
   the Redox lesson taken deliberately — POSIX is a personality, not the centre —
-  and it is where Linux application compatibility comes from. Not started, and
-  it depends on the evaluator being able to live in a domain first.
+  and it is where Linux application compatibility comes from. Not started; its
+  evaluator-domain prerequisite was completed in v1.6.
 
 The device is granted the way each architecture actually grants devices, which
 is the part worth having built once: an I/O permission bitmap in the

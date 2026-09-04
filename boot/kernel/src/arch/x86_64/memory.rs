@@ -36,6 +36,7 @@ const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
 const fn leaf_bits(access: Access) -> u64 {
     match access {
         Access::UserCode => PRESENT | USER,
+        Access::UserReadOnly => PRESENT | USER | NO_EXECUTE,
         Access::UserData => PRESENT | WRITABLE | USER | NO_EXECUTE,
         // x86-64 reaches its console through I/O ports rather than a mapping,
         // so a device grant here is a bitmap entry in the task-state segment,
@@ -131,8 +132,13 @@ impl AddressSpace {
 pub fn build_identity_window(
     pool: &mut FramePool,
     user_code: core::ops::Range<u64>,
+    user_rodata: core::ops::Range<u64>,
 ) -> Result<u64, MemoryError> {
-    if user_code.start % PAGE != 0 || user_code.end % PAGE != 0 {
+    if user_code.start % PAGE != 0
+        || user_code.end % PAGE != 0
+        || user_rodata.start % PAGE != 0
+        || user_rodata.end % PAGE != 0
+    {
         return Err(MemoryError::Misaligned);
     }
     let pdpt = pool.allocate()?;
@@ -147,6 +153,8 @@ pub fn build_identity_window(
         let bits = if user_code.contains(&address) {
             // Ring-3 program text: readable and executable, never writable.
             leaf_bits(Access::UserCode)
+        } else if user_rodata.contains(&address) {
+            leaf_bits(Access::UserReadOnly)
         } else {
             // Everything else in the low 2 MiB is kernel text, kernel rodata,
             // BIOS tables, and the kernel stack. It is mapped writable and

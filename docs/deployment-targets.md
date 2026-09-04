@@ -181,8 +181,8 @@ Exact, because the gap is large:
   privileged instructions, touch ungranted devices, or never yield; plus one
   restartable driver domain with generations and fail-closed stale handles.
 
-Not started: the POSIX personality in any form, local inference, a filesystem, a
-network stack, storage drivers, and moving the Agel evaluator out of the
-supervisor. That last is the next rung and the precondition for the POSIX list,
-because a POSIX process is a protection domain running an Agel-hosted program,
-and the evaluator has to be able to live in one first.
+Not started: the POSIX personality in any form, local inference, a filesystem,
+network stack, or storage drivers. The fixed native evaluator now lives in a
+protection domain on all three research backends, satisfying the first
+precondition for a POSIX process, but the full hosted agent runtime and process
+services have not followed it yet.

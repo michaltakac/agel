@@ -5,7 +5,7 @@ ENTRY(agel_boot)
 SECTIONS
 {
   . = 0x40080000;
-  .text : ALIGN(4K) { KEEP(*(.text.entry)) *(.text .text.*) }
+  .entry : ALIGN(4K) { KEEP(*(.text.entry)) }
 
   /* VBAR_EL1 ignores the low eleven bits of the vector base, so the table gets
      its own output section with the alignment the architecture requires rather
@@ -18,12 +18,24 @@ SECTIONS
   .user_text : ALIGN(4K)
   {
     __user_text_start = .;
+    *(.text.*native*)
+    *(.text.mem*)
+    *(.text.*compiler_builtins*mem*)
+    *(.text.*slice_index_order_fail*)
+    *(.text.*panic_bounds_check*)
     KEEP(*(.user_text))
     . = ALIGN(4K);
     __user_text_end = .;
   }
 
-  .rodata : ALIGN(4K) { *(.rodata .rodata.*) }
+  .text : ALIGN(4K) { *(.text .text.*) }
+  .rodata : ALIGN(4K)
+  {
+    __rodata_start = .;
+    *(.rodata .rodata.*) *(.got .got.*)
+    . = ALIGN(4K);
+    __rodata_end = .;
+  }
   .data : ALIGN(4K) { *(.data .data.*) }
   .bss : ALIGN(4K)
   {

@@ -128,9 +128,12 @@ Each rung must be runnable and differentially testable against the rung below:
    networking and model brokering are still the supervisor's.
 16. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
    and compiler in Agel; extend diverse comparison to every kernel semantic.
-17. **Native agent world:** move the evaluator and the full Agel agent runtime
-   into ring-3 domains, then add an allocator, drivers, and persistent images.
-   Keep device access outside mutable language heaps.
+17. **Native evaluator world (complete at v1.6):** the fixed-memory evaluator
+   runs at the lowest privilege level on all three research backends. The x86-64
+   interactive workshop sends source over a bounded shared page and prints
+   through the restartable console domain. The full agent runtime, allocator,
+   persistent images, and in-OS editor remain future rungs; device access stays
+   outside mutable language heaps.
 18. **seL4 backend (complete at v1.4):** the same kernel contract over an
    unmodified seL4 kernel, composed with Microkit on AArch64. Four protection
    domains — recovery, world, broker, serial — where the contract is answered

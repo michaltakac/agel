@@ -1,6 +1,7 @@
-; Enter these forms after ./scripts/run-qemu.sh.
+; Enter these forms after ./scripts/run-qemu.sh. In v1.6 the evaluator is an
+; unprivileged domain and its output comes from a separate console domain.
 (def fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1))))))
-(fact 10)
+(fact 6)
 (eval '(+ 20 22))
 (def answer 42)
 (begin (def answer 99) (/ 1 0))

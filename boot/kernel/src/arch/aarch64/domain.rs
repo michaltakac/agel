@@ -7,7 +7,7 @@
 use super::cpu::{self, TrapFrame};
 use super::memory::{AddressSpace, IdentityWindow, DOMAIN_BASE};
 use crate::memory::{Access, FramePool, MemoryError, PAGE};
-use crate::world::{DomainCore, Fault, Stop, STACK_PAGES};
+use crate::world::{DomainCore, Fault, Stop};
 use agel_kernel_abi::{Request, Response, Status};
 
 /// Virtual address of a domain's stack region.
@@ -33,9 +33,10 @@ impl Domain {
         entry: u64,
         tick_budget: u32,
         console: Option<u64>,
+        stack_pages: u64,
     ) -> Result<Self, MemoryError> {
         let mut space = AddressSpace::new(pool, identity)?;
-        for page in 0..STACK_PAGES {
+        for page in 0..stack_pages {
             let frame = pool.allocate()?;
             space.map(pool, STACK_BASE + page * PAGE, frame, Access::UserData)?;
         }
@@ -50,7 +51,7 @@ impl Domain {
         // The stack grows down from the top of the last mapped stack page. The
         // page above is deliberately absent, so an overflowing world faults
         // instead of walking into whatever the allocator handed out next.
-        let stack_top = STACK_BASE + STACK_PAGES * PAGE;
+        let stack_top = STACK_BASE + stack_pages * PAGE;
         Ok(Self {
             space,
             frame: TrapFrame::user(entry, stack_top, SHARED_BASE),
@@ -150,12 +151,17 @@ pub unsafe extern "C" fn dispatch_trap(frame: *mut TrapFrame) -> *mut TrapFrame 
     if !saved.in_user_mode() {
         crate::report_supervisor_trap(saved.vector, saved.esr, saved.elr);
     }
+    // Supervisor policy always runs under the kernel translation root. The
+    // domain root may grant the evaluator access to shared compiler helpers;
+    // it must never become the supervisor's ambient address space.
+    unsafe { restore_kernel_space() };
     let domain = unsafe { &mut *CURRENT };
     if saved.vector == cpu::VECTOR_LOWER_IRQ {
         // Acknowledge before deciding, so that stopping the domain does not
         // also stop the clock the supervisor needs.
         unsafe { cpu::acknowledge_interrupt() };
         if domain.core.charge_tick() {
+            unsafe { domain.space.activate() };
             return frame;
         }
     } else if saved.exception_class() == cpu::EC_SVC {
@@ -166,6 +172,7 @@ pub unsafe extern "C" fn dispatch_trap(frame: *mut TrapFrame) -> *mut TrapFrame 
             saved.x[2] = response.values[1];
             saved.x[3] = response.values[2];
             saved.x[4] = response.values[3];
+            unsafe { domain.space.activate() };
             return frame;
         }
     } else {
@@ -176,6 +183,12 @@ pub unsafe extern "C" fn dispatch_trap(frame: *mut TrapFrame) -> *mut TrapFrame 
             address: saved.far,
         }));
     }
-    domain.frame = *saved;
+    unsafe {
+        crate::world::copy_supervisor_words(
+            (&raw mut domain.frame).cast(),
+            (saved as *mut TrapFrame).cast(),
+            core::mem::size_of::<TrapFrame>(),
+        )
+    };
     unsafe { cpu::leave_domain() }
 }

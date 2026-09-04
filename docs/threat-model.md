@@ -345,6 +345,40 @@ networking and model brokering have not been split. The frame pool still never
 reclaims, so a restarted domain's frames are lost; a system that restarts
 drivers in a loop would exhaust it. And the evaluator still runs privileged.
 
+## v1.6
+
+- **An evaluator bug corrupts its recovery plane:** the native evaluator now
+  runs in an unprivileged domain on x86-64, AArch64, and RISC-V. Its writable
+  state is a private, fixed-size stack plus one shared page; kernel state and
+  other domains have no user translation.
+- **A writable language value becomes executable:** evaluator code is
+  read/execute, immutable constants are read-only and non-executable, and the
+  private stack/shared page are read/write and non-executable. The mapping type
+  has no writable-and-executable variant.
+- **A domain mapping becomes ambient kernel authority:** every trap switches to
+  the kernel's own page-table root before invoking supervisor policy. A reply
+  reinstalls the domain root only immediately before returning to user mode.
+- **A request overruns an IPC parser:** source and result bytes share one 4 KiB
+  page but each payload is capped at 256 bytes. Metadata is read back as
+  untrusted data and lengths are clamped before supervisor use.
+- **A failed evaluation partially mutates the world:** the same three-bank
+  active/previous/scratch transaction protocol used by the native workshop now
+  executes inside the domain. The cross-architecture test commits definitions,
+  evaluates recursion, attempts a failing redefinition, and observes the old
+  value and unchanged revision.
+- **A large language stack consumes every domain:** ordinary worlds retain four
+  pages. Only evaluator worlds receive a fixed 512 KiB stack, needed by the
+  current copy-based transactional implementation; an absent guard page makes
+  exhaustion a contained fault rather than growth into another allocation.
+- **A console grant leaks into the language:** the evaluator has no UART mapping
+  or x86 I/O-port grant. Interactive results return to the supervisor and are
+  forwarded to the independently restartable console domain.
+
+This is still not memory-safe proof, formal verification, durable recovery, or
+the full hosted agent runtime. Immutable kernel constants are readable to the
+evaluator domain in this research backend, serial input remains supervisor
+code, and seL4 currently hosts only the frozen kernel contract.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

@@ -23,6 +23,8 @@ pub const PAGE: u64 = 4096;
 pub enum Access {
     /// User read/execute, never writable. Shared program text.
     UserCode,
+    /// User read-only, never executable. Immutable evaluator constants.
+    UserReadOnly,
     /// User read/write, never executable. Stacks, heaps, shared buffers.
     UserData,
     /// A device register window granted to exactly one domain. Read/write,

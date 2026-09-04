@@ -3,7 +3,7 @@
 # the path to the resulting image.
 #
 # x86-64 produces a raw BIOS disk image through ./scripts/build-boot.sh, because
-# that architecture still carries the 512-byte boot stage and the 64 KiB seed.
+# that architecture still carries the 512-byte boot stage and the 128 KiB seed.
 # AArch64 and RISC-V produce ELF files that QEMU loads directly.
 set -eu
 

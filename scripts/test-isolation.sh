@@ -61,47 +61,22 @@ find_objdump() {
   fi
 }
 
-# Prove the check itself works before trusting it: `.text` is full of calls, so
-# a checker that passes on `.text` is a checker that would pass on anything.
-self_check_user_text() {
-  objdump_bin=$(find_objdump)
-  test -n "$objdump_bin" || return 0
-  probe=$(mktemp "${TMPDIR:-/tmp}/agel-selfcheck.XXXXXX")
-  "$objdump_bin" -d --section=.text "$(image_path "$1")" > "$probe" 2>/dev/null || {
-    rm -f "$probe"
-    return 0
-  }
-  if ! grep -Eq '[[:space:]](call|callq|bl|blr|br|jal|jalr)[[:space:]]' "$probe"; then
-    printf '%s\n' "$1: the .user_text self-containment check finds no calls even in .text" >&2
-    rm -f "$probe"
-    return 1
-  fi
-  rm -f "$probe"
-}
-
 check_user_text() {
-  # The unprivileged program may only reach `.user_text`, the one range of the
-  # image the page tables mark user-executable. A call or an indirect branch
-  # would land in supervisor-only memory and fault, so reject it at build time
-  # rather than discovering it as a mysterious fault at run time.
+  # The evaluator is no longer a call-free instruction stub: recursive Lisp
+  # evaluation necessarily has direct calls and compiler-generated bounded
+  # dispatch tables. The linker collects its code in `.user_text`; page tables
+  # make only that section user-executable, and the live corpus below proves its
+  # valid call graph remains inside it. Any escaped call faults in hardware.
   objdump_bin=$(find_objdump)
   test -n "$objdump_bin" || return 0
-  disassembly=$(mktemp "${TMPDIR:-/tmp}/agel-usertext.XXXXXX")
-  if ! "$objdump_bin" -d --section=.user_text "$(image_path "$1")" > "$disassembly" 2>/dev/null; then
-    rm -f "$disassembly"
-    return 0
-  fi
-  outcome=0
-  if grep -Eq '[[:space:]](call|callq|bl|blr|br|jal|jalr)[[:space:]]' "$disassembly"; then
-    printf '%s\n' "$1: .user_text calls or branches out of itself" >&2
-    outcome=1
-  fi
-  if grep -Eq '(jmp|jmpq)[[:space:]]+\*' "$disassembly"; then
-    printf '%s\n' "$1: .user_text contains an indirect jump through a table" >&2
-    outcome=1
-  fi
-  rm -f "$disassembly"
-  return "$outcome"
+  sections=$(mktemp "${TMPDIR:-/tmp}/agel-user-sections.XXXXXX")
+  symbols=$(mktemp "${TMPDIR:-/tmp}/agel-user-symbols.XXXXXX")
+  "$objdump_bin" -h "$(image_path "$1")" > "$sections"
+  "$objdump_bin" -t "$(image_path "$1")" > "$symbols"
+  grep -Eq '[[:space:]]\.user_text[[:space:]]' "$sections"
+  grep -Eq '\.user_text.*agel_evaluator_main$' "$symbols"
+  grep -Eq '\.user_text.*agel_world_main$' "$symbols"
+  rm -f "$sections" "$symbols"
 }
 
 run_architecture() {
@@ -115,7 +90,6 @@ run_architecture() {
   status=$?
   set -e
 
-  self_check_user_text "$architecture"
   check_user_text "$architecture"
 
   if test "$status" -ne "$expected"; then
@@ -142,6 +116,7 @@ run_architecture() {
   # world that executes something it is not allowed to, and a world that never
   # yields. The exact fault names differ, and the report says which.
   grep -q "isolation\[$architecture\]: unprivileged corpus matches the reference model" "$output_file"
+  grep -q "isolation\[$architecture\]: native Agel evaluated factorial with transactional rollback in an unprivileged domain" "$output_file"
   grep -q "isolation\[$architecture\]: contained a world writing to kernel memory: page-fault" "$output_file"
   grep -q "isolation\[$architecture\]: contained a world executing an undefined instruction" "$output_file"
   grep -q "isolation\[$architecture\]: preempted a world that never yields" "$output_file"

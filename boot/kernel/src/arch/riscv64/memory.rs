@@ -52,6 +52,7 @@ const fn leaf_bits(access: Access) -> u64 {
     match access {
         // U-mode may read and execute; nobody may write.
         Access::UserCode => common | READ | EXECUTE,
+        Access::UserReadOnly => common | READ,
         // U-mode may read and write; nobody may execute.
         Access::UserData => common | READ | WRITE,
         // Sv39 leaves have no cache or ordering attributes, so a device page
@@ -169,8 +170,13 @@ impl AddressSpace {
 pub fn build_identity_window(
     pool: &mut FramePool,
     user_code: core::ops::Range<u64>,
+    user_rodata: core::ops::Range<u64>,
 ) -> Result<IdentityWindow, MemoryError> {
-    if user_code.start % PAGE != 0 || user_code.end % PAGE != 0 {
+    if user_code.start % PAGE != 0
+        || user_code.end % PAGE != 0
+        || user_rodata.start % PAGE != 0
+        || user_rodata.end % PAGE != 0
+    {
         return Err(MemoryError::Misaligned);
     }
 
@@ -200,6 +206,8 @@ pub fn build_identity_window(
             // U-mode program text: readable and executable there, never
             // writable.
             leaf_bits(Access::UserCode)
+        } else if user_rodata.contains(&address) {
+            leaf_bits(Access::UserReadOnly)
         } else {
             // Kernel text, rodata, data, bss and the supervisor stack. It is
             // mapped writable and executable together only because the

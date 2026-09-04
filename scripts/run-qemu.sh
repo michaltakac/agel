@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-kernel=$(./scripts/build-boot.sh | tail -n 1)
+kernel=$(./scripts/build-boot.sh --features isolated-repl | tail -n 1)
 set +e
 qemu-system-x86_64 \
   -machine pc,accel=tcg -m 64M -display none -monitor none -serial stdio -no-reboot \

@@ -8,7 +8,7 @@ personality, and always the hosted reference model.
 
 The contract lives in `crates/agel-kernel-abi`. It is `no_std` and
 allocation-free, so the same definitions and the same conformance corpus link
-into a hosted test binary and into a 64 KiB freestanding kernel image.
+into a hosted test binary and into a 128 KiB freestanding kernel image.
 
 ## What is in it, and what is deliberately not
 
@@ -186,7 +186,7 @@ register frames, trap entry, and the privilege transition are per-architecture.
 | Result words | `rdi rsi rdx r10` | `x1`–`x4` | `a1`–`a4` |
 | Translation | 4-level, 4 KiB | 3-level Sv39-shaped, 4 KiB | Sv39, 4 KiB |
 | Preemption | PIT at 100 Hz | EL1 physical timer via GICv2 | SBI timer at 100 Hz |
-| Platform | BIOS seed, raw 64 KiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
+| Platform | BIOS seed, raw 128 KiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
 | Leaving the emulator | debug-exit device | PSCI `SYSTEM_OFF` | `virt` test device |
 
 `rbx` and `rbp` are absent from the x86-64 convention because Rust's inline

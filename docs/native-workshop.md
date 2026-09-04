@@ -1,8 +1,10 @@
-# The v1.1 native Agel workshop
+# The native Agel workshop
 
-`./scripts/run-qemu.sh` now boots directly into an Agel REPL implemented in the
-freestanding kernel. Source arrives through COM1, is parsed into a bounded arena,
-and is evaluated without a Rust allocator or host operating system.
+`./scripts/run-qemu.sh` now boots directly into an Agel REPL on the freestanding
+kernel. Since v1.6, source crosses a bounded shared page into an unprivileged
+evaluator domain, its transactional state lives on that domain's private stack,
+and results are printed through a separate console-driver domain. Evaluation
+uses no Rust allocator or host operating system.
 
 ## Native subset
 
@@ -73,9 +75,24 @@ drift apart.
 
 `./scripts/test-native.sh` exercises the evaluator inside QEMU without input.
 `./scripts/test-native-repl.sh` additionally drives the real UART reader and
-normal REPL through a stateful, recursive, rollback-producing session.
+isolated REPL through a stateful, recursive, rollback-producing session.
 
 This is enough to write and run programs inside Agel itself. It is not yet an
 editor or self-hosted development environment: definitions disappear at power
 off, and the hosted macro/module/agent/effect system is not in the VM. Native
 persistent images and an in-OS editor are the next useful rung.
+
+## v1.6 isolation boundary
+
+The evaluator holds no console-device grant and cannot name another domain's
+stack. Its only mutable cross-boundary object is one 4 KiB shared page; source
+and result payloads are each capped at 256 bytes. The supervisor switches to its
+own page-table root before answering a trap, so a world's mappings never become
+ambient supervisor authority. `.user_text` is read/execute, immutable constants
+are read-only, stacks and the shared page are read/write, and no mapping is both
+writable and executable.
+
+The interactive serial reader and recovery commands remain supervisor code.
+The AArch64 and RISC-V isolation images run the same evaluator corpus but do not
+yet expose an interactive UART workshop. This is a protected language workshop,
+not yet the full hosted agent runtime or a durable self-hosted environment.

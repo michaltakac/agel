@@ -9,10 +9,10 @@ on that substrate while retaining the recovery boundary.
 AArch64 and RISC-V need none of this: QEMU's `virt` machine loads an ELF by its
 program headers, so those images state where they want to live and start there.
 x86-64 keeps the BIOS seed because that is where the project's native work
-began, and because a reproducible 64 KiB raw disk is a useful thing to have.
+began, and because a reproducible 128 KiB raw disk is a useful thing to have.
 
-1. The 512-byte BIOS stage loads the remaining 127 sectors at physical
-   `0x10000`.
+1. The 512-byte BIOS stage loads 254 kernel sectors in two conservative
+   127-sector requests beginning at physical `0x10000`.
 2. It creates identity-mapped four-level page tables for the first GiB.
 3. It enables A20, PAE, long mode, protected mode, and paging.
 4. It jumps through a 64-bit GDT entry and calls the fixed kernel entry at
@@ -22,7 +22,7 @@ began, and because a reproducible 64 KiB raw disk is a useful thing to have.
    evaluator's world banks.
 
 The linker keeps `.text.entry` first so helper-function reordering cannot move
-the address called by the BIOS stage. The raw image is always exactly 128
+the address called by the BIOS stage. The raw image is always exactly 256
 sectors; the build rejects an oversized kernel.
 
 ## Recovery boundary
@@ -59,7 +59,7 @@ of what differs.
 
 | | x86-64 | AArch64 | RISC-V |
 |---|---|---|---|
-| Platform | BIOS seed, raw 64 KiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
+| Platform | BIOS seed, raw 128 KiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
 | Supervisor level | ring 0 | EL1 | S-mode |
 | Unprivileged level | ring 3 | EL0 | U-mode |
 | Trap gate | `int 0x80` | `svc #0` | `ecall` |
@@ -100,10 +100,12 @@ unprivileged world answers all 81 steps of the kernel-contract corpus with a
 transcript byte-identical to `bootstrap/kernel-contract.trace`; that a world
 writing to kernel memory, a world executing something it is not allowed to, and
 a world that never yields are each contained with the fault that machine
-actually produces; and that the recovery monitor still denies, verifies,
-promotes, and rolls back afterwards. It also rejects any image whose built
-`.user_text` contains a call or an indirect branch, since either would leave the
-user-executable range.
+actually produces; that the native evaluator performs persistent definitions,
+recursion, and transactional rollback in the lowest privilege level; and that
+the recovery monitor still denies, verifies, promotes, and rolls back
+afterwards. The linker isolates evaluator code in `.user_text`, immutable data
+is user-readable but non-writable/non-executable, and the live corpus fails on
+any call that escapes those mappings.
 
 The fault vocabulary is shared but the mapping is not flattened. x86-64
 distinguishes four causes and is provoked four ways. AArch64 has no integer
@@ -121,11 +123,11 @@ workspace still has `unsafe_code = "forbid"`. Privileged instructions are
 confined to `boot/kernel/src/hal.rs`; BIOS transition assembly lives in
 `boot/bios`.
 
-The default REPL image still runs the Agel evaluator in ring 0, and the REPL
-exists only on x86-64. The isolation machinery exists on three architectures and
-is tested on all of them, but moving the evaluator into a domain is the next
-rung, not a claim this release makes. There is still no allocator, driver
-model, hardware watchdog, persisted A/B slots, signature verification, or agent
-runtime in the VM, and the frame allocator never reclaims. The important
-invariant remains: mutable language state is not the only component capable of
-recovering it.
+Since v1.6, `./scripts/run-qemu.sh` boots an x86-64 interactive workshop whose
+evaluator lives on a private 512 KiB bounded domain stack and whose output goes
+through the v1.5 console domain. The same evaluator path is tested on AArch64
+and RISC-V. Serial input still terminates in the supervisor, and seL4 still runs
+only the frozen contract. There is no allocator, hardware watchdog, persisted
+A/B slot, signature verification, or full agent runtime in the VM, and the
+frame allocator never reclaims. Mutable language state is nevertheless no
+longer the component responsible for recovering itself.
