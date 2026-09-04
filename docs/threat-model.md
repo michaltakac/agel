@@ -345,46 +345,46 @@ networking and model brokering have not been split. The frame pool still never
 reclaims, so a restarted domain's frames are lost; a system that restarts
 drivers in a loop would exhaust it. And the evaluator still runs privileged.
 
-## Surfaces the DGX target adds
+## Surfaces the scope adds
 
-These are recorded now, before any of the code exists, because the deployment
-requirement is what makes them reachable and it is easier to design against a
+Recorded before the code exists, because it is easier to design against a
 written list than to remember one. Nothing here is implemented; see
 [`deployment-targets.md`](deployment-targets.md).
 
-- **A GPU is a DMA engine that outranks the MMU.** An accelerator programmed by
-  a compromised domain can read and write memory the CPU page tables would have
-  denied it. Only an IOMMU or SMMU constrains it, and seL4's verified
-  configurations exclude device address translation in every configuration. The
-  isolation a DGX node needs most is the isolation the proofs do not cover, and
-  the release manifest has to say so rather than let "runs on seL4" absorb it.
-- **The largest component is proprietary and cannot be reviewed.** The CUDA
-  user-space stack and the GSP firmware are binaries. They are not going to be
-  audited, so the containment argument cannot depend on their behavior: it has
-  to hold when they are wrong or hostile.
-- **A GPU domain that can approve.** The mitigation is the invariant the project
-  already holds for models: it computes, it does not decide. A GPU domain must
-  not be able to mint a capability, approve a change, reach the recovery plane,
-  or touch a world it was not granted. If it can, its size stops being
-  acceptable.
-- **"The GPU" as a capability.** Granting a device rather than a bounded
-  partition means any grant is a total grant. MIG gives hardware-enforced
-  partitioning with separate memory paths; a capability should name a partition
-  and a budget so that inference capacity cannot silently become a training run.
-- **A training job as an unbounded effect.** A run that cannot be cancelled,
-  preempted, or bounded by a deadline is a resource leak with a schedule. A run
-  whose progress is not in the tamper-evident log is work the system cannot
-  reason about after a crash. Neither is an inference-shaped problem.
-- **Checkpoints as a laundering path.** A checkpoint is attacker-influenced data
-  produced by the largest untrusted component, and later loaded as model
-  weights. Admitting one has to be a decision with evidence, not a file
-  appearing in a directory.
-- **The fabric is remote DMA.** GPUDirect RDMA over InfiniBand or RoCE writes
-  straight into GPU memory on another node. A rack presented as one accelerator
-  is also one blast radius, and the trust boundary between nodes has to be
-  stated rather than assumed from the fact that they are in the same rack.
-- **A tier that can promote itself.** An inference-only node must lack training
-  capability because it was never granted one, not because a flag says so.
+### The POSIX personality
 
-None of this is mitigated today. There is no GPU code, no IOMMU work, no VMM,
-and no Linux domain in this repository.
+- **A path that grants itself.** Unix succeeds at `open` because of who you are.
+  If the personality reproduces that, every capability boundary above it becomes
+  decorative: a program that can name a resource can reach it. A name must
+  resolve through a namespace capability the process was given, and a name
+  outside that capability must be unreachable however it is spelled.
+- **Descriptors that outlive their authority.** A file descriptor is a derived
+  handle and is subject to the derivation rule — equal or weaker, never widened
+  — and must fail closed with `stale-generation` when its backing service
+  restarts, exactly as the console driver's handles now do.
+- **`fork` as an authority copier.** A call whose default is "duplicate the
+  entire authority set" is at odds with everything above it. What `fork` means
+  here is a decision to be made, not a semantic to be inherited.
+- **A C library as a trusted computing base.** Writing it in safe Rust bounds
+  the memory-safety failures, not the logic ones, and says nothing about whether
+  a program running on it is contained. Containment comes from the protection
+  domain and the capability set, and the personality must not become a place
+  where those are quietly widened for convenience.
+- **Compatibility as a pressure to weaken.** Every POSIX program that does not
+  run is an argument for an exception. The exceptions are where ambient
+  authority comes back.
+
+### Local inference
+
+- **A model as a way in.** Weights are attacker-influenceable data parsed by a
+  large amount of code. The parser is a boundary and belongs in a domain that
+  holds nothing else.
+- **A driver as a way around.** Any accelerated inference path that needs a
+  proprietary kernel-mode driver puts unreviewable code in the privileged
+  position the whole architecture exists to keep small. That is the rule that
+  keeps this from drifting back to Linux as the core.
+- **Inference as unbounded work.** A request with no budget and no deadline is a
+  denial of service that arrived through the front door.
+
+None of this is mitigated today: there is no POSIX layer, no filesystem, and no
+local inference in this repository.

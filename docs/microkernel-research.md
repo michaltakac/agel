@@ -1,21 +1,15 @@
 # Microkernel research and Agel native architecture
 
 Status: architecture research and recommendation, 2026-09-04.
-Deployment requirements are in [`deployment-targets.md`](deployment-targets.md)
-and constrain several conclusions here: Agel's primary target is a bare-metal
-NVIDIA DGX node doing training as well as inference, which makes **both x86-64
-and AArch64 deployment targets**, makes the Linux GPU domain permanent rather
-than transitional, and puts the isolation that matters most on hardware seL4's
-proofs explicitly exclude.
 Upstream claims re-checked against current seL4, Microkit, Firecracker and
 prototype documentation on 2026-09-04; see "Verified property coverage" and
 "Microkit fit" for the specific figures this revision pins.
 
-This document evaluates modern microkernel and virtual-machine projects as a
-foundation for the native Agel system. It is intentionally stricter than asking
-which project looks most like an "agent OS." Agel must remain live and
-self-improving without allowing a language bug, model mistake, driver fault, or
-malicious tool to rewrite the mechanism that contains it.
+Scope is set by [`deployment-targets.md`](deployment-targets.md): Agel is a
+Unix-like agentic OS on a microkernel, doing **inference and not training**, with
+Linux application compatibility supplied by a **POSIX personality written in safe
+Rust** above the kernel rather than by Linux beneath it. AArch64 is the primary
+deployment target, x86-64 is supported, RISC-V keeps the contract portable.
 
 ## Executive decision
 
@@ -32,8 +26,10 @@ Agel should use a **two-backend architecture with one small kernel contract**:
 4. Use **Firecracker** optionally to contain or deploy an entire Agel VM on a
    Linux/KVM host. Use **rust-vmm** crates only in host-side VMM or device-model
    tooling, not as the Agel guest kernel.
-5. Mine **Redox** for Rust userspace, service, driver, and scheme ideas, but do
-   not adopt its whole compatibility surface as Agel's trusted base.
+5. Take **Redox's** arrangement for Linux application compatibility — a C
+   library and system-interface layer written in Rust, as an unprivileged
+   personality above the kernel — without adopting its whole compatibility
+   surface as Agel's trusted base, and without letting a name become authority.
 6. Treat the linked **Oxide OS prototype** as design inspiration only. Its own
    current issue list says it has no ring-3 userspace and all code runs in
    ring 0, so its capabilities do not yet provide hardware fault isolation.
@@ -314,9 +310,14 @@ There are three plausible relationships, in increasing order of commitment:
 2. port an Agel runtime to Redox as another hosted environment; or
 3. fork Redox as the main Agel OS.
 
-The first two are useful; the third is not recommended now. It would make Agel
-responsible for a broad compatibility OS before its own small kernel contract,
-capability model and recovery semantics are stable.
+The first is the chosen relationship, and it is now a scope decision rather than
+an option: Agel's Linux application compatibility comes from a POSIX personality
+written in safe Rust above its own kernel contract, taking `relibc`'s shape and
+the scheme lesson while keeping authority capability-derived. The second remains
+available. The third is not recommended: it would make Agel responsible for a
+broad compatibility OS before its own kernel contract, capability model and
+recovery semantics are stable. See
+[`deployment-targets.md`](deployment-targets.md).
 
 ## The linked Oxide OS prototype
 
@@ -441,17 +442,15 @@ seL4's kernel object capabilities and system policy.
        - stdlib               - audio/voice
                               - model/tool broker
                               - device drivers
-                                      |
-                            Linux GPU domain: NVIDIA stack,
-                            CUDA, NCCL, training jobs.
-                            Enormous, untrusted, permanent.
-                            GPUs assigned through IOMMU/SMMU.
+                              - POSIX personality:
+                                Rust C library, filesystem
+                                and process services
 ```
 
-The Linux domain is drawn last but it is not an afterthought and not optional.
-On a DGX node it is where the work happens, and it is the largest thing in the
-system by several orders of magnitude. Its size is acceptable because its
-authority is not: it computes, and it cannot approve. See
+The POSIX personality is drawn as one of the service domains because that is
+what it is. It supplies Unix-like semantics to software that expects them, and
+it holds no authority the kernel did not give it: a path resolves through a
+namespace capability, not through ambient identity. See
 [`deployment-targets.md`](deployment-targets.md).
 
 The recovery/root domain is deliberately boring and not live-rewritable by an
@@ -470,7 +469,8 @@ including the supervisor, but cannot approve or install itself.
 | storage/image | append-only log, content addressing, atomic image publication | authority to approve source changes |
 | model/tool broker | provider credentials, rate/budget policy, typed effect execution | authority to install its own callers or bypass audit |
 | driver domains | one device or narrowly related device class | global policy and unrelated drivers |
-| GPU/model domain | the NVIDIA stack, CUDA, NCCL, training jobs, large runtimes, untrusted native tools | root capabilities, authority to approve a change, any capability it was not granted, reach into the recovery plane |
+| POSIX personality | the Rust C library, filesystem and process services, POSIX programs | ambient authority, a namespace it was not granted, any path that resolves outside its capability set |
+| model/inference domain | local inference over weights, or an adapter to an external provider | authority to approve a change, credentials it was not granted, a proprietary kernel-mode driver |
 
 An Agel `agent` is not automatically a kernel thread or process. Millions of
 small agents may be deterministic language objects inside one world. Create a
@@ -712,11 +712,11 @@ phase quietly claims.
   handle from before the restart with `stale-generation` are all asserted in CI
   on every architecture. That status had been in the contract since v1.2 with no
   backend able to produce it; a driver that can die is what made it real.
-- Stand up the Linux GPU domain. This was written as "before writing native
-  equivalents"; there are no native equivalents to write. The CUDA user-space
-  stack and the GSP firmware are proprietary binaries, so the Linux domain is
-  permanent. What is transitional is only how much else lives in it. → not
-  started, and not startable on this hardware.
+- Then the **POSIX personality**: a Rust C library and the filesystem and
+  process services beneath it, running unprivileged above the contract. That is
+  the Redox lesson taken deliberately — POSIX is a personality, not the centre —
+  and it is where Linux application compatibility comes from. Not started, and
+  it depends on the evaluator being able to live in a domain first.
 
 The device is granted the way each architecture actually grants devices, which
 is the part worth having built once: an I/O permission bitmap in the
@@ -740,25 +740,19 @@ is a capability rather than a convention, and CI asserts that on all three.
 
 ### Phase 6 — deployment and hardware
 
-The deployment target is a bare-metal DGX node, single or clustered, doing
-training as well as inference. That reorders this phase: IOMMU-aware DMA
-ownership is not a hardening step to be done eventually, it is the mechanism the
-whole Tier 1 architecture rests on, and it is the mechanism seL4 does not prove.
-
-- IOMMU/SMMU device assignment, with the GPUs granted to a Linux domain by the
-  system manifest. This is load-bearing and unverified; the release manifest
-  must say so.
-- A GPU capability that names a bounded partition — MIG instance and memory
-  budget — rather than a device.
-- Training as a first-class effect: admitted with a resource grant and a
-  deadline, checkpointed into the tamper-evident log, cancellable.
-- Multi-node: NVLink/NVSwitch inside a rack, InfiniBand or RoCE with GPUDirect
-  RDMA between them. Remote DMA into GPU memory is a trust boundary, not a
-  network.
-- SMP using per-core ownership and explicit distributed state, extended to
-  per-node.
+- Real hardware on AArch64 first, since that is both the primary deployment
+  target and the strongest verified seL4 configuration. x86-64 second.
+- IOMMU/SMMU-aware DMA ownership. This is a hardening step again rather than a
+  load-bearing one, now that no deployment depends on assigning an accelerator
+  to a domain — but a device that can DMA anywhere still defeats every page
+  table above it, and seL4 proves nothing about device address translation.
+- Local inference in a domain, over quantized weights, with no proprietary
+  kernel-mode driver. Accelerated inference stays an open question rather than a
+  plan; see [`deployment-targets.md`](deployment-targets.md).
+- SMP using per-core ownership and explicit distributed state.
 - Measured boot and hardware watchdogs.
-- Firecracker stays useful for Tier 2 and CI. A DGX node is not a guest.
+- Firecracker remains useful for Tier 2 hosting and for CI, not for a Tier 1
+  node.
 - Investigate CHERI-capability hardware as a later fine-grained confinement
   target.
 
@@ -770,20 +764,15 @@ whole Tier 1 architecture rests on, and it is the mechanism seL4 does not prove.
 | Fork or add Agel primitives to seL4? | No |
 | Keep Agel's native kernel? | Yes, as research/bootstrap/conformance backend |
 | Run the evaluator in ring 0 long term? | No |
-| Use Firecracker as the guest kernel? | No; optional Linux host envelope, and not on a DGX node |
-| Primary deployment target? | DGX, training and inference, x86-64 *and* aarch64 |
-| Kernel on a DGX node? | Linux. Local inference is core, inference needs CUDA, CUDA needs Linux |
-| Does that make the kernel contract pointless? | No; it becomes the seam. Linux is a backend, and Agel runs unchanged over either core |
-| Microkernel core on a DGX Spark? | No. GB10 has an integrated GPU, firmware demands a 1:1 IOMMU mapping so VFIO is refused, and MIG is unsupported: the DMA boundary a split would rest on is not there |
-| Microkernel core on discrete-GPU DGX? | Available, and demonstrated in `boot/microkit`; a deployment choice per machine |
-| Write a native NVIDIA GPU driver? | No; CUDA user space and GSP firmware are proprietary, so the Linux GPU domain is permanent |
-| Let the GPU domain be large? | Yes; size is acceptable, authority is not |
-| Derive GPU isolation from seL4's proofs? | No; device address translation is unverified in every seL4 configuration |
-| Is a GPU capability a device? | No; a bounded partition with a budget |
-| Is a training run a big inference call? | No; a long-lived resource-owning effect with checkpoints and cancellation |
-| Deploy on RISC-V? | No; it stays a portability and conformance backend |
 | Put rust-vmm crates in the kernel? | No; possible host tooling only |
-| Fork Redox now? | No; borrow patterns and consider a hosted port |
+| Use Firecracker as the guest kernel? | No; an optional Tier 2 hosting envelope only |
+| Does Agel train models? | No; inference only. Training is orchestrated on external systems through the existing provider boundary |
+| Is Linux ever underneath Agel? | No. A CUDA-capable node would need it, and that trade ends every assurance claim the microkernel work exists for |
+| Where does Linux application compatibility come from? | A POSIX personality in safe Rust above the kernel, the Redox way — never from Linux below it |
+| Is a POSIX path authority? | No. A name resolves through a namespace capability; a name outside it is unreachable however it is spelled |
+| Primary deployment architecture? | AArch64, which is also the strongest verified seL4 coverage; x86-64 supported |
+| Deploy on RISC-V? | No; it stays a portability and conformance backend |
+| Fork Redox now? | No; borrow `relibc`'s approach and its scheme lessons, write our own against the contract |
 | Fork the linked Oxide OS now? | No; prototype inspiration only |
 | Use Hubris design patterns? | Yes, especially restart and observability |
 | One process per Agel agent? | No; isolate by trust/failure boundary |
@@ -791,16 +780,12 @@ whole Tier 1 architecture rests on, and it is the mechanism seL4 does not prove.
 
 Open architecture decisions needing experiments or ADRs:
 
-- how far apart the assurance target and the deployment target are allowed to
-  drift, now that the proofs point at AArch64 and the hardware includes x86-64
-  Xeon DGX systems;
-- whether a DGX node runs Agel-owns-the-machine or Agel-as-a-Linux-process
-  first, and for how long;
-- what a GPU capability is, exactly: MIG instance, memory budget, time budget,
-  or all three;
-- how a training job's checkpoints enter the tamper-evident log without the log
-  becoming a bulk data store;
-- whether the fabric between DGX nodes is one trust domain or many;
+- how much of POSIX the personality targets, and in what order;
+- what `fork` means in a system where authority is not ambient;
+- whether a POSIX file descriptor is a capability directly or a handle in a
+  per-process table that holds one;
+- whether local inference is CPU-only indefinitely, and what an accelerator
+  would have to look like to be usable without a proprietary kernel driver;
 - first verified target architecture and exact seL4 configuration (the coverage
   table narrows this to AArch64 or RISCV64, but not which);
 - whether the nightly-only `sel4-microkit` Rust runtime is acceptable in a
@@ -810,7 +795,7 @@ Open architecture decisions needing experiments or ADRs:
 - world granularity for mutually suspicious applications;
 - IOMMU and device-assignment policy on initial hardware;
 - whether GPLv2 kernel distribution constraints fit all intended products;
-- placement and attestation of local model/GPU services; and
+- placement and attestation of local inference services; and
 - the minimum POSIX personality required for development tools.
 
 ## Hard invariants
@@ -906,8 +891,8 @@ Open architecture decisions needing experiments or ADRs:
 | Release manifest naming what is proved, assumed and out of scope | [`sel4-manifest.md`](sel4-manifest.md), regenerated and checked in CI |
 | Running a *verified configuration* | no: Microkit ships MCS kernels and MCS proofs are ongoing |
 | Firecracker as an optional outer envelope | not started; Phase 6, and Tier 2 only |
-| Anything at all on DGX hardware | not started; no GPU code, no Linux backend, no orchestration |
-| A Linux backend for the kernel contract | not started; this is what makes the pivot cost nothing above the kernel |
+| The POSIX personality | not started; depends on the evaluator living in a domain first |
+| Local inference | not started; external providers work today |
 
 ## Bottom line
 

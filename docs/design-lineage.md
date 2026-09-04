@@ -37,11 +37,20 @@ projects are inputs, not dependencies, and Agel keeps the mechanisms separable:
   component contract separable from one kernel, [Tock](https://tockos.org/) supplies
   grant-style per-process resource ownership, and
   [Barrelfish](https://barrelfish.org/) supplies multicore-as-a-distributed-system.
-  [Redox](https://www.redox-os.org/) supplies Rust userspace and service patterns,
-  and [CHERI](https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/) is the
-  future fine-grained hardware target. The evaluation that selected these, and the
+  [CHERI](https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/) is the future
+  fine-grained hardware target. The evaluation that selected these, and the
   ideas Agel deliberately declines to adopt, are recorded in
   [`docs/microkernel-research.md`](microkernel-research.md).
+
+- [Redox](https://www.redox-os.org/) supplies the shape of Agel's Linux
+  application compatibility. Its [`relibc`](https://gitlab.redox-os.org/redox-os/relibc)
+  demonstrates a C library written in Rust, and its schemes demonstrate a
+  uniform service namespace — both as an unprivileged *personality* above the
+  kernel rather than as the conceptual centre of the system. Agel takes that
+  arrangement and changes one thing: a scheme-like name is not authority. A
+  POSIX path resolves through a namespace capability a process was granted, and
+  a name outside that capability is unreachable however it is spelled. Agel does
+  not fork Redox; it writes its own personality against its own kernel contract.
 
 The synthesis specific to Agel is the invariant stack: code remains ordinary
 data, but privileged change crosses content-bound proposals, zero-authority

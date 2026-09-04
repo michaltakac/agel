@@ -68,15 +68,14 @@ restartable domain**. It provides:
   fail closed; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
-Agel's primary deployment target is an NVIDIA DGX node, single or clustered,
-where the GPUs fine-tune and train models as well as serve them. On those
-machines Linux is the kernel and Agel is the userspace that owns policy above
-it, because local inference is core to the agentic experience and CUDA requires
-Linux. The kernel contract stays the seam, so the same Agel runs over a
-microkernel where the hardware supports one — which is what the four native
-backends in this repository are for. Inference-only deployments run on ordinary
-hardware or in a virtual machine and can use external model providers instead.
-The tiers, the reasoning, and how little of the DGX tier exists today are in
+Agel is a **Unix-like agentic operating system on a microkernel**. It does model
+**inference, not training** — training would require a proprietary kernel-mode
+GPU stack and therefore Linux underneath, which is the one trade the project does
+not make. Linux application compatibility comes from a **POSIX personality
+written in safe Rust** running unprivileged above the kernel, the way Redox does
+it, with authority derived from capabilities rather than from paths. AArch64 is
+the primary target, x86-64 is supported, and RISC-V keeps the kernel contract
+portable. Scope, tiers and what does not exist yet are in
 [`docs/deployment-targets.md`](docs/deployment-targets.md).
 
 This is the first Agel evaluator running on the independently bootable
@@ -242,8 +241,9 @@ The native subset, fixed limits, transactions, and workshop commands are in
 [`docs/native-workshop.md`](docs/native-workshop.md).
 What the seL4 backend was built from, and what is and is not verified about it,
 is in [`docs/sel4-manifest.md`](docs/sel4-manifest.md).
-The deployment tiers, the GPU plane, and the requirements the DGX target adds
-are in [`docs/deployment-targets.md`](docs/deployment-targets.md).
+The scope, the deployment tiers, and the POSIX personality that supplies Linux
+application compatibility are in
+[`docs/deployment-targets.md`](docs/deployment-targets.md).
 The evaluated microkernel foundations, the seL4/Microkit decision, and the
 staged native roadmap are in
 [`docs/microkernel-research.md`](docs/microkernel-research.md); the versioned

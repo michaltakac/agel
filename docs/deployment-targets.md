@@ -1,410 +1,188 @@
-# Deployment targets and capability tiers
+# Scope, deployment targets, and the POSIX personality
 
 Status: requirements, 2026-09-04
 
-Agel's primary deployment target is an **NVIDIA DGX machine, or several tied
-together**, where the GPUs are used for fine-tuning and training as well as
-inference. That is the configuration in which Agel is expected to have its full
-capability set.
+Agel is a **Unix-like agentic operating system built on a microkernel**. Agents
+are first-class values in a homoiconic Lisp, authority is capability-derived,
+and the mechanisms that contain an evolving world are enforced by hardware
+protection domains rather than by the language.
 
-**Linux is the kernel on those machines.** Local inference is core to the
-agentic experience, inference needs CUDA, and CUDA needs Linux; a node that
-cannot run CUDA cannot run the agent. Agel is the userspace that owns policy
-above Linux, and the kernel contract stays the seam so the same Agel also runs
-over a microkernel where the hardware allows it. The reasoning, the cost, and
-what survives are in "Decision: Linux is the core" below.
+Two decisions define the scope:
 
-Everything else — inference-only nodes, virtual machines, laptops — is a
-reduced tier. Those tiers are useful and must keep working, but they are not
-what the system is designed around.
+1. **Agel does inference, not training.** Model inference is a first-class
+   capability of the system. Training and fine-tuning are out of scope for the
+   OS itself.
+2. **Linux application compatibility comes from a POSIX personality written in
+   safe Rust**, running unprivileged above the kernel contract — the Redox
+   approach, with capability-derived authority instead of ambient paths.
 
-This document states what that requires, what it costs, and which previously
-recorded decisions it changes.
+This document states what those mean, what they rule out, and what the tiers
+are. It supersedes an earlier draft that explored putting Linux underneath Agel
+in order to reach CUDA; that exploration is in git history and is not the
+project's direction.
 
-## The tiers
+## Why training is out of scope
 
-| | Tier 1 — training node | Tier 2 — inference node | Tier 3 — development |
+Worth writing down, because the reason is not "we did not get to it".
+
+The GPU stack that makes training worth doing on NVIDIA hardware cannot be
+written by us. The open kernel modules are interface layers over
+`nv-kernel.o_binary`; the GSP firmware is a signed binary running on a
+coprocessor on the card, driven by an undocumented RPC protocol; and the entire
+user-space CUDA stack — the runtime, the driver API, cuBLAS, cuDNN, NCCL, the
+compiler — is proprietary and built for Linux.
+
+So a training-capable Agel node would have to run Linux as its kernel. That
+trade is available and it is not the one this project makes: it would move the
+trusted computing base from tens of thousands of lines to tens of millions and
+end every assurance claim the microkernel work exists to support.
+
+Training is therefore something Agel may **orchestrate** rather than perform.
+Agel already has the right boundary for that: a capability-scoped, typed,
+audited, idempotency-keyed request to an external system that computes and
+returns a result, with a transactional outbox so a crash cannot double-claim. A
+training cluster is a provider, reached the way a model API is. Nothing about
+that requires Linux underneath Agel.
+
+## Where inference runs
+
+Inference is in scope, which raises the same question in a smaller form.
+
+| Path | Status | Notes |
+|---|---|---|
+| **External providers** | implemented | capability-scoped adapters with a typed effect boundary and an audit log; this is how Agel gets model access today |
+| **CPU inference in an Agel domain** | not started | safe Rust over quantized weights. Slower than an accelerator, and free of proprietary blobs. The honest baseline for a self-contained node |
+| **Accelerated local inference** | open question | anything using CUDA reintroduces the Linux dependency in full. Open stacks and non-NVIDIA accelerators are the directions worth investigating; neither is a commitment |
+
+The rule that keeps this from drifting: **local inference must not require a
+proprietary kernel-mode driver.** A path that does is a path back to Linux as
+the core, and that decision has been made in the other direction.
+
+## The POSIX personality
+
+Agel is Unix-like, and Unix-like software should run on it. The mechanism is the
+one Redox demonstrates: a C library and system-interface layer written in Rust,
+running unprivileged, translating POSIX into the system's native operations.
+
+### It is a personality, not the centre
+
+This is already the project's recorded position on Redox — POSIX compatibility
+is a library and service personality rather than the conceptual centre of a new
+system. The kernel contract stays free of paths, file descriptors and process
+semantics. The POSIX layer is an ordinary set of unprivileged components above
+it, exactly as the console driver is.
+
+### A path is not authority
+
+This is the requirement that distinguishes an Agel POSIX layer from a
+reimplementation of Unix, and it is the one most easily lost.
+
+In Unix, `open("/etc/passwd")` succeeds because of who you are. In Agel it must
+succeed because of what you hold. A process receives a namespace capability when
+it is created; `open` resolves a name *through that capability*, and a name it
+does not cover is unreachable however it is spelled. No ambient root, no path
+that grants itself, no descriptor that outlives the authority that produced it.
+
+Concretely:
+
+- every POSIX process starts from an explicit capability set, never an inherited
+  ambient one;
+- file descriptors are handles derived from capabilities, under the same
+  derivation rule as everything else — equal or weaker, never widened;
+- a descriptor whose backing service restarts fails closed with the contract's
+  `stale-generation`, the way any other handle does;
+- `fork` has to be decided rather than inherited: a call that duplicates an
+  entire authority set by default is at odds with everything above it.
+
+### Two levels of compatibility, costing very differently
+
+| Level | What it means | Effort |
+|---|---|---|
+| **Source compatibility** | POSIX software recompiled against Agel's Rust C library | large but bounded; this is what Redox's `relibc` does |
+| **Binary compatibility** | unmodified Linux ELF binaries, glibc and all, through a Linux syscall emulation layer | much larger, and the surface is the whole Linux ABI |
+
+Source compatibility is the target. Binary compatibility is not ruled out and is
+not planned; it should be treated as a separate project, decided on its own
+merits, and never assumed by anything depending on the POSIX layer.
+
+### The safety claim, stated carefully
+
+"In safe Rust" means the POSIX layer contains no `unsafe` of its own beyond a
+small, named, reviewed set at the hardware and contract boundary. It does not
+mean the layer is correct, and it does not mean a POSIX program running on it is
+contained: containment comes from the protection domain the program runs in and
+the capabilities it was given, not from the language its libc was written in.
+
+## Target hardware
+
+| | Deployment | seL4 assurance coverage | Conformance backend |
 |---|---|---|---|
-| Hardware | DGX, single or clustered | any 64-bit machine, bare metal or VM | any developer machine |
-| Local GPU | required; training and fine-tuning | optional; inference only | none |
-| Model access | local training and inference, plus external providers | local inference and/or external providers | external providers only |
-| Kernel | Linux; Agel owns userspace policy | Linux, or a microkernel where no GPU is needed | anything |
-| Runs CUDA | yes, locally | optional | no |
-| Untrusted worlds isolated by | KVM microVMs, plus namespaces/seccomp/Landlock/cgroups | same, or protection domains | QEMU |
-| Purpose | the system Agel is for | serving, edge, cheap capacity | building and testing Agel |
+| **AArch64** | primary | functional correctness, integrity, availability, confidentiality | yes |
+| **x86-64** | supported | weakest: C-level functional correctness only | yes |
+| **RISC-V** | not a target | comparable to AArch64 | yes; a third machine keeps the contract honest |
 
-Tier 3 is what this repository has been developed on: a MacBook Pro with no
-NVIDIA GPU, where every native backend runs under QEMU. Nothing about the work
-so far has exercised Tier 1 hardware, and no claim in this repository should be
-read as if it had.
+Dropping the training requirement removes a tension an earlier draft had
+introduced. No deployment target now forces the weakest verified architecture,
+so the assurance target and the deployment target can be the same machine again:
+**AArch64 is primary**, x86-64 is supported, RISC-V keeps the contract portable.
 
-## What Tier 1 actually requires
+Development happens under QEMU on whatever the developer has. This repository is
+built on a MacBook Pro with no discrete GPU, and every native backend runs
+emulated.
 
-### The CPU is not one architecture
+## Tiers
 
-DGX is not a single ISA, and the split runs straight through the current
-generation:
-
-| System class | CPU | ISA |
-|---|---|---|
-| GB200 / GB300 NVL72, DGX Spark, DGX Station GB300 | Grace, Arm Neoverse V2 | aarch64 |
-| DGX H100 / H200 / B200 | Intel Xeon | x86-64 |
-
-So **both x86-64 and AArch64 are deployment targets**, not one target and one
-research backend. On Grace systems the CPU and GPU share memory over NVLink-C2C
-rather than PCIe, which makes the CPU side of the machine part of the
-accelerator rather than a host attached to one.
-
-RISC-V is not a DGX target. It stays in the tree as a portability and
-conformance backend — its value is that a third independent machine keeps the
-kernel contract honest — but nothing is expected to deploy on it.
-
-### CUDA cannot be native, and this is not a matter of effort
-
-NVIDIA's open kernel modules cover the *interface* layers only. The GSP firmware
-and the entire user-space CUDA stack — the runtime, the driver API, cuBLAS,
-cuDNN, NCCL, the compiler — remain proprietary binaries built for Linux. The
-open modules themselves link against `nv-kernel.o_binary`.
-
-There is therefore no path, at any level of effort, by which Agel writes its own
-driver and runs CUDA natively on its own kernel. Anyone who tells you otherwise
-has not looked at what is actually open.
-
-**The GPU plane is Linux.** The only question is what Linux is *underneath*.
-
-### The shape: separate the nodes, not the address spaces
-
-The obvious reading of "bare metal" is that Agel boots the machine and Linux
-becomes a contained domain with the GPUs assigned to it through the IOMMU. That
-works on paper. It also drags in a VMM that is not production-ready, an IOMMU
-path seL4 does not verify, and a multi-million-line driver stack sharing a
-machine with the authority plane.
-
-The product this is being built for is a **cluster of DGX Spark nodes**, and
-that makes a better answer available: put the boundary between machines rather
-than inside one.
-
-```text
-  Agel node                          training node(s)
-  ----------                         ----------------
-  Agel kernel owns the machine       NVIDIA DGX OS (Ubuntu, CUDA, NCCL)
-  no Linux, no blobs, no VMM         the whole proprietary stack
-  holds authority and policy         holds compute, holds no authority
-  decides what runs and when   --->  runs it, returns content-addressed results
-```
-
-One Spark runs Agel. The others run NVIDIA's own OS and do the training. Agel
-schedules, admits, budgets and records; it never executes CUDA and never links
-a proprietary blob.
-
-Why this is better than a contained Linux domain, rather than merely easier:
-
-- **The node that holds authority is genuinely clean.** No Linux anywhere on it,
-  no VMM, no dependence on unverified IOMMU handling for the core claim. The
-  microkernel story holds completely on the machine where it matters.
-- **It is the boundary Agel already has.** Agel's model-provider path is exactly
-  this shape: a capability-scoped, typed, audited, idempotency-keyed request to
-  an external system that computes and returns a result, with a transactional
-  outbox and an effect journal so a crash cannot double-claim. A training node is
-  the same relationship, larger and slower. This is a new provider, not a new
-  concept.
-- **Much of it is testable without DGX hardware.** The orchestration boundary is
-  a protocol and an effect type, not a driver. It can be built and tested on a
-  developer machine, which moves a large part of Tier 1 from "impossible here"
-  to "mostly possible here".
-
-### Decision: Linux is the core, and the contract is the seam
-
-Local inference is not a nice-to-have for this system. The agentic experience is
-the product, the agent's reasoning loop wants a local model, and inference needs
-CUDA for exactly the reasons training does. A node that cannot run CUDA cannot
-run the agent. That settles it: **Linux is the kernel on a DGX node**, and Agel
-is the userspace that owns policy above it.
-
-This is a real loss and it is worth naming rather than absorbing. The trusted
-computing base goes from something in the tens of thousands of lines to
-something in the tens of millions. No formal assurance claim survives it. The
-recovery plane stops being a protection domain on a small kernel and becomes a
-component on a large one.
-
-What survives is most of the project. Everything above the kernel — the
-language, homoiconic code-as-data, transactional worlds, agents as values, the
-capability model, typed effects, evidence-carrying upgrades, A/B images, the
-tamper-evident log — was never Linux-dependent and already works. What changes
-is what enforces the boundaries underneath it.
-
-#### Can a microkernel and Linux be combined, and still have CUDA?
-
-Yes, three ways, and which of them works depends on the machine.
-
-| Arrangement | How CUDA still works | Where it works |
-|---|---|---|
-| **Microkernel hosts Linux.** seL4 boots, Linux is a guest VM, the GPU is assigned to it through the IOMMU. Agel's authority plane is native seL4 domains outside Linux. | the guest owns real GPU hardware, so CUDA is native speed | discrete-GPU DGX (H100/H200/B200), where PCIe passthrough is ordinary |
-| **Static partitioning.** Linux boots, then a partitioning hypervisor demotes it into one cell and gives other cores and memory to Agel. Linux keeps the GPU. | Linux never loses the GPU | Arm and x86 in principle; needs a working DMA boundary to be worth anything |
-| **Linux hosts everything, isolation from KVM.** Linux owns the machine and the GPU. Untrusted Agel worlds run in microVMs. | CUDA is on the host, reached as a service | everywhere |
-
-On **DGX Spark specifically, the first two do not work today**, and it is worth
-being precise about why rather than treating it as a maturity problem:
-
-- GB10's GPU is integrated, sharing memory with Grace over NVLink-C2C. It is not
-  a PCIe device you bind to `vfio-pci`.
-- The platform firmware requires a **1:1 IOMMU mapping**, and VFIO setup is
-  rejected because of it. A guest cannot be given a remapped view of the device's
-  DMA, which is the entire mechanism passthrough isolation depends on.
-- **MIG is not supported on GB10.** The partitioning that would have made a GPU
-  capability mean "this much GPU, and no more" is not available on this part.
-
-The consequence is sharper than "passthrough is unavailable". On Spark, the DMA
-boundary a microkernel split would rely on is weak, so a Linux-under-microkernel
-or microkernel-under-Linux arrangement would buy the *appearance* of a strong
-boundary while resting on a constrained one. That is worse than not claiming it.
-
-**So: Linux core on Spark, and the kernel contract stays the seam.** The
-contract in `crates/agel-kernel-abi` is not tied to a microkernel. It is a
-semantic boundary with a frozen conformance corpus, already implemented by four
-backends. Adding a Linux backend means Agel runs unchanged on either core, and
-the choice becomes a deployment decision per machine rather than an architecture
-decision for the project:
-
-- **DGX Spark today:** Linux core. CUDA everywhere. Isolation from KVM microVMs,
-  namespaces, seccomp, Landlock and cgroups.
-- **Discrete-GPU DGX, or future hardware with a real DMA boundary:** seL4 core,
-  Linux as a guest with the GPU passed through. Already demonstrated in
-  `boot/microkit`.
-
-The same Agel, the same corpus, the same capability model. That is what the
-contract was for, and it is why the last several releases are not stranded by
-this decision.
-
-### What the earlier split-node design got wrong
-
-An earlier draft of this document put Agel on a dedicated Spark with no Linux,
-and the training work on peer Sparks. It is recorded here because the reason it
-fails is instructive rather than embarrassing.
-
-A GB10 is one package. The Grace CPU and the Blackwell GPU share memory over
-NVLink-C2C and cannot be bought separately. So a Spark running Agel is a Spark
-whose GPU does nothing — no training, and **no local inference either**, because
-inference needs CUDA for exactly the same reasons training does.
-
-That is not a rounding error. In a two-node product it is half the accelerator
-capacity, bought and then left dark. It also lands on the node that would most
-like fast local inference, since the agent's own reasoning loop runs there.
-
-The agent does not strictly *need* local inference — Agel's model path already
-treats inference as a capability-scoped request to an external system, and a
-peer Spark over a 200 Gb/s link is a perfectly good model endpoint. Inference
-takes tens to hundreds of milliseconds; a direct link adds a fraction of one.
-Latency is not the problem. The problem is the bill.
-
-A dedicated Agel node therefore cannot serve the agent's own reasoning loop
-locally at all — the thing the product is *for*. That is what rules the design
-out, not the wasted silicon. What remains true is the cluster shape: Agel
-schedules and records, peer nodes compute, and results are content-addressed.
-What changes is that the Agel node runs Linux too, and can therefore also run a
-model.
-
-For the record, the options that were weighed:
-
-| Option | Authority plane | GPU waste | Cost |
+| | Tier 1 — workstation / node | Tier 2 — hosted | Tier 3 — development |
 |---|---|---|---|
-| **A. Agel on a dedicated Spark** | clean; no Linux, no VMM, no IOMMU dependency | one whole GB10 idle | 50% of a two-node product, ~25% of a four-node one |
-| **B. Agel on a small non-GPU controller node** | clean | none; every Spark computes | a second board type in the product, and a port to it |
-| **C. Agel as a process on DGX OS** | Linux is the trusted base | none | gives up the property the native work exists for |
-| **D. Agel on a Spark with a contained Linux domain for its own GPU** | Linux and a VMM on the authority node | none | reintroduces the unverified IOMMU path and an unfinished VMM |
+| Kernel | Agel's, on a microkernel | someone else's; Agel as a guest or a process | any |
+| Model access | local inference and external providers | external providers | external providers |
+| POSIX software | yes, recompiled against the Agel libc | as available | not required |
+| Purpose | the system Agel is for | reaching users before the native stack is finished | building and testing Agel |
 
-Option C is the decision, for the reason above: A and B cannot run a local
-model, and D depends on a DMA boundary GB10 does not provide. On hardware with
-discrete GPUs and working passthrough, D becomes available again, and the kernel
-contract is what makes moving to it a deployment change rather than a rewrite.
-
-**None of this blocks the software.** The orchestration protocol, the remote
-compute capability, the training effect type and the content-addressed
-checkpoint log are identical whether Agel runs on a dedicated Spark, on a
-controller board, or as a Linux process. The decision changes the bill of
-materials and the isolation claim; it does not change what has to be built next.
-
-### The isolation depends on the part of seL4 that is not verified
-
-Assigning a GPU to a domain means constraining what that GPU's DMA engines can
-reach, which means the IOMMU on x86-64 or the SMMU on Arm. Two facts have to be
-put next to each other:
-
-- seL4's verified-configurations table lists **address translation for devices
-  (IOMMU) as unverified in every configuration**, along with kernel startup and
-  the debug interfaces.
-- seL4's own proof assumptions already state that DMA-capable devices can bypass
-  CPU page-table isolation unless an IOMMU or a trusted device arrangement
-  constrains them.
-
-So the mechanism a DGX deployment would lean on hardest is precisely the
-mechanism seL4 carries no proof about. On top of that, `libvmm` — the current
-seL4 virtual-machine monitor — describes itself as in development and not ready
-for production, with IOMMU support still being worked on.
-
-This does not make the architecture wrong. It makes one specific claim
-unavailable: a DGX Agel node **cannot** be described as deriving its GPU
-isolation from seL4's proofs. It derives it from hardware the proofs exclude and
-from a VMM that is not finished. That has to be written in the release manifest
-in those words, the way `docs/sel4-manifest.md` already writes the MCS caveat.
-
-### Sharing state between nodes without sharing a filesystem
-
-The obvious way to connect the nodes is a shared POSIX filesystem. It is the
-wrong way: it would mean Agel needs an NFS client, which means a TCP/IP stack
-and a filesystem client on the node whose whole value is being small.
-
-Content addressing avoids it. Agel's tamper-evident log already holds digests
-and committed inputs rather than bulk bytes. A training job's dataset, weights
-and checkpoints stay on the training nodes' own storage; Agel records *what*
-they are — digest, size, which job produced them, which grant admitted it — and
-names them by hash when it wants one used. The bytes move between Linux nodes,
-which already have every tool for that; the decisions move through Agel, which
-is the only thing that should be deciding.
-
-This also answers a question left open in
-[`microkernel-research.md`](microkernel-research.md): how checkpoints enter the
-tamper-evident log without the log becoming a bulk data store. They do not. The
-log holds their names.
-
-### A GPU is a resource to be owned, not a device to be opened
-
-NVIDIA hardware already partitions in a way that maps onto Agel's capability
-model rather than fighting it:
-
-- **MIG** splits one datacenter GPU into as many as seven instances with
-  separate memory paths, L2 banks, memory controllers and DRAM buses. That is a
-  hardware-enforced resource split, and it is the natural unit for a capability
-  that says "this much GPU, and no more".
-- **Confidential computing** on Hopper and later protects a workload's data from
-  the hypervisor and other tenants, which is the direction Agel wants for a
-  candidate world running someone else's fine-tune.
-
-The requirement that follows: an Agel GPU capability names a *partition with a
-budget*, not "the GPU". A world that is granted inference capacity must not be
-able to start a training run, and a training job must not be able to grow past
-what it was granted.
-
-### Training is a different kind of effect from inference
-
-Agel already has a careful story for model inference: a transactional outbox, an
-idempotency-keyed effect journal, exact-result replay, and a trusted adapter
-that owns process execution. A training run breaks most of the assumptions
-underneath it.
-
-| | Inference call | Training run |
-|---|---|---|
-| Duration | seconds | hours to weeks |
-| Resource | one request | whole GPUs, exclusively, for the duration |
-| Result | a response that can be replayed | a checkpoint, non-reproducible in practice |
-| Failure | retry | resume from a checkpoint, or lose the work |
-| Scope | one process | many processes across many nodes |
-
-So a training job is not a big inference call. It is a long-lived, resource-owning,
-externally-checkpointed effect, and the prepare/commit/idempotency shape has to
-be extended rather than reused:
-
-- the effect is *admitted* with a resource grant and a deadline, not just
-  authorized;
-- progress is a sequence of durable checkpoints, each an entry in the same
-  tamper-evident log that already carries images and model results;
-- replay reproduces the *decision to train and the checkpoints referenced*, not
-  the arithmetic;
-- cancellation and preemption are protocol states, because a job that cannot be
-  stopped is a resource leak with a schedule.
-
-### Several machines are one machine
-
-GB200 NVL72 presents 72 GPUs on a single NVLink fabric, deliberately so that a
-rack behaves like one accelerator. Multi-node training additionally uses
-InfiniBand or RoCE with GPUDirect RDMA, which is remote DMA straight into GPU
-memory.
-
-This is Barrelfish's lesson arriving with teeth: the machine is already a
-distributed system, and the interconnect is a DMA path between nodes. Agel's
-existing rule — per-core ownership and message passing rather than global locks
-— extends to per-node, and the fabric has to be treated as a device class with
-its own trust boundary rather than as a faster network.
-
-## What this changes about decisions already recorded
-
-| Previously recorded | Now |
-|---|---|
-| "x86-64 is the weakest verified target, so the assurance spike must be AArch64 or RISCV64" | Still true about the proofs, but x86-64 is a **required deployment target** for Xeon-based DGX. Assurance and deployment now pull in different directions, and that is a permanent condition rather than a temporary one |
-| RISC-V as a candidate assurance target | Demoted to portability and conformance only; nothing deploys there |
-| "Use a Linux service VM for GPU/model stacks before writing native equivalents" (Phase 3) | The Linux GPU domain is **permanent**, not a stepping stone. There is no native equivalent to write |
-| Firecracker as an optional outer envelope | Unchanged for Tier 2 and CI, but irrelevant to Tier 1: a DGX node is not a guest |
-| The recovery plane is small and outside the mutable world | Unchanged, and now load-bearing in a new way: it is also outside a multi-million-line GPU driver stack |
-
-## The tension, stated plainly
-
-"Absolutely full capabilities, including CUDA training on bare metal" and "a
-small, auditable trusted computing base" cannot both be maximised on the same
-node. The NVIDIA stack is enormous, proprietary, and must be able to program DMA
-engines. Nothing about running it on top of a microkernel makes it small.
-
-The resolution Agel takes is to separate *size* from *authority*:
-
-- The GPU domain is allowed to be enormous. It computes.
-- The GPU domain is not allowed to be authoritative. It cannot approve a change
-  to the system, cannot mint a capability, cannot reach the recovery plane, and
-  cannot read another world's memory except where a capability was explicitly
-  granted.
-- The recovery and authority plane stays small enough to audit, and stays
-  outside Linux.
-
-This is the same invariant the project already holds for model output — a model
-may propose, a capability decides — applied to the hardware the model runs on.
-A compromised or crashed GPU domain must cost the system its training run, not
-its ability to say no.
+Tier 2 is a real deployment shape rather than an embarrassment: it is how the
+language and agent runtime reach people while the native stack is built. It
+should be described as what it is — Agel hosted on someone else's kernel — and
+never as bare metal.
 
 ## Requirements, as testable statements
 
-Tier 1:
+1. The kernel contract contains no POSIX concept: no paths, no file descriptors,
+   no process semantics, no ambient names.
+2. The POSIX layer runs unprivileged, in protection domains, above the contract.
+3. A POSIX process reaches exactly the resources its capability set covers, and
+   a name outside it is unreachable however it is spelled.
+4. A file descriptor is a derived handle: equal or weaker than what produced it,
+   never widened, failing closed across a service restart.
+5. POSIX software builds against the Agel C library without patching, for a
+   stated and growing subset of the standard.
+6. Local inference requires no proprietary kernel-mode driver.
+7. Model access — local or external — is a capability, and a world without it
+   cannot obtain one.
+8. Everything except hardware-specific driver work is developable and testable
+   under QEMU on a machine with no accelerator.
 
-1. Agel boots a DGX-class machine on both x86-64 and aarch64 without a host OS.
-2. GPUs are assigned to a Linux domain through the IOMMU or SMMU, and that
-   assignment is described in the system manifest rather than discovered.
-3. The full NVIDIA stack runs unmodified inside that domain, at native speed,
-   for training and fine-tuning as well as inference.
-4. A GPU capability names a bounded partition, not a device.
-5. A training job is admitted with a resource grant and a deadline, checkpoints
-   into the tamper-evident log, and is cancellable.
-6. The GPU domain crashing or being compromised loses work, and loses nothing
-   else: the recovery plane, the authority plane, and other worlds survive.
-7. Multi-node work treats the fabric as a device class with a trust boundary,
-   not as a fast network.
-8. The release manifest states which isolation properties rest on unverified
-   IOMMU handling.
+## What exists today
 
-Tier 2:
+Exact, because the gap is large:
 
-9. Inference-only Agel runs on any 64-bit machine, bare metal or virtualized,
-   with no local GPU required, using external providers through the existing
-   capability-scoped adapters.
-10. A Tier 2 node cannot be persuaded to think it is Tier 1: the absence of a
-    training capability is a property of what it was granted, not of a
-    configuration flag it could change.
+- **The language and runtime:** homoiconic reader and evaluator, transactional
+  worlds, hygienic macros, modules, conditions and restarts, agents with
+  isolated heaps and typed protocols, supervision, event logs, snapshots and
+  replay, capability-scoped effects, evidence-carrying upgrades, A/B images, a
+  tamper-evident log, and a standard library written in Agel.
+- **Model access:** external providers, through a typed and audited effect
+  boundary.
+- **The kernel contract:** frozen at v1.0, with a reference model, an 81-step
+  conformance corpus, and four backends producing byte-identical transcripts —
+  three research kernels on x86-64, AArch64 and RISC-V, and one on an unmodified
+  seL4 kernel under Microkit.
+- **Isolation:** protection domains with separate address spaces,
+  write-xor-execute, preemption, and containment of worlds that fault, execute
+  privileged instructions, touch ungranted devices, or never yield; plus one
+  restartable driver domain with generations and fail-closed stale handles.
 
-Tier 3:
-
-11. Everything except the GPU plane is developable and testable on a machine
-    with no NVIDIA hardware, which is how this repository is built today.
-
-## What exists today against this
-
-Very little, and it is worth being exact about it.
-
-- Tier 3 is real: the language, the runtime, the kernel contract, the three
-  research backends and the seL4 spike all run on a developer machine under
-  QEMU.
-- Tier 2 is partly real: external model providers already work through
-  capability-scoped adapters with a typed effect boundary and an audit log.
-  Local inference does not exist.
-- Tier 1 does not exist at all. No GPU code, no IOMMU work, no VMM, no Linux
-  domain, no training effect type, no multi-node anything. The nearest thing in
-  the tree is a research kernel that can contain a world that misbehaves on
-  three architectures, which is a precondition rather than a start.
-
-The roadmap in [`microkernel-research.md`](microkernel-research.md) is written
-against this document; the phases that change are marked there.
+Not started: the POSIX personality in any form, local inference, a filesystem, a
+network stack, storage drivers, and moving the Agel evaluator out of the
+supervisor. That last is the next rung and the precondition for the POSIX list,
+because a POSIX process is a protection domain running an Agel-hosted program,
+and the evaluator has to be able to live in one first.

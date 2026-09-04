@@ -6,17 +6,14 @@ Agel aims to be a homoiconic language and live operating environment where
 agents are ordinary programmable values, applications are compositions of
 agents, and a running system can propose and adopt its own changes.
 
-Its primary deployment target is an NVIDIA DGX node, single or clustered, where
-the GPUs train and fine-tune models as well as serve them. On those machines
-**Linux is the kernel** and Agel is the userspace that owns policy above it,
-because local inference is core to the agentic experience and CUDA requires it.
-The kernel contract remains the seam, so the same Agel runs over a microkernel
-on hardware whose DMA boundary supports one.
-Inference-only deployments run anywhere, including virtual machines, and can use
-external model providers instead of local hardware. The tiers, and what each
-one requires, are in [`deployment-targets.md`](deployment-targets.md). Common Lisp
-is the conceptual and bootstrap lineage; Rust and C are temporary substrate for
-memory-safe runtime machinery and narrow hardware interfaces.
+Agel is a **Unix-like agentic operating system on a microkernel**. It does
+model **inference, not training**: training would require a proprietary
+kernel-mode GPU stack and therefore Linux underneath, which is the one trade the
+project does not make. Linux application compatibility comes from a **POSIX
+personality written in safe Rust** running unprivileged above the kernel — the
+Redox approach — with authority derived from capabilities rather than from
+paths. Scope, tiers and hardware are in
+[`deployment-targets.md`](deployment-targets.md).
 
 The essential design constraint is that *self-modifying* must not mean
 *unreviewed mutation of the only running world*. Agel therefore separates four
@@ -50,10 +47,8 @@ current deterministic checker—can prove arbitrary code safe.
   revocation is transitive and fails stale holders closed.
 
 Software transactional memory is only one layer. STM can roll back language
-state, but cannot undo a model call, network request, disk write, or device I/O
-— and it certainly cannot undo six hours of gradient descent on eight GPUs.
-Long-running, resource-owning effects are a distinct class from request-shaped
-ones; see [`deployment-targets.md`](deployment-targets.md).
+state, but cannot undo a model call, network request, disk write, or device
+I/O.
 Model inference therefore uses a committed outbox, idempotence-guarded
 completion, explicit dispatch, and exact-result replay. At v0.6, host process
 execution is also routed through typed intent, policy, resource limits, and an
@@ -144,16 +139,13 @@ Each rung must be runnable and differentially testable against the rung below:
    says so.
 19. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-20. **GPU plane:** a Linux domain holding the NVIDIA stack, with GPUs assigned
-   through the IOMMU or SMMU and granted by the system manifest. Permanent, not
-   transitional: CUDA user space and GSP firmware are proprietary, so there is
-   no native equivalent to write. Large, and deliberately without authority.
-21. **Training as an effect:** admitted with a resource grant and a deadline,
-   checkpointed into the tamper-evident log, cancellable, and replayable as the
-   decision and the checkpoints rather than as the arithmetic.
-22. **Multi-node:** per-node ownership and explicit distributed state across an
-   NVLink or InfiniBand fabric that is treated as a device class with a trust
-   boundary rather than as a fast network.
+20. **POSIX personality:** a Rust C library and the filesystem and process
+   services beneath it, running unprivileged above the contract, so that
+   Unix-like software builds and runs on Agel. A path resolves through a
+   namespace capability; there is no ambient root.
+21. **Local inference:** model inference in its own domain, over quantized
+   weights, requiring no proprietary kernel-mode driver. External providers
+   already work through the same capability-scoped effect boundary.
 
 ## Change protocol for privileged code
 
