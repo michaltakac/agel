@@ -22,6 +22,7 @@ recorded decisions it changes.
 | Local GPU | required; training and fine-tuning | optional; inference only | none |
 | Model access | local training and inference, plus external providers | local inference and/or external providers | external providers only |
 | Runs under a hypervisor | no; Agel owns the machine | permitted | expected |
+| Runs CUDA itself | no; a peer node does | no | no |
 | Purpose | the system Agel is for | serving, edge, cheap capacity | building and testing Agel |
 
 Tier 3 is what this repository has been developed on: a MacBook Pro with no
@@ -63,26 +64,86 @@ has not looked at what is actually open.
 
 **The GPU plane is Linux.** The only question is what Linux is *underneath*.
 
-### What "bare metal" has to mean
+### The shape: separate the nodes, not the address spaces
 
-Two readings, and they lead to different systems:
+The obvious reading of "bare metal" is that Agel boots the machine and Linux
+becomes a contained domain with the GPUs assigned to it through the IOMMU. That
+works on paper. It also drags in a VMM that is not production-ready, an IOMMU
+path seL4 does not verify, and a multi-million-line driver stack sharing a
+machine with the authority plane.
 
-1. **Agel owns the machine; Linux is a contained component.** Agel's kernel
-   boots the machine. A Linux service domain holds the GPUs, assigned to it
-   through the IOMMU, and runs the NVIDIA stack. CUDA runs at native speed
-   because the GPUs are really assigned, not emulated. Agel's authority and
-   recovery plane is small, outside Linux, and survives Linux.
-2. **Linux owns the machine; Agel is a process on it.** Full CUDA immediately,
-   no isolation story worth the name, and the Linux kernel is the trusted
-   computing base for everything Agel claims about authority.
+The product this is being built for is a **cluster of DGX Spark nodes**, and
+that makes a better answer available: put the boundary between machines rather
+than inside one.
 
-Reading 1 is what "bare metal" is for. Reading 2 is a legitimate Tier 2
-deployment and a reasonable stepping stone, but it gives up the property the
-whole native effort exists to obtain, and it should be called what it is rather
-than described as bare metal.
+```text
+  Agel node                          training node(s)
+  ----------                         ----------------
+  Agel kernel owns the machine       NVIDIA DGX OS (Ubuntu, CUDA, NCCL)
+  no Linux, no blobs, no VMM         the whole proprietary stack
+  holds authority and policy         holds compute, holds no authority
+  decides what runs and when   --->  runs it, returns content-addressed results
+```
 
-This document assumes reading 1 for Tier 1, and treats reading 2 as a named
-fallback rather than the goal.
+One Spark runs Agel. The others run NVIDIA's own OS and do the training. Agel
+schedules, admits, budgets and records; it never executes CUDA and never links
+a proprietary blob.
+
+Why this is better than a contained Linux domain, rather than merely easier:
+
+- **The node that holds authority is genuinely clean.** No Linux anywhere on it,
+  no VMM, no dependence on unverified IOMMU handling for the core claim. The
+  microkernel story holds completely on the machine where it matters.
+- **It is the boundary Agel already has.** Agel's model-provider path is exactly
+  this shape: a capability-scoped, typed, audited, idempotency-keyed request to
+  an external system that computes and returns a result, with a transactional
+  outbox and an effect journal so a crash cannot double-claim. A training node is
+  the same relationship, larger and slower. This is a new provider, not a new
+  concept.
+- **Much of it is testable without DGX hardware.** The orchestration boundary is
+  a protocol and an effect type, not a driver. It can be built and tested on a
+  developer machine, which moves a large part of Tier 1 from "impossible here"
+  to "mostly possible here".
+
+### The cost of the split: one node's GPU goes dark
+
+A GB10 is one package. The Grace CPU and the Blackwell GPU share memory over
+NVLink-C2C and cannot be bought separately. So a Spark running Agel is a Spark
+whose GPU does nothing — no training, and **no local inference either**, because
+inference needs CUDA for exactly the same reasons training does.
+
+That is not a rounding error. In a two-node product it is half the accelerator
+capacity, bought and then left dark. It also lands on the node that would most
+like fast local inference, since the agent's own reasoning loop runs there.
+
+The agent does not strictly *need* local inference — Agel's model path already
+treats inference as a capability-scoped request to an external system, and a
+peer Spark over a 200 Gb/s link is a perfectly good model endpoint. Inference
+takes tens to hundreds of milliseconds; a direct link adds a fraction of one.
+Latency is not the problem. The problem is the bill.
+
+So the boundary belongs between machines, but *which* machine Agel occupies is
+an open product decision, not a technical one:
+
+| Option | Authority plane | GPU waste | Cost |
+|---|---|---|---|
+| **A. Agel on a dedicated Spark** | clean; no Linux, no VMM, no IOMMU dependency | one whole GB10 idle | 50% of a two-node product, ~25% of a four-node one |
+| **B. Agel on a small non-GPU controller node** | clean | none; every Spark computes | a second board type in the product, and a port to it |
+| **C. Agel as a process on DGX OS** | Linux is the trusted base | none | gives up the property the native work exists for |
+| **D. Agel on a Spark with a contained Linux domain for its own GPU** | Linux and a VMM on the authority node | none | reintroduces the unverified IOMMU path and an unfinished VMM |
+
+Option A is defensible at four or more nodes and hard to justify at two. Option
+B is what appliances normally do — a controller alongside the accelerators — and
+is the only one that keeps both a clean authority plane and full GPU
+utilisation. Option C is a legitimate staging step that ships sooner. Option D
+is the design this document originally proposed, and its weaknesses do not
+improve by being confined to one node.
+
+**None of this blocks the software.** The orchestration protocol, the remote
+compute capability, the training effect type and the content-addressed
+checkpoint log are identical whether Agel runs on a dedicated Spark, on a
+controller board, or as a Linux process. The decision changes the bill of
+materials and the isolation claim; it does not change what has to be built next.
 
 ### The isolation depends on the part of seL4 that is not verified
 
@@ -107,6 +168,25 @@ unavailable: a DGX Agel node **cannot** be described as deriving its GPU
 isolation from seL4's proofs. It derives it from hardware the proofs exclude and
 from a VMM that is not finished. That has to be written in the release manifest
 in those words, the way `docs/sel4-manifest.md` already writes the MCS caveat.
+
+### Sharing state between nodes without sharing a filesystem
+
+The obvious way to connect the nodes is a shared POSIX filesystem. It is the
+wrong way: it would mean Agel needs an NFS client, which means a TCP/IP stack
+and a filesystem client on the node whose whole value is being small.
+
+Content addressing avoids it. Agel's tamper-evident log already holds digests
+and committed inputs rather than bulk bytes. A training job's dataset, weights
+and checkpoints stay on the training nodes' own storage; Agel records *what*
+they are — digest, size, which job produced them, which grant admitted it — and
+names them by hash when it wants one used. The bytes move between Linux nodes,
+which already have every tool for that; the decisions move through Agel, which
+is the only thing that should be deciding.
+
+This also answers a question left open in
+[`microkernel-research.md`](microkernel-research.md): how checkpoints enter the
+tamper-evident log without the log becoming a bulk data store. They do not. The
+log holds their names.
 
 ### A GPU is a resource to be owned, not a device to be opened
 
