@@ -1,0 +1,52 @@
+# Agel v0.8 standard library
+
+The standard library is one Agel source file installed as one transaction. A
+syntax, module, or test error leaves no partial library behind. Its implementation
+is available at `crates/agel-stdlib/stdlib.agel` and receives no capabilities.
+
+## `agel/sequence`
+
+Import with `(import agel/sequence)`. It exports:
+
+- `(append left right)`
+- `(reverse values)`
+- `(map function values)`
+- `(filter predicate values)`
+- `(foldl function initial values)`
+- `(each function values)`
+
+Collections remain persistent. All traversal is deterministic and charged to
+the transaction's fuel/call-depth budgets.
+
+## `agel/result`
+
+Import with `(import agel/result)`. `ok` and `err` construct transparent tagged
+lists. `ok?`, `err?`, `value`, `error`, and `unwrap-or` inspect them. Taking the
+wrong projection signals `result/not-ok` or `result/not-error`, so callers can
+use normal Agel handlers and restarts.
+
+## `agel/swarm`
+
+Import with `(import agel/swarm)`. It exports two protocols and three constructors:
+
+```lisp
+(def worker (make-worker "name" (fn (payload) ...result...)))
+(def pool (make-pool "name" (list worker ...)))
+(submit pool reply-agent payload)
+```
+
+The pool's heap is its rotating worker list. Each committed pool turn sends one
+`(work reply payload)` message and moves that worker to the tail. A worker replies
+with `(result worker value)`. Both routing and rotation are transactional, so a
+failed send cannot advance only half the state.
+
+The pool does not create parallel threads. It composes the deterministic
+cooperative scheduler: `(run n)` performs at most `n` turns and normal mailbox,
+event, fuel, call-depth, and collection bounds still apply. This predictable
+micro-turn model is the substrate for later foreground/background interaction.
+
+Run the complete example:
+
+```sh
+cargo run -q -p agel-cli < examples/worker-pool.agel
+```

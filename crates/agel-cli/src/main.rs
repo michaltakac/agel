@@ -21,6 +21,7 @@ struct CliConfig {
     workspace: PathBuf,
     timeout: Duration,
     max_output_bytes: usize,
+    stdlib: bool,
 }
 
 impl CliConfig {
@@ -36,6 +37,7 @@ impl CliConfig {
             workspace: std::env::current_dir().map_err(|error| error.to_string())?,
             timeout: Duration::from_secs(300),
             max_output_bytes: 1_048_576,
+            stdlib: true,
         };
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
@@ -43,6 +45,7 @@ impl CliConfig {
                 "--help" | "-h" => return Ok(None),
                 "--enable-claude" => config.claude = true,
                 "--enable-codex" => config.codex = true,
+                "--no-stdlib" => config.stdlib = false,
                 "--claude-bin" => {
                     config.claude_bin = required_value(&mut arguments, &argument)?.into()
                 }
@@ -100,6 +103,11 @@ fn main() -> io::Result<()> {
     let mut world = World::default();
     let mut options = EvaluationOptions::default();
     let mut providers = ProviderRegistry::default();
+    if config.stdlib {
+        agel_stdlib::install(&mut world, &options).map_err(|error| {
+            io::Error::other(format!("cannot install standard library: {error}"))
+        })?;
+    }
     let mut limits = CommandLimits::new(&config.workspace);
     limits.timeout = config.timeout;
     limits.max_output_bytes = config.max_output_bytes;
@@ -136,7 +144,10 @@ fn main() -> io::Result<()> {
     let mut last_steps = 0;
     let mut snapshots = BTreeMap::<String, Snapshot>::new();
 
-    println!("Agel agentic runtime — world revision 0");
+    println!("Agel agentic runtime — world revision {}", world.revision());
+    if config.stdlib {
+        println!("Standard library installed: agel/sequence, agel/result, agel/swarm");
+    }
     if providers.names().next().is_none() {
         println!("Model providers disabled; opt in with --enable-claude or --enable-codex.");
     } else {
@@ -367,6 +378,7 @@ fn print_usage() {
     println!("Usage: agel-cli [MODEL OPTIONS]");
     println!("  --enable-claude              enable restricted Claude Code dispatch");
     println!("  --enable-codex               enable read-only Codex dispatch");
+    println!("  --no-stdlib                  start with only the postcard-sized core");
     println!("  --claude-bin PATH            Claude executable (default: claude)");
     println!("  --codex-bin PATH             Codex executable (default: codex)");
     println!("  --claude-model NAME          select a Claude model");

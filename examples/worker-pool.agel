@@ -1,0 +1,25 @@
+; A library-defined worker pool. No new evaluator syntax or Rust builtin is
+; involved: protocols, routing, workers, and round-robin state are Agel values.
+(import agel/swarm)
+
+(def human (spawn "human"))
+(def fast (make-worker "fast" (fn (x) (+ x 1000))))
+(def deep (make-worker "deep" (fn (x) (* x x))))
+(def pool (make-pool "thinking-pool" (list fast deep)))
+
+(submit pool human 7)
+(submit pool human 8)
+(submit pool human 9)
+(run 10)
+
+; => (result #<agent:2> 1007)
+; => (result #<agent:3> 64)
+; => (result #<agent:2> 1009)
+(recv human)
+(recv human)
+(recv human)
+
+; The worker order itself is ordinary inspectable state.
+(get (agent-info pool) 'heap)
+:events
+:quit

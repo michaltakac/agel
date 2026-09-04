@@ -80,13 +80,16 @@ Each rung must be runnable and differentially testable against the rung below:
 7. **Portable images (complete at v0.7):** canonical committed-input logs,
    exact model-result replay, fresh authority on reconstruction, tamper-evident
    chains, and crash-safe file replacement with previous-image recovery.
-8. **Common Lisp bootstrap:** a portable reference implementation that emits
+8. **Library-first environment (complete at v0.8):** sequence/result modules
+   and typed bounded worker pools implemented as ordinary Agel source. The CLI
+   installs them atomically while retaining a `--no-stdlib` minimal-core mode.
+9. **Common Lisp bootstrap:** a portable reference implementation that emits
    the same core IR and runs conformance tests against the Rust seed.
-9. **Self-host:** reader, expander, evaluator/compiler, and standard library in
+10. **Self-host:** reader, expander, evaluator/compiler, and standard library in
    Agel; use diverse bootstrap comparison to detect trusting-trust failures.
-10. **Native substrate:** minimal Rust/C HAL, allocator, interrupt/trap entry,
+11. **Native substrate:** minimal Rust/C HAL, allocator, interrupt/trap entry,
    drivers, and a QEMU image. Keep device access outside mutable language heaps.
-11. **Live system:** A/B system worlds, health oracles, signed promotion,
+12. **Live system:** A/B system worlds, health oracles, signed promotion,
    watchdog-triggered rollback, and a recovery monitor outside the self-editing
    runtime.
 

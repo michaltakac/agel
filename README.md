@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.7: portable, crash-safe world images**. It provides:
+The current repository is **v0.8: a library-first agent environment**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -27,6 +27,9 @@ The current repository is **v0.7: portable, crash-safe world images**. It provid
 - canonical event-sourced images with a tamper-evident SHA-256 chain;
 - exact offline reconstruction with fresh capability authority; and
 - atomic image replacement, stale-writer detection, and previous-image recovery;
+- an atomic standard library written in Agel, not privileged Rust;
+- persistent sequence and tagged-result libraries; and
+- typed round-robin worker pools with bounded transactional scheduling;
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 This is deliberately not presented as an operating-system kernel yet. See
@@ -40,6 +43,9 @@ Agel currently requires only a Rust toolchain:
 ```sh
 cargo run -p agel-cli
 ```
+
+The CLI installs `agel/sequence`, `agel/result`, and `agel/swarm` by default.
+Use `--no-stdlib` to expose only the minimal language substrate.
 
 Example session:
 
@@ -98,6 +104,12 @@ Portable image demonstration:
 cargo run -q -p agel-image --example portable_image
 ```
 
+Library-defined orchestration demonstration:
+
+```sh
+cargo run -q -p agel-cli < examples/worker-pool.agel
+```
+
 See [`docs/language-core.md`](docs/language-core.md) and
 [`docs/agent-runtime.md`](docs/agent-runtime.md) for the implemented language.
 Runnable demonstrations live in [`examples/`](examples/).
@@ -110,3 +122,5 @@ See [`docs/effect-sandbox.md`](docs/effect-sandbox.md) for the v0.6 host-effect
 boundary and its deliberately explicit limitations.
 The stable v0.7 image format and recovery behavior are specified in
 [`docs/portable-images.md`](docs/portable-images.md).
+The v0.8 library APIs are documented in [`docs/standard-library.md`](docs/standard-library.md),
+and the whole reader grammar fits in [`docs/language-postcard.md`](docs/language-postcard.md).

@@ -1,0 +1,100 @@
+; Agel v0.8 standard library. The evaluator remains small; ordinary Agel code
+; supplies reusable sequence, result, and orchestration abstractions.
+
+(module agel/sequence
+  (export append reverse map filter foldl each)
+
+  (def append
+    (fn (left right)
+      (if (= left nil)
+          right
+          (cons (car left) (append (cdr left) right)))))
+
+  (def reverse
+    (fn (values)
+      (foldl (fn (result value) (cons value result)) nil values)))
+
+  (def map
+    (fn (function values)
+      (if (= values nil)
+          nil
+          (cons (function (car values)) (map function (cdr values))))))
+
+  (def filter
+    (fn (predicate values)
+      (if (= values nil)
+          nil
+          (if (predicate (car values))
+              (cons (car values) (filter predicate (cdr values)))
+              (filter predicate (cdr values))))))
+
+  (def foldl
+    (fn (function initial values)
+      (if (= values nil)
+          initial
+          (foldl function (function initial (car values)) (cdr values)))))
+
+  (def each
+    (fn (function values)
+      (if (= values nil)
+          nil
+          (begin (function (car values)) (each function (cdr values)))))))
+
+(module agel/result
+  (export ok err ok? err? value error unwrap-or)
+
+  (def ok (fn (value) (list 'ok value)))
+  (def err (fn (problem) (list 'error problem)))
+  (def ok? (fn (result) (= (car result) 'ok)))
+  (def err? (fn (result) (= (car result) 'error)))
+  (def value
+    (fn (result)
+      (if (ok? result)
+          (car (cdr result))
+          (signal 'result/not-ok "cannot take value from error" result))))
+  (def error
+    (fn (result)
+      (if (err? result)
+          (car (cdr result))
+          (signal 'result/not-error "cannot take error from ok" result))))
+  (def unwrap-or
+    (fn (result fallback)
+      (if (ok? result) (car (cdr result)) fallback))))
+
+(module agel/swarm
+  (import agel/sequence)
+  (export worker-protocol pool-protocol make-worker make-pool submit)
+
+  (defprotocol worker-protocol (work agent any))
+  (defprotocol pool-protocol (submit agent any))
+
+  (def worker-behavior
+    (fn (self heap message)
+      (begin
+        (send (car (cdr message))
+          (list 'result self
+            ((get heap 'handler) (car (cdr (cdr message))))))
+        heap)))
+
+  (def make-worker
+    (fn (name handler)
+      (spawn name worker-behavior (dict 'handler handler) worker-protocol)))
+
+  (def pool-behavior
+    (fn (self workers message)
+      (let ((worker (car workers))
+            (reply (car (cdr message)))
+            (payload (car (cdr (cdr message)))))
+        (begin
+          (send worker (list 'work reply payload))
+          (append (cdr workers) (list worker))))))
+
+  (def make-pool
+    (fn (name workers)
+      (if (= workers nil)
+          (signal 'swarm/no-workers "worker pool cannot be empty")
+          (spawn name pool-behavior workers pool-protocol))))
+
+  (def submit
+    (fn (pool reply payload)
+      (send pool (list 'submit reply payload)))))

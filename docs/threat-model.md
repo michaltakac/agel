@@ -65,3 +65,22 @@ run hostile machine code.
 The chain is tamper-evident, not authenticated. Anyone who can rewrite the file
 can recompute it. Signed roots, encrypted secrets, bounded compaction, and remote
 replication remain later trust layers.
+
+## v0.8
+
+- **Library privilege creep:** standard facilities are ordinary Agel modules
+  installed in one transaction. They receive no hidden host authority and can be
+  omitted with `--no-stdlib`.
+- **Unbounded functional traversal:** recursive sequence functions remain under
+  evaluator fuel, call-depth, and collection limits. Exhaustion aborts the whole
+  candidate transaction.
+- **Swarm amplification:** worker creation is explicit, workers receive no
+  ambient capabilities, pool messages are protocol checked, mailbox/event growth
+  is collection-bounded, and `(run n)` caps turns at the caller's chosen number.
+- **Partial dispatch:** a pool turn either queues one typed worker message and
+  rotates its worker list, or rolls both operations back. Empty pools fail before
+  an agent is spawned.
+
+`any` payloads in `agel/swarm` are a convenience type, not authority. Applications
+with a stable domain protocol should define narrower message types around the
+generic pool.
