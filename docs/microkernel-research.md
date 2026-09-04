@@ -1,6 +1,12 @@
 # Microkernel research and Agel native architecture
 
 Status: architecture research and recommendation, 2026-09-04.
+Deployment requirements are in [`deployment-targets.md`](deployment-targets.md)
+and constrain several conclusions here: Agel's primary target is a bare-metal
+NVIDIA DGX node doing training as well as inference, which makes **both x86-64
+and AArch64 deployment targets**, makes the Linux GPU domain permanent rather
+than transitional, and puts the isolation that matters most on hardware seL4's
+proofs explicitly exclude.
 Upstream claims re-checked against current seL4, Microkit, Firecracker and
 prototype documentation on 2026-09-04; see "Verified property coverage" and
 "Microkit fit" for the specific figures this revision pins.
@@ -436,9 +442,17 @@ seL4's kernel object capabilities and system policy.
                               - model/tool broker
                               - device drivers
                                       |
-                            optional Linux service VM
-                            for GPU/models/legacy stacks
+                            Linux GPU domain: NVIDIA stack,
+                            CUDA, NCCL, training jobs.
+                            Enormous, untrusted, permanent.
+                            GPUs assigned through IOMMU/SMMU.
 ```
+
+The Linux domain is drawn last but it is not an afterthought and not optional.
+On a DGX node it is where the work happens, and it is the largest thing in the
+system by several orders of magnitude. Its size is acceptable because its
+authority is not: it computes, and it cannot approve. See
+[`deployment-targets.md`](deployment-targets.md).
 
 The recovery/root domain is deliberately boring and not live-rewritable by an
 ordinary agent. It verifies manifests, creates or activates worlds, retains the
@@ -456,7 +470,7 @@ including the supervisor, but cannot approve or install itself.
 | storage/image | append-only log, content addressing, atomic image publication | authority to approve source changes |
 | model/tool broker | provider credentials, rate/budget policy, typed effect execution | authority to install its own callers or bypass audit |
 | driver domains | one device or narrowly related device class | global policy and unrelated drivers |
-| legacy/model VM | GPU stacks, large runtimes, untrusted native tools | root capabilities to the Agel system |
+| GPU/model domain | the NVIDIA stack, CUDA, NCCL, training jobs, large runtimes, untrusted native tools | root capabilities, authority to approve a change, any capability it was not granted, reach into the recovery plane |
 
 An Agel `agent` is not automatically a kernel thread or process. Millions of
 small agents may be deterministic language objects inside one world. Create a
@@ -688,7 +702,10 @@ phase quietly claims.
 - Serial/input and timers first, then storage/image, networking and model/tool
   brokering.
 - Put each risky driver in its own restartable domain.
-- Use a Linux service VM for GPU/model stacks before writing native equivalents.
+- Stand up the Linux GPU domain. This was written as "before writing native
+  equivalents"; there are no native equivalents to write. The CUDA user-space
+  stack and the GSP firmware are proprietary binaries, so the Linux domain is
+  permanent. What is transitional is only how much else lives in it.
 
 ### Phase 4 — durable worlds and effects
 
@@ -704,9 +721,25 @@ phase quietly claims.
 
 ### Phase 6 — deployment and hardware
 
-- Firecracker launcher on Linux/KVM; QEMU remains the portable development path.
-- IOMMU-aware DMA ownership, measured boot and hardware watchdogs.
-- SMP using per-core ownership and explicit distributed state.
+The deployment target is a bare-metal DGX node, single or clustered, doing
+training as well as inference. That reorders this phase: IOMMU-aware DMA
+ownership is not a hardening step to be done eventually, it is the mechanism the
+whole Tier 1 architecture rests on, and it is the mechanism seL4 does not prove.
+
+- IOMMU/SMMU device assignment, with the GPUs granted to a Linux domain by the
+  system manifest. This is load-bearing and unverified; the release manifest
+  must say so.
+- A GPU capability that names a bounded partition — MIG instance and memory
+  budget — rather than a device.
+- Training as a first-class effect: admitted with a resource grant and a
+  deadline, checkpointed into the tamper-evident log, cancellable.
+- Multi-node: NVLink/NVSwitch inside a rack, InfiniBand or RoCE with GPUDirect
+  RDMA between them. Remote DMA into GPU memory is a trust boundary, not a
+  network.
+- SMP using per-core ownership and explicit distributed state, extended to
+  per-node.
+- Measured boot and hardware watchdogs.
+- Firecracker stays useful for Tier 2 and CI. A DGX node is not a guest.
 - Investigate CHERI-capability hardware as a later fine-grained confinement
   target.
 
@@ -718,7 +751,14 @@ phase quietly claims.
 | Fork or add Agel primitives to seL4? | No |
 | Keep Agel's native kernel? | Yes, as research/bootstrap/conformance backend |
 | Run the evaluator in ring 0 long term? | No |
-| Use Firecracker as the guest kernel? | No; optional Linux host envelope |
+| Use Firecracker as the guest kernel? | No; optional Linux host envelope, and not on a DGX node |
+| Primary deployment target? | Bare-metal DGX, training and inference, x86-64 *and* aarch64 |
+| Write a native NVIDIA GPU driver? | No; CUDA user space and GSP firmware are proprietary, so the Linux GPU domain is permanent |
+| Let the GPU domain be large? | Yes; size is acceptable, authority is not |
+| Derive GPU isolation from seL4's proofs? | No; device address translation is unverified in every seL4 configuration |
+| Is a GPU capability a device? | No; a bounded partition with a budget |
+| Is a training run a big inference call? | No; a long-lived resource-owning effect with checkpoints and cancellation |
+| Deploy on RISC-V? | No; it stays a portability and conformance backend |
 | Put rust-vmm crates in the kernel? | No; possible host tooling only |
 | Fork Redox now? | No; borrow patterns and consider a hosted port |
 | Fork the linked Oxide OS now? | No; prototype inspiration only |
@@ -728,6 +768,16 @@ phase quietly claims.
 
 Open architecture decisions needing experiments or ADRs:
 
+- how far apart the assurance target and the deployment target are allowed to
+  drift, now that the proofs point at AArch64 and the hardware includes x86-64
+  Xeon DGX systems;
+- whether a DGX node runs Agel-owns-the-machine or Agel-as-a-Linux-process
+  first, and for how long;
+- what a GPU capability is, exactly: MIG instance, memory budget, time budget,
+  or all three;
+- how a training job's checkpoints enter the tamper-evident log without the log
+  becoming a bulk data store;
+- whether the fabric between DGX nodes is one trust domain or many;
 - first verified target architecture and exact seL4 configuration (the coverage
   table narrows this to AArch64 or RISCV64, but not which);
 - whether the nightly-only `sel4-microkit` Rust runtime is acceptable in a
@@ -831,7 +881,8 @@ Open architecture decisions needing experiments or ADRs:
 | The contract answered by a server, never by the kernel | the broker PD; seL4 is unmodified and unaware of Agel |
 | Release manifest naming what is proved, assumed and out of scope | [`sel4-manifest.md`](sel4-manifest.md), regenerated and checked in CI |
 | Running a *verified configuration* | no: Microkit ships MCS kernels and MCS proofs are ongoing |
-| Firecracker as an optional outer envelope | not started; Phase 6 |
+| Firecracker as an optional outer envelope | not started; Phase 6, and Tier 2 only |
+| Anything at all on DGX hardware | not started; no GPU code, no IOMMU work, no VMM, no Linux domain |
 
 ## Bottom line
 

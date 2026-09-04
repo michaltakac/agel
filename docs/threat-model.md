@@ -312,3 +312,47 @@ in those protection domains, which is ordinary unverified Rust, or about the
 system description, which grants the authority and has been reviewed by nobody
 but its author. The seL4 backend also runs only the contract: the Agel evaluator
 is not in it, and is still privileged on x86-64.
+
+## Surfaces the DGX target adds
+
+These are recorded now, before any of the code exists, because the deployment
+requirement is what makes them reachable and it is easier to design against a
+written list than to remember one. Nothing here is implemented; see
+[`deployment-targets.md`](deployment-targets.md).
+
+- **A GPU is a DMA engine that outranks the MMU.** An accelerator programmed by
+  a compromised domain can read and write memory the CPU page tables would have
+  denied it. Only an IOMMU or SMMU constrains it, and seL4's verified
+  configurations exclude device address translation in every configuration. The
+  isolation a DGX node needs most is the isolation the proofs do not cover, and
+  the release manifest has to say so rather than let "runs on seL4" absorb it.
+- **The largest component is proprietary and cannot be reviewed.** The CUDA
+  user-space stack and the GSP firmware are binaries. They are not going to be
+  audited, so the containment argument cannot depend on their behavior: it has
+  to hold when they are wrong or hostile.
+- **A GPU domain that can approve.** The mitigation is the invariant the project
+  already holds for models: it computes, it does not decide. A GPU domain must
+  not be able to mint a capability, approve a change, reach the recovery plane,
+  or touch a world it was not granted. If it can, its size stops being
+  acceptable.
+- **"The GPU" as a capability.** Granting a device rather than a bounded
+  partition means any grant is a total grant. MIG gives hardware-enforced
+  partitioning with separate memory paths; a capability should name a partition
+  and a budget so that inference capacity cannot silently become a training run.
+- **A training job as an unbounded effect.** A run that cannot be cancelled,
+  preempted, or bounded by a deadline is a resource leak with a schedule. A run
+  whose progress is not in the tamper-evident log is work the system cannot
+  reason about after a crash. Neither is an inference-shaped problem.
+- **Checkpoints as a laundering path.** A checkpoint is attacker-influenced data
+  produced by the largest untrusted component, and later loaded as model
+  weights. Admitting one has to be a decision with evidence, not a file
+  appearing in a directory.
+- **The fabric is remote DMA.** GPUDirect RDMA over InfiniBand or RoCE writes
+  straight into GPU memory on another node. A rack presented as one accelerator
+  is also one blast radius, and the trust boundary between nodes has to be
+  stated rather than assumed from the fact that they are in the same rack.
+- **A tier that can promote itself.** An inference-only node must lack training
+  capability because it was never granted one, not because a flag says so.
+
+None of this is mitigated today. There is no GPU code, no IOMMU work, no VMM,
+and no Linux domain in this repository.

@@ -4,7 +4,13 @@
 
 Agel aims to be a homoiconic language and live operating environment where
 agents are ordinary programmable values, applications are compositions of
-agents, and a running system can propose and adopt its own changes. Common Lisp
+agents, and a running system can propose and adopt its own changes.
+
+Its primary deployment target is a bare-metal NVIDIA DGX node, single or
+clustered, where the GPUs train and fine-tune models as well as serve them.
+Inference-only deployments run anywhere, including virtual machines, and can use
+external model providers instead of local hardware. The tiers, and what each
+one requires, are in [`deployment-targets.md`](deployment-targets.md). Common Lisp
 is the conceptual and bootstrap lineage; Rust and C are temporary substrate for
 memory-safe runtime machinery and narrow hardware interfaces.
 
@@ -40,7 +46,10 @@ current deterministic checker—can prove arbitrary code safe.
   revocation is transitive and fails stale holders closed.
 
 Software transactional memory is only one layer. STM can roll back language
-state, but cannot undo a model call, network request, disk write, or device I/O.
+state, but cannot undo a model call, network request, disk write, or device I/O
+— and it certainly cannot undo six hours of gradient descent on eight GPUs.
+Long-running, resource-owning effects are a distinct class from request-shaped
+ones; see [`deployment-targets.md`](deployment-targets.md).
 Model inference therefore uses a committed outbox, idempotence-guarded
 completion, explicit dispatch, and exact-result replay. At v0.6, host process
 execution is also routed through typed intent, policy, resource limits, and an
@@ -125,6 +134,16 @@ Each rung must be runnable and differentially testable against the rung below:
    says so.
 18. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
+19. **GPU plane:** a Linux domain holding the NVIDIA stack, with GPUs assigned
+   through the IOMMU or SMMU and granted by the system manifest. Permanent, not
+   transitional: CUDA user space and GSP firmware are proprietary, so there is
+   no native equivalent to write. Large, and deliberately without authority.
+20. **Training as an effect:** admitted with a resource grant and a deadline,
+   checkpointed into the tamper-evident log, cancellable, and replayable as the
+   decision and the checkpoints rather than as the arithmetic.
+21. **Multi-node:** per-node ownership and explicit distributed state across an
+   NVLink or InfiniBand fabric that is treated as a device class with a trust
+   boundary rather than as a fast network.
 
 ## Change protocol for privileged code
 

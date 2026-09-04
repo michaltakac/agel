@@ -62,6 +62,13 @@ unmodified seL4 kernel**. It provides:
   execute instructions they are not allowed to, or never yield; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
+Agel's primary deployment target is a bare-metal NVIDIA DGX node, single or
+clustered, where the GPUs fine-tune and train models as well as serve them.
+Inference-only deployments run on ordinary hardware or in a virtual machine and
+can use external model providers instead. Those tiers, what each requires, and
+how little of the DGX tier exists today are in
+[`docs/deployment-targets.md`](docs/deployment-targets.md).
+
 This is the first Agel evaluator running on the independently bootable
 substrate, and the first hardware protection boundary the project can point at,
 but not yet a general-purpose operating system. The evaluator itself still runs
@@ -225,6 +232,8 @@ The native subset, fixed limits, transactions, and workshop commands are in
 [`docs/native-workshop.md`](docs/native-workshop.md).
 What the seL4 backend was built from, and what is and is not verified about it,
 is in [`docs/sel4-manifest.md`](docs/sel4-manifest.md).
+The deployment tiers, the GPU plane, and the requirements the DGX target adds
+are in [`docs/deployment-targets.md`](docs/deployment-targets.md).
 The evaluated microkernel foundations, the seL4/Microkit decision, and the
 staged native roadmap are in
 [`docs/microkernel-research.md`](docs/microkernel-research.md); the versioned
