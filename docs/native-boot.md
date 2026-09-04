@@ -4,7 +4,12 @@ Agel v1.0 added a small, reproducible path from a raw disk image to freestanding
 Rust on x86-64. v1.1 places a fixed-memory Agel evaluator and transactional REPL
 on that substrate while retaining the recovery boundary.
 
-## Boot path
+## Boot path, x86-64
+
+AArch64 and RISC-V need none of this: QEMU's `virt` machine loads an ELF by its
+program headers, so those images state where they want to live and start there.
+x86-64 keeps the BIOS seed because that is where the project's native work
+began, and because a reproducible 64 KiB raw disk is a useful thing to have.
 
 1. The 512-byte BIOS stage loads the remaining 127 sectors at physical
    `0x10000`.
@@ -37,9 +42,43 @@ rebuilds the disk twice, requires byte equality, boots it, and checks a serial
 success token. `./scripts/test-monitor.sh` boots a deterministic monitor scenario
 and asserts denial, verification, promotion, and rollback.
 
-## Ring-3 protection domains
+## Three machines, one contract
 
-v1.2 adds the isolation layer the roadmap's Phase 1 calls for, built and tested
+v1.3 builds the isolation backend for **x86-64, AArch64, and RISC-V from one
+source**. The shared half — the capability space, the handshake page, the tick
+budget, the conformance driver, the containment driver, and the unprivileged
+world program — is architecture-neutral. Address spaces, register frames, trap
+entry, and the privilege transition are per-architecture, and that is the whole
+of what differs.
+
+```sh
+./scripts/build-kernel.sh aarch64    # or x86_64, or riscv64
+./scripts/test-isolation.sh          # all three
+./scripts/test-isolation.sh riscv64  # or just one
+```
+
+| | x86-64 | AArch64 | RISC-V |
+|---|---|---|---|
+| Platform | BIOS seed, raw 64 KiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
+| Supervisor level | ring 0 | EL1 | S-mode |
+| Unprivileged level | ring 3 | EL0 | U-mode |
+| Trap gate | `int 0x80` | `svc #0` | `ecall` |
+| Translation | 4-level, 4 KiB pages | 3-level, 39-bit, 4 KiB | Sv39, 4 KiB |
+| Preemption | 8259-routed PIT, 100 Hz | EL1 physical timer via GICv2 | SBI timer, 100 Hz |
+| Domain window | 512 GiB | 2 GiB | 4 GiB |
+
+Each architecture's domain window sits in a different top-level table entry from
+the kernel and device windows, so two domains do not merely fail to reach each
+other's memory — they have no translation for it.
+
+RISC-V is the one backend that is not alone on its machine: OpenSBI runs in
+machine mode beneath it, owns the timer, and constrains what S-mode may touch
+through physical memory protection. That is a useful reminder of what the whole
+exercise is about, with the kernel on the receiving end of the arrangement.
+
+## Protection domains
+
+v1.2 added the isolation layer the roadmap's Phase 1 calls for, built and tested
 under `--features isolation-selftest`:
 
 - the kernel replaces the BIOS's single supervisor mapping with page tables it
@@ -56,15 +95,24 @@ under `--features isolation-selftest`:
 - ring 0 runs with interrupts masked throughout. They are only ever enabled by
   entering ring 3 with a frame whose flags set `IF`.
 
-`./scripts/test-isolation.sh` boots the result and requires that an
-unprivileged world answers all 81 steps of the kernel-contract corpus through
-`int 0x80` with a transcript byte-identical to
-`bootstrap/kernel-contract.trace`; that worlds writing to kernel memory,
-dividing by zero, and masking interrupts are contained with the expected
-architectural vector; that a world which never yields is preempted by budget;
-and that the recovery monitor still denies, verifies, promotes, and rolls back
-afterwards. It also rejects the image if the built `.user_text` contains a call
-or indirect branch, since either would leave the user-executable range.
+`./scripts/test-isolation.sh` boots each architecture and requires that an
+unprivileged world answers all 81 steps of the kernel-contract corpus with a
+transcript byte-identical to `bootstrap/kernel-contract.trace`; that a world
+writing to kernel memory, a world executing something it is not allowed to, and
+a world that never yields are each contained with the fault that machine
+actually produces; and that the recovery monitor still denies, verifies,
+promotes, and rolls back afterwards. It also rejects any image whose built
+`.user_text` contains a call or an indirect branch, since either would leave the
+user-executable range.
+
+The fault vocabulary is shared but the mapping is not flattened. x86-64
+distinguishes four causes and is provoked four ways. AArch64 has no integer
+divide exception, and its privileged-instruction case reads the physical timer's
+control register — the first move a world would make towards disabling its own
+preemption — which `CNTKCTL_EL1` denies EL0. RISC-V genuinely cannot tell a
+privileged instruction from an undefined one; both raise *illegal instruction*,
+and the test says so rather than inventing a distinction the architecture does
+not make.
 
 ## Trust boundary
 
@@ -73,9 +121,10 @@ workspace still has `unsafe_code = "forbid"`. Privileged instructions are
 confined to `boot/kernel/src/hal.rs`; BIOS transition assembly lives in
 `boot/bios`.
 
-The default REPL image still runs the Agel evaluator in ring 0. The isolation
-machinery exists and is tested, but moving the evaluator into a domain is the
-next rung, not a claim this release makes. There is still no allocator, driver
+The default REPL image still runs the Agel evaluator in ring 0, and the REPL
+exists only on x86-64. The isolation machinery exists on three architectures and
+is tested on all of them, but moving the evaluator into a domain is the next
+rung, not a claim this release makes. There is still no allocator, driver
 model, hardware watchdog, persisted A/B slots, signature verification, or agent
 runtime in the VM, and the frame allocator never reclaims. The important
 invariant remains: mutable language state is not the only component capable of

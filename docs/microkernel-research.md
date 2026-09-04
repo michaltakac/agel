@@ -651,18 +651,27 @@ Agel's user-level policy or evaluator is correct.
 
 Run it with `./scripts/test-isolation.sh`.
 
-### Phase 2 — seL4/Microkit spike
+### Phase 2 — seL4/Microkit spike — **groundwork done (v1.3)**
 
 - Select one QEMU target with strong verified-configuration coverage. Per the
   coverage table, this is `qemu-arm-virt` (AArch64) or `qemu-riscv-virt`
-  (RISCV64), not x86-64.
-- Boot a Rust root/recovery PD, Agel world PD and serial PD.
-- Pass the same kernel-contract conformance messages as the research backend.
-- Record binary, configuration, proof and toolchain hashes.
+  (RISCV64), not x86-64. → the research backend now **runs on both**, so the
+  target choice is no longer blocked on porting work; `./scripts/build-kernel.sh
+  aarch64` and `riscv64` produce booting images today.
+- Pass the same kernel-contract conformance messages as the research backend. →
+  the corpus, the reference model, the containment driver and the unprivileged
+  world program are already architecture-neutral, and all three backends emit
+  byte-identical transcripts. An seL4 backend has to implement
+  `Machine`/`Domain` and nothing else.
+- Boot a Rust root/recovery PD, Agel world PD and serial PD. → not started; this
+  is the actual seL4 work.
+- Record binary, configuration, proof and toolchain hashes. → not started.
 
-Agel's current x86-64 QEMU work can continue, but the assurance spike should
-choose architecture/configuration by proof coverage rather than familiarity.
-RISC-V or Arm may therefore precede a production x86-64 build.
+Agel's x86-64 QEMU work continues alongside rather than instead: the same
+source builds the raw BIOS seed and the two ELF images, and CI boots all three.
+The assurance spike still chooses architecture and configuration by proof
+coverage rather than familiarity, but that choice is now a decision rather than
+a porting project.
 
 ### Phase 3 — split privileged services
 
@@ -803,11 +812,12 @@ Open architecture decisions needing experiments or ADRs:
 |---|---|
 | One small kernel contract, versioned and backend-neutral | `crates/agel-kernel-abi`, [`kernel-contract.md`](kernel-contract.md) |
 | Conformance suite runnable against more than one backend | `bootstrap/kernel-contract.trace`, run by two scripts against two backends |
-| Capability is a slot with rights, never a name | enforced and corpus-tested; ring 3 never holds a reference |
+| Capability is a slot with rights, never a name | enforced and corpus-tested; an unprivileged world never holds a reference |
 | Derivation is monotonic; revocation is transitive and fails closed | enforced and corpus-tested |
 | Every queue is bounded with defined backpressure | `queue-full` at capacity, corpus-tested |
-| The evaluator does not belong in the privileged kernel | machinery built; the evaluator has not moved yet |
-| seL4 as the assurance backend | not started; Phase 2, on AArch64 or RISCV64 |
+| A kernel-neutral component contract, in Genode's sense | the shared driver, corpus and world program are architecture-neutral across three machines |
+| The evaluator does not belong in the privileged kernel | machinery built on three architectures; the evaluator has not moved yet |
+| seL4 as the assurance backend | not started, but both candidate targets now run the research backend |
 | Firecracker as an optional outer envelope | not started; Phase 6 |
 
 ## Bottom line

@@ -226,3 +226,45 @@ on a proof. The research kernel's object semantics are the shared reference
 model rather than an independent second implementation; that independence is
 what the seL4 backend is for. The frame allocator never reclaims, there is no
 IOMMU, no SMP, no signature verification, and no hardware watchdog.
+
+## v1.3
+
+- **An isolation claim that only holds on one machine:** the same contract, the
+  same 81-step corpus, the same containment driver, and the same unprivileged
+  world program now run on x86-64, AArch64, and RISC-V, and CI requires all
+  three transcripts to be byte-identical to the frozen one. A boundary that had
+  only ever been enforced by one page-table format and one trap gate was a
+  boundary with one implementation, not a boundary with a specification.
+- **Portability by lowest common denominator:** the fault vocabulary is shared
+  but the mapping is per-architecture and deliberately unflattened. RISC-V
+  cannot distinguish a privileged instruction from an undefined one, and its
+  provocation table says so. AArch64 has no integer divide exception, so it is
+  not provoked with one. Making three machines agree by only testing what they
+  all do would have quietly weakened every one of them.
+- **A world disabling its own preemption, restated per machine:** x86-64 denies
+  `cli` through IOPL and an absent I/O permission bitmap; AArch64 denies EL0
+  every access to the timer and the system counter through `CNTKCTL_EL1`, and
+  the test provokes exactly that; RISC-V gives a U-mode hart no way to mask a
+  supervisor interrupt at all. Each is asserted on its own machine.
+- **Divergence between three copies of the same logic:** the capability space,
+  the shared handshake page, the tick budget, the "a stopped world stays
+  stopped" rule, the conformance driver, the containment driver, and the world
+  program are single-sourced. Only address spaces, register frames, trap entry,
+  and the privilege transition are written three times, and each is checked by
+  the same tests.
+- **A trap frame written through a domain's own state:** every backend resets
+  its supervisor trap stack before returning to the unprivileged level. Leaving
+  the stack pointer just past a domain's saved frame would make the next trap
+  overwrite that domain — which is the kind of bug that looks like containment
+  right up until it is not.
+- **Firmware assumed to be absent:** on RISC-V the kernel is itself a guest.
+  OpenSBI holds the machine timer and constrains S-mode through physical memory
+  protection, and the identity window deliberately leaves the firmware's own
+  memory unmapped rather than mapping what it cannot legitimately touch.
+
+The three backends share the reference model's object semantics rather than
+being independent implementations of them; that independence is still what the
+seL4 backend is for. Nothing here is a formal claim: these are QEMU tests, on
+emulated machines, of a kernel whose frame allocator never reclaims and which
+has no IOMMU, no SMP, no signature verification, and no hardware watchdog. The
+Agel evaluator still runs privileged, and only on x86-64.

@@ -16,8 +16,15 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Install bootstrap and VM tools
-        run: sudo apt-get update && sudo apt-get install -y sbcl qemu-system-x86 binutils clang
-      - run: rustup target add x86_64-unknown-none
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sbcl binutils clang \
+            qemu-system-x86 qemu-system-arm qemu-system-misc
+      - name: Add freestanding targets
+        run: |
+          rustup target add x86_64-unknown-none
+          rustup target add aarch64-unknown-none-softfloat
+          rustup target add riscv64imac-unknown-none-elf
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path boot/kernel/Cargo.toml -- --check
       - run: cargo test --workspace
@@ -35,3 +42,5 @@ jobs:
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features monitor-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features native-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features isolation-selftest -- -D warnings
+      - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features isolation-selftest -- -D warnings
+      - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target riscv64imac-unknown-none-elf --features isolation-selftest -- -D warnings

@@ -4,8 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v1.2: a native Agel workshop with a frozen kernel
-contract and ring-3 isolation**. It provides:
+The current repository is **v1.3: a native Agel workshop with a frozen kernel
+contract and a portable isolation backend**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -47,10 +47,13 @@ contract and ring-3 isolation**. It provides:
   model and an 81-step conformance corpus frozen as a canonical transcript;
 - kernel-built page tables, per-domain address spaces, write-xor-execute, trap
   entry, and a 100 Hz preemption timer;
-- ring-3 protection domains that answer the whole kernel-contract corpus through
-  one trap gate while holding capability slots rather than references;
-- containment of worlds that write kernel memory, divide by zero, execute
-  privileged instructions, or never yield; and
+- protection domains on x86-64, AArch64, and RISC-V that answer the whole
+  kernel-contract corpus from the machine's lowest privilege level, through one
+  trap gate, holding capability slots rather than references;
+- byte-identical conformance transcripts from all three, checked against one
+  frozen reference;
+- containment, on every architecture, of worlds that write kernel memory,
+  execute instructions they are not allowed to, or never yield; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 This is the first Agel evaluator running on the independently bootable
@@ -165,18 +168,26 @@ answer
 ```
 
 Run the prompt-synchronized native language conformance session, the frozen
-kernel-contract transcript, and the ring-3 isolation suite with:
+kernel-contract transcript, and the isolation suite with:
 
 ```sh
 ./scripts/test-native.sh
 ./scripts/test-native-repl.sh
 ./scripts/test-kernel-contract.sh
-./scripts/test-isolation.sh
+./scripts/test-isolation.sh              # x86-64, AArch64 and RISC-V
+./scripts/test-isolation.sh aarch64      # or one of them
+./scripts/build-kernel.sh riscv64        # just build an image
 ```
 
-The isolation suite boots a protection domain that answers all 81 steps of the
-kernel contract from user mode, then deliberately makes four worlds misbehave
-and requires each to be contained without losing the recovery monitor.
+For each architecture the isolation suite boots a protection domain that answers
+all 81 steps of the kernel contract from the machine's lowest privilege level,
+requires the transcript to match the frozen reference byte for byte, then
+deliberately makes worlds misbehave and requires each to be contained without
+losing the recovery monitor.
+
+The AArch64 and RISC-V suites need `qemu-system-aarch64` and
+`qemu-system-riscv64` and the `aarch64-unknown-none-softfloat` and
+`riscv64imac-unknown-none-elf` Rust targets.
 
 The boot scripts require `qemu-system-x86_64`, `clang`, GNU `objcopy`, and the
 Rust `x86_64-unknown-none` target. On macOS: `brew install qemu binutils`.

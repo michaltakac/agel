@@ -6,7 +6,7 @@
 //! answer is a trap into a kernel the world cannot write, on a stack the world
 //! cannot name, through descriptors the world cannot edit.
 
-use crate::hal::{self, Pseudo};
+use super::hal::{self, Pseudo};
 use core::arch::naked_asm;
 
 /// Kernel code selector.
@@ -431,6 +431,6 @@ unsafe extern "C" fn trap_common() {
         "pop rax",
         "add rsp, 16",
         "iretq",
-        dispatch = sym crate::domain::dispatch_trap,
+        dispatch = sym super::domain::dispatch_trap,
     )
 }

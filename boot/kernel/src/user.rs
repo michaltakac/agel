@@ -1,29 +1,30 @@
-//! The ring-3 world program.
+//! The unprivileged world program, shared by every architecture.
 //!
-//! Everything here executes unprivileged. It is written to be self-contained —
-//! volatile word loads and stores, no slices, no library calls — because it is
-//! linked into `.user_text`, and `.user_text` is the only range of the kernel
-//! image the page tables mark user-executable. A call out of this section would
-//! fault, which is a blunt but effective way to keep the ring-3 code surface
-//! honest about its size.
+//! Everything here executes at the lowest privilege level the machine offers:
+//! ring 3 on x86-64, EL0 on AArch64, U-mode on RISC-V. It is written to be
+//! self-contained — volatile word loads and stores, no slices, no library
+//! calls — because it is linked into `.user_text`, and `.user_text` is the only
+//! range of the kernel image the page tables mark user-executable. A call out
+//! of this section would land in supervisor-only memory and fault, so the
+//! isolation test rejects any image whose `.user_text` contains one.
 //!
-//! The program has no capability to the serial port, the timer, the frame pool,
-//! or any other world. Its entire vocabulary is the trap gate at `int 0x80` and
-//! one page it shares with its supervisor.
+//! The program has no capability to the console, the timer, the frame pool, or
+//! any other world. Its entire vocabulary is one trap instruction and one page
+//! it shares with its supervisor.
 
 use crate::contract::SUPERVISOR_ENDPOINT;
-use crate::domain::shared;
+use crate::world::shared;
 use agel_kernel_abi::Operation;
 use core::arch::asm;
 
 /// Invoke the kernel contract.
 ///
-/// The register convention avoids `rbx` and `rbp` because Rust's inline
-/// assembler reserves them, and it is the same convention the trap handler
-/// reads out of the saved frame.
+/// Each architecture uses a spare register for the operation code and its
+/// ordinary argument registers for the capability and the four bounded words,
+/// so nothing about the call needs memory the kernel would have to validate.
 ///
 /// # Safety
-/// Executes a trap into the kernel. The kernel validates everything.
+/// Traps into the kernel, which validates everything.
 #[inline(always)]
 unsafe fn contract_call(operation: u16, capability: u64, arguments: [u64; 4]) -> (u64, [u64; 4]) {
     let status: u64;
@@ -31,6 +32,9 @@ unsafe fn contract_call(operation: u16, capability: u64, arguments: [u64; 4]) ->
     let value1: u64;
     let value2: u64;
     let value3: u64;
+
+    #[cfg(target_arch = "x86_64")]
+    // `rbx` and `rbp` are absent because Rust's inline assembler reserves them.
     unsafe {
         asm!(
             "int 0x80",
@@ -43,6 +47,35 @@ unsafe fn contract_call(operation: u16, capability: u64, arguments: [u64; 4]) ->
             options(nostack),
         )
     };
+
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        asm!(
+            "svc #0",
+            in("x8") u64::from(operation),
+            inout("x0") capability => status,
+            inout("x1") arguments[0] => value0,
+            inout("x2") arguments[1] => value1,
+            inout("x3") arguments[2] => value2,
+            inout("x4") arguments[3] => value3,
+            options(nostack),
+        )
+    };
+
+    #[cfg(target_arch = "riscv64")]
+    unsafe {
+        asm!(
+            "ecall",
+            in("a7") u64::from(operation),
+            inout("a0") capability => status,
+            inout("a1") arguments[0] => value0,
+            inout("a2") arguments[1] => value1,
+            inout("a3") arguments[2] => value2,
+            inout("a4") arguments[3] => value3,
+            options(nostack),
+        )
+    };
+
     (status, [value0, value1, value2, value3])
 }
 
@@ -61,13 +94,93 @@ unsafe fn yield_to_supervisor() {
     };
 }
 
-/// The ring-3 entry point.
+/// Execute an instruction reserved to the supervisor.
 ///
-/// `shared_page` is the only address the supervisor tells the world about. Every
-/// other address in the world's space is its own stack.
+/// On x86-64 masking interrupts is exactly the instruction an unprivileged
+/// world must never get away with, because it would defeat preemption. The
+/// other two architectures reach the same place by reading a supervisor-only
+/// system register.
 ///
 /// # Safety
-/// Entered by `iretq` from the kernel with a valid mapped stack and shared page.
+/// Raises a fault, by design.
+#[inline(always)]
+unsafe fn execute_privileged() {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        asm!("cli", options(nomem, nostack))
+    };
+    // Reading the physical timer's control register is the AArch64 equivalent
+    // of masking interrupts: it is the first move a world would make towards
+    // disabling the preemption that contains it. `CNTKCTL_EL1` denies EL0 that
+    // access, so the attempt is trapped rather than answered.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        asm!("mrs {}, cntp_ctl_el0", out(reg) _, options(nomem, nostack))
+    };
+    #[cfg(target_arch = "riscv64")]
+    unsafe {
+        asm!("csrr {}, sstatus", out(reg) _, options(nomem, nostack))
+    };
+}
+
+/// Execute an undefined instruction.
+///
+/// # Safety
+/// Raises a fault, by design.
+#[inline(always)]
+unsafe fn execute_undefined() {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        asm!("ud2", options(nomem, nostack))
+    };
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        asm!("udf #0", options(nomem, nostack))
+    };
+    #[cfg(target_arch = "riscv64")]
+    unsafe {
+        asm!("unimp", options(nomem, nostack))
+    };
+}
+
+/// Divide by zero without letting the optimizer fold it away.
+///
+/// Only x86-64 raises an exception for this. RISC-V defines a result for
+/// division by zero and AArch64 has no integer divide exception, so only the
+/// x86-64 provocation table exercises it.
+///
+/// # Safety
+/// Raises `#DE` on x86-64.
+#[inline(always)]
+#[cfg(target_arch = "x86_64")]
+unsafe fn divide_by_zero() {
+    unsafe {
+        asm!(
+            "xor rdx, rdx",
+            "xor rcx, rcx",
+            "div rcx",
+            inout("rax") 1_u64 => _,
+            out("rdx") _,
+            out("rcx") _,
+            options(nostack),
+        )
+    };
+}
+
+/// One `nop`, kept opaque so an empty loop is not optimized into a trap.
+#[inline(always)]
+unsafe fn pause() {
+    unsafe { asm!("nop", options(nomem, nostack)) };
+}
+
+/// The unprivileged entry point.
+///
+/// `shared_page` is the only address the supervisor tells the world about.
+/// Every other address in the world's space is its own stack.
+///
+/// # Safety
+/// Entered by the architecture's return-from-exception instruction, with a
+/// valid mapped stack and shared page.
 #[no_mangle]
 #[link_section = ".user_text"]
 pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
@@ -97,39 +210,23 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
             // The kernel image is mapped in this address space, without the
             // user bit. Writing to it must fault rather than corrupt the
             // supervisor that is about to judge this world.
-            unsafe { (0x0001_0000_u64 as *mut u64).write_volatile(0xdead) };
-        } else if command == shared::COMMAND_FAULT_DIVIDE {
-            unsafe { divide_by_zero() };
+            unsafe { (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead) };
         } else if command == shared::COMMAND_FAULT_PRIVILEGED {
-            // Masking interrupts is exactly the instruction an unprivileged
-            // world must never get away with: it would defeat preemption.
-            unsafe { asm!("cli", options(nomem, nostack)) };
+            unsafe { execute_privileged() };
+        } else if command == shared::COMMAND_FAULT_ILLEGAL {
+            unsafe { execute_undefined() };
         } else if command == shared::COMMAND_SPIN {
-            // No syscall, no memory fault, no cooperation. Only the timer can
-            // end this, which is the property the test exists to demonstrate.
+            // No trap, no memory fault, no cooperation. Only the timer can end
+            // this, which is the property the test exists to demonstrate.
             loop {
-                unsafe { asm!("nop", options(nomem, nostack)) };
+                unsafe { pause() };
+            }
+        } else {
+            #[cfg(target_arch = "x86_64")]
+            if command == shared::COMMAND_FAULT_DIVIDE {
+                unsafe { divide_by_zero() };
             }
         }
         unsafe { yield_to_supervisor() };
     }
-}
-
-/// Divide by zero without letting the optimizer fold it away.
-///
-/// # Safety
-/// Raises `#DE`.
-#[inline(always)]
-unsafe fn divide_by_zero() {
-    unsafe {
-        asm!(
-            "xor rdx, rdx",
-            "xor rcx, rcx",
-            "div rcx",
-            inout("rax") 1_u64 => _,
-            out("rdx") _,
-            out("rcx") _,
-            options(nostack),
-        )
-    };
 }

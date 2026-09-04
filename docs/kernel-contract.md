@@ -141,38 +141,73 @@ regenerate the frozen transcript.
 ## How conformance is checked
 
 ```sh
-./scripts/test-kernel-contract.sh   # reference model = frozen transcript
-./scripts/test-isolation.sh         # ring-3 backend  = frozen transcript
+cargo test -p agel-kernel-abi        # reference model = frozen transcript
+./scripts/test-kernel-contract.sh    # the same, as a diff you can read
+./scripts/test-isolation.sh          # three machines = frozen transcript
+./scripts/test-isolation.sh aarch64  # or just one
 ```
 
-`bootstrap/kernel-contract.trace` is the frozen canonical transcript. Both
-scripts diff against it, so three artifacts share one set of bytes: the hosted
-reference model, the checked-in freeze, and a real protection domain talking
-through a trap gate inside QEMU. This is the same comparison discipline the
-Common Lisp reference uses for the language kernel.
+`bootstrap/kernel-contract.trace` is the frozen canonical transcript. Five
+artifacts share one set of bytes: the hosted reference model, the checked-in
+freeze, and an unprivileged protection domain on each of x86-64, AArch64, and
+RISC-V, each talking to its kernel through that machine's trap gate. This is the
+same comparison discipline the Common Lisp reference uses for the language
+kernel.
+
+The host test also stands up a deliberately non-conformant backend — one that
+widens rights on `cap.mint` — and requires the corpus to catch it at
+`derive/mint-cannot-widen`. A comparison that has never been seen to fail is not
+yet evidence of anything.
 
 ## Backend notes: the research kernel
 
 The research backend implements the contract's object semantics by linking the
 shared reference model, and adds the part a hosted model cannot have: the object
 table lives in supervisor-only memory, the caller holds slot numbers rather than
-references, and the only path to any of it from ring 3 is the `int 0x80` trap
+references, and the only path to any of it from an unprivileged world is a trap
 gate. That is the honest division of labour for this phase — the research
 backend's job is to put already-specified semantics behind a hardware privilege
 boundary, and seL4 will be the independent second implementation.
 
-Register convention for `int 0x80`:
+It builds for three architectures from one source. The shared driver, the
+capability space, the shared handshake page, the tick budget, and the rule that
+a stopped world stays stopped live in architecture-neutral code; address spaces,
+register frames, trap entry, and the privilege transition are per-architecture.
 
-```text
-in   rax = operation   rdi = capability   rsi rdx r10 r8 = argument words 0..3
-out  rax = status      rdi rsi rdx r10    = result words 0..3
-```
+| | x86-64 | AArch64 | RISC-V |
+|---|---|---|---|
+| Unprivileged level | ring 3 | EL0 | U-mode |
+| Trap instruction | `int 0x80` | `svc #0` | `ecall` |
+| Operation register | `rax` | `x8` | `a7` |
+| Capability register | `rdi` | `x0` | `a0` |
+| Argument words | `rsi rdx r10 r8` | `x1`–`x4` | `a1`–`a4` |
+| Result words | `rdi rsi rdx r10` | `x1`–`x4` | `a1`–`a4` |
+| Translation | 4-level, 4 KiB | 3-level Sv39-shaped, 4 KiB | Sv39, 4 KiB |
+| Preemption | PIT at 100 Hz | EL1 physical timer via GICv2 | SBI timer at 100 Hz |
+| Platform | BIOS seed, raw 64 KiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
+| Leaving the emulator | debug-exit device | PSCI `SYSTEM_OFF` | `virt` test device |
 
-`rbx` and `rbp` are absent because Rust's inline assembler reserves them.
+`rbx` and `rbp` are absent from the x86-64 convention because Rust's inline
+assembler reserves them.
 
 Slot 31 is a backend convention rather than part of the contract: a send on it
 is how a world hands control back to its supervisor. It sits above every slot
 the corpus touches, so the corpus never observes that it exists.
+
+### What the architectures do not agree about
+
+The containment tests use a shared vocabulary of fault names, but the mapping to
+each machine is deliberately not flattened:
+
+- x86-64 distinguishes `divide-error`, `invalid-opcode`, `general-protection`
+  and `page-fault`, so it is provoked four ways.
+- AArch64 has no integer divide exception at all, so it is provoked three ways.
+  Its "privileged instruction" case reads the physical timer's control
+  register — the first move a world would make towards disabling its own
+  preemption — which `CNTKCTL_EL1` denies EL0.
+- RISC-V genuinely cannot distinguish a privileged instruction from an
+  undefined one: both raise *illegal instruction*. Its provocation table says so
+  rather than inventing a distinction the architecture does not make.
 
 ## What this document does not claim
 

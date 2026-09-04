@@ -107,14 +107,20 @@ Each rung must be runnable and differentially testable against the rung below:
    unprivileged world answers the whole conformance corpus, and worlds that
    fault, execute privileged instructions, or never yield are contained without
    losing the recovery monitor.
-14. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
+14. **Portable isolation backend (complete at v1.3):** the same contract, the
+   same corpus, and the same containment tests on x86-64, AArch64, and RISC-V
+   from one source, with byte-identical transcripts. Only address spaces,
+   register frames, trap entry, and the privilege transition are
+   per-architecture.
+15. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
    and compiler in Agel; extend diverse comparison to every kernel semantic.
-15. **Native agent world:** move the evaluator and the full Agel agent runtime
+16. **Native agent world:** move the evaluator and the full Agel agent runtime
    into ring-3 domains, then add an allocator, drivers, and persistent images.
    Keep device access outside mutable language heaps.
-16. **seL4 backend:** the same kernel contract over an unmodified verified seL4
-   configuration, composed with Microkit, on AArch64 or RISC-V.
-17. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+17. **seL4 backend:** the same kernel contract over an unmodified verified seL4
+   configuration, composed with Microkit, on AArch64 or RISC-V — both of which
+   the research backend now already runs on.
+18. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
 
 ## Change protocol for privileged code
