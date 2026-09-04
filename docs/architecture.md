@@ -83,10 +83,13 @@ Each rung must be runnable and differentially testable against the rung below:
 8. **Library-first environment (complete at v0.8):** sequence/result modules
    and typed bounded worker pools implemented as ordinary Agel source. The CLI
    installs them atomically while retaining a `--no-stdlib` minimal-core mode.
-9. **Common Lisp bootstrap:** a portable reference implementation that emits
-   the same core IR and runs conformance tests against the Rust seed.
-10. **Self-host:** reader, expander, evaluator/compiler, and standard library in
-   Agel; use diverse bootstrap comparison to detect trusting-trust failures.
+9. **Diverse bootstrap (complete for the functional kernel at v0.9):** an
+   independent Common Lisp evaluator is differentially checked against the Rust
+   seed, while `agel/meta` evaluates lexical Agel code as data. A supervisor
+   keeps whole A/B semantic images outside the candidate and binds promotion to
+   zero-authority health evidence.
+10. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
+   and compiler in Agel; extend diverse comparison to every kernel semantic.
 11. **Native substrate:** minimal Rust/C HAL, allocator, interrupt/trap entry,
    drivers, and a QEMU image. Keep device access outside mutable language heaps.
 12. **Live system:** A/B system worlds, health oracles, signed promotion,

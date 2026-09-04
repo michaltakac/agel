@@ -31,10 +31,13 @@ pub enum Builtin {
     Cdr,
     Dict,
     Get,
+    HasKey,
     Assoc,
     Dissoc,
     Keys,
     Count,
+    TypeOf,
+    Apply,
     Spawn,
     Send,
     Receive,
@@ -160,6 +163,23 @@ pub enum Value {
 impl Value {
     pub fn is_truthy(&self) -> bool {
         !matches!(self, Self::Nil | Self::Bool(false))
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::Nil => "nil",
+            Self::Bool(_) => "bool",
+            Self::Int(_) => "int",
+            Self::String(_) => "string",
+            Self::Symbol(_) => "symbol",
+            Self::List(_) => "list",
+            Self::Map(_) => "map",
+            Self::Agent(_) => "agent",
+            Self::Protocol(_) => "protocol",
+            Self::Module(_) => "module",
+            Self::Capability(_) => "capability",
+            Self::Closure(_) | Self::Builtin(_) => "callable",
+        }
     }
 }
 

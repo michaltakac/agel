@@ -1,0 +1,9 @@
+; Each top-level form must be rejected by both bootstrap evaluators.
+((fn (x) x))
+((fn (x) x) 1 2)
+(+ 9223372036854775807 1)
+(- -9223372036854775808)
+(/ 1 0)
+(quote)
+(if #t 42)
+(def only-name)

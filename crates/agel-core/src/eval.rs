@@ -710,10 +710,13 @@ fn apply_builtin(
         Builtin::Cdr => cdr(arguments),
         Builtin::Dict => dict(arguments, runtime),
         Builtin::Get => get(arguments),
+        Builtin::HasKey => has_key(arguments),
         Builtin::Assoc => assoc(arguments, runtime),
         Builtin::Dissoc => dissoc(arguments),
         Builtin::Keys => keys(arguments, runtime),
         Builtin::Count => count(arguments),
+        Builtin::TypeOf => type_of(arguments),
+        Builtin::Apply => apply_values(arguments, state, runtime),
         Builtin::Spawn => spawn(arguments, state, runtime),
         Builtin::Send => send(arguments, state, runtime),
         Builtin::Receive => receive(arguments, state, runtime),
@@ -859,6 +862,16 @@ fn get(arguments: Vec<Value>) -> Result<Value, Signal> {
         .unwrap_or(Value::Nil))
 }
 
+fn has_key(arguments: Vec<Value>) -> Result<Value, Signal> {
+    expect_arity("has-key?", arguments.len(), 2)?;
+    let Value::Map(entries) = &arguments[0] else {
+        return Err(condition("type", "has-key? expects a map"));
+    };
+    Ok(Value::Bool(
+        entries.iter().any(|(key, _)| key == &arguments[1]),
+    ))
+}
+
 fn assoc(arguments: Vec<Value>, runtime: &Runtime<'_>) -> Result<Value, Signal> {
     expect_arity("assoc", arguments.len(), 3)?;
     let Value::Map(mut entries) = arguments[0].clone() else {
@@ -901,6 +914,31 @@ fn count(arguments: Vec<Value>) -> Result<Value, Signal> {
     i64::try_from(length)
         .map(Value::Int)
         .map_err(|_| condition("arithmetic/overflow", "collection length does not fit i64"))
+}
+
+fn type_of(arguments: Vec<Value>) -> Result<Value, Signal> {
+    expect_arity("type-of", arguments.len(), 1)?;
+    Ok(Value::Symbol(arguments[0].type_name().into()))
+}
+
+fn apply_values(
+    arguments: Vec<Value>,
+    state: &mut State,
+    runtime: &mut Runtime<'_>,
+) -> Result<Value, Signal> {
+    expect_arity("apply", arguments.len(), 2)?;
+    let function = arguments[0].clone();
+    let values = match &arguments[1] {
+        Value::Nil => Vec::new(),
+        Value::List(values) => values.clone(),
+        other => {
+            return Err(condition(
+                "type",
+                format!("apply expects an argument list, got {other}"),
+            ))
+        }
+    };
+    apply(function, values, state, runtime)
 }
 
 fn map_insert(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {

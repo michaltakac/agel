@@ -76,6 +76,17 @@ impl Image {
         self.entries.iter().map(|entry| &entry.entry)
     }
 
+    pub fn budget(&self) -> &Budget {
+        &self.budget
+    }
+
+    pub fn extends(&self, ancestor: &Self) -> bool {
+        self.budget == ancestor.budget
+            && self.history_limit == ancestor.history_limit
+            && self.entries.len() >= ancestor.entries.len()
+            && self.entries[..ancestor.entries.len()] == ancestor.entries
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut output = Vec::new();
         output.extend_from_slice(MAGIC);

@@ -84,3 +84,25 @@ replication remain later trust layers.
 `any` payloads in `agel/swarm` are a convenience type, not authority. Applications
 with a stable domain protocol should define narrower message types around the
 generic pool.
+
+## v0.9
+
+- **Single-bootstrap semantic bugs:** a separately written Common Lisp evaluator
+  and the Rust seed consume the same functional-kernel forms and must emit the
+  same canonical values in CI. Agreement increases confidence; it cannot exclude
+  a shared specification mistake.
+- **Self-interpreter escape:** `agel/meta` receives only an explicit environment.
+  It has no implicit capabilities, and the enclosing evaluator still enforces
+  transaction, fuel, call-depth, and collection bounds.
+- **Candidate replaces its judge:** `agel-supervisor` remains Rust-hosted and
+  outside candidate images. Candidates must extend the active semantic history,
+  rebuild successfully, and pass at least one isolated zero-authority health
+  check.
+- **Stale or forged promotion:** evidence binds both active and candidate roots.
+  Staging a newer candidate invalidates older evidence. Promotion swaps whole
+  images, retaining the old slot for watchdog rollback.
+
+The Common Lisp reference and metacircular evaluator currently cover the lexical
+functional kernel, not macros, modules, agents, persistence, or effects. A/B
+slot state is not yet a separately bootable disk selector. These are explicit
+v1.0 boundaries, not implied guarantees.

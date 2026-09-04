@@ -22,6 +22,8 @@ defprotocol
 Everything else is a call. The seed builtins are arithmetic/equality; persistent
 list/map construction and access; agent spawn/send/receive/scheduling/introspection;
 conditions; capability attenuation; and transactional model intent creation.
+The reflective pair `type-of` and `apply` is sufficient for the library-written
+metacircular evaluator without growing surface syntax.
 
 There is intentionally no special syntax for agents, swarms, persistence,
 sandboxes, verification, or AI models. They are values and libraries built on

@@ -146,7 +146,7 @@ fn main() -> io::Result<()> {
 
     println!("Agel agentic runtime — world revision {}", world.revision());
     if config.stdlib {
-        println!("Standard library installed: agel/sequence, agel/result, agel/swarm");
+        println!("Standard library installed: agel/sequence, agel/result, agel/swarm, agel/meta");
     }
     if providers.names().next().is_none() {
         println!("Model providers disabled; opt in with --enable-claude or --enable-codex.");

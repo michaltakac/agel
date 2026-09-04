@@ -65,7 +65,9 @@ mutate their inputs.
 ```
 
 Map keys use structural equality. Available list operations are `list`, `cons`,
-`car`, and `cdr`.
+`car`, and `cdr`. `(has-key? map key)` distinguishes a missing entry from one
+whose value is `nil`. `type-of` returns a symbolic value category, and `apply`
+invokes a callable from an explicit argument list.
 
 ## Conditions and restarts
 

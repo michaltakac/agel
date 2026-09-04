@@ -102,4 +102,44 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("swarm/no-workers"));
     }
+
+    #[test]
+    fn agel_interprets_agel_code_as_data() {
+        let mut world = installed();
+        let result = world
+            .evaluate(
+                "(import agel/meta)
+                 (def meta-env (meta-base-env))
+                 (list
+                   (meta-eval '(if (= 1 2) 0 (* 6 7)) meta-env)
+                   (meta-eval '((fn (x) (+ x 1)) 41) meta-env)
+                   (meta-eval
+                     '((fn (x) ((fn (y) (+ x y)) 2)) 40)
+                     meta-env))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            result,
+            Value::List(vec![Value::Int(42), Value::Int(42), Value::Int(42)])
+        );
+    }
+
+    #[test]
+    fn metacircular_evaluator_rejects_malformed_and_unbound_code() {
+        let mut world = installed();
+        world
+            .evaluate("(import agel/meta) (def meta-env (meta-base-env))")
+            .unwrap();
+        for source in [
+            "(meta-eval 'missing meta-env)",
+            "(meta-eval '(if #t 42) meta-env)",
+            "(meta-eval '((fn (x) x)) meta-env)",
+            "(meta-eval '((fn (x) x) 1 2) meta-env)",
+        ] {
+            assert!(world.evaluate(source).is_err(), "accepted {source}");
+        }
+    }
 }

@@ -98,3 +98,81 @@
   (def submit
     (fn (pool reply payload)
       (send pool (list 'submit reply payload)))))
+
+(module agel/meta
+  (export meta-base-env meta-eval)
+
+  (def meta-base-env
+    (fn ()
+      (dict
+        '+ + '- - '* * '/ / '= =
+        'list list 'cons cons 'car car 'cdr cdr
+        'dict dict 'get get 'assoc assoc 'count count
+        'has-key? has-key? 'type-of type-of)))
+
+  (def meta-require-arity
+    (fn (arguments expected)
+      (if (= (count arguments) expected)
+          arguments
+          (signal 'arity "malformed metacircular form" arguments))))
+
+  (def meta-bind
+    (fn (parameters arguments environment)
+      (if (= (count parameters) (count arguments))
+          (if (= parameters nil)
+              environment
+              (meta-bind
+                (cdr parameters)
+                (cdr arguments)
+                (assoc environment (car parameters) (car arguments))))
+          (signal 'arity "metacircular function arity mismatch" arguments))))
+
+  (def meta-eval-list
+    (fn (expressions environment)
+      (if (= expressions nil)
+          nil
+          (cons
+            (meta-eval (car expressions) environment)
+            (meta-eval-list (cdr expressions) environment)))))
+
+  (def meta-apply
+    (fn (function arguments)
+      (if (= (type-of function) 'list)
+          (if (= (car function) 'meta/closure)
+              (meta-eval
+                (car (cdr (cdr function)))
+                (meta-bind
+                  (car (cdr function))
+                  arguments
+                  (car (cdr (cdr (cdr function))))))
+              (signal 'meta/not-callable "invalid metacircular closure" function))
+          (apply function arguments))))
+
+  (def meta-eval
+    (fn (expression environment)
+      (if (= expression nil)
+          nil
+          (if (= (type-of expression) 'symbol)
+              (if (has-key? environment expression)
+                  (get environment expression)
+                  (signal 'name/unbound "unbound metacircular name" expression))
+              (if (= (type-of expression) 'list)
+                  (let ((head (car expression))
+                        (tail (cdr expression)))
+                    (if (= head 'quote)
+                        (car (meta-require-arity tail 1))
+                        (if (= head 'if)
+                            (let ((parts (meta-require-arity tail 3)))
+                              (if (meta-eval (car parts) environment)
+                                  (meta-eval (car (cdr parts)) environment)
+                                  (meta-eval (car (cdr (cdr parts))) environment)))
+                            (if (= head 'fn)
+                                (let ((parts (meta-require-arity tail 2)))
+                                  (list 'meta/closure
+                                    (car parts)
+                                    (car (cdr parts))
+                                    environment))
+                                (meta-apply
+                                  (meta-eval head environment)
+                                  (meta-eval-list tail environment))))))
+                  expression))))))

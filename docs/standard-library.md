@@ -50,3 +50,16 @@ Run the complete example:
 ```sh
 cargo run -q -p agel-cli < examples/worker-pool.agel
 ```
+
+## `agel/meta`
+
+`agel/meta` is an evaluator written in Agel. `meta-base-env` returns explicit
+bindings for its primitives; `(meta-eval quoted-program environment)` evaluates
+literals, symbols, `quote`, `if`, single-body lexical `fn`, and ordinary calls.
+Metacircular closures are transparent tagged lists containing parameters, body,
+and captured environment.
+
+This is the first self-hosting stratum, not yet a replacement for the seed. It
+deliberately omits world mutation, macros, modules, agents, effects, and resource
+accounting of its own; the enclosing seed still supplies budgets and transaction
+rollback. Run `examples/metacircular.agel` to inspect code, closures, and results.

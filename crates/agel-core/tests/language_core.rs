@@ -336,3 +336,29 @@ fn rollback_preserves_monotonic_revision_ids() {
     let commit = world.evaluate("(def value 3)").unwrap();
     assert_eq!(commit.revision, 3);
 }
+
+#[test]
+fn reflection_and_apply_are_small_homoiconic_primitives() {
+    let mut world = World::default();
+    let value = last(
+        &mut world,
+        "(list
+           (type-of '(+ 1 2))
+           (type-of +)
+           (has-key? (dict 'present nil) 'present)
+           (has-key? (dict 'present nil) 'missing)
+           (apply + '(10 20 12))
+           (apply (fn (x y) (* x y)) '(6 7)))",
+    );
+    assert_eq!(
+        value,
+        Value::List(vec![
+            Value::Symbol("list".into()),
+            Value::Symbol("callable".into()),
+            Value::Bool(true),
+            Value::Bool(false),
+            Value::Int(42),
+            Value::Int(42),
+        ])
+    );
+}

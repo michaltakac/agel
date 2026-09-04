@@ -1,0 +1,15 @@
+; Agel code interpreting quoted Agel code. The inner fn is represented as data,
+; closes over its metacircular environment, and is applied by Agel itself.
+(import agel/meta)
+(def env (meta-base-env))
+
+(meta-eval '(+ 20 22) env)
+(meta-eval '(if (= 1 2) 0 (* 6 7)) env)
+(meta-eval '((fn (x) (+ x 1)) 41) env)
+(meta-eval '((fn (x) ((fn (y) (+ x y)) 2)) 40) env)
+
+; The interpreted program is ordinary inspectable data.
+(def program '((fn (meaning) (list 'answer meaning)) 42))
+program
+(meta-eval program env)
+:quit

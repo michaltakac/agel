@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.8: a library-first agent environment**. It provides:
+The current repository is **v0.9: independently checked self-hosting foundations**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -30,6 +30,10 @@ The current repository is **v0.8: a library-first agent environment**. It provid
 - an atomic standard library written in Agel, not privileged Rust;
 - persistent sequence and tagged-result libraries; and
 - typed round-robin worker pools with bounded transactional scheduling;
+- `type-of` and `apply`, the two small reflective primitives needed by libraries;
+- an `agel/meta` evaluator written in Agel for a lexical functional subset;
+- an independent Common Lisp reference checked against the Rust seed; and
+- external A/B image canary, evidence-bound promotion, and rollback;
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 This is deliberately not presented as an operating-system kernel yet. See
@@ -44,7 +48,7 @@ Agel currently requires only a Rust toolchain:
 cargo run -p agel-cli
 ```
 
-The CLI installs `agel/sequence`, `agel/result`, and `agel/swarm` by default.
+The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, and `agel/meta` by default.
 Use `--no-stdlib` to expose only the minimal language substrate.
 
 Example session:
@@ -110,6 +114,14 @@ Library-defined orchestration demonstration:
 cargo run -q -p agel-cli < examples/worker-pool.agel
 ```
 
+Metacircular and A/B bootstrap demonstrations:
+
+```sh
+cargo run -q -p agel-cli < examples/metacircular.agel
+./scripts/test-bootstrap.sh
+cargo run -q -p agel-supervisor --example ab_upgrade
+```
+
 See [`docs/language-core.md`](docs/language-core.md) and
 [`docs/agent-runtime.md`](docs/agent-runtime.md) for the implemented language.
 Runnable demonstrations live in [`examples/`](examples/).
@@ -124,3 +136,5 @@ The stable v0.7 image format and recovery behavior are specified in
 [`docs/portable-images.md`](docs/portable-images.md).
 The v0.8 library APIs are documented in [`docs/standard-library.md`](docs/standard-library.md),
 and the whole reader grammar fits in [`docs/language-postcard.md`](docs/language-postcard.md).
+The v0.9 bootstrap trust story and its current limits are in
+[`docs/bootstrap.md`](docs/bootstrap.md).
