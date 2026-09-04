@@ -1,0 +1,20 @@
+[package]
+name = "agel-boot"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[features]
+selftest = []
+monitor-selftest = []
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+strip = false
+
+[workspace]

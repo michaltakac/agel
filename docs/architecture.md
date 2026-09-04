@@ -88,13 +88,16 @@ Each rung must be runnable and differentially testable against the rung below:
    seed, while `agel/meta` evaluates lexical Agel code as data. A supervisor
    keeps whole A/B semantic images outside the candidate and binds promotion to
    zero-authority health evidence.
-10. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
+10. **Bootable recovery seed (complete at v1.0):** a reproducible BIOS image
+   enters x86-64 long mode, runs a freestanding Rust serial HAL, and exposes an
+   independent A/B recovery monitor whose policy is testable under QEMU.
+11. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
    and compiler in Agel; extend diverse comparison to every kernel semantic.
-11. **Native substrate:** minimal Rust/C HAL, allocator, interrupt/trap entry,
-   drivers, and a QEMU image. Keep device access outside mutable language heaps.
-12. **Live system:** A/B system worlds, health oracles, signed promotion,
-   watchdog-triggered rollback, and a recovery monitor outside the self-editing
-   runtime.
+12. **Native agent world:** allocator, interrupt/trap entry, drivers, the Agel
+   evaluator, and persistent images inside the VM. Keep device access outside
+   mutable language heaps.
+13. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+   promotion, and watchdog-triggered rollback managed by the recovery monitor.
 
 ## Change protocol for privileged code
 

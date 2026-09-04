@@ -106,3 +106,28 @@ The Common Lisp reference and metacircular evaluator currently cover the lexical
 functional kernel, not macros, modules, agents, persistence, or effects. A/B
 slot state is not yet a separately bootable disk selector. These are explicit
 v1.0 boundaries, not implied guarantees.
+
+## v1.0
+
+- **Self-editing world replaces recovery:** the freestanding recovery monitor is
+  linked into the native seed, outside any mutable Agel world. Its A/B policy
+  denies unverified promotion and retains the previous slot for rollback.
+- **Hosted-runtime-only confidence:** CI boots the exact raw image under QEMU,
+  checks the serial success token and debug-exit status, and rebuilds twice byte
+  for byte. This catches linker, disk-loader, and long-mode handoff regressions.
+- **Voice mistaken for authority:** text and voice are data modalities, not
+  credentials. `Authorize` inputs require an opaque proof bound to the hub's
+  host-owned presence authority; transcription alone can only observe or propose.
+- **Slow agent blocks conversation:** bounded foreground and background lanes
+  acknowledge accepted input independently of model or agent latency and apply
+  explicit backpressure rather than growing without limit.
+- **Native unsafety spreads inward:** privileged assembly and port I/O live only
+  in the separate `boot/kernel` workspace. The language workspace continues to
+  forbid unsafe Rust.
+
+The monitor's slots are presently an executable policy model, not two persisted
+boot partitions, and the boot seed does not yet contain the Agel evaluator,
+allocator, interrupts, storage, networking, audio, or isolation for hostile
+native binaries. QEMU emulation is a conformance target, not a proof of hardware
+correctness. Cryptographic boot, real watchdog hardware, and signed system
+images remain required before this is a secure autonomous OS.
