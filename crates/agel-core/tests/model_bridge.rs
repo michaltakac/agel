@@ -1,6 +1,6 @@
 use agel_core::{
     EvaluationOptions, EventKind, ModelCompletion, ModelCompletionError, ModelDispatchError,
-    ModelOutcome, ReplayInput, Value, World,
+    ReplayInput, Value, World,
 };
 
 fn setup_model_agent(world: &mut World) -> EvaluationOptions {
@@ -48,12 +48,10 @@ fn model_effect_is_committed_then_completed_as_a_trusted_message() {
     assert_eq!(pending[0].provider, "claude");
     assert_eq!(pending[0].prompt, "What is homoiconicity?");
 
+    world.claim_model_request(pending[0].id, &options).unwrap();
     world
         .complete_model_request(
-            ModelCompletion {
-                request_id: pending[0].id,
-                outcome: ModelOutcome::Success("Code and data share a representation.".into()),
-            },
+            ModelCompletion::success(&pending[0], "Code and data share a representation."),
             &options,
         )
         .unwrap();
@@ -130,13 +128,17 @@ fn recorded_model_completion_replays_without_calling_a_provider() {
     let mut world = World::default();
     let options = setup_model_agent(&mut world);
     let snapshot = world.snapshot();
+    world
+        .evaluate("(send asker '(ask \"future?\")) (run)")
+        .unwrap();
+    let request = world.pending_model_requests().pop().unwrap();
     let inputs = vec![
         ReplayInput::Evaluate("(send asker '(ask \"future?\")) (run)".into()),
         ReplayInput::ClaimModel(1),
-        ReplayInput::CompleteModel(ModelCompletion {
-            request_id: 1,
-            outcome: ModelOutcome::Success("agents all the way down".into()),
-        }),
+        ReplayInput::CompleteModel(ModelCompletion::success(
+            &request,
+            "agents all the way down",
+        )),
         ReplayInput::Evaluate("(run)".into()),
     ];
     let left = World::replay_inputs(&snapshot, &inputs, &options).unwrap();
@@ -155,19 +157,13 @@ fn dispatch_claim_prevents_duplicate_external_work() {
     let (_, claimed) = world.claim_model_request(1, &options).unwrap();
     assert_eq!(claimed.prompt, "exactly once");
     assert!(world.pending_model_requests().is_empty());
-    assert_eq!(world.dispatching_model_requests(), vec![claimed]);
+    assert_eq!(world.dispatching_model_requests(), vec![claimed.clone()]);
     assert_eq!(
         world.claim_model_request(1, &options).unwrap_err(),
         ModelDispatchError::NotPending(1)
     );
     world
-        .complete_model_request(
-            ModelCompletion {
-                request_id: 1,
-                outcome: ModelOutcome::Success("once".into()),
-            },
-            &options,
-        )
+        .complete_model_request(ModelCompletion::success(&claimed, "once"), &options)
         .unwrap();
     assert!(world.dispatching_model_requests().is_empty());
 }
@@ -179,14 +175,11 @@ fn completed_output_is_not_reissued_when_its_target_has_stopped() {
     world
         .evaluate("(send asker '(ask \"survive me\")) (run)")
         .unwrap();
-    world.claim_model_request(1, &options).unwrap();
+    let (_, request) = world.claim_model_request(1, &options).unwrap();
     world.evaluate("(send asker '(crash)) (run)").unwrap();
     world
         .complete_model_request(
-            ModelCompletion {
-                request_id: 1,
-                outcome: ModelOutcome::Success("durably recorded".into()),
-            },
+            ModelCompletion::success(&request, "durably recorded"),
             &options,
         )
         .unwrap();
@@ -205,10 +198,9 @@ fn completion_is_idempotence_guarded() {
     world
         .evaluate("(send asker '(ask \"once\")) (run)")
         .unwrap();
-    let completion = ModelCompletion {
-        request_id: 1,
-        outcome: ModelOutcome::Success("one answer".into()),
-    };
+    let request = world.pending_model_requests().pop().unwrap();
+    world.claim_model_request(1, &options).unwrap();
+    let completion = ModelCompletion::success(&request, "one answer");
     world
         .complete_model_request(completion.clone(), &options)
         .unwrap();
@@ -217,5 +209,48 @@ fn completion_is_idempotence_guarded() {
             .complete_model_request(completion, &options)
             .unwrap_err(),
         ModelCompletionError::AlreadyCompleted(1)
+    );
+}
+
+#[test]
+fn restoring_pending_snapshot_cannot_reissue_a_claimed_effect() {
+    let mut world = World::default();
+    let options = setup_model_agent(&mut world);
+    world
+        .evaluate("(send asker '(ask \"charge once\")) (run)")
+        .unwrap();
+    let pending_snapshot = world.snapshot();
+    let (_, request) = world.claim_model_request(1, &options).unwrap();
+    world
+        .complete_model_request(ModelCompletion::success(&request, "paid result"), &options)
+        .unwrap();
+    world.restore_snapshot(&pending_snapshot).unwrap();
+    assert_eq!(world.pending_model_requests().len(), 1);
+    assert!(matches!(
+        world.claim_model_request(1, &options),
+        Err(ModelDispatchError::AlreadyClaimed(_))
+    ));
+    assert_eq!(world.effect_journal().entries().len(), 1);
+}
+
+#[test]
+fn snapshot_restore_revokes_pre_restore_capabilities() {
+    let mut world = World::default();
+    let capability = world.issue_capability("model/infer", "claude").unwrap();
+    let options = EvaluationOptions {
+        capabilities: vec![capability],
+        ..EvaluationOptions::default()
+    };
+    world
+        .evaluate_with("(request-capability 'model/infer \"claude\")", &options)
+        .unwrap();
+    let snapshot = world.snapshot();
+    world.restore_snapshot(&snapshot).unwrap();
+    let error = world
+        .evaluate_with("(request-capability 'model/infer \"claude\")", &options)
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "evaluation error: capability/denied: no supplied capability permits model/infer on claude"
     );
 }

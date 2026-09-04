@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **Milestone 3: real model agents**. It provides:
+The current repository is **v0.5: evidence-carrying self-improvement**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -17,7 +17,10 @@ The current repository is **Milestone 3: real model agents**. It provides:
 - deterministic cooperative scheduling and supervision trees;
 - transactional agent turns, structured event history, snapshots, and replay;
 - transactional model-request outboxes with exact-response replay;
-- capability-scoped, explicit adapters for real Claude Code and Codex CLIs; and
+- capability-scoped, explicit adapters for real Claude Code and Codex CLIs;
+- SHA-256-bound proposals, zero-authority canaries, executable evidence, and
+  atomic promotion;
+- a non-rollback effect journal and epoch-bound capability revocation; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 This is deliberately not presented as an operating-system kernel yet. See
@@ -70,8 +73,17 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+Self-improvement demonstration:
+
+```sh
+cargo run -q -p agel-verify --example safe_upgrade
+```
+
 See [`docs/language-core.md`](docs/language-core.md) and
 [`docs/agent-runtime.md`](docs/agent-runtime.md) for the implemented language.
 Runnable demonstrations live in [`examples/`](examples/).
 See [`docs/model-agents.md`](docs/model-agents.md) for the real-provider trust
 boundary and opt-in instructions.
+See [`docs/evidence-upgrades.md`](docs/evidence-upgrades.md) for safe staged
+self-modification and [`docs/threat-model.md`](docs/threat-model.md) for the
+growing adversarial model.

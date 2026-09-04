@@ -1,12 +1,9 @@
 [package]
-name = "agel-core"
+name = "agel-integrity"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-
-[dependencies]
-agel-integrity = { path = "../agel-integrity" }
 
 [lints]
 workspace = true

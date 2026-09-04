@@ -1,11 +1,12 @@
 [package]
-name = "agel-core"
+name = "agel-verify"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+agel-core = { path = "../agel-core" }
 agel-integrity = { path = "../agel-integrity" }
 
 [lints]

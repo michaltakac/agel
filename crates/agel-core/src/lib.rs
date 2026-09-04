@@ -6,10 +6,12 @@ mod reader;
 mod value;
 mod world;
 
+pub use agel_integrity::Digest;
 pub use agent::{AgentStatus, Event, EventKind, FailureAction, Protocol, TypeSpec};
 pub use eval::{Condition, EvalError};
 pub use model::{
-    ModelCompletion, ModelCompletionError, ModelDispatchError, ModelOutcome, ModelRequest,
+    EffectJournal, EffectJournalEntry, EffectJournalStatus, EffectKey, ModelCompletion,
+    ModelCompletionError, ModelDispatchError, ModelOutcome, ModelRequest,
 };
 pub use reader::{read_all, read_all_with_limits, ReadError, ReadLimits};
 pub use value::{Capability, Expr, Value};

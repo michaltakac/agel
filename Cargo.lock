@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "agel-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "agel-core",
  "agel-model",
@@ -12,11 +12,26 @@ dependencies = [
 
 [[package]]
 name = "agel-core"
-version = "0.4.0"
+version = "0.5.0"
+dependencies = [
+ "agel-integrity",
+]
+
+[[package]]
+name = "agel-integrity"
+version = "0.5.0"
 
 [[package]]
 name = "agel-model"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "agel-core",
+]
+
+[[package]]
+name = "agel-verify"
+version = "0.5.0"
+dependencies = [
+ "agel-core",
+ "agel-integrity",
 ]

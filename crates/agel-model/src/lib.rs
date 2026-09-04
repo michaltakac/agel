@@ -358,6 +358,8 @@ mod tests {
             reply_to: 1,
             provider: provider.into(),
             prompt: "explain (cons 'agent future)".into(),
+            prompt_digest: agel_core::Digest::ZERO,
+            effect_key: agel_core::Digest::ZERO,
         }
     }
 

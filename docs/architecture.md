@@ -65,10 +65,11 @@ Each rung must be runnable and differentially testable against the rung below:
 4. **Model-agent bridge (complete):** transactional inference intents,
    capability-scoped Claude Code and Codex adapters, trusted result injection,
    and deterministic replay without provider re-execution.
-5. **Verification gate (next):** contracts, effect inference, model checking of finite
-   protocol state machines, proof objects for privileged changes, and staged
-   canary execution. A macro may construct evidence; a small trusted checker,
-   not the macro itself, decides whether it is valid.
+5. **Verification gate (complete at v0.5):** content-bound proposals,
+   conservative effect declarations, executable evidence, zero-authority
+   canaries, and atomic promotion. A small trusted checker, not a macro or
+   model, decides admission. Finite protocol model checking remains a
+   library-layer extension.
 6. **Common Lisp bootstrap:** a portable reference implementation that emits
    the same core IR and runs conformance tests against the Rust seed.
 7. **Self-host:** reader, expander, evaluator/compiler, and standard library in

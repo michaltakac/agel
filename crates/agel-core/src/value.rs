@@ -91,11 +91,19 @@ pub struct Capability {
     id: u64,
     kind: String,
     scope: String,
+    issuer_world: u64,
+    epoch: u64,
 }
 
 impl Capability {
-    pub(crate) fn new(id: u64, kind: String, scope: String) -> Self {
-        Self { id, kind, scope }
+    pub(crate) fn new(id: u64, kind: String, scope: String, issuer_world: u64, epoch: u64) -> Self {
+        Self {
+            id,
+            kind,
+            scope,
+            issuer_world,
+            epoch,
+        }
     }
 
     pub fn id(&self) -> u64 {
@@ -110,8 +118,18 @@ impl Capability {
         &self.scope
     }
 
-    pub(crate) fn permits(&self, kind: &str, scope: &str) -> bool {
-        self.kind == kind
+    pub fn issuer_world(&self) -> u64 {
+        self.issuer_world
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub(crate) fn permits(&self, kind: &str, scope: &str, world: u64, epoch: u64) -> bool {
+        self.issuer_world == world
+            && self.epoch == epoch
+            && self.kind == kind
             && (self.scope == "*"
                 || self.scope == scope
                 || scope

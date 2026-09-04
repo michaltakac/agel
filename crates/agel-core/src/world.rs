@@ -2,16 +2,19 @@ use crate::agent::{Agent, Event};
 use crate::eval::{eval_all, EvalError};
 use crate::macro_expander::MacroDef;
 use crate::model::{
-    ModelCompletion, ModelCompletionError, ModelDispatchError, ModelRecord, ModelRequest,
-    ModelRequestStatus,
+    EffectJournal, EffectJournalEntry, EffectJournalStatus, ModelCompletion, ModelCompletionError,
+    ModelDispatchError, ModelRecord, ModelRequest, ModelRequestStatus,
 };
 use crate::reader::{read_all_with_limits, ReadError, ReadLimits};
 use crate::value::Builtin;
 use crate::{Capability, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 const DEFAULT_HISTORY_LIMIT: usize = 64;
+static NEXT_WORLD_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Budget {
@@ -167,13 +170,16 @@ impl fmt::Display for AuthorityError {
 
 impl std::error::Error for AuthorityError {}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Snapshot {
     state: State,
     revision: u64,
     next_revision: u64,
     next_capability_id: u64,
     digest: u64,
+    world_id: u64,
+    authority_epoch: u64,
+    effect_journal: Arc<Mutex<EffectJournal>>,
 }
 
 impl Snapshot {
@@ -183,6 +189,10 @@ impl Snapshot {
 
     pub fn digest(&self) -> u64 {
         self.digest
+    }
+
+    pub fn content_digest(&self) -> agel_integrity::Digest {
+        state_content_digest(&self.state)
     }
 }
 
@@ -229,6 +239,9 @@ pub struct World {
     next_capability_id: u64,
     history: VecDeque<(u64, State)>,
     history_limit: usize,
+    world_id: u64,
+    authority_epoch: u64,
+    effect_journal: Arc<Mutex<EffectJournal>>,
 }
 
 impl Default for World {
@@ -246,6 +259,9 @@ impl World {
             next_capability_id: 1,
             history: VecDeque::new(),
             history_limit,
+            world_id: next_world_id(),
+            authority_epoch: 1,
+            effect_journal: Arc::new(Mutex::new(EffectJournal::default())),
         }
     }
 
@@ -261,6 +277,22 @@ impl World {
         state_digest(&self.state)
     }
 
+    pub fn content_digest(&self) -> agel_integrity::Digest {
+        state_content_digest(&self.state)
+    }
+
+    pub fn world_id(&self) -> u64 {
+        self.world_id
+    }
+
+    pub fn authority_epoch(&self) -> u64 {
+        self.authority_epoch
+    }
+
+    pub fn effect_journal(&self) -> EffectJournal {
+        lock_journal(&self.effect_journal).clone()
+    }
+
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             state: self.state.clone(),
@@ -268,6 +300,9 @@ impl World {
             next_revision: self.next_revision,
             next_capability_id: self.next_capability_id,
             digest: self.state_digest(),
+            world_id: self.world_id,
+            authority_epoch: self.authority_epoch,
+            effect_journal: Arc::clone(&self.effect_journal),
         }
     }
 
@@ -282,6 +317,9 @@ impl World {
             next_capability_id: snapshot.next_capability_id,
             history: VecDeque::new(),
             history_limit: DEFAULT_HISTORY_LIMIT,
+            world_id: snapshot.world_id,
+            authority_epoch: snapshot.authority_epoch,
+            effect_journal: Arc::clone(&snapshot.effect_journal),
         })
     }
 
@@ -306,6 +344,12 @@ impl World {
         self.revision = revision;
         self.next_revision = following_revision;
         self.next_capability_id = self.next_capability_id.max(snapshot.next_capability_id);
+        self.authority_epoch =
+            self.authority_epoch
+                .checked_add(1)
+                .ok_or(ReplayError::Transaction(
+                    TransactionError::RevisionExhausted,
+                ))?;
         Ok(revision)
     }
 
@@ -342,6 +386,7 @@ impl World {
         options: &EvaluationOptions,
     ) -> Result<ReplayReport, ReplayError> {
         let mut world = Self::from_snapshot(snapshot)?;
+        world.effect_journal = Arc::new(Mutex::new(EffectJournal::default()));
         let initial_events = world.events().len();
         let mut values = Vec::with_capacity(inputs.len());
         let mut steps_used = 0_u64;
@@ -364,6 +409,11 @@ impl World {
                             "model/not-pending",
                             format!("model request is not pending: {id}"),
                             id,
+                        ),
+                        ModelDispatchError::AlreadyClaimed(key) => model_replay_error(
+                            "model/already-claimed",
+                            format!("external effect was already claimed: {key}"),
+                            *id,
                         ),
                     })?,
                 ReplayInput::CompleteModel(completion) => world
@@ -388,6 +438,11 @@ impl World {
                                 }),
                             }))
                         }
+                        ModelCompletionError::MismatchedEffect(id) => model_replay_error(
+                            "model/mismatched-effect",
+                            format!("completion does not match model request: {id}"),
+                            id,
+                        ),
                     })?,
             };
             steps_used = steps_used
@@ -414,7 +469,13 @@ impl World {
             .next_capability_id
             .checked_add(1)
             .ok_or(AuthorityError)?;
-        Ok(Capability::new(id, kind.into(), scope.into()))
+        Ok(Capability::new(
+            id,
+            kind.into(),
+            scope.into(),
+            self.world_id,
+            self.authority_epoch,
+        ))
     }
 
     pub fn evaluate(&mut self, source: &str) -> Result<Commit, TransactionError> {
@@ -447,7 +508,13 @@ impl World {
             .checked_add(1)
             .ok_or(TransactionError::RevisionExhausted)?;
         let mut candidate = self.state.clone();
-        let (values, steps_used) = eval_all(&expressions, &mut candidate, options)?;
+        let (values, steps_used) = eval_all(
+            &expressions,
+            &mut candidate,
+            options,
+            self.world_id,
+            self.authority_epoch,
+        )?;
 
         if self.history_limit > 0 {
             if self.history.len() == self.history_limit {
@@ -497,6 +564,19 @@ impl World {
             return Err(ModelDispatchError::NotPending(request_id));
         }
         let request = record.request.clone();
+        {
+            let mut journal = lock_journal(&self.effect_journal);
+            if journal.entries.contains_key(&request.effect_key) {
+                return Err(ModelDispatchError::AlreadyClaimed(request.effect_key));
+            }
+            journal.entries.insert(
+                request.effect_key,
+                EffectJournalEntry {
+                    request: request.clone(),
+                    status: EffectJournalStatus::Claimed,
+                },
+            );
+        }
         let revision = self.next_revision;
         let following_revision =
             self.next_revision
@@ -505,8 +585,14 @@ impl World {
                     TransactionError::RevisionExhausted,
                 ))?;
         let mut candidate = self.state.clone();
-        let steps_used = crate::eval::claim_model_request(&mut candidate, request_id, options)
-            .map_err(|error| ModelDispatchError::Transaction(TransactionError::Eval(error)))?;
+        let steps_used = crate::eval::claim_model_request(
+            &mut candidate,
+            request_id,
+            options,
+            self.world_id,
+            self.authority_epoch,
+        )
+        .map_err(|error| ModelDispatchError::Transaction(TransactionError::Eval(error)))?;
         if self.history_limit > 0 {
             if self.history.len() == self.history_limit {
                 self.history.pop_front();
@@ -537,10 +623,30 @@ impl World {
             .get(&completion.request_id)
             .map(|record| &record.status)
             .ok_or(ModelCompletionError::UnknownRequest(completion.request_id))?;
+        let request = &self
+            .state
+            .model_requests
+            .get(&completion.request_id)
+            .expect("request was just found")
+            .request;
+        if completion.effect_key != request.effect_key {
+            return Err(ModelCompletionError::MismatchedEffect(
+                completion.request_id,
+            ));
+        }
         if matches!(status, ModelRequestStatus::Completed(_)) {
             return Err(ModelCompletionError::AlreadyCompleted(
                 completion.request_id,
             ));
+        }
+        {
+            let mut journal = lock_journal(&self.effect_journal);
+            let Some(entry) = journal.entries.get_mut(&completion.effect_key) else {
+                return Err(ModelCompletionError::MismatchedEffect(
+                    completion.request_id,
+                ));
+            };
+            entry.status = EffectJournalStatus::Completed(completion.outcome.clone());
         }
         let revision = self.next_revision;
         let following_revision =
@@ -550,8 +656,14 @@ impl World {
                     TransactionError::RevisionExhausted,
                 ))?;
         let mut candidate = self.state.clone();
-        let steps_used = crate::eval::complete_model_request(&mut candidate, &completion, options)
-            .map_err(|error| ModelCompletionError::Transaction(TransactionError::Eval(error)))?;
+        let steps_used = crate::eval::complete_model_request(
+            &mut candidate,
+            &completion,
+            options,
+            self.world_id,
+            self.authority_epoch,
+        )
+        .map_err(|error| ModelCompletionError::Transaction(TransactionError::Eval(error)))?;
         if self.history_limit > 0 {
             if self.history.len() == self.history_limit {
                 self.history.pop_front();
@@ -582,6 +694,20 @@ impl World {
     pub fn agent_name(&self, id: u64) -> Option<&str> {
         self.state.agents.get(&id).map(|agent| agent.name.as_str())
     }
+
+    pub fn fork_isolated(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            revision: self.revision,
+            next_revision: self.next_revision,
+            next_capability_id: 1,
+            history: VecDeque::new(),
+            history_limit: self.history_limit,
+            world_id: next_world_id(),
+            authority_epoch: 1,
+            effect_journal: Arc::new(Mutex::new(EffectJournal::default())),
+        }
+    }
 }
 
 fn state_digest(state: &State) -> u64 {
@@ -592,6 +718,22 @@ fn state_digest(state: &State) -> u64 {
         .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
             (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
         })
+}
+
+fn state_content_digest(state: &State) -> agel_integrity::Digest {
+    let mut bytes = b"agel-world-debug-v1\0".to_vec();
+    bytes.extend_from_slice(format!("{state:?}").as_bytes());
+    agel_integrity::sha256(&bytes)
+}
+
+fn next_world_id() -> u64 {
+    NEXT_WORLD_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn lock_journal(journal: &Arc<Mutex<EffectJournal>>) -> MutexGuard<'_, EffectJournal> {
+    journal
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn model_replay_error(kind: &str, message: String, id: u64) -> ReplayError {

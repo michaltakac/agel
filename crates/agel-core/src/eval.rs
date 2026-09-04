@@ -1,6 +1,8 @@
 use crate::agent::{Agent, AgentStatus, Event, EventKind, FailureAction, Protocol, TypeSpec};
 use crate::macro_expander::{expand, ExpansionError, MacroDef};
-use crate::model::{ModelCompletion, ModelOutcome, ModelRecord, ModelRequest, ModelRequestStatus};
+use crate::model::{
+    model_effect_key, ModelCompletion, ModelOutcome, ModelRecord, ModelRequest, ModelRequestStatus,
+};
 use crate::value::{Builtin, Capability, Closure, Env};
 use crate::world::{EvaluationOptions, Module, State};
 use crate::{Expr, Value};
@@ -70,10 +72,12 @@ struct Runtime<'a> {
     macro_depth: usize,
     current_agent: Option<u64>,
     agent_capabilities: Option<Vec<Capability>>,
+    world_id: u64,
+    authority_epoch: u64,
 }
 
 impl<'a> Runtime<'a> {
-    fn new(options: &'a EvaluationOptions) -> Self {
+    fn new(options: &'a EvaluationOptions, world_id: u64, authority_epoch: u64) -> Self {
         Self {
             options,
             fuel_remaining: options.budget.fuel,
@@ -81,6 +85,8 @@ impl<'a> Runtime<'a> {
             macro_depth: 0,
             current_agent: None,
             agent_capabilities: None,
+            world_id,
+            authority_epoch,
         }
     }
 
@@ -128,8 +134,10 @@ pub(crate) fn eval_all(
     expressions: &[Expr],
     state: &mut State,
     options: &EvaluationOptions,
+    world_id: u64,
+    authority_epoch: u64,
 ) -> Result<(Vec<Value>, u64), EvalError> {
-    let mut runtime = Runtime::new(options);
+    let mut runtime = Runtime::new(options, world_id, authority_epoch);
     let mut env = Env::default();
     let mut values = Vec::with_capacity(expressions.len());
     for expression in expressions {
@@ -1478,10 +1486,14 @@ fn request_model(
         ));
     }
     let capabilities = runtime.agent_capabilities.as_deref().unwrap_or_default();
-    if !capabilities
-        .iter()
-        .any(|capability| capability.permits("model/infer", &provider))
-    {
+    if !capabilities.iter().any(|capability| {
+        capability.permits(
+            "model/infer",
+            &provider,
+            runtime.world_id,
+            runtime.authority_epoch,
+        )
+    }) {
         return Err(condition(
             "capability/denied",
             format!("agent has no model/infer capability for {provider}"),
@@ -1502,12 +1514,16 @@ fn request_model(
         .next_model_request_id
         .checked_add(1)
         .ok_or_else(|| condition("resource/id-exhausted", "model request id space exhausted"))?;
+    let prompt_digest = agel_integrity::sha256(prompt.as_bytes());
+    let effect_key = model_effect_key(runtime.world_id, id, &provider, prompt_digest);
     let request = ModelRequest {
         id,
         requester,
         reply_to,
         provider,
         prompt: prompt.clone(),
+        prompt_digest,
+        effect_key,
     };
     state.model_requests.insert(
         id,
@@ -1565,6 +1581,14 @@ fn model_request_value(request: &ModelRequest) -> Value {
             Value::Symbol("prompt".into()),
             Value::String(request.prompt.clone()),
         ),
+        (
+            Value::Symbol("prompt-digest".into()),
+            Value::String(request.prompt_digest.to_string()),
+        ),
+        (
+            Value::Symbol("effect-key".into()),
+            Value::String(request.effect_key.to_string()),
+        ),
     ])
 }
 
@@ -1572,8 +1596,10 @@ pub(crate) fn complete_model_request(
     state: &mut State,
     completion: &ModelCompletion,
     options: &EvaluationOptions,
+    world_id: u64,
+    authority_epoch: u64,
 ) -> Result<u64, EvalError> {
-    let mut runtime = Runtime::new(options);
+    let mut runtime = Runtime::new(options, world_id, authority_epoch);
     let request = state
         .model_requests
         .get(&completion.request_id)
@@ -1642,8 +1668,10 @@ pub(crate) fn claim_model_request(
     state: &mut State,
     request_id: u64,
     options: &EvaluationOptions,
+    world_id: u64,
+    authority_epoch: u64,
 ) -> Result<u64, EvalError> {
-    let mut runtime = Runtime::new(options);
+    let mut runtime = Runtime::new(options, world_id, authority_epoch);
     runtime.tick().map_err(signal_to_eval_error)?;
     let request = state
         .model_requests
@@ -1704,7 +1732,9 @@ fn request_capability(arguments: Vec<Value>, runtime: &Runtime<'_>) -> Result<Va
         .unwrap_or(&runtime.options.capabilities);
     capabilities
         .iter()
-        .find(|capability| capability.permits(kind, scope))
+        .find(|capability| {
+            capability.permits(kind, scope, runtime.world_id, runtime.authority_epoch)
+        })
         .cloned()
         .map(Value::Capability)
         .ok_or_else(|| {

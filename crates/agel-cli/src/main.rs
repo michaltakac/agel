@@ -316,6 +316,7 @@ fn dispatch_pending(world: &mut World, providers: &ProviderRegistry, options: &E
         if let Err(error) = world.complete_model_request(
             ModelCompletion {
                 request_id: request.id,
+                effect_key: request.effect_key,
                 outcome,
             },
             options,
