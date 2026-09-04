@@ -1,13 +1,18 @@
 [package]
 name = "agel-boot"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
+rust-version = "1.88"
 publish = false
+
+[dependencies]
+agel-kernel-abi = { path = "../../crates/agel-kernel-abi", default-features = false }
 
 [features]
 selftest = []
 monitor-selftest = []
 native-selftest = []
+isolation-selftest = []
 
 [profile.dev]
 panic = "abort"

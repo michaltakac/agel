@@ -4,7 +4,24 @@
 use core::arch::asm;
 use core::panic::PanicInfo;
 
-#[cfg(not(any(feature = "selftest", feature = "monitor-selftest")))]
+#[cfg(feature = "isolation-selftest")]
+mod contract;
+#[cfg(feature = "isolation-selftest")]
+mod cpu;
+#[cfg(feature = "isolation-selftest")]
+mod domain;
+#[cfg(feature = "isolation-selftest")]
+mod hal;
+#[cfg(feature = "isolation-selftest")]
+mod memory;
+#[cfg(feature = "isolation-selftest")]
+mod user;
+
+#[cfg(not(any(
+    feature = "selftest",
+    feature = "monitor-selftest",
+    feature = "isolation-selftest"
+)))]
 mod native;
 
 const COM1: u16 = 0x3f8;
@@ -41,7 +58,8 @@ impl Serial {
     #[cfg(not(any(
         feature = "selftest",
         feature = "monitor-selftest",
-        feature = "native-selftest"
+        feature = "native-selftest",
+        feature = "isolation-selftest"
     )))]
     fn read_byte() -> u8 {
         while unsafe { input(COM1 + 5) } & 1 == 0 {}
@@ -114,8 +132,13 @@ impl RecoveryMonitor {
 #[no_mangle]
 #[link_section = ".text.entry"]
 extern "C" fn agel_boot() -> ! {
+    // Nothing has zeroed `.bss`: it is a NOBITS section, so it occupies
+    // addresses in the image's memory range but contributes no bytes to the raw
+    // disk image the BIOS loads. Relying on the emulator handing us zeroed RAM
+    // would make correctness a property of QEMU rather than of this kernel.
+    zero_bss();
     Serial::initialize();
-    Serial::write("\nAgel v1.1 native workshop\n");
+    Serial::write("\nAgel v1.2 native workshop\n");
     Serial::write("recovery monitor is outside the mutable agent world\n");
     Serial::write("self-check: BIOS seed -> long mode -> Rust HAL [ok]\n");
 
@@ -151,10 +174,23 @@ extern "C" fn agel_boot() -> ! {
         native_selftest()
     }
 
+    #[cfg(all(
+        feature = "isolation-selftest",
+        not(any(
+            feature = "selftest",
+            feature = "monitor-selftest",
+            feature = "native-selftest"
+        ))
+    ))]
+    {
+        isolation_selftest()
+    }
+
     #[cfg(not(any(
         feature = "selftest",
         feature = "monitor-selftest",
-        feature = "native-selftest"
+        feature = "native-selftest",
+        feature = "isolation-selftest"
     )))]
     {
         native_repl()
@@ -164,7 +200,8 @@ extern "C" fn agel_boot() -> ! {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn native_repl() -> ! {
     let mut session = native::Session::new();
@@ -214,9 +251,17 @@ fn native_repl() -> ! {
                 }
                 Serial::write("\n");
             }
-            b":limits" => Serial::write(
-                "source=256 nodes=128 globals=24 name=24 params=4 args=8 body=192 depth=24 fuel=2000\n",
-            ),
+            b":limits" => {
+                Serial::write("source=");
+                write_u64(line.len() as u64);
+                for (name, bound) in native::LIMITS {
+                    Serial::write(" ");
+                    Serial::write(name);
+                    Serial::write("=");
+                    write_u64(*bound);
+                }
+                Serial::write("\n");
+            }
             b":recovery-status" => monitor.status(),
             b":verify" => monitor.verify(),
             b":promote" => monitor.promote(),
@@ -234,7 +279,8 @@ fn native_repl() -> ! {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn read_line(buffer: &mut [u8]) -> usize {
     let mut length = 0;
@@ -261,7 +307,8 @@ fn read_line(buffer: &mut [u8]) -> usize {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn read_form(buffer: &mut [u8]) -> usize {
     let mut length = 0;
@@ -279,7 +326,8 @@ fn read_form(buffer: &mut [u8]) -> usize {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn needs_more_input(source: &[u8]) -> bool {
     let mut depth = 0_u16;
@@ -304,7 +352,8 @@ fn needs_more_input(source: &[u8]) -> bool {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn write_value(value: native::Value, source: &[u8]) {
     match value {
@@ -324,7 +373,8 @@ fn write_value(value: native::Value, source: &[u8]) {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn write_error(error: native::Error) {
     Serial::write("error: ");
@@ -335,7 +385,8 @@ fn write_error(error: native::Error) {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn write_bytes(bytes: &[u8]) {
     for byte in bytes {
@@ -346,7 +397,8 @@ fn write_bytes(bytes: &[u8]) {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn write_i64(value: i64) {
     if value < 0 {
@@ -360,7 +412,8 @@ fn write_i64(value: i64) {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest"
+    feature = "native-selftest",
+    feature = "isolation-selftest"
 )))]
 fn write_u64(mut value: u64) {
     let mut digits = [0_u8; 20];
@@ -378,7 +431,11 @@ fn write_u64(mut value: u64) {
 
 #[cfg(all(
     feature = "native-selftest",
-    not(any(feature = "selftest", feature = "monitor-selftest"))
+    not(any(
+        feature = "selftest",
+        feature = "monitor-selftest",
+        feature = "isolation-selftest"
+    ))
 ))]
 fn native_selftest() -> ! {
     let mut session = native::Session::new();
@@ -417,10 +474,34 @@ fn native_selftest() -> ! {
 
 #[cfg(all(
     feature = "native-selftest",
-    not(any(feature = "selftest", feature = "monitor-selftest"))
+    not(any(
+        feature = "selftest",
+        feature = "monitor-selftest",
+        feature = "isolation-selftest"
+    ))
 ))]
 fn expect_int(session: &mut native::Session, source: &[u8], expected: i64) -> bool {
     session.evaluate(source) == Ok(native::Value::Int(expected))
+}
+
+/// Zero the `.bss` section named by the linker script.
+fn zero_bss() {
+    extern "C" {
+        static mut __bss_start: u8;
+        static mut __bss_end: u8;
+    }
+    // Safety: the linker guarantees the two symbols bound one contiguous,
+    // 8-byte-aligned region that belongs to this image and that nothing has
+    // read yet.
+    unsafe {
+        let start = &raw mut __bss_start as *mut u64;
+        let end = &raw mut __bss_end as *mut u64;
+        let mut cursor = start;
+        while cursor < end {
+            cursor.write_volatile(0);
+            cursor = cursor.add(1);
+        }
+    }
 }
 
 #[inline]
@@ -449,5 +530,220 @@ fn halt() -> ! {
 #[panic_handler]
 fn panic(_info: &PanicInfo<'_>) -> ! {
     Serial::write("KERNEL PANIC: recovery monitor halted the mutable world\n");
+    halt()
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 isolation self-test
+// ---------------------------------------------------------------------------
+
+/// A `core::fmt` sink over COM1, so the kernel can render the contract
+/// transcript with exactly the same code the hosted reference model uses.
+#[cfg(feature = "isolation-selftest")]
+struct SerialWriter;
+
+#[cfg(feature = "isolation-selftest")]
+impl core::fmt::Write for SerialWriter {
+    fn write_str(&mut self, text: &str) -> core::fmt::Result {
+        Serial::write(text);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "isolation-selftest")]
+macro_rules! kprint {
+    ($($argument:tt)*) => {{
+        use core::fmt::Write as _;
+        let _ = write!(SerialWriter, $($argument)*);
+    }};
+}
+
+/// Report a condition that makes the isolation test meaningless and stop.
+#[cfg(feature = "isolation-selftest")]
+fn isolation_failed(reason: &str) -> ! {
+    Serial::write("AGEL_ISOLATION_FAILED: ");
+    Serial::write(reason);
+    Serial::write("\n");
+    unsafe { out32(0xf4, 0x11) };
+    halt()
+}
+
+#[cfg(feature = "isolation-selftest")]
+fn allocate_stack(pool: &mut memory::FramePool, pages: u64) -> u64 {
+    let mut top = 0;
+    for _ in 0..pages {
+        match pool.allocate() {
+            // The pool is a bump allocator, so consecutive frames are
+            // contiguous and the last one's end is the top of the stack.
+            Ok(frame) => top = frame + memory::PAGE,
+            Err(_) => isolation_failed("frame pool exhausted building a kernel stack"),
+        }
+    }
+    top
+}
+
+/// Prove that an unprivileged world can speak the kernel contract, and cannot
+/// do anything else.
+#[cfg(feature = "isolation-selftest")]
+fn isolation_selftest() -> ! {
+    use agel_kernel_abi::model::ModelKernel;
+    use agel_kernel_abi::{conformance, write_step, Kernel};
+    use domain::{shared, Domain, Stop};
+
+    extern "C" {
+        static __user_text_start: u8;
+        static __user_text_end: u8;
+    }
+    // Only the addresses are taken; the bytes are never read through these.
+    let user_text = (&raw const __user_text_start) as u64..(&raw const __user_text_end) as u64;
+
+    hal::disable_interrupts();
+    if !memory::enable_no_execute() {
+        isolation_failed("processor does not support the no-execute bit");
+    }
+
+    let mut pool = memory::FramePool::new();
+    let Ok(identity) = memory::build_identity_window(&mut pool, user_text.clone()) else {
+        isolation_failed("could not build the identity window");
+    };
+    let Ok(kernel_space) = memory::AddressSpace::new(&mut pool, identity) else {
+        isolation_failed("could not build the kernel address space");
+    };
+    // Safety: the new space maps every address this code and its stack use.
+    unsafe {
+        kernel_space.activate();
+        domain::set_kernel_root(kernel_space.root());
+    }
+
+    let trap_stack = allocate_stack(&mut pool, 4);
+    let fault_stack = allocate_stack(&mut pool, 2);
+    // Safety: called once, from ring 0, with interrupts disabled, and with two
+    // distinct kernel stacks.
+    unsafe {
+        cpu::install(trap_stack, fault_stack);
+        // 1_193_182 Hz / 11_932 is very close to 100 Hz.
+        cpu::remap_interrupts(11_932);
+    }
+    Serial::write("isolation: page tables, descriptors, traps and timer installed\n");
+
+    let entry = user::agel_world_main as usize as u64;
+    if !user_text.contains(&entry) {
+        isolation_failed("the ring-3 entry point is not in user-executable text");
+    }
+
+    // -- The contract, spoken from ring 3 -----------------------------------
+    let Ok(mut world) = Domain::new(&mut pool, identity, entry, 8) else {
+        isolation_failed("could not build the conformance world");
+    };
+    let mut reference = ModelKernel::new();
+    reference.reset_to_conformance_domain();
+
+    let mut agreed = 0_usize;
+    Serial::write("---BEGIN AGEL RING3 CONTRACT TRANSCRIPT---\n");
+    kprint!(
+        "agel-kernel-contract v{}.{}.{} corpus={} steps\n",
+        agel_kernel_abi::VERSION_MAJOR,
+        agel_kernel_abi::VERSION_MINOR,
+        agel_kernel_abi::VERSION_PATCH,
+        conformance::CORPUS.len()
+    );
+    for step in conformance::CORPUS {
+        let observed = world.invoke_in_world(&step.request);
+        let expected = reference.invoke(&step.request);
+        let _ = write_step(&mut SerialWriter, step.label, &step.request, &observed);
+        if observed == expected {
+            agreed += 1;
+        }
+    }
+    Serial::write("---END AGEL RING3 CONTRACT TRANSCRIPT---\n");
+    if agreed != conformance::CORPUS.len() {
+        isolation_failed("ring 3 and the reference model disagree");
+    }
+    if world.stopped().is_some() {
+        isolation_failed("the conformance world did not survive its own corpus");
+    }
+    Serial::write("isolation: ring-3 corpus matches the reference model\n");
+
+    // -- Four hostile worlds, four containments -----------------------------
+    let provocations = [
+        (
+            shared::COMMAND_FAULT_WRITE,
+            "page-fault",
+            "writing to kernel memory",
+        ),
+        (
+            shared::COMMAND_FAULT_DIVIDE,
+            "divide-error",
+            "dividing by zero",
+        ),
+        (
+            shared::COMMAND_FAULT_PRIVILEGED,
+            "general-protection",
+            "masking interrupts",
+        ),
+    ];
+    for (command, expected, description) in provocations {
+        let Ok(mut hostile) = Domain::new(&mut pool, identity, entry, 8) else {
+            isolation_failed("could not build a hostile world");
+        };
+        match hostile.provoke(command) {
+            Stop::Faulted(fault) if fault.name() == expected => {
+                kprint!(
+                    "isolation: contained a world {description}: {} at rip {:#x}\n",
+                    fault.name(),
+                    fault.rip
+                );
+            }
+            Stop::Faulted(fault) => {
+                kprint!("isolation: unexpected {} for {description}\n", fault.name());
+                isolation_failed("a world faulted in an unexpected way");
+            }
+            _ => isolation_failed("a world was not contained"),
+        }
+        // A stopped world stays stopped, and cannot be re-entered by accident.
+        if !matches!(hostile.run(), Stop::Faulted(_)) {
+            isolation_failed("a stopped world was resumed");
+        }
+    }
+
+    let Ok(mut spinner) = Domain::new(&mut pool, identity, entry, 4) else {
+        isolation_failed("could not build the looping world");
+    };
+    match spinner.provoke(shared::COMMAND_SPIN) {
+        Stop::BudgetExhausted => {
+            Serial::write("isolation: preempted a world that never yields\n");
+        }
+        _ => isolation_failed("an infinite loop was not preempted"),
+    }
+
+    // -- The recovery plane is intact ---------------------------------------
+    let mut monitor = RecoveryMonitor::new();
+    monitor.status();
+    monitor.promote();
+    monitor.verify();
+    monitor.promote();
+    monitor.fault();
+    monitor.status();
+    kprint!("isolation: {} frames still unallocated\n", pool.remaining());
+
+    Serial::write("AGEL_ISOLATION_OK\n");
+    unsafe { out32(0xf4, 0x10) };
+    halt()
+}
+
+/// A trap taken in ring 0 is a defect in the kernel itself.
+///
+/// There is no domain to contain and no state that can be trusted, so the only
+/// honest action is to say which vector fired and stop. Silently continuing
+/// would turn a kernel bug into a world that appears to have been contained.
+#[cfg(feature = "isolation-selftest")]
+pub fn report_kernel_trap(frame: &cpu::TrapFrame) -> ! {
+    kprint!(
+        "AGEL_ISOLATION_FAILED: supervisor trap vector {} error {:#x} at rip {:#x}\n",
+        frame.vector,
+        frame.error,
+        frame.rip
+    );
+    unsafe { out32(0xf4, 0x11) };
     halt()
 }

@@ -166,3 +166,63 @@ editor, persistent image, macro expander, agent scheduler, capability system,
 interrupt table, memory protection, or compiler yet. The fixed evaluator shares
 the kernel address space, so its checked implementation is a robustness boundary,
 not hardware isolation from hostile native code.
+
+## v1.2
+
+- **A frozen boundary drifts by accident:** the kernel contract is a versioned
+  crate with an executable reference model and an 81-step conformance corpus
+  whose canonical transcript is checked in and diffed in CI. Adding, removing,
+  or reordering a step changes derivation identifiers and therefore the
+  transcript, so a contract change cannot be made quietly.
+- **"Not implemented" is discovered by being refused:** `boot.info` publishes a
+  profile bitmask, and every operation outside the profile answers
+  `invalid-operation`. A backend states what it does not do instead of leaving
+  a caller to infer it from an error.
+- **A refusal smuggles data:** a failing response carries no result words, by
+  construction rather than by convention.
+- **Authority is widened by derivation:** `mint` and `attenuate` reject any
+  rights their parent lacks, and reject bit patterns outside the defined set. A
+  capability space can attenuate itself and then cannot restore itself.
+- **A revoked handle keeps working, or looks like a caller mistake:**
+  revocation is transitive over the derivation tree to a fixed point, and
+  descendants are tombstoned rather than merely emptied, so a stale holder is
+  told `revoked` and not `invalid-capability`.
+- **An unbounded mailbox absorbs a hostile sender:** the endpoint queue has a
+  fixed capacity and reports `queue-full`. Notifications coalesce, so a
+  notification count is never a message count.
+- **A blocking call hangs a single-threaded domain:** operations with no
+  counterparty answer `would-block` or `not-found`. The contract has no
+  operation that can silently fail to return.
+- **The mutable language world runs privileged:** the research kernel now builds
+  its own page tables, runs worlds in ring 3 in separate address spaces, and
+  exposes exactly one trap gate. A world holds capability slot numbers; the
+  object table is supervisor-only memory it cannot read, forge, or corrupt.
+- **A world writes the supervisor that is about to judge it:** the kernel image
+  is mapped without the user bit in every domain's address space, so the write
+  page-faults. CI asserts the specific containment, not merely that the kernel
+  survived.
+- **A world disables its own preemption:** ring 3 runs with IOPL 0 and no I/O
+  permission bitmap, so `cli` and every port instruction raise
+  general-protection. CI asserts this.
+- **A world never yields:** each entry has a tick budget charged by a 100 Hz
+  timer. Exhausting it stops the domain. CI runs a deliberate infinite loop and
+  requires the supervisor to survive it.
+- **A stopped world is silently resumed:** a fault or overrun latches, and
+  re-entering a stopped domain returns its stop reason instead of running it.
+  Restart is a supervisor decision with a new generation, not an automatic retry.
+- **Ring-3 code reaches supervisor-only text:** `.user_text` is the only
+  user-executable range, and the isolation test rejects the image if the built
+  section contains a call or an indirect branch. A dense `match` in ring-3 code
+  compiles to a jump table in supervisor-only `.rodata`; the command codes are
+  deliberately sparse and the check keeps that from silently regressing.
+- **A NOBITS section is assumed to be zero:** the entry point zeroes `.bss`
+  itself rather than depending on the emulator handing out zeroed memory.
+
+The evaluator still runs in ring 0 in the default image; the isolation layer is
+built and tested but not yet carrying the language. Passing the conformance
+corpus is not evidence of isolation — a backend with no privilege separation at
+all would pass it — and the isolation claims above rest on the QEMU tests, not
+on a proof. The research kernel's object semantics are the shared reference
+model rather than an independent second implementation; that independence is
+what the seL4 backend is for. The frame allocator never reclaims, there is no
+IOMMU, no SMP, no signature verification, and no hardware watchdog.

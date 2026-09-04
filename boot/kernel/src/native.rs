@@ -16,6 +16,22 @@ const MAX_DEPTH: u8 = 24;
 const INITIAL_FUEL: u16 = 2_000;
 const NONE: u16 = u16::MAX;
 
+/// Every fixed native resource bound, named and reported from the constants the
+/// evaluator actually enforces. `:limits` renders this table, so the console can
+/// never drift away from the implementation or the documentation.
+#[cfg(not(feature = "native-selftest"))]
+pub const LIMITS: &[(&str, u64)] = &[
+    ("nodes", MAX_NODES as u64),
+    ("globals", MAX_BINDINGS as u64),
+    ("name", MAX_NAME as u64),
+    ("params", MAX_PARAMS as u64),
+    ("locals", MAX_LOCALS as u64),
+    ("args", MAX_ARGUMENTS as u64),
+    ("body", MAX_BODY as u64),
+    ("depth", MAX_DEPTH as u64),
+    ("fuel", INITIAL_FUEL as u64),
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
     Int(i64),

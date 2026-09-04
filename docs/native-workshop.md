@@ -55,10 +55,10 @@ definition without rebooting the VM.
 :defs              list current global definitions
 :limits            show every fixed native resource bound
 :recovery-status   inspect the independent boot recovery state
-:verify             admit recovery candidate B
-:promote            select a verified recovery candidate
-:fault              simulate watchdog rollback to A
-:shutdown           leave QEMU when the debug-exit device is present
+:verify            admit recovery candidate B
+:promote           select a verified recovery candidate
+:fault             simulate watchdog rollback to A
+:shutdown          leave QEMU when the debug-exit device is present
 ```
 
 ## Deterministic limits
@@ -67,7 +67,9 @@ The native seed permits 128 syntax nodes, 24 global definitions, 24-byte names,
 four function parameters, eight arguments/local slots, 192-byte stored bodies,
 24 reader/call levels, and 2,000 evaluation steps per submitted form. The serial
 input buffer is 256 bytes. These are explicit resource policy, not accidental
-allocation failures.
+allocation failures. `:limits` renders the table directly from the constants the
+evaluator enforces, so the console, this document, and the implementation cannot
+drift apart.
 
 `./scripts/test-native.sh` exercises the evaluator inside QEMU without input.
 `./scripts/test-native-repl.sh` additionally drives the real UART reader and

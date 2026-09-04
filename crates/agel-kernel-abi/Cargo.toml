@@ -1,0 +1,11 @@
+[package]
+name = "agel-kernel-abi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Versioned, backend-neutral kernel contract and conformance corpus for Agel native backends."
+
+[lints]
+workspace = true

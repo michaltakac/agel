@@ -35,6 +35,9 @@ current deterministic checker—can prove arbitrary code safe.
   Model inference is the first effect: agents can only create transactional
   requests, while a trusted host adapter owns process execution.
 - `unsafe` Rust is forbidden in the seed workspace.
+- Authority in the native backends is a capability slot with rights, never a
+  name. A derived capability may only be equal or weaker than its parent, and
+  revocation is transitive and fails stale holders closed.
 
 Software transactional memory is only one layer. STM can roll back language
 state, but cannot undo a model call, network request, disk write, or device I/O.
@@ -94,12 +97,24 @@ Each rung must be runnable and differentially testable against the rung below:
 11. **Native language workshop (complete at v1.1):** a fixed-memory Agel reader,
    evaluator, transactional world, definitions, recursive functions, and serial
    REPL execute inside QEMU while recovery state remains outside the language.
-12. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
+12. **Frozen kernel contract (complete at v1.2):** a versioned, backend-neutral
+   object/rights/operation contract, an executable reference model, and an
+   81-step conformance corpus whose canonical transcript is frozen and diffed.
+   See [`kernel-contract.md`](kernel-contract.md).
+13. **Research-kernel isolation (complete at v1.2):** kernel-built page tables,
+   per-domain address spaces, write-xor-execute, descriptor tables, trap entry,
+   a preemption timer, ring-3 protection domains, and a syscall boundary. An
+   unprivileged world answers the whole conformance corpus, and worlds that
+   fault, execute privileged instructions, or never yield are contained without
+   losing the recovery monitor.
+14. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
    and compiler in Agel; extend diverse comparison to every kernel semantic.
-13. **Native agent world:** allocator, interrupt/trap entry, drivers, the full
-   Agel agent runtime, and persistent images inside the VM. Keep device access
-   outside mutable language heaps.
-14. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+15. **Native agent world:** move the evaluator and the full Agel agent runtime
+   into ring-3 domains, then add an allocator, drivers, and persistent images.
+   Keep device access outside mutable language heaps.
+16. **seL4 backend:** the same kernel contract over an unmodified verified seL4
+   configuration, composed with Microkit, on AArch64 or RISC-V.
+17. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
 
 ## Change protocol for privileged code

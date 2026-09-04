@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v1.1: a native Agel workshop**. It provides:
+The current repository is **v1.2: a native Agel workshop with a frozen kernel
+contract and ring-3 isolation**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -41,12 +42,22 @@ The current repository is **v1.1: a native Agel workshop**. It provides:
 - boot-time A/B denial, verification, promotion, and watchdog rollback checks;
 - a fixed-memory Agel reader and evaluator running inside the VM;
 - native transactional definitions, functions, recursion, quote/eval, monotonic
-  revisions, and one-step world rollback; and
+  revisions, and one-step world rollback;
+- a versioned, backend-neutral kernel contract with an executable reference
+  model and an 81-step conformance corpus frozen as a canonical transcript;
+- kernel-built page tables, per-domain address spaces, write-xor-execute, trap
+  entry, and a 100 Hz preemption timer;
+- ring-3 protection domains that answer the whole kernel-contract corpus through
+  one trap gate while holding capability slots rather than references;
+- containment of worlds that write kernel memory, divide by zero, execute
+  privileged instructions, or never yield; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 This is the first Agel evaluator running on the independently bootable
-substrate, not yet a general-purpose operating system. The full agent runtime,
-filesystem, compiler, and persistent images still run as hosted components. See
+substrate, and the first hardware protection boundary the project can point at,
+but not yet a general-purpose operating system. The evaluator itself still runs
+privileged in the default image, and the full agent runtime, filesystem,
+compiler, and persistent images still run as hosted components. See
 [`docs/architecture.md`](docs/architecture.md) for the trust boundaries and
 bootstrap plan.
 
@@ -153,12 +164,19 @@ answer
 :rollback
 ```
 
-Run the prompt-synchronized native language conformance session with:
+Run the prompt-synchronized native language conformance session, the frozen
+kernel-contract transcript, and the ring-3 isolation suite with:
 
 ```sh
 ./scripts/test-native.sh
 ./scripts/test-native-repl.sh
+./scripts/test-kernel-contract.sh
+./scripts/test-isolation.sh
 ```
+
+The isolation suite boots a protection domain that answers all 81 steps of the
+kernel contract from user mode, then deliberately makes four worlds misbehave
+and requires each to be contained without losing the recovery monitor.
 
 The boot scripts require `qemu-system-x86_64`, `clang`, GNU `objcopy`, and the
 Rust `x86_64-unknown-none` target. On macOS: `brew install qemu binutils`.
@@ -184,5 +202,10 @@ The native seed and recovery boundary are documented in
 are specified in [`docs/interaction.md`](docs/interaction.md).
 The native subset, fixed limits, transactions, and workshop commands are in
 [`docs/native-workshop.md`](docs/native-workshop.md).
+The evaluated microkernel foundations, the seL4/Microkit decision, and the
+staged native roadmap are in
+[`docs/microkernel-research.md`](docs/microkernel-research.md); the versioned
+backend-neutral kernel contract it freezes is in
+[`docs/kernel-contract.md`](docs/kernel-contract.md).
 External inspirations and the exact ideas Agel adopts from them are recorded in
 [`docs/design-lineage.md`](docs/design-lineage.md).

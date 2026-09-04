@@ -1,6 +1,9 @@
 # Microkernel research and Agel native architecture
 
-Status: architecture research and recommendation, 2026-09-04
+Status: architecture research and recommendation, 2026-09-04.
+Upstream claims re-checked against current seL4, Microkit, Firecracker and
+prototype documentation on 2026-09-04; see "Verified property coverage" and
+"Microkit fit" for the specific figures this revision pins.
 
 This document evaluates modern microkernel and virtual-machine projects as a
 foundation for the native Agel system. It is intentionally stricter than asking
@@ -101,6 +104,29 @@ proof manifest. The official verified-configurations table shows that coverage
 varies by architecture and option; MCS, SMP, virtualization and some platforms
 do not all have the same proved property set.
 
+#### Verified property coverage
+
+This is the single most important input to Agel's target selection, so it is
+recorded explicitly rather than summarized:
+
+| Configuration | Functional correctness | Integrity + availability | Confidentiality | Binary correctness |
+|---|---|---|---|---|
+| ARM (AArch32) | yes, including fast path | yes | yes | yes, for C functions with C-level verification |
+| ARM_HYP (AArch32 hypervisor) | yes, including fast path | no | no | no |
+| AARCH64 | yes, including fast path | yes | yes | no |
+| RISCV64 | yes, no fast path | yes | yes | no |
+| X64 | yes, no fast path | no | no | no |
+
+MCS proofs are ongoing rather than complete on every architecture. Address
+translation for devices (IOMMU), debug and profiling interfaces, and kernel
+startup are outside the verification on every configuration.
+
+The consequence for Agel is direct. **x86-64 is the weakest verified target**:
+it carries only C-level functional correctness, with no access-control or
+information-flow theorem and no binary correctness. Agel's assurance spike must
+therefore be **AArch64 or RISCV64**, and the familiar x86-64 QEMU work stays a
+research and bootstrap backend rather than the assurance one.
+
 The documented assumptions also matter:
 
 - boot code and portions of assembly are outside parts of the high-level proof;
@@ -125,6 +151,32 @@ entry point, priority and optionally a scheduling budget and period. This is an
 excellent match for Agel's initial trusted root, recovery supervisor, storage
 server, driver domains and one or more Agel worlds.
 
+The concrete shape of the current release (v2.3.0) constrains Agel's system
+graph, so it is worth stating exactly:
+
+- a system holds at most **63 protection domains**, and each PD may hold at most
+  **63 channels and interrupts** combined;
+- a PD is a single thread with an `init` entry point plus `notified`, an optional
+  `protected` entry point for synchronous protected procedures, and a `fault`
+  entry point required of any PD that parents another;
+- protected procedures carry at most **64 words** of argument and return value,
+  block the caller, and may only be called toward a higher-priority PD, which
+  makes the "bounded synchronous control path" rule below enforceable by
+  construction rather than by convention;
+- notifications are bidirectional, do not block, and **coalesce**, so a protocol
+  may never treat a notification count as a message count;
+- priorities run 0–254; budget and period are microsecond quantities whose ratio
+  is the PD's CPU share; a **passive** PD surrenders its scheduling context after
+  `init` and afterwards runs on its notifier's context; and
+- memory regions may be zero-initialized or prefilled from a file, and are mapped
+  with explicit read/write/execute permissions and caching attributes, which is
+  what makes Agel's write-xor-execute rule expressible in the system file.
+
+Microkit gained x86-64 support in v2.1.0, where the kernel and the Microkit
+initialiser are two ELF images started by a Multiboot 2 bootloader; AArch64 and
+RISC-V remain the longer-established targets and, per the coverage table above,
+the ones worth spiking.
+
 It is not the complete answer for open-ended dynamic agent creation. Fine-grain
 logical agents normally remain language objects scheduled inside an Agel world.
 When a new trust boundary is required, a resource manager can allocate kernel
@@ -134,9 +186,22 @@ be kept small.
 
 ### Rust and performance
 
-The seL4 ecosystem has maintained Rust bindings and examples. C remains the
-lowest-friction ABI for some generated interfaces, but the Agel runtime and most
-servers can be Rust `no_std` programs. seL4 is also designed around fast IPC;
+The seL4 ecosystem has maintained Rust bindings and examples. The relevant crates
+are `sel4-microkit`, a runtime for Microkit protection domains that reimplements
+`libmicrokit` and adds IPC abstractions, and `sel4-root-task` for root tasks;
+supporting crates (`sel4-sys`, `sel4-config`, `sel4-platform-info`,
+`sel4-kernel-loader`) cover configuration and boot. Two practical constraints
+must be planned for rather than discovered: these crates are **not published on
+crates.io**, and they use **nightly-only language features**, so a stable
+toolchain needs `RUSTC_BOOTSTRAP=1`. Builds are configured through environment
+variables (`SEL4_INCLUDE_DIRS`, `SEL4_PLATFORM_INFO`, `SEL4_KERNEL`) that a
+reproducible Agel build must pin alongside the kernel configuration hash. The
+built-in bare-metal target triples such as `aarch64-unknown-none` suffice, though
+seL4-specific target specifications exist.
+
+C remains the lowest-friction ABI for some generated interfaces, but the Agel
+runtime and most servers can be Rust `no_std` programs. seL4 is also designed
+around fast IPC;
 performance should still be measured with Agel's actual message sizes,
 scheduling configuration and hardware rather than copied from headline
 benchmarks.
@@ -170,9 +235,21 @@ This is useful for cloud workers, hostile experiments, reproducible CI and
 disposable candidate worlds. It is not the direct development route on macOS,
 where KVM is unavailable; QEMU remains the portable emulator during bootstrap.
 
-Firecracker's published sub-125 ms boot and sub-5 MiB VMM overhead figures are
-measurements under specified host and guest conditions, not guarantees for an
-Agel image. We should benchmark boot-to-Agel-REPL and per-world memory ourselves.
+Firecracker's headline sub-125 ms boot and sub-5 MiB VMM overhead figures come
+from its README and marketing material, not from its design document, and are
+measurements under specified host and guest conditions rather than guarantees for
+an Agel image. The design document's own quantitative claim is a steady mutation
+rate of five microVMs per host core per second for a minimal 1-vCPU/128 MiB
+configuration. Agel should benchmark boot-to-Agel-REPL and per-world memory
+itself and quote its own numbers.
+
+The process model is three thread classes — an API thread, a VMM thread owning
+the machine and device model, and one thread per vCPU running the `KVM_RUN`
+loop — with per-thread seccomp filters installed before any guest code executes.
+The virtual device model is deliberately small: VirtIO net and block, a serial
+console, a partial i8042 controller, and the MMDS metadata endpoint. That
+narrowness is the reason Firecracker is a useful outer envelope; it is also the
+reason it cannot host Agel's device ambitions directly.
 
 ### Snapshot caution
 
@@ -538,23 +615,47 @@ Agel's user-level policy or evaluator is correct.
 
 ## Incremental implementation roadmap
 
-### Phase 0 — freeze the boundary
+### Phase 0 — freeze the boundary — **done (v1.2)**
 
-- Write the versioned kernel contract and threat model.
-- Add conformance traces independent of either backend.
+- Write the versioned kernel contract and threat model. →
+  `crates/agel-kernel-abi`, [`kernel-contract.md`](kernel-contract.md), and the
+  v1.2 section of [`threat-model.md`](threat-model.md).
+- Add conformance traces independent of either backend. → an 81-step corpus and
+  an executable reference model, both `no_std` and allocation-free so the same
+  bytes link into a hosted binary and a freestanding kernel image. The canonical
+  transcript is frozen in `bootstrap/kernel-contract.trace` and diffed by
+  `./scripts/test-kernel-contract.sh`.
 - Mark today's ring-0 native evaluator as a bootstrap implementation, not a
-  security boundary.
+  security boundary. → stated in [`native-boot.md`](native-boot.md),
+  [`native-workshop.md`](native-workshop.md), and the threat model.
 
-### Phase 1 — research-kernel isolation
+### Phase 1 — research-kernel isolation — **substantially done (v1.2)**
 
-- Add IDT/trap handling, user mode, page tables and separate address spaces.
-- Boot a minimal recovery/root task and move the Agel evaluator into ring 3.
-- Implement bounded endpoint IPC and opaque capability slots.
-- Run a deliberately crashing and looping world without losing the monitor.
+- Add IDT/trap handling, user mode, page tables and separate address spaces. →
+  done. Kernel-owned four-level tables, a per-domain root at its own top-level
+  slot, write-xor-execute with `EFER.NXE`, a GDT with ring-3 descriptors and a
+  TSS, every architectural exception vector, a double-fault stack reached
+  through IST, and a 100 Hz preemption timer on remapped 8259s.
+- Boot a minimal recovery/root task and move the Agel evaluator into ring 3. →
+  half done. The supervisor and the recovery monitor are outside every domain,
+  and worlds run in ring 3, but the *evaluator itself* is still in ring 0 in the
+  default image. Moving it needs its compiled code and its several tens of
+  kilobytes of transient parse state relocated into a domain, which is the next
+  concrete rung rather than something this phase claims.
+- Implement bounded endpoint IPC and opaque capability slots. → done. A world
+  holds slot numbers; the object table is supervisor-only. Bulk data crosses on
+  a shared page signalled through the contract, never through the control path.
+- Run a deliberately crashing and looping world without losing the monitor. →
+  done, and asserted in CI for four separate provocations: writing to kernel
+  memory, dividing by zero, executing `cli`, and never yielding.
+
+Run it with `./scripts/test-isolation.sh`.
 
 ### Phase 2 — seL4/Microkit spike
 
-- Select one QEMU target with strong verified-configuration coverage.
+- Select one QEMU target with strong verified-configuration coverage. Per the
+  coverage table, this is `qemu-arm-virt` (AArch64) or `qemu-riscv-virt`
+  (RISCV64), not x86-64.
 - Boot a Rust root/recovery PD, Agel world PD and serial PD.
 - Pass the same kernel-contract conformance messages as the research backend.
 - Record binary, configuration, proof and toolchain hashes.
@@ -608,7 +709,10 @@ RISC-V or Arm may therefore precede a production x86-64 build.
 
 Open architecture decisions needing experiments or ADRs:
 
-- first verified target architecture and exact seL4 configuration;
+- first verified target architecture and exact seL4 configuration (the coverage
+  table narrows this to AArch64 or RISCV64, but not which);
+- whether the nightly-only `sel4-microkit` Rust runtime is acceptable in a
+  release build or whether the first spike is written in C;
 - Microkit-only static topology versus a small dynamic resource manager;
 - the stable kernel-contract wire format and compatibility rules;
 - world granularity for mutually suspicious applications;
@@ -692,6 +796,19 @@ Open architecture decisions needing experiments or ADRs:
 - [Theseus OS](https://github.com/theseus-os/Theseus).
 - [CHERI FAQ](https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/cheri-faq.html)
   and [CHERI technical report](https://www.cl.cam.ac.uk/techreports/UCAM-CL-TR-850.html).
+
+## Status against this document
+
+| Claim | Where it now lives |
+|---|---|
+| One small kernel contract, versioned and backend-neutral | `crates/agel-kernel-abi`, [`kernel-contract.md`](kernel-contract.md) |
+| Conformance suite runnable against more than one backend | `bootstrap/kernel-contract.trace`, run by two scripts against two backends |
+| Capability is a slot with rights, never a name | enforced and corpus-tested; ring 3 never holds a reference |
+| Derivation is monotonic; revocation is transitive and fails closed | enforced and corpus-tested |
+| Every queue is bounded with defined backpressure | `queue-full` at capacity, corpus-tested |
+| The evaluator does not belong in the privileged kernel | machinery built; the evaluator has not moved yet |
+| seL4 as the assurance backend | not started; Phase 2, on AArch64 or RISCV64 |
+| Firecracker as an optional outer envelope | not started; Phase 6 |
 
 ## Bottom line
 

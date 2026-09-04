@@ -25,6 +25,24 @@ projects are inputs, not dependencies, and Agel keeps the mechanisms separable:
   background thought. `agel-interaction` makes that split explicit and adds a
   separate verified-human authority class.
 
+- [seL4](https://sel4.systems/) supplies the capability model Agel treats as
+  authoritative: authority is a slot in a capability space with rights, never a
+  name, string, or unguessable token. [Microkit](https://docs.sel4.systems/projects/microkit/)
+  supplies statically composed protection domains, channels, memory regions and
+  budget/period scheduling attributes. [Hubris](https://github.com/oxidecomputer/hubris)
+  supplies restart-as-an-architectural-property: isolated tasks, generations, and
+  introspection that does not require each task to implement a debug protocol.
+  [Zircon](https://fuchsia.dev/fuchsia-src/concepts/kernel) supplies rights-carrying
+  handles transferred over channels, [Genode](https://www.genode.org/) supplies a
+  component contract separable from one kernel, [Tock](https://tockos.org/) supplies
+  grant-style per-process resource ownership, and
+  [Barrelfish](https://barrelfish.org/) supplies multicore-as-a-distributed-system.
+  [Redox](https://www.redox-os.org/) supplies Rust userspace and service patterns,
+  and [CHERI](https://www.cl.cam.ac.uk/research/security/ctsrd/cheri/) is the
+  future fine-grained hardware target. The evaluation that selected these, and the
+  ideas Agel deliberately declines to adopt, are recorded in
+  [`docs/microkernel-research.md`](microkernel-research.md).
+
 The synthesis specific to Agel is the invariant stack: code remains ordinary
 data, but privileged change crosses content-bound proposals, zero-authority
 canaries, typed effects, event-sourced images, A/B promotion, and an independent

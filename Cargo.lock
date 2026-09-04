@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "agel-cli"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "agel-core",
  "agel-model",
@@ -13,21 +13,21 @@ dependencies = [
 
 [[package]]
 name = "agel-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "agel-integrity",
 ]
 
 [[package]]
 name = "agel-effects"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "agel-integrity",
 ]
 
 [[package]]
 name = "agel-image"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "agel-core",
  "agel-integrity",
@@ -35,15 +35,19 @@ dependencies = [
 
 [[package]]
 name = "agel-integrity"
-version = "1.1.0"
+version = "1.2.0"
 
 [[package]]
 name = "agel-interaction"
-version = "1.1.0"
+version = "1.2.0"
+
+[[package]]
+name = "agel-kernel-abi"
+version = "1.2.0"
 
 [[package]]
 name = "agel-model"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "agel-core",
  "agel-effects",
@@ -51,14 +55,14 @@ dependencies = [
 
 [[package]]
 name = "agel-stdlib"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "agel-core",
 ]
 
 [[package]]
 name = "agel-supervisor"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "agel-core",
  "agel-image",
@@ -67,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "agel-verify"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "agel-core",
  "agel-integrity",

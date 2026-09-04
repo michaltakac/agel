@@ -143,6 +143,13 @@ def main() -> int:
         harness.continue_form("(def fact (fn (n)")
         harness.send("  (if (= n 0) 1 (* n (fact (- n 1))))))", "#<native-function>", 9)
         harness.send("(fact 6)", "720", 10)
+        harness.send(":defs", "definitions (3): native-answer x fact", 10)
+        harness.send(
+            ":limits",
+            "source=256 nodes=128 globals=24 name=24 params=4 locals=8 "
+            "args=8 body=192 depth=24 fuel=2000",
+            10,
+        )
         harness.send(":verify", "candidate B: isolated health evidence accepted", 10)
         harness.send(":promote", "selected slot B; slot A retained for rollback", 10)
         harness.send(":verify", "candidate B: isolated health evidence accepted", 10)
