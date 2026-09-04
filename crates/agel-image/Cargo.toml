@@ -1,0 +1,13 @@
+[package]
+name = "agel-image"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+agel-core = { path = "../agel-core" }
+agel-integrity = { path = "../agel-integrity" }
+
+[lints]
+workspace = true

@@ -41,3 +41,27 @@ crate, and provider safety additionally relies on each CLI's own read-only or
 restricted mode. Native syscall mediation, mount/network policy, quotas across
 process descendants, and a separate supervisor remain required before Agel can
 run hostile machine code.
+
+## v0.7
+
+- **Host-layout lock-in:** images store canonical committed inputs rather than
+  Rust memory layouts. Decoding is bounded and versioned; reconstruction uses
+  the public language semantics.
+- **Silent history edits:** each entry commits to the previous digest and its
+  length-delimited bytes. The final root also binds format version, resource
+  budget, and history policy. Mutation, insertion, deletion, and reordering are
+  detected.
+- **Crash during save:** bytes are written and synced to a same-directory
+  temporary file, the current image becomes a recovery sidecar, the new image is
+  atomically renamed into place, and the directory is synced on Unix.
+- **Stale overwrite:** callers provide the root they loaded. A mismatched root
+  rejects the save. The current implementation assumes a single writer between
+  check and rename; cross-process locking is still required for concurrent
+  writers.
+- **Persisted bearer authority:** capability grants are replayed in order into a
+  fresh world. Old capability objects and world-bound model effect keys are not
+  serialized or accepted in the restored world.
+
+The chain is tamper-evident, not authenticated. Anyone who can rewrite the file
+can recompute it. Signed roots, encrypted secrets, bounded compaction, and remote
+replication remain later trust layers.

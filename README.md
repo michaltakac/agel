@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.6: interposed effects and isolated workspaces**. It provides:
+The current repository is **v0.7: portable, crash-safe world images**. It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -24,6 +24,9 @@ The current repository is **v0.6: interposed effects and isolated workspaces**. 
 - typed, default-deny effect intents with inspectable audit records;
 - one constrained process boundary used by both real model adapters; and
 - an in-memory copy-on-write workspace for disposable agent changes;
+- canonical event-sourced images with a tamper-evident SHA-256 chain;
+- exact offline reconstruction with fresh capability authority; and
+- atomic image replacement, stale-writer detection, and previous-image recovery;
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 This is deliberately not presented as an operating-system kernel yet. See
@@ -89,6 +92,12 @@ Disposable filesystem demonstration:
 cargo run -q -p agel-effects --example cow_workspace
 ```
 
+Portable image demonstration:
+
+```sh
+cargo run -q -p agel-image --example portable_image
+```
+
 See [`docs/language-core.md`](docs/language-core.md) and
 [`docs/agent-runtime.md`](docs/agent-runtime.md) for the implemented language.
 Runnable demonstrations live in [`examples/`](examples/).
@@ -99,3 +108,5 @@ self-modification and [`docs/threat-model.md`](docs/threat-model.md) for the
 growing adversarial model.
 See [`docs/effect-sandbox.md`](docs/effect-sandbox.md) for the v0.6 host-effect
 boundary and its deliberately explicit limitations.
+The stable v0.7 image format and recovery behavior are specified in
+[`docs/portable-images.md`](docs/portable-images.md).
