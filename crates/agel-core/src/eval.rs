@@ -1518,6 +1518,7 @@ fn request_model(
     let effect_key = model_effect_key(runtime.world_id, id, &provider, prompt_digest);
     let request = ModelRequest {
         id,
+        world_id: runtime.world_id,
         requester,
         reply_to,
         provider,

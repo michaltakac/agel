@@ -2,8 +2,8 @@
 
 Milestone 3 connects transactional Agel agents to locally installed Claude Code
 and Codex CLIs without pretending an external inference can be rolled back.
-The core runtime remains deterministic; provider execution lives in a narrow
-host adapter crate.
+The core runtime remains deterministic; provider execution lives behind the
+typed `agel-effects` boundary.
 
 ## The effect protocol
 
@@ -57,6 +57,10 @@ stdin.
 - Both have host-enforced time and captured-output limits. Nonzero exits,
   invalid UTF-8, timeouts, and excessive output become structured model-error
   messages rather than runtime crashes.
+- Both clear ambient process environment and restore only named login/config
+  variables required to find the executable and existing subscription state.
+  Every decision and outcome is retained in a typed audit log; use `:effects`
+  after dispatch to inspect it.
 
 This milestone intentionally does not use either CLI's dangerous permission
 bypass. Later milestones may offer write-capable coding agents, but only behind

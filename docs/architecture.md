@@ -19,8 +19,9 @@ roles that classic Lisp images often combined:
 4. **Supervisor** — owns revisions, rollback, resource budgets, and recovery.
 
 The language core implements the first two roles, explicit authority and resource
-boundaries, and the revision portion of the fourth. The verifier is an explicit
-future boundary, not a claim that macros alone can prove arbitrary code safe.
+boundaries, and the revision portion of the fourth. `agel-verify` implements the
+first conservative verification gate. This is not a claim that macros—or the
+current deterministic checker—can prove arbitrary code safe.
 
 ## Safety invariants
 
@@ -38,8 +39,10 @@ future boundary, not a claim that macros alone can prove arbitrary code safe.
 Software transactional memory is only one layer. STM can roll back language
 state, but cannot undo a model call, network request, disk write, or device I/O.
 Model inference therefore uses a committed outbox, idempotence-guarded
-completion, explicit dispatch, and exact-result replay. Future effects must use
-the same prepare/commit shape plus idempotency keys or compensating actions.
+completion, explicit dispatch, and exact-result replay. At v0.6, host process
+execution is also routed through typed intent, policy, resource limits, and an
+audit log in `agel-effects`. Future effects must use the same prepare/commit
+shape plus idempotency keys or compensating actions.
 
 ## Current execution model
 
@@ -70,13 +73,17 @@ Each rung must be runnable and differentially testable against the rung below:
    canaries, and atomic promotion. A small trusted checker, not a macro or
    model, decides admission. Finite protocol model checking remains a
    library-layer extension.
-6. **Common Lisp bootstrap:** a portable reference implementation that emits
+6. **Effect interposition (complete at v0.6):** typed default-deny policy,
+   constrained process execution, inspectable outcomes, and copy-on-write
+   virtual workspaces. Kernel-grade syscall mediation remains a later native
+   boundary.
+7. **Common Lisp bootstrap:** a portable reference implementation that emits
    the same core IR and runs conformance tests against the Rust seed.
-7. **Self-host:** reader, expander, evaluator/compiler, and standard library in
+8. **Self-host:** reader, expander, evaluator/compiler, and standard library in
    Agel; use diverse bootstrap comparison to detect trusting-trust failures.
-8. **Native substrate:** minimal Rust/C HAL, allocator, interrupt/trap entry,
+9. **Native substrate:** minimal Rust/C HAL, allocator, interrupt/trap entry,
    drivers, and a QEMU image. Keep device access outside mutable language heaps.
-9. **Live system:** A/B system worlds, health oracles, signed promotion,
+10. **Live system:** A/B system worlds, health oracles, signed promotion,
    watchdog-triggered rollback, and a recovery monitor outside the self-editing
    runtime.
 

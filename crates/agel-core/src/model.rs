@@ -22,6 +22,7 @@ pub(crate) fn model_effect_key(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelRequest {
     pub id: u64,
+    pub world_id: u64,
     pub requester: u64,
     pub reply_to: u64,
     pub provider: String,

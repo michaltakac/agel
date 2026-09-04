@@ -187,6 +187,18 @@ fn main() -> io::Result<()> {
                         println!("enabled: {}", names.join(", "));
                     }
                 }
+                ":effects" => {
+                    for entry in providers.audit_records() {
+                        println!(
+                            "{} #{} {} {:?} {:?}",
+                            entry.provider,
+                            entry.record.sequence,
+                            entry.record.key,
+                            entry.record.intent.kind,
+                            entry.record.outcome
+                        );
+                    }
+                }
                 ":requests" => {
                     for request in world.pending_model_requests() {
                         println!(
@@ -341,6 +353,7 @@ fn print_help() {
     println!(":budget    show default deterministic resource limits");
     println!(":events    show the agent event log");
     println!(":providers show model providers enabled at startup");
+    println!(":effects   show typed host-effect decisions and outcomes");
     println!(":requests  show committed model requests awaiting dispatch");
     println!(":dispatch  explicitly invoke enabled providers for pending requests");
     println!(":snapshot NAME  save an in-memory world snapshot");

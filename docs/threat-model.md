@@ -18,3 +18,26 @@ contains them.
 The verifier is a deterministic gate, not a theorem prover. Unknown semantic
 behavior is constrained by zero-authority canaries and executable tests; later
 releases add stronger effect interposition and model checking.
+
+## v0.6
+
+- **Ambient host authority:** a child process could inherit credentials or an
+  attacker-controlled environment. The process boundary clears the environment
+  and restores only a short, named login/configuration allowlist.
+- **Arbitrary execution:** an effect request cannot select a different binary;
+  the exact executable must have been allowlisted when its provider was enabled.
+- **Runaway tools:** wall-clock and captured-output limits are enforced, and a
+  timed-out Unix child process group is terminated.
+- **Unreviewed filesystem mutation:** proposed file changes can live in a
+  copy-on-write overlay, be inspected as a deterministic diff, then explicitly
+  committed or discarded. Virtual paths reject parent traversal.
+- **Invisible effects:** every process allow/deny and terminal outcome receives
+  a SHA-256-bound typed intent and is visible through the provider audit log and
+  the REPL's `:effects` command.
+
+This is userspace interposition, not a complete sandbox against malicious native
+code. Today the trusted Rust host can call operating-system APIs outside this
+crate, and provider safety additionally relies on each CLI's own read-only or
+restricted mode. Native syscall mediation, mount/network policy, quotas across
+process descendants, and a separate supervisor remain required before Agel can
+run hostile machine code.

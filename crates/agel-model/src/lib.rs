@@ -1,28 +1,11 @@
 use agel_core::{ModelOutcome, ModelRequest};
+use agel_effects::{EffectError, Principal, ProcessSandbox, ProcessSpec};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
 
-#[derive(Clone, Debug)]
-pub struct CommandLimits {
-    pub timeout: Duration,
-    pub max_output_bytes: usize,
-    pub workspace: PathBuf,
-}
-
-impl CommandLimits {
-    pub fn new(workspace: impl Into<PathBuf>) -> Self {
-        Self {
-            timeout: Duration::from_secs(300),
-            max_output_bytes: 1_048_576,
-            workspace: workspace.into(),
-        }
-    }
-}
+pub use agel_effects::ProcessLimits as CommandLimits;
+pub use agel_effects::{AuditOutcome, AuditRecord};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderError {
@@ -78,6 +61,16 @@ impl std::error::Error for ProviderError {}
 pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
     fn infer(&self, request: &ModelRequest) -> Result<String, ProviderError>;
+
+    fn audit_records(&self) -> Vec<AuditRecord> {
+        Vec::new()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderAuditRecord {
+    pub provider: String,
+    pub record: AuditRecord,
 }
 
 #[derive(Default)]
@@ -105,6 +98,21 @@ impl ProviderRegistry {
             .ok_or_else(|| ProviderError::UnknownProvider(request.provider.clone()))?
             .infer(request)
     }
+
+    pub fn audit_records(&self) -> Vec<ProviderAuditRecord> {
+        self.providers
+            .iter()
+            .flat_map(|(provider, adapter)| {
+                adapter
+                    .audit_records()
+                    .into_iter()
+                    .map(|record| ProviderAuditRecord {
+                        provider: provider.clone(),
+                        record,
+                    })
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -112,16 +120,17 @@ pub struct ClaudeCodeProvider {
     executable: PathBuf,
     model: Option<String>,
     max_budget_usd: Option<String>,
-    limits: CommandLimits,
+    sandbox: ProcessSandbox,
 }
 
 impl ClaudeCodeProvider {
     pub fn new(executable: impl Into<PathBuf>, limits: CommandLimits) -> Self {
+        let executable = executable.into();
         Self {
-            executable: executable.into(),
+            sandbox: process_sandbox(&executable, &limits),
+            executable,
             model: None,
             max_budget_usd: None,
-            limits,
         }
     }
 
@@ -133,6 +142,10 @@ impl ClaudeCodeProvider {
     pub fn with_max_budget_usd(mut self, amount: impl Into<String>) -> Self {
         self.max_budget_usd = Some(amount.into());
         self
+    }
+
+    pub fn audit_log(&self) -> agel_effects::AuditLog {
+        self.sandbox.audit_log()
     }
 }
 
@@ -157,7 +170,17 @@ impl Provider for ClaudeCodeProvider {
         if let Some(amount) = &self.max_budget_usd {
             args.extend(["--max-budget-usd".into(), amount.clone()]);
         }
-        run_command(&self.executable, &args, &request.prompt, &self.limits)
+        run_command(
+            &self.executable,
+            &args,
+            &request.prompt,
+            request,
+            &self.sandbox,
+        )
+    }
+
+    fn audit_records(&self) -> Vec<AuditRecord> {
+        self.audit_log().records()
     }
 }
 
@@ -166,12 +189,15 @@ pub struct CodexProvider {
     executable: PathBuf,
     model: Option<String>,
     limits: CommandLimits,
+    sandbox: ProcessSandbox,
 }
 
 impl CodexProvider {
     pub fn new(executable: impl Into<PathBuf>, limits: CommandLimits) -> Self {
+        let executable = executable.into();
         Self {
-            executable: executable.into(),
+            sandbox: process_sandbox(&executable, &limits),
+            executable,
             model: None,
             limits,
         }
@@ -180,6 +206,10 @@ impl CodexProvider {
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
         self
+    }
+
+    pub fn audit_log(&self) -> agel_effects::AuditLog {
+        self.sandbox.audit_log()
     }
 }
 
@@ -205,126 +235,80 @@ impl Provider for CodexProvider {
             args.extend(["--model".into(), model.clone()]);
         }
         args.push("-".into());
-        run_command(&self.executable, &args, &request.prompt, &self.limits)
+        run_command(
+            &self.executable,
+            &args,
+            &request.prompt,
+            request,
+            &self.sandbox,
+        )
+    }
+
+    fn audit_records(&self) -> Vec<AuditRecord> {
+        self.audit_log().records()
     }
 }
 
 fn run_command(
-    executable: &Path,
+    executable: &std::path::Path,
     arguments: &[String],
     prompt: &str,
-    limits: &CommandLimits,
+    request: &ModelRequest,
+    sandbox: &ProcessSandbox,
 ) -> Result<String, ProviderError> {
-    let mut command = Command::new(executable);
-    command
-        .args(arguments)
-        .current_dir(&limits.workspace)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    configure_process_group(&mut command);
-    let mut child = command.spawn().map_err(io_error)?;
-
-    let mut stdin = child.stdin.take().expect("piped stdin exists");
-    let prompt = prompt.as_bytes().to_vec();
-    let input = thread::spawn(move || stdin.write_all(&prompt));
-    let stdout = child.stdout.take().expect("piped stdout exists");
-    let stderr = child.stderr.take().expect("piped stderr exists");
-    let output_limit = limits.max_output_bytes;
-    let stdout_reader = thread::spawn(move || read_bounded(stdout, output_limit));
-    let stderr_reader = thread::spawn(move || read_bounded(stderr, output_limit));
-
-    let deadline = Instant::now()
-        .checked_add(limits.timeout)
-        .ok_or_else(|| ProviderError::Io("provider timeout is out of range".into()))?;
-    let status = loop {
-        match child.try_wait().map_err(io_error)? {
-            Some(status) => break status,
-            None if Instant::now() >= deadline => {
-                terminate_process_group(&mut child);
-                join_input(input)?;
-                let _ = join_reader(stdout_reader)?;
-                let _ = join_reader(stderr_reader)?;
-                return Err(ProviderError::TimedOut);
-            }
-            None => thread::sleep(Duration::from_millis(10)),
-        }
-    };
-    join_input(input)?;
-    let (stdout, stdout_exceeded) = join_reader(stdout_reader)?;
-    let (stderr, stderr_exceeded) = join_reader(stderr_reader)?;
-    if stdout_exceeded || stderr_exceeded {
-        return Err(ProviderError::OutputLimitExceeded);
-    }
-    let stderr = String::from_utf8(stderr).map_err(|_| ProviderError::InvalidUtf8)?;
-    if !status.success() {
+    let output = sandbox
+        .run(
+            Principal {
+                world: request.world_id,
+                agent: Some(request.requester),
+            },
+            format!("model/infer/{}/request/{}", request.provider, request.id),
+            ProcessSpec {
+                executable: executable.to_owned(),
+                arguments: arguments.to_vec(),
+                stdin: prompt.as_bytes().to_vec(),
+            },
+        )
+        .map_err(provider_effect_error)?;
+    let stderr = String::from_utf8(output.stderr).map_err(|_| ProviderError::InvalidUtf8)?;
+    if output.status != 0 {
         return Err(ProviderError::Failed {
-            code: status.code(),
+            code: (output.status >= 0).then_some(output.status),
             stderr: stderr.trim().to_owned(),
         });
     }
-    String::from_utf8(stdout)
+    String::from_utf8(output.stdout)
         .map(|text| text.trim_end().to_owned())
         .map_err(|_| ProviderError::InvalidUtf8)
 }
 
-fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<(Vec<u8>, bool)> {
-    let mut retained = Vec::new();
-    let mut exceeded = false;
-    let mut buffer = [0_u8; 8192];
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        let remaining = limit.saturating_sub(retained.len());
-        retained.extend_from_slice(&buffer[..read.min(remaining)]);
-        exceeded |= read > remaining;
+fn process_sandbox(executable: &std::path::Path, limits: &CommandLimits) -> ProcessSandbox {
+    ProcessSandbox::new(CommandLimits {
+        timeout: limits.timeout,
+        max_output_bytes: limits.max_output_bytes,
+        workspace: limits.workspace.clone(),
+    })
+    .allow_executable(executable)
+    .inherit_environment([
+        "HOME",
+        "PATH",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+    ])
+}
+
+fn provider_effect_error(error: EffectError) -> ProviderError {
+    match error {
+        EffectError::TimedOut => ProviderError::TimedOut,
+        EffectError::OutputLimitExceeded => ProviderError::OutputLimitExceeded,
+        other => ProviderError::Io(other.to_string()),
     }
-    Ok((retained, exceeded))
-}
-
-fn join_input(handle: thread::JoinHandle<io::Result<()>>) -> Result<(), ProviderError> {
-    handle
-        .join()
-        .map_err(|_| ProviderError::Io("stdin writer thread panicked".into()))?
-        .map_err(io_error)
-}
-
-fn join_reader(
-    handle: thread::JoinHandle<io::Result<(Vec<u8>, bool)>>,
-) -> Result<(Vec<u8>, bool), ProviderError> {
-    handle
-        .join()
-        .map_err(|_| ProviderError::Io("output reader thread panicked".into()))?
-        .map_err(io_error)
-}
-
-fn io_error(error: io::Error) -> ProviderError {
-    ProviderError::Io(error.to_string())
-}
-
-#[cfg(unix)]
-fn configure_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    command.process_group(0);
-}
-
-#[cfg(not(unix))]
-fn configure_process_group(_command: &mut Command) {}
-
-#[cfg(unix)]
-fn terminate_process_group(child: &mut Child) {
-    let group = format!("-{}", child.id());
-    let _ = Command::new("/bin/kill").args(["-KILL", &group]).status();
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-#[cfg(not(unix))]
-fn terminate_process_group(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 #[cfg(all(test, unix))]
@@ -333,6 +317,7 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
 
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
 
@@ -354,6 +339,7 @@ mod tests {
     fn request(provider: &str) -> ModelRequest {
         ModelRequest {
             id: 7,
+            world_id: 11,
             requester: 1,
             reply_to: 1,
             provider: provider.into(),
@@ -377,6 +363,15 @@ mod tests {
         assert!(output.contains("<--permission-prompts><none>"));
         assert!(output.contains("<--model><sonnet><--max-budget-usd><0.25>"));
         assert!(output.ends_with("PROMPT:explain (cons 'agent future)"));
+        let audit = provider.audit_log().records();
+        assert_eq!(audit.len(), 2);
+        assert!(matches!(audit[0].outcome, AuditOutcome::Allowed));
+        assert!(matches!(
+            audit[1].outcome,
+            AuditOutcome::Succeeded { status: 0 }
+        ));
+        assert_eq!(audit[0].intent.principal.world, 11);
+        assert_eq!(audit[0].intent.principal.agent, Some(1));
         fs::remove_dir_all(directory).unwrap();
     }
 
