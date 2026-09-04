@@ -68,11 +68,15 @@ restartable domain**. It provides:
   fail closed; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
-Agel's primary deployment target is a bare-metal NVIDIA DGX node, single or
-clustered, where the GPUs fine-tune and train models as well as serve them.
-Inference-only deployments run on ordinary hardware or in a virtual machine and
-can use external model providers instead. Those tiers, what each requires, and
-how little of the DGX tier exists today are in
+Agel's primary deployment target is an NVIDIA DGX node, single or clustered,
+where the GPUs fine-tune and train models as well as serve them. On those
+machines Linux is the kernel and Agel is the userspace that owns policy above
+it, because local inference is core to the agentic experience and CUDA requires
+Linux. The kernel contract stays the seam, so the same Agel runs over a
+microkernel where the hardware supports one — which is what the four native
+backends in this repository are for. Inference-only deployments run on ordinary
+hardware or in a virtual machine and can use external model providers instead.
+The tiers, the reasoning, and how little of the DGX tier exists today are in
 [`docs/deployment-targets.md`](docs/deployment-targets.md).
 
 This is the first Agel evaluator running on the independently bootable

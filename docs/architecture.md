@@ -6,8 +6,12 @@ Agel aims to be a homoiconic language and live operating environment where
 agents are ordinary programmable values, applications are compositions of
 agents, and a running system can propose and adopt its own changes.
 
-Its primary deployment target is a bare-metal NVIDIA DGX node, single or
-clustered, where the GPUs train and fine-tune models as well as serve them.
+Its primary deployment target is an NVIDIA DGX node, single or clustered, where
+the GPUs train and fine-tune models as well as serve them. On those machines
+**Linux is the kernel** and Agel is the userspace that owns policy above it,
+because local inference is core to the agentic experience and CUDA requires it.
+The kernel contract remains the seam, so the same Agel runs over a microkernel
+on hardware whose DMA boundary supports one.
 Inference-only deployments run anywhere, including virtual machines, and can use
 external model providers instead of local hardware. The tiers, and what each
 one requires, are in [`deployment-targets.md`](deployment-targets.md). Common Lisp

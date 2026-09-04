@@ -3,9 +3,16 @@
 Status: requirements, 2026-09-04
 
 Agel's primary deployment target is an **NVIDIA DGX machine, or several tied
-together, running Agel on bare metal**, where the GPUs are used for fine-tuning
-and training as well as inference. That is the configuration in which Agel is
-expected to have its full capability set.
+together**, where the GPUs are used for fine-tuning and training as well as
+inference. That is the configuration in which Agel is expected to have its full
+capability set.
+
+**Linux is the kernel on those machines.** Local inference is core to the
+agentic experience, inference needs CUDA, and CUDA needs Linux; a node that
+cannot run CUDA cannot run the agent. Agel is the userspace that owns policy
+above Linux, and the kernel contract stays the seam so the same Agel also runs
+over a microkernel where the hardware allows it. The reasoning, the cost, and
+what survives are in "Decision: Linux is the core" below.
 
 Everything else — inference-only nodes, virtual machines, laptops — is a
 reduced tier. Those tiers are useful and must keep working, but they are not
@@ -21,8 +28,9 @@ recorded decisions it changes.
 | Hardware | DGX, single or clustered | any 64-bit machine, bare metal or VM | any developer machine |
 | Local GPU | required; training and fine-tuning | optional; inference only | none |
 | Model access | local training and inference, plus external providers | local inference and/or external providers | external providers only |
-| Runs under a hypervisor | no; Agel owns the machine | permitted | expected |
-| Runs CUDA itself | no; a peer node does | no | no |
+| Kernel | Linux; Agel owns userspace policy | Linux, or a microkernel where no GPU is needed | anything |
+| Runs CUDA | yes, locally | optional | no |
+| Untrusted worlds isolated by | KVM microVMs, plus namespaces/seccomp/Landlock/cgroups | same, or protection domains | QEMU |
 | Purpose | the system Agel is for | serving, edge, cheap capacity | building and testing Agel |
 
 Tier 3 is what this repository has been developed on: a MacBook Pro with no
@@ -105,7 +113,74 @@ Why this is better than a contained Linux domain, rather than merely easier:
   developer machine, which moves a large part of Tier 1 from "impossible here"
   to "mostly possible here".
 
-### The cost of the split: one node's GPU goes dark
+### Decision: Linux is the core, and the contract is the seam
+
+Local inference is not a nice-to-have for this system. The agentic experience is
+the product, the agent's reasoning loop wants a local model, and inference needs
+CUDA for exactly the reasons training does. A node that cannot run CUDA cannot
+run the agent. That settles it: **Linux is the kernel on a DGX node**, and Agel
+is the userspace that owns policy above it.
+
+This is a real loss and it is worth naming rather than absorbing. The trusted
+computing base goes from something in the tens of thousands of lines to
+something in the tens of millions. No formal assurance claim survives it. The
+recovery plane stops being a protection domain on a small kernel and becomes a
+component on a large one.
+
+What survives is most of the project. Everything above the kernel — the
+language, homoiconic code-as-data, transactional worlds, agents as values, the
+capability model, typed effects, evidence-carrying upgrades, A/B images, the
+tamper-evident log — was never Linux-dependent and already works. What changes
+is what enforces the boundaries underneath it.
+
+#### Can a microkernel and Linux be combined, and still have CUDA?
+
+Yes, three ways, and which of them works depends on the machine.
+
+| Arrangement | How CUDA still works | Where it works |
+|---|---|---|
+| **Microkernel hosts Linux.** seL4 boots, Linux is a guest VM, the GPU is assigned to it through the IOMMU. Agel's authority plane is native seL4 domains outside Linux. | the guest owns real GPU hardware, so CUDA is native speed | discrete-GPU DGX (H100/H200/B200), where PCIe passthrough is ordinary |
+| **Static partitioning.** Linux boots, then a partitioning hypervisor demotes it into one cell and gives other cores and memory to Agel. Linux keeps the GPU. | Linux never loses the GPU | Arm and x86 in principle; needs a working DMA boundary to be worth anything |
+| **Linux hosts everything, isolation from KVM.** Linux owns the machine and the GPU. Untrusted Agel worlds run in microVMs. | CUDA is on the host, reached as a service | everywhere |
+
+On **DGX Spark specifically, the first two do not work today**, and it is worth
+being precise about why rather than treating it as a maturity problem:
+
+- GB10's GPU is integrated, sharing memory with Grace over NVLink-C2C. It is not
+  a PCIe device you bind to `vfio-pci`.
+- The platform firmware requires a **1:1 IOMMU mapping**, and VFIO setup is
+  rejected because of it. A guest cannot be given a remapped view of the device's
+  DMA, which is the entire mechanism passthrough isolation depends on.
+- **MIG is not supported on GB10.** The partitioning that would have made a GPU
+  capability mean "this much GPU, and no more" is not available on this part.
+
+The consequence is sharper than "passthrough is unavailable". On Spark, the DMA
+boundary a microkernel split would rely on is weak, so a Linux-under-microkernel
+or microkernel-under-Linux arrangement would buy the *appearance* of a strong
+boundary while resting on a constrained one. That is worse than not claiming it.
+
+**So: Linux core on Spark, and the kernel contract stays the seam.** The
+contract in `crates/agel-kernel-abi` is not tied to a microkernel. It is a
+semantic boundary with a frozen conformance corpus, already implemented by four
+backends. Adding a Linux backend means Agel runs unchanged on either core, and
+the choice becomes a deployment decision per machine rather than an architecture
+decision for the project:
+
+- **DGX Spark today:** Linux core. CUDA everywhere. Isolation from KVM microVMs,
+  namespaces, seccomp, Landlock and cgroups.
+- **Discrete-GPU DGX, or future hardware with a real DMA boundary:** seL4 core,
+  Linux as a guest with the GPU passed through. Already demonstrated in
+  `boot/microkit`.
+
+The same Agel, the same corpus, the same capability model. That is what the
+contract was for, and it is why the last several releases are not stranded by
+this decision.
+
+### What the earlier split-node design got wrong
+
+An earlier draft of this document put Agel on a dedicated Spark with no Linux,
+and the training work on peer Sparks. It is recorded here because the reason it
+fails is instructive rather than embarrassing.
 
 A GB10 is one package. The Grace CPU and the Blackwell GPU share memory over
 NVLink-C2C and cannot be bought separately. So a Spark running Agel is a Spark
@@ -122,8 +197,14 @@ peer Spark over a 200 Gb/s link is a perfectly good model endpoint. Inference
 takes tens to hundreds of milliseconds; a direct link adds a fraction of one.
 Latency is not the problem. The problem is the bill.
 
-So the boundary belongs between machines, but *which* machine Agel occupies is
-an open product decision, not a technical one:
+A dedicated Agel node therefore cannot serve the agent's own reasoning loop
+locally at all — the thing the product is *for*. That is what rules the design
+out, not the wasted silicon. What remains true is the cluster shape: Agel
+schedules and records, peer nodes compute, and results are content-addressed.
+What changes is that the Agel node runs Linux too, and can therefore also run a
+model.
+
+For the record, the options that were weighed:
 
 | Option | Authority plane | GPU waste | Cost |
 |---|---|---|---|
@@ -132,12 +213,10 @@ an open product decision, not a technical one:
 | **C. Agel as a process on DGX OS** | Linux is the trusted base | none | gives up the property the native work exists for |
 | **D. Agel on a Spark with a contained Linux domain for its own GPU** | Linux and a VMM on the authority node | none | reintroduces the unverified IOMMU path and an unfinished VMM |
 
-Option A is defensible at four or more nodes and hard to justify at two. Option
-B is what appliances normally do — a controller alongside the accelerators — and
-is the only one that keeps both a clean authority plane and full GPU
-utilisation. Option C is a legitimate staging step that ships sooner. Option D
-is the design this document originally proposed, and its weaknesses do not
-improve by being confined to one node.
+Option C is the decision, for the reason above: A and B cannot run a local
+model, and D depends on a DMA boundary GB10 does not provide. On hardware with
+discrete GPUs and working passthrough, D becomes available again, and the kernel
+contract is what makes moving to it a deployment change rather than a rewrite.
 
 **None of this blocks the software.** The orchestration protocol, the remote
 compute capability, the training effect type and the content-addressed

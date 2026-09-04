@@ -771,7 +771,11 @@ whole Tier 1 architecture rests on, and it is the mechanism seL4 does not prove.
 | Keep Agel's native kernel? | Yes, as research/bootstrap/conformance backend |
 | Run the evaluator in ring 0 long term? | No |
 | Use Firecracker as the guest kernel? | No; optional Linux host envelope, and not on a DGX node |
-| Primary deployment target? | Bare-metal DGX, training and inference, x86-64 *and* aarch64 |
+| Primary deployment target? | DGX, training and inference, x86-64 *and* aarch64 |
+| Kernel on a DGX node? | Linux. Local inference is core, inference needs CUDA, CUDA needs Linux |
+| Does that make the kernel contract pointless? | No; it becomes the seam. Linux is a backend, and Agel runs unchanged over either core |
+| Microkernel core on a DGX Spark? | No. GB10 has an integrated GPU, firmware demands a 1:1 IOMMU mapping so VFIO is refused, and MIG is unsupported: the DMA boundary a split would rest on is not there |
+| Microkernel core on discrete-GPU DGX? | Available, and demonstrated in `boot/microkit`; a deployment choice per machine |
 | Write a native NVIDIA GPU driver? | No; CUDA user space and GSP firmware are proprietary, so the Linux GPU domain is permanent |
 | Let the GPU domain be large? | Yes; size is acceptable, authority is not |
 | Derive GPU isolation from seL4's proofs? | No; device address translation is unverified in every seL4 configuration |
@@ -902,7 +906,8 @@ Open architecture decisions needing experiments or ADRs:
 | Release manifest naming what is proved, assumed and out of scope | [`sel4-manifest.md`](sel4-manifest.md), regenerated and checked in CI |
 | Running a *verified configuration* | no: Microkit ships MCS kernels and MCS proofs are ongoing |
 | Firecracker as an optional outer envelope | not started; Phase 6, and Tier 2 only |
-| Anything at all on DGX hardware | not started; no GPU code, no IOMMU work, no VMM, no Linux domain |
+| Anything at all on DGX hardware | not started; no GPU code, no Linux backend, no orchestration |
+| A Linux backend for the kernel contract | not started; this is what makes the pivot cost nothing above the kernel |
 
 ## Bottom line
 
