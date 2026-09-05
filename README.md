@@ -4,10 +4,16 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v1.7: a persistent native Agel workshop with a frozen kernel
+The current repository is **v0.1.7: a persistent native Agel workshop with a frozen kernel
 contract, a portable isolation backend, the same contract running on an
 unmodified seL4 kernel, and the first privileged service split out into a
-restartable domain**. It provides:
+restartable domain**.
+
+Agel is still pre-production. Project releases follow the policy in
+[`docs/versioning.md`](docs/versioning.md); `v1.0.0` is reserved for the first
+production-ready system. The separately versioned kernel contract remains v1.0.
+
+It provides:
 
 - a small, homoiconic Lisp reader and evaluator;
 - atomic evaluation: a submitted batch either commits completely or changes
@@ -255,13 +261,13 @@ boundary and opt-in instructions.
 See [`docs/evidence-upgrades.md`](docs/evidence-upgrades.md) for safe staged
 self-modification and [`docs/threat-model.md`](docs/threat-model.md) for the
 growing adversarial model.
-See [`docs/effect-sandbox.md`](docs/effect-sandbox.md) for the v0.6 host-effect
+See [`docs/effect-sandbox.md`](docs/effect-sandbox.md) for the v0.0.6 host-effect
 boundary and its deliberately explicit limitations.
-The stable v0.7 image format and recovery behavior are specified in
+The stable v0.0.7 image format and recovery behavior are specified in
 [`docs/portable-images.md`](docs/portable-images.md).
-The v0.8 library APIs are documented in [`docs/standard-library.md`](docs/standard-library.md),
+The v0.0.8 library APIs are documented in [`docs/standard-library.md`](docs/standard-library.md),
 and the whole reader grammar fits in [`docs/language-postcard.md`](docs/language-postcard.md).
-The v0.9 bootstrap trust story and its current limits are in
+The v0.0.9 bootstrap trust story and its current limits are in
 [`docs/bootstrap.md`](docs/bootstrap.md).
 The native seed and recovery boundary are documented in
 [`docs/native-boot.md`](docs/native-boot.md); text/voice scheduling and authority

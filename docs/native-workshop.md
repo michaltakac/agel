@@ -1,10 +1,10 @@
 # The native Agel workshop
 
 `./scripts/run-qemu.sh` now boots directly into an Agel REPL on the freestanding
-kernel. Since v1.6, source crosses a bounded shared page into an unprivileged
+kernel. Since v0.1.6, source crosses a bounded shared page into an unprivileged
 evaluator domain, its transactional state lives on that domain's private stack,
 and results are printed through a separate console-driver domain. Evaluation
-uses no Rust allocator or host operating system. Since v1.7, named source cells
+uses no Rust allocator or host operating system. Since v0.1.7, named source cells
 can be edited, committed, and reconstructed after reboot.
 
 ## Native subset
@@ -26,7 +26,7 @@ lambdas capture bounded scalar lexical parameters, so
 a lexical call cannot yet be persisted by `def`; this is rejected rather than
 silently losing its captures. Function-valued captures are also deferred.
 Quoted syntax is valid for the current transaction and can be passed to `eval`,
-but v1.1 does not persist quoted graphs in globals.
+but v0.1.1 does not persist quoted graphs in globals.
 
 ## Transaction protocol
 
@@ -89,7 +89,7 @@ the ordinary balanced-form reader accepts as many physical lines as the form
 needs. Editing stages source; `:run` changes only the live evaluator and `:save`
 is the explicit durability boundary.
 
-## v1.7 durable source workspace
+## v0.1.7 durable source workspace
 
 The raw x86 disk reserves two 8 KiB slots after the boot seed. A workspace image
 contains canonical name/source pairs, never a Rust memory dump or capability.
@@ -124,7 +124,7 @@ codec are trusted Rust services, and the hosted macro/module/agent/effect system
 is not in the VM. A native agent runtime and an editor implemented in Agel are
 the next useful rungs.
 
-## v1.6 isolation boundary
+## v0.1.6 isolation boundary
 
 The evaluator holds no console-device grant and cannot name another domain's
 stack. Its only mutable cross-boundary object is one 4 KiB shared page; source

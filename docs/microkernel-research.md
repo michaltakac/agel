@@ -629,11 +629,11 @@ Agel's user-level policy or evaluator is correct.
 
 ## Incremental implementation roadmap
 
-### Phase 0 — freeze the boundary — **done (v1.2)**
+### Phase 0 — freeze the boundary — **done (v0.1.2)**
 
 - Write the versioned kernel contract and threat model. →
   `crates/agel-kernel-abi`, [`kernel-contract.md`](kernel-contract.md), and the
-  v1.2 section of [`threat-model.md`](threat-model.md).
+  v0.1.2 section of [`threat-model.md`](threat-model.md).
 - Add conformance traces independent of either backend. → an 81-step corpus and
   an executable reference model, both `no_std` and allocation-free so the same
   bytes link into a hosted binary and a freestanding kernel image. The canonical
@@ -643,7 +643,7 @@ Agel's user-level policy or evaluator is correct.
   security boundary. → stated in [`native-boot.md`](native-boot.md),
   [`native-workshop.md`](native-workshop.md), and the threat model.
 
-### Phase 1 — research-kernel isolation — **done (v1.6)**
+### Phase 1 — research-kernel isolation — **done (v0.1.6)**
 
 - Add IDT/trap handling, user mode, page tables and separate address spaces. →
   done. Kernel-owned four-level tables, a per-domain root at its own top-level
@@ -651,7 +651,7 @@ Agel's user-level policy or evaluator is correct.
   TSS, every architectural exception vector, a double-fault stack reached
   through IST, and a 100 Hz preemption timer on remapped 8259s.
 - Boot a minimal recovery/root task and move the Agel evaluator into the lowest
-  privilege level. → done in v1.6 on all three research backends. Evaluator code
+  privilege level. → done in v0.1.6 on all three research backends. Evaluator code
   is isolated in `.user_text`, immutable constants are read-only, and its fixed
   transactional worlds and transient parse state live on a private bounded
   stack. The x86-64 workshop is interactive through a shared-page request/reply
@@ -665,7 +665,7 @@ Agel's user-level policy or evaluator is correct.
 
 Run it with `./scripts/test-isolation.sh`.
 
-### Phase 2 — seL4/Microkit spike — **done (v1.4)**
+### Phase 2 — seL4/Microkit spike — **done (v0.1.4)**
 
 - Select one QEMU target with strong verified-configuration coverage. → done:
   `qemu_virt_aarch64`, chosen from the coverage table rather than from
@@ -697,14 +697,14 @@ either a Microkit board built against a proved configuration or dropping to the
 raw seL4 SDK, and that is the next assurance step rather than something this
 phase quietly claims.
 
-### Phase 3 — split privileged services — **started (v1.5)**
+### Phase 3 — split privileged services — **started (v0.1.5)**
 
 - Serial/input and timers first, then storage/image, networking and model/tool
   brokering. → the **console driver has left the supervisor** on all three
   research backends. It runs unprivileged, holds the device, and prints the
   conformance transcript on the supervisor's behalf: if the driver does not
   work, the transcript does not appear and the frozen-transcript diff fails.
-  v1.7 adds a bounded ATA-backed source workspace, but that storage mechanism
+  v0.1.7 adds a bounded ATA-backed source workspace, but that storage mechanism
   is still in the supervisor rather than a restartable driver domain. Timers are
   not split — preemption is the supervisor's own mechanism for
   containing a world, so moving it out is a later question rather than an
@@ -712,13 +712,13 @@ phase quietly claims.
 - Put each risky driver in its own restartable domain. → done for the one driver
   that exists. Losing it, replacing it at a new generation, and refusing a
   handle from before the restart with `stale-generation` are all asserted in CI
-  on every architecture. That status had been in the contract since v1.2 with no
+  on every architecture. That status had been in the contract since v0.1.2 with no
   backend able to produce it; a driver that can die is what made it real.
 - Then the **POSIX personality**: a Rust C library and the filesystem and
   process services beneath it, running unprivileged above the contract. That is
   the Redox lesson taken deliberately — POSIX is a personality, not the centre —
   and it is where Linux application compatibility comes from. Not started; its
-  evaluator-domain prerequisite was completed in v1.6.
+  evaluator-domain prerequisite was completed in v0.1.6.
 
 The device is granted the way each architecture actually grants devices, which
 is the part worth having built once: an I/O permission bitmap in the
@@ -728,7 +728,7 @@ a mapped device page on AArch64 and RISC-V. Every other world runs the same
 general protection on x86-64, by a page fault on the other two — so the device
 is a capability rather than a convention, and CI asserts that on all three.
 
-### Phase 4 — durable worlds and effects — **started (v1.7)**
+### Phase 4 — durable worlds and effects — **started (v0.1.7)**
 
 - Canonical signed images and event logs. → native canonical source cells and
   dual-slot recovery exist; signatures and the hosted event log do not yet.

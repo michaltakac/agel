@@ -3,10 +3,10 @@
 //! Serial input still enters through the recovery plane. Source then
 //! crosses one bounded shared page into an unprivileged evaluator domain. The
 //! result crosses back as bytes and is printed by the separate console-driver
-//! domain introduced in v1.5. Neither mutable component owns the recovery
+//! domain introduced in v0.1.5. Neither mutable component owns the recovery
 //! monitor or can address the other's private stack.
 //!
-//! v1.7 adds a tiny structural editor and a dual-slot source workspace. The
+//! v0.1.7 adds a tiny structural editor and a dual-slot source workspace. The
 //! supervisor owns the raw-disk mechanism, but persisted bytes are bounded
 //! named Agel forms which are replayed into a fresh evaluator rather than a
 //! dump of Rust memory or authority-bearing state.

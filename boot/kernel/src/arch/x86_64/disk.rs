@@ -1,6 +1,6 @@
 //! Minimal primary-ATA PIO storage for the native source workspace.
 //!
-//! The BIOS seed already boots from QEMU's first IDE disk. v1.7 deliberately
+//! The BIOS seed already boots from QEMU's first IDE disk. v0.1.7 deliberately
 //! uses only single-sector LBA28 operations and a bounded poll loop; there is
 //! no probing, DMA, partition parser, filesystem, or ambient block API.
 

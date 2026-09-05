@@ -1,6 +1,6 @@
 //! The supervisor's own last-resort path to the console.
 //!
-//! Since v1.5 this is *not* how most output happens. The console driver runs in
+//! Since v0.1.5 this is *not* how most output happens. The console driver runs in
 //! its own unprivileged domain and holds the device; ordinary output goes
 //! through [`crate::service::ServiceWriter`], and if that driver does not work
 //! nothing is printed.

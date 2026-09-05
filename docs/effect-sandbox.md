@@ -1,6 +1,6 @@
 # Typed effects and copy-on-write sandboxes
 
-Agel v0.6 gives host effects one vocabulary and one interposition point. The
+Agel v0.0.6 gives host effects one vocabulary and one interposition point. The
 language core still only creates transactional intents. A trusted host decides
 whether an intent may cross into the operating system.
 
@@ -54,7 +54,7 @@ cargo run -q -p agel-effects --example cow_workspace
 ```
 
 This in-memory implementation establishes semantics for the persistent,
-single-file image planned for v0.7. It does not yet virtualize an arbitrary
+single-file image planned for v0.0.7. It does not yet virtualize an arbitrary
 native process's filesystem accesses.
 
 ## Boundary honesty

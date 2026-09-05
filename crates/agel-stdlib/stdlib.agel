@@ -1,4 +1,4 @@
-; Agel v0.8 standard library. The evaluator remains small; ordinary Agel code
+; Agel v0.0.8 standard library. The evaluator remains small; ordinary Agel code
 ; supplies reusable sequence, result, and orchestration abstractions.
 
 (module agel/sequence

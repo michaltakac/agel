@@ -17,7 +17,7 @@ projects are inputs, not dependencies, and Agel keeps the mechanisms separable:
 - [Chimera](https://github.com/penberg/chimera), its
   [design essay](https://penberg.org/blog/chimera.html), and the paper
   [*Towards Sandboxing Untrusted Agents in Userspace*](https://penberg.org/papers/penberg-chimera.pdf)
-  motivate syscall-level mediation beneath language capabilities. Agel v0.6
+  motivate syscall-level mediation beneath language capabilities. Agel v0.0.6
   interposes one constrained process path, but does not claim DBT-strength
   containment; that remains a native boundary.
 - Thinking Machines' [Interaction Models](https://thinkingmachines.ai/blog/interaction-models/)

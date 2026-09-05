@@ -1,6 +1,6 @@
 //! Descriptor tables, trap entry, and the ring transition.
 //!
-//! Everything in this module exists to answer one question the v1.1 kernel
+//! Everything in this module exists to answer one question the v0.1.1 kernel
 //! could not: what happens when the mutable Agel world does something wrong?
 //! Before this, the answer was "the machine executes it". After this, the
 //! answer is a trap into a kernel the world cannot write, on a stack the world

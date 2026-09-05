@@ -13,7 +13,7 @@
 //! real.
 //!
 //! Why the console first, when the roadmap could have started anywhere: the
-//! Agel evaluator now runs in a domain in v1.6. An unprivileged evaluator needs
+//! Agel evaluator now runs in a domain in v0.1.6. An unprivileged evaluator needs
 //! somewhere to print, and it must not be handed the device to do it. The
 //! driver domain is what it prints through.
 

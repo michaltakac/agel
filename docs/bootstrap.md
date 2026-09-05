@@ -1,4 +1,4 @@
-# Agel v0.9 diverse bootstrap
+# Agel v0.0.9 diverse bootstrap
 
 Self-hosting is split into independently testable claims. This avoids treating a
 single metacircular demo as proof that the host can be removed.
@@ -53,10 +53,10 @@ rollback.
 cargo run -q -p agel-supervisor --example ab_upgrade
 ```
 
-## What remains after v1.1
+## What remains after v0.1.1
 
 The independent and metacircular evaluators cover a meaningful functional
-kernel, not all Agel semantics. v1.0 added a bootable recovery path and v1.1
+kernel, not all Agel semantics. v0.1.0 added a bootable recovery path and v0.1.1
 added a fixed-memory native evaluator. The next trust steps are native persistent
 images, expanding cross-implementation conformance, and moving the agent runtime
 and compiler into the VM. The Rust seed has not disappeared, and the A/B

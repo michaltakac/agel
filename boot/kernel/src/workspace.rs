@@ -1,6 +1,6 @@
 //! Crash-tolerant native source-cell images.
 //!
-//! v1.7 persists language source rather than Rust memory layout. Two fixed raw
+//! v0.1.7 persists language source rather than Rust memory layout. Two fixed raw
 //! disk slots retain the newest and previous committed workspace. A save first
 //! invalidates the older slot, writes its payload, and publishes its header
 //! last; boot accepts only a bounded, checksummed, canonically decoded image.

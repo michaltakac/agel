@@ -1,6 +1,6 @@
 # Agel portable image format v1
 
-Agel v0.7 persists *causes*, not host representation. An image is the ordered
+Agel v0.0.7 persists *causes*, not host representation. An image is the ordered
 sequence of successful inputs that created a world:
 
 ```text

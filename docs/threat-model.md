@@ -3,7 +3,7 @@
 Each release records newly reachable attack surfaces and the invariant that
 contains them.
 
-## v0.5
+## v0.0.5
 
 - **Staged source:** proposals may be malformed, stale, effectful, or authored
   by a compromised model. The external verifier binds source and base digests,
@@ -19,7 +19,7 @@ The verifier is a deterministic gate, not a theorem prover. Unknown semantic
 behavior is constrained by zero-authority canaries and executable tests; later
 releases add stronger effect interposition and model checking.
 
-## v0.6
+## v0.0.6
 
 - **Ambient host authority:** a child process could inherit credentials or an
   attacker-controlled environment. The process boundary clears the environment
@@ -42,7 +42,7 @@ restricted mode. Native syscall mediation, mount/network policy, quotas across
 process descendants, and a separate supervisor remain required before Agel can
 run hostile machine code.
 
-## v0.7
+## v0.0.7
 
 - **Host-layout lock-in:** images store canonical committed inputs rather than
   Rust memory layouts. Decoding is bounded and versioned; reconstruction uses
@@ -66,7 +66,7 @@ The chain is tamper-evident, not authenticated. Anyone who can rewrite the file
 can recompute it. Signed roots, encrypted secrets, bounded compaction, and remote
 replication remain later trust layers.
 
-## v0.8
+## v0.0.8
 
 - **Library privilege creep:** standard facilities are ordinary Agel modules
   installed in one transaction. They receive no hidden host authority and can be
@@ -85,7 +85,7 @@ replication remain later trust layers.
 with a stable domain protocol should define narrower message types around the
 generic pool.
 
-## v0.9
+## v0.0.9
 
 - **Single-bootstrap semantic bugs:** a separately written Common Lisp evaluator
   and the Rust seed consume the same functional-kernel forms and must emit the
@@ -105,9 +105,9 @@ generic pool.
 The Common Lisp reference and metacircular evaluator currently cover the lexical
 functional kernel, not macros, modules, agents, persistence, or effects. A/B
 slot state is not yet a separately bootable disk selector. These are explicit
-v1.0 boundaries, not implied guarantees.
+v0.1.0 boundaries, not implied guarantees.
 
-## v1.0
+## v0.1.0
 
 - **Self-editing world replaces recovery:** the freestanding recovery monitor is
   linked into the native seed, outside any mutable Agel world. Its A/B policy
@@ -132,7 +132,7 @@ native binaries. QEMU emulation is a conformance target, not a proof of hardware
 correctness. Cryptographic boot, real watchdog hardware, and signed system
 images remain required before this is a secure autonomous OS.
 
-## v1.1
+## v0.1.1
 
 - **Failed native evaluation destroys rollback history:** three fixed world
   banks separate active, previous, and scratch state. Evaluation mutates only
@@ -150,7 +150,7 @@ images remain required before this is a secure autonomous OS.
 - **Repeated promotion destroys the rollback slot:** promoting while B is
   already active is denied and clears stale candidate evidence, so retained A
   cannot be replaced by B. A fault reports the slot actually restored.
-- **Persisted closure loses lexical authority or data:** v1.1 stored functions
+- **Persisted closure loses lexical authority or data:** v0.1.1 stored functions
   do not yet encode captured environments. Defining one from a nonempty lexical
   context is rejected transactionally instead of committing broken semantics.
 - **Argument side effects replace the selected callee:** function values carry
@@ -167,7 +167,7 @@ interrupt table, memory protection, or compiler yet. The fixed evaluator shares
 the kernel address space, so its checked implementation is a robustness boundary,
 not hardware isolation from hostile native code.
 
-## v1.2
+## v0.1.2
 
 - **A frozen boundary drifts by accident:** the kernel contract is a versioned
   crate with an executable reference model and an 81-step conformance corpus
@@ -227,7 +227,7 @@ model rather than an independent second implementation; that independence is
 what the seL4 backend is for. The frame allocator never reclaims, there is no
 IOMMU, no SMP, no signature verification, and no hardware watchdog.
 
-## v1.3
+## v0.1.3
 
 - **An isolation claim that only holds on one machine:** the same contract, the
   same 81-step corpus, the same containment driver, and the same unprivileged
@@ -269,7 +269,7 @@ emulated machines, of a kernel whose frame allocator never reclaims and which
 has no IOMMU, no SMP, no signature verification, and no hardware watchdog. The
 Agel evaluator still runs privileged, and only on x86-64.
 
-## v1.4
+## v0.1.4
 
 - **A kernel we wrote is the only thing that has ever enforced our boundary:**
   the same contract now runs on an unmodified seL4 kernel, in four protection
@@ -313,7 +313,7 @@ system description, which grants the authority and has been reviewed by nobody
 but its author. The seL4 backend also runs only the contract: the Agel evaluator
 is not in it, and is still privileged on x86-64.
 
-## v1.5
+## v0.1.5
 
 - **A driver fault is a kernel fault:** the console driver runs unprivileged in
   its own domain on all three research backends. It faults where every other
@@ -345,7 +345,7 @@ networking and model brokering have not been split. The frame pool still never
 reclaims, so a restarted domain's frames are lost; a system that restarts
 drivers in a loop would exhaust it. And the evaluator still runs privileged.
 
-## v1.6
+## v0.1.6
 
 - **An evaluator bug corrupts its recovery plane:** the native evaluator now
   runs in an unprivileged domain on x86-64, AArch64, and RISC-V. Its writable
@@ -379,7 +379,7 @@ the full hosted agent runtime. Immutable kernel constants are readable to the
 evaluator domain in this research backend, serial input remains supervisor
 code, and seL4 currently hosts only the frozen kernel contract.
 
-## v1.7
+## v0.1.7
 
 - **A memory-layout snapshot revives stale authority:** the native image stores
   only bounded source-cell names and source bytes. Boot reconstructs a new

@@ -1,4 +1,4 @@
-# Agel v0.8 standard library
+# Agel v0.0.8 standard library
 
 The standard library is one Agel source file installed as one transaction. A
 syntax, module, or test error leaves no partial library behind. Its implementation

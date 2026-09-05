@@ -50,7 +50,7 @@ Software transactional memory is only one layer. STM can roll back language
 state, but cannot undo a model call, network request, disk write, or device
 I/O.
 Model inference therefore uses a committed outbox, idempotence-guarded
-completion, explicit dispatch, and exact-result replay. At v0.6, host process
+completion, explicit dispatch, and exact-result replay. At v0.0.6, host process
 execution is also routed through typed intent, policy, resource limits, and an
 audit log in `agel-effects`. Future effects must use the same prepare/commit
 shape plus idempotency keys or compensating actions.
@@ -79,48 +79,48 @@ Each rung must be runnable and differentially testable against the rung below:
 4. **Model-agent bridge (complete):** transactional inference intents,
    capability-scoped Claude Code and Codex adapters, trusted result injection,
    and deterministic replay without provider re-execution.
-5. **Verification gate (complete at v0.5):** content-bound proposals,
+5. **Verification gate (complete at v0.0.5):** content-bound proposals,
    conservative effect declarations, executable evidence, zero-authority
    canaries, and atomic promotion. A small trusted checker, not a macro or
    model, decides admission. Finite protocol model checking remains a
    library-layer extension.
-6. **Effect interposition (complete at v0.6):** typed default-deny policy,
+6. **Effect interposition (complete at v0.0.6):** typed default-deny policy,
    constrained process execution, inspectable outcomes, and copy-on-write
    virtual workspaces. Kernel-grade syscall mediation remains a later native
    boundary.
-7. **Portable images (complete at v0.7):** canonical committed-input logs,
+7. **Portable images (complete at v0.0.7):** canonical committed-input logs,
    exact model-result replay, fresh authority on reconstruction, tamper-evident
    chains, and crash-safe file replacement with previous-image recovery.
-8. **Library-first environment (complete at v0.8):** sequence/result modules
+8. **Library-first environment (complete at v0.0.8):** sequence/result modules
    and typed bounded worker pools implemented as ordinary Agel source. The CLI
    installs them atomically while retaining a `--no-stdlib` minimal-core mode.
-9. **Diverse bootstrap (complete for the functional kernel at v0.9):** an
+9. **Diverse bootstrap (complete for the functional kernel at v0.0.9):** an
    independent Common Lisp evaluator is differentially checked against the Rust
    seed, while `agel/meta` evaluates lexical Agel code as data. A supervisor
    keeps whole A/B semantic images outside the candidate and binds promotion to
    zero-authority health evidence.
-10. **Bootable recovery seed (complete at v1.0):** a reproducible BIOS image
+10. **Bootable recovery seed (complete at v0.1.0):** a reproducible BIOS image
    enters x86-64 long mode, runs a freestanding Rust serial HAL, and exposes an
    independent A/B recovery monitor whose policy is testable under QEMU.
-11. **Native language workshop (complete at v1.1):** a fixed-memory Agel reader,
+11. **Native language workshop (complete at v0.1.1):** a fixed-memory Agel reader,
    evaluator, transactional world, definitions, recursive functions, and serial
    REPL execute inside QEMU while recovery state remains outside the language.
-12. **Frozen kernel contract (complete at v1.2):** a versioned, backend-neutral
+12. **Frozen kernel contract (complete at v0.1.2):** a versioned, backend-neutral
    object/rights/operation contract, an executable reference model, and an
    81-step conformance corpus whose canonical transcript is frozen and diffed.
    See [`kernel-contract.md`](kernel-contract.md).
-13. **Research-kernel isolation (complete at v1.2):** kernel-built page tables,
+13. **Research-kernel isolation (complete at v0.1.2):** kernel-built page tables,
    per-domain address spaces, write-xor-execute, descriptor tables, trap entry,
    a preemption timer, ring-3 protection domains, and a syscall boundary. An
    unprivileged world answers the whole conformance corpus, and worlds that
    fault, execute privileged instructions, or never yield are contained without
    losing the recovery monitor.
-14. **Portable isolation backend (complete at v1.3):** the same contract, the
+14. **Portable isolation backend (complete at v0.1.3):** the same contract, the
    same corpus, and the same containment tests on x86-64, AArch64, and RISC-V
    from one source, with byte-identical transcripts. Only address spaces,
    register frames, trap entry, and the privilege transition are
    per-architecture.
-15. **Split privileged services (started at v1.5):** the console driver runs in
+15. **Split privileged services (started at v0.1.5):** the console driver runs in
    its own unprivileged, restartable domain on all three research backends,
    holding the device by whatever mechanism the architecture uses to grant one.
    The supervisor prints through it, can lose it, replaces it at a new
@@ -128,18 +128,18 @@ Each rung must be runnable and differentially testable against the rung below:
    networking and model brokering are still the supervisor's.
 16. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
    and compiler in Agel; extend diverse comparison to every kernel semantic.
-17. **Native evaluator world (complete at v1.6):** the fixed-memory evaluator
+17. **Native evaluator world (complete at v0.1.6):** the fixed-memory evaluator
    runs at the lowest privilege level on all three research backends. The x86-64
    interactive workshop sends source over a bounded shared page and prints
    through the restartable console domain. At this rung the full agent runtime,
    allocator, persistent images, and in-OS editor were still future work; device
    access stays outside mutable language heaps.
-18. **Durable native workspace (complete at v1.7):** a bounded named-source-cell
+18. **Durable native workspace (complete at v0.1.7):** a bounded named-source-cell
    editor runs in the x86 workshop. Canonical cells are validated by replay into
    a fresh evaluator, committed to alternating raw-disk slots, and reconstructed
    at boot; a corrupt or semantically invalid newest generation falls back to
    the preceding slot.
-19. **seL4 backend (complete at v1.4):** the same kernel contract over an
+19. **seL4 backend (complete at v0.1.4):** the same kernel contract over an
    unmodified seL4 kernel, composed with Microkit on AArch64. Four protection
    domains — recovery, world, broker, serial — where the contract is answered
    by an unprivileged server and the kernel knows nothing about Agel. The

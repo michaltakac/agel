@@ -754,7 +754,7 @@ fn evaluate_def(
             StoredValue::Function(capture_function(document, source, node)?)
         }
         RuntimeValue::Function(function) => StoredValue::Function(function),
-        RuntimeValue::Code(_) => return Err(Error("quoted code is transaction-local in v1.1")),
+        RuntimeValue::Code(_) => return Err(Error("quoted code is transaction-local in v0.1.1")),
         RuntimeValue::Builtin(_) => return Err(Error("native builtins cannot be rebound")),
     };
     world.define(name, stored)?;

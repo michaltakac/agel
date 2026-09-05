@@ -1,4 +1,4 @@
-# Agel v0.5: evidence-carrying upgrades
+# Agel v0.0.5: evidence-carrying upgrades
 
 Agel deliberately calls these upgrades *evidence-carrying*, not formally
 verified. A model, macro, or human may author a proposal, but only the small
@@ -25,7 +25,7 @@ cargo run -q -p agel-verify --example safe_upgrade
 ## Irreversible-effect repair
 
 v0.4 kept model request status in rollbackable state. Restoring an older
-snapshot could therefore resurrect a paid request. v0.5 adds a shared monotonic
+snapshot could therefore resurrect a paid request. v0.0.5 adds a shared monotonic
 effect journal outside transactional `State`. A model request receives a
 SHA-256 effect key bound to world identity, request id, provider, and prompt
 digest. Claim is written to this journal before provider launch; rollback and
@@ -44,7 +44,7 @@ explicitly reissue current authority.
 
 ## Honest limitation
 
-The v0.5 content digest is cryptographic but its payload is still an explicitly
-versioned representation of the Rust seed's state. v0.7 replaces this with the
+The v0.0.5 content digest is cryptographic but its payload is still an explicitly
+versioned representation of the Rust seed's state. v0.0.7 replaces this with the
 portable canonical image encoding required for cross-version persistence and
 diverse-bootstrap comparison. It is not yet a detached signature.

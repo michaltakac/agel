@@ -1,8 +1,8 @@
-//! The serial Agel workshop: the v1.1 REPL that runs on the BIOS x86-64 seed.
+//! The serial Agel workshop: the v0.1.1 REPL that runs on the BIOS x86-64 seed.
 //!
 //! This is the one part of the kernel that is still architecture-bound, because
 //! it is also the legacy privileged path used by the small evaluator self-test.
-//! The interactive v1.7 workshop lives in `isolated_repl` and runs the same
+//! The interactive v0.1.7 workshop lives in `isolated_repl` and runs the same
 //! evaluator in a protection domain.
 
 #[cfg(not(feature = "native-selftest"))]

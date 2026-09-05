@@ -1,4 +1,4 @@
-; Enter these forms after ./scripts/run-qemu.sh. In v1.6 the evaluator is an
+; Enter these forms after ./scripts/run-qemu.sh. In v0.1.6 the evaluator is an
 ; unprivileged domain and its output comes from a separate console domain.
 ; To retain a form, enter :edit NAME, type the form at the edit prompt, then
 ; use :run NAME and :save. It will be replayed on the next boot.

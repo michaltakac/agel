@@ -1,7 +1,7 @@
 # Native boot seed and recovery monitor
 
-Agel v1.0 added a small, reproducible path from a raw disk image to freestanding
-Rust on x86-64. v1.1 places a fixed-memory Agel evaluator and transactional REPL
+Agel v0.1.0 added a small, reproducible path from a raw disk image to freestanding
+Rust on x86-64. v0.1.1 places a fixed-memory Agel evaluator and transactional REPL
 on that substrate while retaining the recovery boundary.
 
 ## Boot path, x86-64
@@ -24,7 +24,7 @@ began, and because a reproducible 128 KiB boot seed is a useful thing to have.
 The linker keeps `.text.entry` first so helper-function reordering cannot move
 the address called by the BIOS stage. The complete raw image is 2,048 sectors
 (1 MiB). Sectors 0 through 255 are the replaceable boot seed; the build rejects
-an oversized kernel. Sectors 256 through 287 are the two v1.7 workspace slots,
+an oversized kernel. Sectors 256 through 287 are the two v0.1.7 workspace slots,
 and rebuilding deliberately preserves them.
 
 ## Recovery boundary
@@ -46,7 +46,7 @@ and asserts denial, verification, promotion, and rollback.
 
 ## Three machines, one contract
 
-v1.3 builds the isolation backend for **x86-64, AArch64, and RISC-V from one
+v0.1.3 builds the isolation backend for **x86-64, AArch64, and RISC-V from one
 source**. The shared half — the capability space, the handshake page, the tick
 budget, the conformance driver, the containment driver, and the unprivileged
 world program — is architecture-neutral. Address spaces, register frames, trap
@@ -80,7 +80,7 @@ exercise is about, with the kernel on the receiving end of the arrangement.
 
 ## Protection domains
 
-v1.2 added the isolation layer the roadmap's Phase 1 calls for, built and tested
+v0.1.2 added the isolation layer the roadmap's Phase 1 calls for, built and tested
 under `--features isolation-selftest`:
 
 - the kernel replaces the BIOS's single supervisor mapping with page tables it
@@ -125,11 +125,11 @@ workspace still has `unsafe_code = "forbid"`. Privileged instructions are
 confined to `boot/kernel/src/hal.rs`; BIOS transition assembly lives in
 `boot/bios`.
 
-Since v1.6, `./scripts/run-qemu.sh` boots an x86-64 interactive workshop whose
+Since v0.1.6, `./scripts/run-qemu.sh` boots an x86-64 interactive workshop whose
 evaluator lives on a private 512 KiB bounded domain stack and whose output goes
-through the v1.5 console domain. The same evaluator path is tested on AArch64
+through the v0.1.5 console domain. The same evaluator path is tested on AArch64
 and RISC-V. Serial input still terminates in the supervisor, and seL4 still runs
-only the frozen contract. v1.7 adds alternating, checksummed native source-image
+only the frozen contract. v0.1.7 adds alternating, checksummed native source-image
 slots and boot-time replay, but the ATA mechanism remains supervisor code and
 the images are not signed. There is no allocator, hardware watchdog, full agent
 runtime, or frame reclamation in the VM. Mutable language state is nevertheless
