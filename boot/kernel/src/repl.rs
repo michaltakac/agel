@@ -2,7 +2,7 @@
 //!
 //! This is the one part of the kernel that is still architecture-bound, because
 //! it is also the legacy privileged path used by the small evaluator self-test.
-//! The interactive v1.6 workshop lives in `isolated_repl` and runs the same
+//! The interactive v1.7 workshop lives in `isolated_repl` and runs the same
 //! evaluator in a protection domain.
 
 #[cfg(not(feature = "native-selftest"))]

@@ -90,6 +90,9 @@ pub mod shared {
     pub const COMMAND_EVALUATOR_DEFS: u64 = 0x8200;
     /// Render the evaluator's enforced fixed resource limits.
     pub const COMMAND_EVALUATOR_LIMITS: u64 = 0x8300;
+    /// Replace the evaluator session with a fresh empty transactional world.
+    /// This is a supervisor-only workspace reconstruction primitive.
+    pub const COMMAND_EVALUATOR_RESET: u64 = 0x8400;
     /// Divide by zero. Only x86-64 traps on this; RISC-V defines a result and
     /// AArch64 has no integer divide exception at all, so the command exists
     /// only where a machine can actually be provoked by it.

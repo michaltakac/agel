@@ -379,6 +379,35 @@ the full hosted agent runtime. Immutable kernel constants are readable to the
 evaluator domain in this research backend, serial input remains supervisor
 code, and seL4 currently hosts only the frozen kernel contract.
 
+## v1.7
+
+- **A memory-layout snapshot revives stale authority:** the native image stores
+  only bounded source-cell names and source bytes. Boot reconstructs a new
+  evaluator session by replay; pointers, stacks, page tables, capability slots,
+  and Rust enum layouts never enter the format.
+- **A failed source edit becomes the boot image:** `:save` first resets a fresh
+  session and replays every staged cell in order. Any language error rejects the
+  entire candidate and reconstructs the last committed workspace.
+- **A torn write destroys the only development state:** two fixed slots alternate.
+  The target header is invalidated first, the payload is flushed, and the new
+  generation header is published last. The other complete generation is never
+  overwritten by the same save.
+- **Corrupt bytes are evaluated at startup:** headers carry explicit magic,
+  version, generation, length, and CRC-32. Decoding rechecks all cell, name, and
+  source bounds, duplicate names, and trailing bytes before replay. The test
+  exercises both a checksummed but semantically invalid newest image and a
+  corrupt newest payload, then simulates power loss after invalidation and a
+  partial payload write, requiring automatic fallback in each case.
+- **Disk absence freezes the recovery console:** ATA polling is bounded and a
+  missing or failed disk degrades the workshop to volatile operation rather
+  than preventing the prompt.
+
+CRC-32 is accidental-corruption detection, not authenticity. The storage path
+and editor remain supervisor Rust, the disk is ambient to that supervisor, and
+only x86-64 has the interactive durable workspace. Signed images, a storage
+driver domain, power-cut injection at every sector transition, and the native
+agent runtime remain outside this claim.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

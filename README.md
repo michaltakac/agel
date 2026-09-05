@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v1.6: a native Agel workshop with a frozen kernel
+The current repository is **v1.7: a persistent native Agel workshop with a frozen kernel
 contract, a portable isolation backend, the same contract running on an
 unmodified seL4 kernel, and the first privileged service split out into a
 restartable domain**. It provides:
@@ -39,7 +39,8 @@ restartable domain**. It provides:
 - external A/B image canary, evidence-bound promotion, and rollback;
 - a modality-neutral text/voice interaction handoff with a 200 ms foreground
   acknowledgement contract, bounded background work, and verified human authority;
-- a reproducible 128 KiB BIOS disk seed that enters x86-64 long mode in QEMU;
+- a reproducible 128 KiB BIOS boot seed in a persistent 1 MiB raw disk that
+  enters x86-64 long mode in QEMU;
 - a freestanding Rust serial HAL and interactive recovery monitor; and
 - boot-time A/B denial, verification, promotion, and watchdog rollback checks;
 - a fixed-memory Agel reader and evaluator running inside the VM;
@@ -69,6 +70,10 @@ restartable domain**. It provides:
 - the fixed-memory native evaluator running unprivileged on x86-64, AArch64,
   and RISC-V, with its transactional world on a private bounded stack and only
   a shared-page request/reply boundary to the supervisor; and
+- a native named-source-cell editor whose canonical workspace is committed to
+  alternating CRC-checked disk slots, replayed after reboot, and recovered from
+  the preceding generation when the newest image is torn, corrupt, or fails
+  semantic replay; and
 - a Rust CLI and test suite with no third-party crate dependencies.
 
 Agel is a **Unix-like agentic operating system on a microkernel**. It does model
@@ -84,9 +89,11 @@ portable. Scope, tiers and what does not exist yet are in
 This is the first Agel evaluator running on the independently bootable
 substrate, and the first hardware protection boundary the project can point at,
 but not yet a general-purpose operating system. `run-qemu.sh` now places the
-evaluator and console output in separate unprivileged domains; serial input and
-recovery policy remain in the supervisor. The full agent runtime, filesystem,
-compiler, and persistent images still run as hosted components. See
+evaluator and console output in separate unprivileged domains; serial input,
+raw storage, and recovery policy remain in the supervisor. Native source cells
+now survive reboot, but the full agent runtime, filesystem, compiler, signed
+portable images, and editor implementation in Agel remain hosted or future
+components. See
 [`docs/architecture.md`](docs/architecture.md) for the trust boundaries and
 bootstrap plan.
 
@@ -193,12 +200,29 @@ answer
 :rollback
 ```
 
+Create a source cell inside the VM and make it survive shutdown:
+
+```text
+:edit boot
+(def answer 42)
+:run boot
+:save
+:shutdown
+```
+
+Run `./scripts/run-qemu.sh` again; the workspace is replayed before the first
+prompt and `answer` evaluates to `42`. `:cells`, `:show boot`, `:workspace`,
+`:delete boot`, and `:reload` provide the rest of the native editing loop.
+Saving rebuilds the live evaluator from named cells, so prompt-only definitions
+are deliberately ephemeral while revision identifiers remain monotonic.
+
 Run the prompt-synchronized native language conformance session, the frozen
 kernel-contract transcript, and the isolation suite with:
 
 ```sh
 ./scripts/test-native.sh
 ./scripts/test-native-repl.sh
+./scripts/test-native-persistence.sh     # save, reboot, reject, recover
 ./scripts/test-kernel-contract.sh
 ./scripts/test-isolation.sh              # x86-64, AArch64 and RISC-V
 ./scripts/test-isolation.sh aarch64      # or one of them

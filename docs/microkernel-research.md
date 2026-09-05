@@ -704,9 +704,11 @@ phase quietly claims.
   research backends. It runs unprivileged, holds the device, and prints the
   conformance transcript on the supervisor's behalf: if the driver does not
   work, the transcript does not appear and the frozen-transcript diff fails.
-  Timers are not split — preemption is the supervisor's own mechanism for
+  v1.7 adds a bounded ATA-backed source workspace, but that storage mechanism
+  is still in the supervisor rather than a restartable driver domain. Timers are
+  not split — preemption is the supervisor's own mechanism for
   containing a world, so moving it out is a later question rather than an
-  obvious next step. Storage, networking and model/tool brokering are untouched.
+  obvious next step. Networking and model/tool brokering are untouched.
 - Put each risky driver in its own restartable domain. → done for the one driver
   that exists. Losing it, replacing it at a new generation, and refusing a
   handle from before the restart with `stale-generation` are all asserted in CI
@@ -726,11 +728,14 @@ a mapped device page on AArch64 and RISC-V. Every other world runs the same
 general protection on x86-64, by a page fault on the other two — so the device
 is a capability rather than a convention, and CI asserts that on all three.
 
-### Phase 4 — durable worlds and effects
+### Phase 4 — durable worlds and effects — **started (v1.7)**
 
-- Canonical signed images and event logs.
+- Canonical signed images and event logs. → native canonical source cells and
+  dual-slot recovery exist; signatures and the hosted event log do not yet.
 - Prepare/commit/idempotency protocols with effect servers.
-- Crash injection at every persistence transition.
+- Crash injection at every persistence transition. → the native integration
+  test corrupts the newest committed payload and requires previous-slot replay;
+  interruption at every individual write remains future work.
 
 ### Phase 5 — live replacement
 

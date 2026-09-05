@@ -7,7 +7,7 @@ qemu-system-x86_64 \
   -machine pc,accel=tcg -m 64M -display none -monitor none -serial stdio -no-reboot \
   -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
   -boot order=c,strict=on \
-  -drive format=raw,file="$kernel"
+  -drive format=raw,file="$kernel",if=ide,index=0,media=disk
 status=$?
 set -e
 

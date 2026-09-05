@@ -9,7 +9,7 @@ on that substrate while retaining the recovery boundary.
 AArch64 and RISC-V need none of this: QEMU's `virt` machine loads an ELF by its
 program headers, so those images state where they want to live and start there.
 x86-64 keeps the BIOS seed because that is where the project's native work
-began, and because a reproducible 128 KiB raw disk is a useful thing to have.
+began, and because a reproducible 128 KiB boot seed is a useful thing to have.
 
 1. The 512-byte BIOS stage loads 254 kernel sectors in two conservative
    127-sector requests beginning at physical `0x10000`.
@@ -22,8 +22,10 @@ began, and because a reproducible 128 KiB raw disk is a useful thing to have.
    evaluator's world banks.
 
 The linker keeps `.text.entry` first so helper-function reordering cannot move
-the address called by the BIOS stage. The raw image is always exactly 256
-sectors; the build rejects an oversized kernel.
+the address called by the BIOS stage. The complete raw image is 2,048 sectors
+(1 MiB). Sectors 0 through 255 are the replaceable boot seed; the build rejects
+an oversized kernel. Sectors 256 through 287 are the two v1.7 workspace slots,
+and rebuilding deliberately preserves them.
 
 ## Recovery boundary
 
@@ -59,7 +61,7 @@ of what differs.
 
 | | x86-64 | AArch64 | RISC-V |
 |---|---|---|---|
-| Platform | BIOS seed, raw 128 KiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
+| Platform | BIOS seed, raw 1 MiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
 | Supervisor level | ring 0 | EL1 | S-mode |
 | Unprivileged level | ring 3 | EL0 | U-mode |
 | Trap gate | `int 0x80` | `svc #0` | `ecall` |
@@ -127,7 +129,8 @@ Since v1.6, `./scripts/run-qemu.sh` boots an x86-64 interactive workshop whose
 evaluator lives on a private 512 KiB bounded domain stack and whose output goes
 through the v1.5 console domain. The same evaluator path is tested on AArch64
 and RISC-V. Serial input still terminates in the supervisor, and seL4 still runs
-only the frozen contract. There is no allocator, hardware watchdog, persisted
-A/B slot, signature verification, or full agent runtime in the VM, and the
-frame allocator never reclaims. Mutable language state is nevertheless no
-longer the component responsible for recovering itself.
+only the frozen contract. v1.7 adds alternating, checksummed native source-image
+slots and boot-time replay, but the ATA mechanism remains supervisor code and
+the images are not signed. There is no allocator, hardware watchdog, full agent
+runtime, or frame reclamation in the VM. Mutable language state is nevertheless
+no longer the component responsible for recovering itself.

@@ -34,7 +34,17 @@ clang -target i386-none-elf -c "$project_dir/boot/bios/boot.S" -o "$boot_object"
 
 test "$(wc -c < "$boot_bin" | tr -d ' ')" -eq 512
 test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 130048
-dd if=/dev/zero of="$disk_image" bs=512 count=256 2>/dev/null
+
+# The first 256 sectors are the reproducible boot seed. Sectors from 256 onward
+# belong to the native dual-slot source workspace and must survive rebuilding
+# the kernel between workshop sessions.
+disk_bytes=1048576
+if test ! -f "$disk_image"; then
+  dd if=/dev/zero of="$disk_image" bs=512 count=2048 2>/dev/null
+elif test "$(wc -c < "$disk_image" | tr -d ' ')" -lt "$disk_bytes"; then
+  dd if=/dev/zero of="$disk_image" bs=1 count=1 seek=$((disk_bytes - 1)) conv=notrunc 2>/dev/null
+fi
+dd if=/dev/zero of="$disk_image" bs=512 seek=1 count=255 conv=notrunc 2>/dev/null
 dd if="$boot_bin" of="$disk_image" conv=notrunc 2>/dev/null
 dd if="$kernel_bin" of="$disk_image" bs=512 seek=1 conv=notrunc 2>/dev/null
 

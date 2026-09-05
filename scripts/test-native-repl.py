@@ -8,10 +8,11 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 
 
 class Harness:
-    def __init__(self, image: str) -> None:
+    def __init__(self, image: str, *, persistent: bool = False) -> None:
         self.output: queue.Queue[bytes | None] = queue.Queue()
         self.transcript = bytearray()
         self.deadline = time.monotonic() + 45.0
@@ -36,7 +37,11 @@ class Harness:
                 "-boot",
                 "order=c,strict=on",
                 "-drive",
-                f"format=raw,file={image},snapshot=on",
+                (
+                    f"format=raw,file={image}"
+                    if persistent
+                    else f"format=raw,file={image},snapshot=on"
+                ),
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -118,10 +123,199 @@ class Harness:
         self.reader.join(timeout=2)
 
 
+def persistence_test(image: str) -> None:
+    first = Harness(image, persistent=True)
+    try:
+        first.expect_until(b"AGEL_NATIVE_READY")
+        first.expect_until(b"workspace: no persisted image; starting empty")
+        first.expect_until(b"agel-native[0]> ")
+        first.send_bytes(":edit scratch")
+        assert first.process.stdin is not None
+        first.process.stdin.write(b"\n")
+        first.process.stdin.flush()
+        first.expect_exact(b"\r\nedit[scratch]> ")
+        first.send("(+ 1 1)", "cell staged; :run NAME to evaluate, :save to persist", 0)
+        first.send(":reload", "workspace reload restored empty state", 0)
+        first.send(":cells", "cells (0):", 0)
+        first.send_bytes(":edit boot")
+        assert first.process.stdin is not None
+        first.process.stdin.write(b"\n")
+        first.process.stdin.flush()
+        first.expect_exact(b"\r\nedit[boot]> ")
+        first.send(
+            "(def persisted-answer 42)",
+            "cell staged; :run NAME to evaluate, :save to persist",
+            0,
+        )
+        first.send(":run boot", "42", 1)
+        first.send(
+            ":save",
+            "workspace generation 1 committed: 1 cells; evaluator rebuilt from cells; previous slot retained",
+            2,
+        )
+        first.send_bytes(":edit bad")
+        assert first.process.stdin is not None
+        first.process.stdin.write(b"\n")
+        first.process.stdin.flush()
+        first.expect_exact(b"\r\nedit[bad]> ")
+        first.send(
+            "(def broken (/ 1 0))",
+            "cell staged; :run NAME to evaluate, :save to persist",
+            2,
+        )
+        first.send_bytes(":save")
+        first.process.stdin.write(b"\n")
+        first.process.stdin.flush()
+        first.expect_exact(
+            b"\r\nworkspace replay rejected at cell bad: error: division by zero\r\n"
+            b"workspace not saved; committed evaluator restored\r\n"
+            b"agel-native[4]> "
+        )
+        first.send(
+            ":delete bad",
+            "cell deleted from staged workspace; :save to commit",
+            4,
+        )
+        shutdown(first)
+    finally:
+        first.close()
+
+    second = Harness(image, persistent=True)
+    try:
+        second.expect_until(b"AGEL_NATIVE_READY")
+        second.expect_until(b"workspace generation 1 restored: 1 cells replayed")
+        second.expect_until(b"agel-native[1]> ")
+        second.send("persisted-answer", "42", 2)
+        second.send(":show boot", "(def persisted-answer 42)", 2)
+        second.send(
+            ":workspace", "workspace generation 1, 1 cells, clean", 2
+        )
+        second.send_bytes(":edit math")
+        assert second.process.stdin is not None
+        second.process.stdin.write(b"\n")
+        second.process.stdin.flush()
+        second.expect_exact(b"\r\nedit[math]> ")
+        second.send(
+            "(def double (fn (x) (+ x x)))",
+            "cell staged; :run NAME to evaluate, :save to persist",
+            2,
+        )
+        second.send(":run math", "#<native-function>", 3)
+        second.send(
+            ":save",
+            "workspace generation 2 committed: 2 cells; evaluator rebuilt from cells; previous slot retained",
+            5,
+        )
+        shutdown(second)
+    finally:
+        second.close()
+
+    # Make generation 2 checksummed and structurally valid but semantically
+    # invalid. Boot must reject its replay and try generation 1.
+    with open(image, "r+b") as disk:
+        disk.seek(256 * 512)
+        header = bytearray(disk.read(512))
+        length = int.from_bytes(header[24:28], "big")
+        disk.seek(257 * 512)
+        payload = bytearray(disk.read(15 * 512))
+        old = b"(def persisted-answer 42)"
+        new = b"(def persisted-answer zz)"
+        position = payload[:length].find(old)
+        if position < 0 or len(old) != len(new):
+            raise RuntimeError("could not synthesize replay-invalid generation")
+        payload[position : position + len(old)] = new
+        header[28:32] = (
+            zlib.crc32(header[:28] + payload[:length]) & 0xFFFFFFFF
+        ).to_bytes(4, "big")
+        disk.seek(256 * 512)
+        disk.write(header)
+        disk.seek(257 * 512)
+        disk.write(payload)
+        disk.flush()
+
+    third = Harness(image, persistent=True)
+    try:
+        third.expect_until(b"AGEL_NATIVE_READY")
+        third.expect_until(
+            b"workspace replay rejected at cell boot: error: unbound native symbol"
+        )
+        third.expect_until(b"trying previous workspace generation")
+        third.expect_until(b"workspace generation 1 restored: 1 cells replayed")
+        third.expect_until(b"agel-native[1]> ")
+        third.send("persisted-answer", "42", 2)
+        third.send(":cells", "cells (1): boot", 2)
+        shutdown(third)
+    finally:
+        third.close()
+
+    # Now damage generation 2's payload without updating its checksum. The
+    # structural verifier must independently reach the same older generation.
+    with open(image, "r+b") as disk:
+        disk.seek(257 * 512)
+        original = disk.read(1)
+        if len(original) != 1:
+            raise RuntimeError("test image has no workspace payload sector")
+        disk.seek(257 * 512)
+        disk.write(bytes([original[0] ^ 0x80]))
+        disk.flush()
+
+    fourth = Harness(image, persistent=True)
+    try:
+        fourth.expect_until(b"AGEL_NATIVE_READY")
+        fourth.expect_until(b"workspace generation 1 restored: 1 cells replayed")
+        fourth.expect_until(b"agel-native[1]> ")
+        fourth.send("persisted-answer", "42", 2)
+        shutdown(fourth)
+    finally:
+        fourth.close()
+
+    # Model a power loss after target-slot invalidation and a partial payload
+    # write. With no published header, boot must ignore the torn generation.
+    with open(image, "r+b") as disk:
+        disk.seek(256 * 512)
+        disk.write(bytes(512))
+        disk.write(b"partial-uncommitted-workspace")
+        disk.flush()
+
+    fifth = Harness(image, persistent=True)
+    try:
+        fifth.expect_until(b"AGEL_NATIVE_READY")
+        fifth.expect_until(b"workspace generation 1 restored: 1 cells replayed")
+        fifth.expect_until(b"agel-native[1]> ")
+        fifth.send("persisted-answer", "42", 2)
+        shutdown(fifth)
+    finally:
+        fifth.close()
+
+
+def shutdown(harness: Harness) -> None:
+    assert harness.process.stdin is not None
+    harness.send_bytes(":shutdown")
+    harness.process.stdin.write(b"\n")
+    harness.process.stdin.flush()
+    harness.expect_exact(b"\r\n")
+    exit_code = harness.process.wait(timeout=harness.remaining(8.0))
+    if exit_code != 33:
+        raise RuntimeError(f"QEMU exit status {exit_code}, expected 33")
+
+
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: test-native-repl.py IMAGE", file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print("usage: test-native-repl.py IMAGE [--persistence]", file=sys.stderr)
         return 2
+    if len(sys.argv) == 3:
+        if sys.argv[2] != "--persistence":
+            print("unknown test mode", file=sys.stderr)
+            return 2
+        try:
+            persistence_test(sys.argv[1])
+        except Exception as error:
+            print(f"native persistence test failed: {error}", file=sys.stderr)
+            return 1
+        print(
+            "Agel native workspace: edit -> reboot -> semantic, corruption, and torn-write fallback [ok]"
+        )
+        return 0
     harness = Harness(sys.argv[1])
     failure: Exception | None = None
     try:

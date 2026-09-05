@@ -3,7 +3,7 @@
 //! It has two jobs, and it is worth being clear about which is which.
 //!
 //! The first is the native Agel workshop: a fixed-memory evaluator and a serial
-//! REPL on a reproducible BIOS x86-64 seed. The v1.6 isolation image also runs
+//! REPL on a reproducible BIOS x86-64 seed. The isolation image also runs
 //! that evaluator in an unprivileged protection domain.
 //!
 //! The second is the isolation backend: address spaces, trap entry,
@@ -38,6 +38,8 @@ mod memory;
 mod service;
 #[cfg(feature = "isolation-selftest")]
 mod user;
+#[cfg(all(target_arch = "x86_64", feature = "isolated-repl"))]
+mod workspace;
 
 #[cfg(feature = "isolation-selftest")]
 mod native;
@@ -65,7 +67,7 @@ mod repl;
 /// exists and `.bss` has been zeroed.
 pub fn agel_main() -> ! {
     console::initialize();
-    console::write("\nAgel v1.6 research kernel: ");
+    console::write("\nAgel v1.7 research kernel: ");
     console::write(arch::NAME);
     console::write("\n");
     console::write("recovery monitor is outside the mutable agent world\n");

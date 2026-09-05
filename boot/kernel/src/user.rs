@@ -420,6 +420,9 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
                 unsafe { evaluator_u64(page, &mut response_length, *bound) };
             }
             unsafe { evaluator_finish(page, response_length, false, session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_RESET {
+            session.reset();
+            unsafe { evaluator_finish(page, 0, false, session.revision()) };
         }
         unsafe { yield_to_supervisor() };
     }

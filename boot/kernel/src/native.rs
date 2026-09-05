@@ -192,6 +192,15 @@ impl Session {
         }
     }
 
+    /// Clear language state without reusing a revision identifier.
+    #[cfg(feature = "isolation-selftest")]
+    pub fn reset(&mut self) {
+        self.active = World::EMPTY;
+        self.previous = World::EMPTY;
+        self.scratch = World::EMPTY;
+        self.has_previous = false;
+    }
+
     pub fn rollback(&mut self) -> Result<(), Error> {
         if !self.has_previous {
             return Err(Error("no previous native revision"));

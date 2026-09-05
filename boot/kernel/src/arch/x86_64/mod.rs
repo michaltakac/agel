@@ -1,11 +1,14 @@
 //! x86-64: the BIOS bootstrap seed and the first isolation backend.
 //!
 //! This is the architecture Agel's native work started on, so it carries the
-//! extra weight the others do not: a 512-byte BIOS stage, a 64 KiB raw disk
+//! extra weight the others do not: a 512-byte BIOS stage, a 1 MiB raw disk
 //! image, and the serial Agel workshop. The isolation half of it answers the
 //! same contract as AArch64 and RISC-V.
 
 pub mod hal;
+
+#[cfg(feature = "isolated-repl")]
+mod disk;
 
 #[cfg(feature = "isolation-selftest")]
 pub mod cpu;
@@ -73,6 +76,9 @@ pub fn console_read_byte() -> u8 {
     while unsafe { hal::in8(COM1 + 5) } & 1 == 0 {}
     unsafe { hal::in8(COM1) }
 }
+
+#[cfg(feature = "isolated-repl")]
+pub use disk::{flush_disk, read_disk_sector, write_disk_sector};
 
 /// Leave QEMU through the debug-exit device.
 ///

@@ -4,7 +4,8 @@
 kernel. Since v1.6, source crosses a bounded shared page into an unprivileged
 evaluator domain, its transactional state lives on that domain's private stack,
 and results are printed through a separate console-driver domain. Evaluation
-uses no Rust allocator or host operating system.
+uses no Rust allocator or host operating system. Since v1.7, named source cells
+can be edited, committed, and reconstructed after reboot.
 
 ## Native subset
 
@@ -56,6 +57,14 @@ definition without rebooting the VM.
 :rollback          restore the preceding committed world
 :defs              list current global definitions
 :limits            show every fixed native resource bound
+:edit NAME         read one balanced form into a named source cell
+:run NAME          evaluate a staged cell
+:show NAME         print a cell's exact source
+:delete NAME       remove a cell from the staged workspace
+:cells             list cells in replay order
+:workspace         show generation, cell count, and dirty state
+:save              validate, commit, and switch to the workspace image
+:reload            discard staged changes and replay the disk image
 :recovery-status   inspect the independent boot recovery state
 :verify            admit recovery candidate B
 :promote           select a verified recovery candidate
@@ -73,14 +82,47 @@ allocation failures. `:limits` renders the table directly from the constants the
 evaluator enforces, so the console, this document, and the implementation cannot
 drift apart.
 
+The workspace holds at most 16 cells. Cell names are at most 24 ASCII bytes and
+each cell is exactly one balanced Agel form of at most 256 bytes. The editor is
+structural and intentionally small: `:edit NAME` opens a secondary prompt and
+the ordinary balanced-form reader accepts as many physical lines as the form
+needs. Editing stages source; `:run` changes only the live evaluator and `:save`
+is the explicit durability boundary.
+
+## v1.7 durable source workspace
+
+The raw x86 disk reserves two 8 KiB slots after the boot seed. A workspace image
+contains canonical name/source pairs, never a Rust memory dump or capability.
+On `:save`, Agel resets the evaluator and replays every staged cell in order.
+Definitions entered directly at the prompt are intentionally discarded; put
+anything you want to retain in a named cell. The revision counter remains
+monotonic across that rebuild. A reader or evaluation failure rejects the whole
+candidate and reconstructs the last committed workspace. Only a valid candidate
+reaches storage.
+
+The storage path invalidates the older slot, writes and flushes its bounded
+payload, publishes the generation header last, flushes again, and reads it back
+for verification. Boot checks format, bounds, canonical decoding, and CRC-32,
+then tries valid generations newest-first. If the newest slot is torn, corrupt,
+or cannot be evaluated, the preceding slot is replayed automatically. CRC detects accidental
+damage; it is not a cryptographic signature or protection from a malicious disk.
+
+`./scripts/build-boot.sh` replaces only sectors 0 through 255 and preserves the
+workspace region. Thus rebuilding or rerunning `./scripts/run-qemu.sh` keeps
+your cells. `./scripts/test-native-persistence.sh` uses a temporary disk and
+proves edit → save → reboot → reject a checksummed but semantically invalid
+newest slot → corrupt it → simulate an invalidated/partially written slot →
+recover the previous generation in every case.
+
 `./scripts/test-native.sh` exercises the evaluator inside QEMU without input.
 `./scripts/test-native-repl.sh` additionally drives the real UART reader and
 isolated REPL through a stateful, recursive, rollback-producing session.
 
-This is enough to write and run programs inside Agel itself. It is not yet an
-editor or self-hosted development environment: definitions disappear at power
-off, and the hosted macro/module/agent/effect system is not in the VM. Native
-persistent images and an in-OS editor are the next useful rung.
+This is enough to write, organize, and retain small programs inside Agel itself.
+It is not yet a self-hosted development environment: the editor and storage
+codec are trusted Rust services, and the hosted macro/module/agent/effect system
+is not in the VM. A native agent runtime and an editor implemented in Agel are
+the next useful rungs.
 
 ## v1.6 isolation boundary
 

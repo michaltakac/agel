@@ -131,22 +131,27 @@ Each rung must be runnable and differentially testable against the rung below:
 17. **Native evaluator world (complete at v1.6):** the fixed-memory evaluator
    runs at the lowest privilege level on all three research backends. The x86-64
    interactive workshop sends source over a bounded shared page and prints
-   through the restartable console domain. The full agent runtime, allocator,
-   persistent images, and in-OS editor remain future rungs; device access stays
-   outside mutable language heaps.
-18. **seL4 backend (complete at v1.4):** the same kernel contract over an
+   through the restartable console domain. At this rung the full agent runtime,
+   allocator, persistent images, and in-OS editor were still future work; device
+   access stays outside mutable language heaps.
+18. **Durable native workspace (complete at v1.7):** a bounded named-source-cell
+   editor runs in the x86 workshop. Canonical cells are validated by replay into
+   a fresh evaluator, committed to alternating raw-disk slots, and reconstructed
+   at boot; a corrupt or semantically invalid newest generation falls back to
+   the preceding slot.
+19. **seL4 backend (complete at v1.4):** the same kernel contract over an
    unmodified seL4 kernel, composed with Microkit on AArch64. Four protection
    domains — recovery, world, broker, serial — where the contract is answered
    by an unprivileged server and the kernel knows nothing about Agel. The
    configuration is MCS and therefore not a proved one; the release manifest
    says so.
-19. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+20. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-20. **POSIX personality:** a Rust C library and the filesystem and process
+21. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-21. **Local inference:** model inference in its own domain, over quantized
+22. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 
