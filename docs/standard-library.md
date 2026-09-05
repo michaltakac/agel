@@ -132,3 +132,5 @@ coordinates to semantic intents, customize it through the desktop agent,
 recompile it through the layout agent, and reject an impossible frame safely.
 Run `examples/vector-desktop.agel` for the polished 2× UI and
 `examples/vector-primitives.agel` for paths, gradients, clipping, and transforms.
+The bootable system's smaller native vector projection and contained compositor
+are documented in [`native-graphics.md`](native-graphics.md).

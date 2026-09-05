@@ -81,8 +81,11 @@ transforms—without recompiling Rust.
 
 ## Native continuation
 
-The next graphical milestone is an unprivileged software framebuffer compositor
-inside the bootable system, followed by pointer/keyboard routing to semantic
-intents. It should consume this vector contract rather than moving UI meaning
-into a device driver. Later acceleration can replace the raster backend without
-changing applications or granting model agents direct device authority.
+v0.2.3 adds the first unprivileged software framebuffer compositor inside the
+bootable system. Its deliberately smaller native stream is compiled from
+`boot/desktop/native-desktop.agel`, and the display domain revalidates every
+record before rasterization. See [`native-graphics.md`](native-graphics.md).
+
+Pointer/keyboard routing to semantic intents is next. Later acceleration can
+replace the raster backend without changing applications or granting model
+agents direct device authority.

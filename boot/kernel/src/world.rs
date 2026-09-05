@@ -93,6 +93,28 @@ pub mod shared {
     /// Replace the evaluator session with a fresh empty transactional world.
     /// This is a supervisor-only workspace reconstruction primitive.
     pub const COMMAND_EVALUATOR_RESET: u64 = 0x8400;
+    /// Rasterize one validated 64-byte native vector record.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const COMMAND_DISPLAY_DRAW: u64 = 0x9000;
+    /// Hash the visible framebuffer from inside its owning domain.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const COMMAND_DISPLAY_CHECKSUM: u64 = 0x9100;
+    /// Deliberately touch supervisor memory to prove display fault containment.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const COMMAND_DISPLAY_FAULT: u64 = 0x9200;
+
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const DISPLAY_ADDRESS: usize = 48;
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const DISPLAY_WIDTH: usize = 49;
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const DISPLAY_HEIGHT: usize = 50;
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const DISPLAY_PITCH: usize = 51;
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const DISPLAY_LOGICAL_WIDTH: usize = 52;
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const DISPLAY_LOGICAL_HEIGHT: usize = 53;
     /// Divide by zero. Only x86-64 traps on this; RISC-V defines a result and
     /// AArch64 has no integer divide exception at all, so the command exists
     /// only where a machine can actually be provoked by it.

@@ -408,7 +408,7 @@ only x86-64 has the interactive durable workspace. Signed images, a storage
 driver domain, power-cut injection at every sector transition, and the native
 agent runtime remain outside this claim.
 
-## v0.2.0–v0.2.1 agentic desktop
+## v0.2.0–v0.2.3 agentic desktop and graphics
 
 - **An agent publishes half a UI mutation:** desktop edits are persistent patch
   values applied to a candidate scene. Only a structurally valid whole scene may
@@ -433,11 +433,26 @@ agent runtime remain outside this claim.
 - **Overlapping actions are nondeterministic:** action regions retain display
   order and hit-testing checks the last region first. Identical scene, viewport,
   and theme values produce structurally identical frames.
+- **Agent-authored SVG becomes markup injection:** the host renderer accepts
+  only strict colors, escapes text and IDs, independently revalidates the whole
+  frame, and applies command, path, dimension, scale, and output-byte bounds.
+- **The native compositor becomes ambient display authority:** framebuffer
+  pages are mapped only into one ring-3 domain as writable, non-executable,
+  cache-disabled device memory. Ordinary worlds cannot name that mapping.
+- **A malformed native command destroys the visible frame:** the build adapter,
+  supervisor stream envelope, and compositor validate at separate boundaries.
+  The executable test submits an unknown operation and requires the exact prior
+  framebuffer digest afterwards.
+- **A compositor bug freezes or erases recovery:** preemption bounds every
+  entry. The test deliberately makes the compositor write supervisor memory,
+  requires a contained page fault, creates a fresh domain, and requires that it
+  sees the exact last-good framebuffer digest without redrawing.
 
-There is still no pixel renderer, native display service, pointer driver,
-accessibility bridge, text shaping, or privileged UI action broker. Symbolic
-colors and validated display commands are data contracts, not evidence that an
-untrusted renderer is contained. These remain explicit later boundaries.
+There is still no pointer driver, keyboard-to-intent router, accessibility
+bridge, font shaping, live native scene editor, GPU acceleration, or privileged
+UI action broker. The native build adapter consumes a small Agel vector source;
+it is not yet the full hosted evaluator running the standard-library UI stack.
+These remain explicit later boundaries.
 
 ## Surfaces the scope adds
 

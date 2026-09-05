@@ -15,6 +15,32 @@ _start:
     orb $2, %al
     outb %al, $0x92
 
+    # Ask the VBE BIOS for a 1024x768x32 linear framebuffer while BIOS calls
+    # are still available. Failure is non-fatal: the serial recovery plane must
+    # boot even on a machine with no graphics device. The mode-information
+    # block remains at 0x7000 for the kernel; 0x6ff0 carries a success marker.
+    movl $0, 0x6ff0
+    xorw %ax, %ax
+    movw %ax, %es
+    movw $0x7000, %di
+    movw $0x4f01, %ax
+    # SeaBIOS/QEMU's 32-bit 1024x768 mode.
+    movw $0x0144, %cx
+    int $0x10
+    cmpw $0x004f, %ax
+    jne graphics_done
+    testw $0x0080, 0x7000
+    jz graphics_done
+    cmpb $32, 0x7019
+    jne graphics_done
+    movw $0x4f02, %ax
+    movw $0x4144, %bx
+    int $0x10
+    cmpw $0x004f, %ax
+    jne graphics_done
+    movl $0xa6e10fb0, 0x6ff0
+graphics_done:
+
     # Load the kernel in two conservative 127-sector BIOS transfers. One DAP
     # request is deliberately kept below the common firmware limit; together
     # they leave 127 KiB for the isolated evaluator without making the seed

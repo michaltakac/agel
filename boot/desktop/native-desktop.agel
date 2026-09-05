@@ -1,0 +1,38 @@
+; v0.2.3 native vector frame. This is ordinary Agel syntax compiled into the
+; boot image by the bounded native-vector build adapter. The unprivileged
+; compositor validates every 64-byte command again before touching its device.
+(native-vector-frame 1024 768
+  (background-gradient "#10131f" "#1c2033")
+  (ellipse 820 180 260 210 "#252b4d")
+  (ellipse 940 650 210 180 "#33285a")
+  (rounded-rectangle 0 0 1024 48 0 "#24293a")
+  (text 24 15 3 "#f6f7ff" "AGEL")
+  (text 112 17 2 "#aeb6d0" "AGENTS ALL THE WAY DOWN")
+
+  (rounded-rectangle 20 68 210 616 16 "#24293a")
+  (rounded-rectangle 246 68 758 616 16 "#24293a")
+  (text 42 94 2 "#f6f7ff" "SPACES")
+  (gradient-rounded-rectangle 38 138 174 62 12 "#9285ff" "#6254e7")
+  (text 72 160 2 "#ffffff" "WORKSPACE 1")
+  (rounded-rectangle 38 214 174 54 12 "#30364a")
+  (text 76 233 2 "#d9dded" "PROJECTS")
+  (rounded-rectangle 38 282 174 54 12 "#30364a")
+  (text 66 301 2 "#d9dded" "WORKSHOP")
+  (rounded-rectangle 38 350 174 54 12 "#30364a")
+  (text 76 369 2 "#d9dded" "SETTINGS")
+
+  (text 282 104 2 "#9b8cff" "LIVE AGENTIC WORKSPACE")
+  (text 282 148 3 "#f6f7ff" "MOLD THE SYSTEM AS IT RUNS")
+  (text 282 198 2 "#aeb6d0" "VECTOR DESKTOP")
+  (gradient-rounded-rectangle 282 548 210 82 14 "#9285ff" "#6254e7")
+  (text 318 579 2 "#ffffff" "ASK AGEL")
+  (rounded-rectangle 508 548 210 82 14 "#30364a")
+  (text 544 579 2 "#f6f7ff" "TERMINAL")
+  (rounded-rectangle 734 548 234 82 14 "#30364a")
+  (text 774 579 2 "#f6f7ff" "INSPECT SYSTEM")
+
+  (gradient-rounded-rectangle 286 258 132 132 28 "#71e6ff" "#8b6cff")
+  (ellipse 352 324 28 28 "#20263a")
+  (rounded-rectangle 438 258 522 132 20 "#20263a")
+  (text 472 288 2 "#f6f7ff" "3 AGENTS READY")
+  (text 472 330 2 "#aeb6d0" "SAFE PREVIEW ACTIVE"))

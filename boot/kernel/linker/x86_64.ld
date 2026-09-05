@@ -12,6 +12,7 @@ SECTIONS
   {
     __user_text_start = .;
     *(.text.*native*)
+    *(.text.*display_user*)
     *(.text.mem*)
     *(.text.*compiler_builtins*mem*)
     *(.text.*slice_index_order_fail*)

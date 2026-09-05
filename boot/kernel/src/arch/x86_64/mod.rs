@@ -249,6 +249,19 @@ impl Machine {
         .map_err(|error| error.name())
     }
 
+    /// Build the one domain granted the VBE linear framebuffer.
+    #[cfg(feature = "native-graphics")]
+    pub fn create_display_world(
+        &mut self,
+        entry: u64,
+        ticks: u32,
+        physical: u64,
+        bytes: u64,
+    ) -> Result<(Domain, u64), &'static str> {
+        Domain::new_display(&mut self.pool, self.identity, entry, ticks, physical, bytes)
+            .map_err(|error| error.name())
+    }
+
     /// Frames the pool has not handed out.
     pub fn frames_remaining(&self) -> u64 {
         self.pool.remaining()

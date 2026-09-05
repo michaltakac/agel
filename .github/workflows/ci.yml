@@ -37,6 +37,7 @@ jobs:
       - run: ./scripts/test-native.sh
       - run: ./scripts/test-native-repl.sh
       - run: ./scripts/test-native-persistence.sh
+      - run: ./scripts/test-graphics.sh
       - run: ./scripts/test-isolation.sh
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features selftest -- -D warnings
@@ -44,6 +45,7 @@ jobs:
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features native-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features isolation-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features isolated-repl -- -D warnings
+      - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features graphics-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features isolation-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target riscv64imac-unknown-none-elf --features isolation-selftest -- -D warnings
 

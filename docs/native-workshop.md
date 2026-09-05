@@ -5,7 +5,9 @@ kernel. Since v0.1.6, source crosses a bounded shared page into an unprivileged
 evaluator domain, its transactional state lives on that domain's private stack,
 and results are printed through a separate console-driver domain. Evaluation
 uses no Rust allocator or host operating system. Since v0.1.7, named source cells
-can be edited, committed, and reconstructed after reboot.
+can be edited, committed, and reconstructed after reboot. Since project v0.2.3,
+`./scripts/run-graphics.sh` boots a separate unprivileged display domain and a
+real graphical desktop alongside the serial recovery plane.
 
 ## Native subset
 
@@ -118,11 +120,13 @@ recover the previous generation in every case.
 `./scripts/test-native-repl.sh` additionally drives the real UART reader and
 isolated REPL through a stateful, recursive, rollback-producing session.
 
-This is enough to write, organize, and retain small programs inside Agel itself.
-It is not yet a self-hosted development environment: the editor and storage
-codec are trusted Rust services, and the hosted macro/module/agent/effect system
-is not in the VM. A native agent runtime and an editor implemented in Agel are
-the next useful rungs.
+This is enough to write, organize, and retain small programs inside Agel itself,
+and to see an Agel-authored vector frame in the VM. It is not yet a self-hosted
+graphical development environment: the editor and storage codec are trusted
+Rust services, native graphics are build-time data rather than live evaluator
+state, and the hosted macro/module/agent/effect system is not in the VM. A
+semantic input router and live native scene replacement are the next useful
+rungs.
 
 ## v0.1.6 isolation boundary
 

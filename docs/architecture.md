@@ -153,13 +153,21 @@ Each rung must be runnable and differentially testable against the rung below:
    COSMIC-inspired panel/workspace/dock scene, theme tokens, fixed/flexible
    geometry, validated display lists, semantic hit-testing, and a transactional
    layout agent are Agel library code. No pixel renderer is claimed yet.
-22. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+22. **Hosted vector graphics (complete at v0.2.2):** Agel-authored paths,
+   curves, shapes, paints, transforms, clips, and UI-to-vector compilation feed
+   a bounded deterministic SVG output service.
+23. **Native vector desktop (complete at v0.2.3):** the BIOS hands off a
+   1024×768×32 VBE framebuffer. Only a ring-3 compositor maps its device pages;
+   it consumes a build-validated Agel vector stream, rejects malformed records
+   without changing the frame, and can fault and be replaced while the last
+   good pixels remain. This is output, not yet interactive input.
+24. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-23. **POSIX personality:** a Rust C library and the filesystem and process
+25. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-24. **Local inference:** model inference in its own domain, over quantized
+26. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

@@ -4,11 +4,12 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.2: a persistent native Agel workshop plus a
-COSMIC-inspired default shell and a real, high-density vector graphics pipeline.
-Scenes, layout, paths, shapes, paints, transforms, clipping, display lists, and
-transactional desktop/layout/vector agents are written in Agel; a small bounded
-host service emits deterministic SVG**. It retains the frozen kernel contract,
+The current repository is **v0.2.3: the first graphical Agel desktop inside
+QEMU. A build-validated Agel vector frame is rasterized at 1024×768×32 by a
+dedicated ring-3 compositor holding the framebuffer device grant; malformed
+commands preserve the last frame and a faulted compositor is contained and
+replaced**. The hosted scene, layout, paths, paints, transforms, clipping, and
+transactional desktop/layout/vector agents remain written in Agel. It retains the frozen kernel contract,
 portable isolation backend, unmodified seL4 backend, and
 restartable privileged console service from the v0.1 line.
 
@@ -58,6 +59,13 @@ It provides:
   its last good frame after a rejected render;
 - deterministic 1×–8× SVG output through a bounded, dependency-free Rust
   renderer that independently validates untrusted vector frames;
+- a native VBE linear-framebuffer handoff established before long mode;
+- a bounded native vector stream authored as Agel data and compiled into the
+  reproducible boot image;
+- an unprivileged software compositor with the framebuffer as its only device
+  mapping, procedural resolution-independent cell-vector text, and no UI policy;
+- deterministic native framebuffer hashing, malformed-command rejection,
+  compositor fault containment, replacement, and retained last-good pixels;
 - semantic hit-testing that returns inspectable intents without executing them;
 - an isolated layout agent that preserves its last good frame when compilation
   fails;
@@ -154,7 +162,13 @@ open target/vector-desktop.svg
 ```
 
 SVG is the first real output surface and remains sharp at arbitrary resolution.
-The native framebuffer compositor and input stack are the next strata; see
+The same architecture now reaches a native QEMU framebuffer. Launch it with:
+
+```sh
+./scripts/run-graphics.sh
+```
+
+The semantic keyboard/pointer input stack is the next stratum; see
 [`docs/vector-graphics.md`](docs/vector-graphics.md).
 
 Example session:

@@ -22,6 +22,12 @@ meaningful layers remain Agel code; the native service is a replaceable output
 boundary that validates the vector value again. This is graphical output, but
 not yet the native QEMU framebuffer or window/input server.
 
+Agel v0.2.3 adds that first native framebuffer boundary. A VBE handoff maps the
+display only into a dedicated ring-3 compositor. Its input is a bounded vector
+frame authored in Agel syntax, build-validated, and revalidated inside the
+domain. The native desktop is visible in QEMU today; pointer, keyboard, live
+scene editing, and the full hosted agent runtime are not yet native.
+
 ## Design
 
 Every node is a persistent map with four keys:
@@ -101,6 +107,7 @@ cargo run -q -p agel-vector -- \
   --program examples/vector-desktop.agel \
   --output target/vector-desktop.svg
 open target/vector-desktop.svg
+./scripts/run-graphics.sh
 ```
 
 The final `ui-spec` expression is the machine-readable schema from inside Agel.
@@ -111,9 +118,9 @@ sending `discard` instead of `commit`.
 
 The next desktop work should preserve this separation:
 
-1. Add a software framebuffer compositor as a replaceable, unprivileged native
-   service, consuming the same tested vector IR.
-2. Move the same vector scene interpreter into the native world and route keyboard and
+1. Route keyboard and pointer events through a separate input domain into
+   semantic intents without granting device authority to application agents.
+2. Move more of the hosted vector scene interpreter into the native world and
    pointer events through semantic, capability-checked intents.
 3. Split compositor, panel, launcher, notifications, settings, and applications
    into supervised agents.

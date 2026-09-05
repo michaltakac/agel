@@ -13,7 +13,10 @@
 
 #![no_std]
 #![no_main]
-#![cfg_attr(feature = "isolated-repl", allow(dead_code))]
+#![cfg_attr(
+    any(feature = "isolated-repl", feature = "native-graphics"),
+    allow(dead_code)
+)]
 
 use core::panic::PanicInfo;
 
@@ -28,6 +31,10 @@ mod monitor;
 
 #[cfg(feature = "isolation-selftest")]
 mod contract;
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+mod display_user;
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+mod graphics;
 #[cfg(all(target_arch = "x86_64", feature = "isolated-repl"))]
 mod isolated_repl;
 #[cfg(feature = "isolation-selftest")]
@@ -67,7 +74,7 @@ mod repl;
 /// exists and `.bss` has been zeroed.
 pub fn agel_main() -> ! {
     console::initialize();
-    console::write("\nAgel v0.1.7 research kernel: ");
+    console::write("\nAgel research kernel: ");
     console::write(arch::NAME);
     console::write("\n");
     console::write("recovery monitor is outside the mutable agent world\n");
@@ -100,7 +107,8 @@ pub fn agel_main() -> ! {
         not(any(
             feature = "selftest",
             feature = "monitor-selftest",
-            feature = "isolated-repl"
+            feature = "isolated-repl",
+            feature = "native-graphics"
         ))
     ))]
     {
@@ -114,6 +122,19 @@ pub fn agel_main() -> ! {
     ))]
     {
         isolated_repl::run()
+    }
+
+    #[cfg(all(
+        target_arch = "x86_64",
+        feature = "native-graphics",
+        not(any(
+            feature = "selftest",
+            feature = "monitor-selftest",
+            feature = "isolated-repl"
+        ))
+    ))]
+    {
+        graphics::run()
     }
 
     #[cfg(all(
@@ -135,7 +156,8 @@ pub fn agel_main() -> ! {
             feature = "selftest",
             feature = "monitor-selftest",
             feature = "native-selftest",
-            feature = "isolation-selftest"
+            feature = "isolation-selftest",
+            feature = "native-graphics"
         ))
     ))]
     {

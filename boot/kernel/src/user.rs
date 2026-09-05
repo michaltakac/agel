@@ -84,7 +84,7 @@ unsafe fn contract_call(operation: u16, capability: u64, arguments: [u64; 4]) ->
 /// # Safety
 /// See [`contract_call`].
 #[inline(always)]
-unsafe fn yield_to_supervisor() {
+pub(crate) unsafe fn yield_to_supervisor() {
     unsafe {
         contract_call(
             Operation::EndpointSend.code(),

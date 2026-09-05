@@ -14,6 +14,9 @@ use agel_kernel_abi::{Request, Response, Status};
 const STACK_BASE: u64 = DOMAIN_BASE;
 /// Virtual address of the page a domain shares with the supervisor.
 const SHARED_BASE: u64 = DOMAIN_BASE + 0x0010_0000;
+/// Virtual address at which a display domain sees its framebuffer grant.
+#[cfg(feature = "native-graphics")]
+pub const DISPLAY_BASE: u64 = DOMAIN_BASE + 0x0020_0000;
 
 /// An unprivileged world.
 pub struct Domain {
@@ -53,6 +56,38 @@ impl Domain {
             core: DomainCore::new(shared_physical, tick_budget),
             console,
         })
+    }
+
+    /// Build a domain with one explicit framebuffer device grant.
+    ///
+    /// The physical pages are never allocated from the RAM pool and are mapped
+    /// user-writable, non-executable, and cache-disabled. No other domain
+    /// receives translations for them.
+    #[cfg(feature = "native-graphics")]
+    pub fn new_display(
+        pool: &mut FramePool,
+        identity_pdpt: u64,
+        entry: u64,
+        tick_budget: u32,
+        physical: u64,
+        bytes: u64,
+    ) -> Result<(Self, u64), MemoryError> {
+        let mut domain = Self::new(pool, identity_pdpt, entry, tick_budget, false, 8)?;
+        let page_offset = physical & (PAGE - 1);
+        let physical_start = physical - page_offset;
+        let mapped_bytes = page_offset
+            .checked_add(bytes)
+            .ok_or(MemoryError::OutsideDomainWindow)?;
+        let pages = mapped_bytes.div_ceil(PAGE);
+        for page in 0..pages {
+            domain.space.map(
+                pool,
+                DISPLAY_BASE + page * PAGE,
+                physical_start + page * PAGE,
+                Access::UserDevice,
+            )?;
+        }
+        Ok((domain, DISPLAY_BASE + page_offset))
     }
 
     /// Ask the world to perform one contract invocation and report the answer.
