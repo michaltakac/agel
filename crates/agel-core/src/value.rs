@@ -25,6 +25,7 @@ pub enum Builtin {
     Multiply,
     Divide,
     Equal,
+    LessThan,
     List,
     Cons,
     Car,

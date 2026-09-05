@@ -69,6 +69,11 @@ Map keys use structural equality. Available list operations are `list`, `cons`,
 whose value is `nil`. `type-of` returns a symbolic value category, and `apply`
 invokes a callable from an explicit argument list.
 
+Checked integer arithmetic uses `+`, `-`, `*`, and `/`. `<` is the single
+ordering primitive; libraries derive richer ordering without adding syntax. It
+accepts exactly two integers, and overflow or invalid operand types abort the
+surrounding transaction.
+
 ## Conditions and restarts
 
 Uncaught failures expose a condition with `kind`, `message`, and `data` fields.

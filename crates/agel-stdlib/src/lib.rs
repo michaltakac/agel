@@ -332,4 +332,115 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn default_desktop_compiles_to_a_deterministic_display_frame() {
+        let mut world = installed();
+        let result = world
+            .evaluate(
+                "(import agel/desktop)
+                 (import agel/ui)
+                 (import agel/ui-layout)
+                 (def scene (default-scene))
+                 (def frame (compile-frame scene default-viewport default-theme))
+                 (def same-frame (compile-frame scene default-viewport default-theme))
+                 (def panel-hit (hit-test frame 20 50))
+                 (def dock-hit (hit-test frame 20 720))
+                 (list
+                   (scene? scene)
+                   (frame? frame)
+                   (= frame same-frame)
+                   (count (get frame 'boxes))
+                   (count (display-list frame))
+                   (count (get frame 'actions))
+                   (get panel-hit 'id)
+                   (get (get panel-hit 'intent) 'action)
+                   (get dock-hit 'id)
+                   (get (get dock-hit 'intent) 'target)
+                   (hit-test frame 640 400))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            result,
+            Value::List(vec![
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Int(16),
+                Value::Int(24),
+                Value::Int(8),
+                Value::Symbol("launcher".into()),
+                Value::Symbol("launcher/toggle".into()),
+                Value::Symbol("terminal".into()),
+                Value::Symbol("terminal".into()),
+                Value::Nil,
+            ])
+        );
+
+        let error = world
+            .evaluate("(compile-frame (text 'bad 42) default-viewport default-theme)")
+            .unwrap_err();
+        assert!(error.to_string().contains("ui/invalid-display-list"));
+        let error = world
+            .evaluate("(compile-frame (window 'tiny \"Tiny\" nil) (rect 0 0 20 20) default-theme)")
+            .unwrap_err();
+        assert!(error.to_string().contains("ui/layout-overflow"));
+        assert_eq!(
+            world
+                .evaluate("(frame? (dict 'kind 'display-frame 'viewport default-viewport))")
+                .unwrap()
+                .values
+                .pop(),
+            Some(Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn layout_agent_commits_frames_and_rejects_impossible_geometry() {
+        let mut world = installed();
+        let result = world
+            .evaluate(
+                "(import agel/desktop)
+                 (import agel/ui-layout)
+                 (def observer (spawn \"display-server\"))
+                 (def layout-engine (make-layout-agent \"layout-engine\"))
+                 (def scene (default-scene))
+                 (render-frame layout-engine observer scene default-viewport default-theme)
+                 (run 1)
+                 (def rendered (recv observer))
+                 (hit-point layout-engine observer 20 720)
+                 (run 1)
+                 (def activated (recv observer))
+                 (render-frame layout-engine observer scene (rect 0 0 20 20) default-theme)
+                 (run 1)
+                 (def rejected (recv observer))
+                 (list
+                   (car rendered)
+                   (car activated)
+                   (get (car (cdr activated)) 'id)
+                   (car rejected)
+                   (get (car (cdr rejected)) 'data)
+                   (frame? (get (get (agent-info layout-engine) 'heap) 'frame))
+                   (get (agent-info layout-engine) 'status))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            result,
+            Value::List(vec![
+                Value::Symbol("rendered".into()),
+                Value::Symbol("action".into()),
+                Value::Symbol("terminal".into()),
+                Value::Symbol("render-rejected".into()),
+                Value::Symbol("desktop".into()),
+                Value::Bool(true),
+                Value::Symbol("running".into()),
+            ])
+        );
+    }
 }

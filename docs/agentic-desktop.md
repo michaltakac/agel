@@ -11,6 +11,11 @@ hosted runtime, but it is not yet a graphical compositor, renderer, window
 server, pointer stack, or native QEMU desktop. A later renderer can project the
 same scene to a framebuffer without taking ownership of application meaning.
 
+Agel v0.2.1 adds the language-owned half of that projection.
+`agel/ui-layout` compiles scenes into strictly validated, renderer-neutral
+display frames, and `agel/desktop` supplies a COSMIC-inspired default shell.
+This release still does not claim pixels on screen.
+
 ## Design
 
 Every node is a persistent map with four keys:
@@ -85,6 +90,7 @@ renderer containment, and independent recovery.
 
 ```sh
 cargo run -q -p agel-cli < examples/agentic-desktop.agel
+cargo run -q -p agel-cli < examples/cosmic-desktop.agel
 ```
 
 The final `ui-spec` expression is the machine-readable schema from inside Agel.
@@ -95,15 +101,13 @@ sending `discard` instead of `commit`.
 
 The next desktop work should preserve this separation:
 
-1. Add layout and theme libraries that compile scenes to a deterministic display
-   list.
-2. Add a software framebuffer renderer as a replaceable, unprivileged boundary
+1. Add a software framebuffer renderer as a replaceable, unprivileged boundary
    service and snapshot-test its output.
-3. Move the same scene interpreter into the native world and route keyboard and
+2. Move the same scene interpreter into the native world and route keyboard and
    pointer events through semantic, capability-checked intents.
-4. Split compositor, panel, launcher, notifications, settings, and applications
+3. Split compositor, panel, launcher, notifications, settings, and applications
    into supervised agents.
-5. Permit natural-language agents to author patches, but require the same
+4. Permit natural-language agents to author patches, but require the same
    preview, validation, authority, promotion, and recovery path as human edits.
 
 No desktop agent will own both the ability to author a privileged change and the

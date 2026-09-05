@@ -78,6 +78,7 @@ impl Default for State {
             ("*", Builtin::Multiply),
             ("/", Builtin::Divide),
             ("=", Builtin::Equal),
+            ("<", Builtin::LessThan),
             ("list", Builtin::List),
             ("cons", Builtin::Cons),
             ("car", Builtin::Car),

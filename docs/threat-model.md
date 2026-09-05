@@ -408,6 +408,37 @@ only x86-64 has the interactive durable workspace. Signed images, a storage
 driver domain, power-cut injection at every sector transition, and the native
 agent runtime remain outside this claim.
 
+## v0.2.0–v0.2.1 agentic desktop
+
+- **An agent publishes half a UI mutation:** desktop edits are persistent patch
+  values applied to a candidate scene. Only a structurally valid whole scene may
+  become a preview, and commit swaps the complete candidate in one agent turn.
+- **A delayed agent overwrites newer work:** every proposal declares its base
+  desktop revision. A mismatched revision produces `ui/stale-revision` and leaves
+  the current scene and preview unchanged.
+- **Malformed or duplicate components poison traversal:** scenes require the
+  complete node shape and globally unique identities. Recursive validation,
+  compilation, and hit-testing remain under the evaluator's fuel, call-depth,
+  and collection limits.
+- **Negative, zero, or overflowing geometry reaches a renderer:** `<` is a
+  type-checked integer primitive; Agel validates viewport extents, theme metrics,
+  padding, gap, basis, every rectangle, and every display command. Existing
+  checked arithmetic converts overflow into a transactional condition.
+- **A failed reflow destroys the visible desktop:** the layout agent compiles a
+  complete candidate frame before replacing its heap. Expected layout failure
+  returns `render-rejected`; the preceding validated frame remains committed.
+- **A pointer event becomes authority:** hit-testing returns an inspectable
+  semantic intent and its declared requirement. It does not execute the intent,
+  mint a capability, or contact an effectful service.
+- **Overlapping actions are nondeterministic:** action regions retain display
+  order and hit-testing checks the last region first. Identical scene, viewport,
+  and theme values produce structurally identical frames.
+
+There is still no pixel renderer, native display service, pointer driver,
+accessibility bridge, text shaping, or privileged UI action broker. Symbolic
+colors and validated display commands are data contracts, not evidence that an
+untrusted renderer is contained. These remain explicit later boundaries.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

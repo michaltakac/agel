@@ -697,6 +697,13 @@ fn apply_builtin(
             expect_arity("=", arguments.len(), 2)?;
             Ok(Value::Bool(arguments[0] == arguments[1]))
         }
+        Builtin::LessThan => {
+            expect_arity("<", arguments.len(), 2)?;
+            let (Value::Int(left), Value::Int(right)) = (&arguments[0], &arguments[1]) else {
+                return Err(condition("type", "< expects two integers"));
+            };
+            Ok(Value::Bool(left < right))
+        }
         Builtin::List => {
             runtime.check_collection(arguments.len())?;
             if arguments.is_empty() {

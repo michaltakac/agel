@@ -4,10 +4,11 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.0: a persistent native Agel workshop plus the
-first Agel-authored desktop stratum—a homoiconic retained scene, semantic action
-graph, and transactional preview/commit/rollback desktop agent**. It retains the
-frozen kernel contract, portable isolation backend, unmodified seL4 backend, and
+The current repository is **v0.2.1: a persistent native Agel workshop plus a
+COSMIC-inspired default shell, deterministic layout, renderer-neutral display
+lists, semantic hit-testing, and transactional desktop/layout agents written in
+Agel**. It retains the frozen kernel contract, portable isolation backend,
+unmodified seL4 backend, and
 restartable privileged console service from the v0.1 line.
 
 Agel is still pre-production. Project releases follow the policy in
@@ -41,10 +42,17 @@ It provides:
 - persistent sequence and tagged-result libraries; and
 - typed round-robin worker pools with bounded transactional scheduling;
 - `type-of` and `apply`, the two small reflective primitives needed by libraries;
+- checked integer ordering through the ordinary `<` builtin used by geometry;
 - an `agel/meta` evaluator written in Agel for a lexical functional subset;
 - an `agel/ui` retained scene and semantic action model written in Agel;
 - inspectable UI patches and a typed desktop agent with validated preview,
   atomic commit, discard, and live rollback;
+- deterministic fixed/flexible row and column layout written in Agel;
+- a COSMIC-inspired default panel, workspace, applets, launcher, and dock;
+- renderer-neutral fill/stroke/text display lists with strict validation;
+- semantic hit-testing that returns inspectable intents without executing them;
+- an isolated layout agent that preserves its last good frame when compilation
+  fails;
 - an independent Common Lisp reference checked against the Rust seed; and
 - external A/B image canary, evidence-bound promotion, and rollback;
 - a modality-neutral text/voice interaction handoff with a 200 ms foreground
@@ -115,19 +123,21 @@ Agel currently requires only a Rust toolchain:
 cargo run -p agel-cli
 ```
 
-The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/meta`, and
-`agel/ui` by default.
+The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/meta`,
+`agel/ui`, `agel/ui-layout`, and `agel/desktop` by default.
 Use `--no-stdlib` to expose only the minimal language substrate.
 
 Run the agentic desktop object model:
 
 ```sh
 cargo run -q -p agel-cli < examples/agentic-desktop.agel
+cargo run -q -p agel-cli < examples/cosmic-desktop.agel
 ```
 
-This milestone models a live desktop in Agel but does not claim graphical output
-yet. The renderer, input stack, and native scene interpreter are the next strata;
-see [`docs/agentic-desktop.md`](docs/agentic-desktop.md).
+This milestone compiles a live desktop to a complete display list in Agel but
+does not claim graphical output yet. The pixel renderer, input stack, and native
+scene interpreter are the next strata; see
+[`docs/agentic-desktop.md`](docs/agentic-desktop.md).
 
 Example session:
 

@@ -9,9 +9,10 @@ promise.
 - `v0.1.0` through `v0.1.7` identify the native workshop milestones.
 - Patch releases repair a milestone without claiming a new capability rung.
 - `v0.2.0` begins the agentic desktop line with an Agel-authored scene and live
-  change protocol. Minor releases may make deliberate breaking changes while
-  Agel is still experimental; those changes must be documented and
-  migration-tested.
+  change protocol. `v0.2.1` adds the Agel-authored default shell, layout compiler,
+  display-list contract, and semantic hit-testing. Minor releases may make
+  deliberate breaking changes while Agel is still experimental; those changes
+  must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.
 
 Project releases and protocol versions are separate namespaces. In particular,

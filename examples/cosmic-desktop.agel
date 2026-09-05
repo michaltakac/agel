@@ -1,0 +1,82 @@
+; v0.2.1 — the default Agel desktop, compiled by an Agel layout agent.
+;
+; Run:
+;   cargo run -q -p agel-cli < examples/cosmic-desktop.agel
+
+(import agel/ui)
+(import agel/ui-layout)
+(import agel/desktop)
+
+(def human (spawn "human-console"))
+(def desktop (make-desktop "desktop-state" (default-scene)))
+(def layout-engine (make-layout-agent "layout-engine"))
+
+; The default shell resembles the useful composition of COSMIC—a panel,
+; workspace, applets, launcher, and dock—but every part is transparent Agel data.
+(def first-frame
+  (compile-frame (default-scene) default-viewport default-theme))
+
+(list
+  (get desktop-spec 'principle)
+  (frame? first-frame)
+  (count (get first-frame 'boxes))
+  (count (display-list first-frame))
+  (count (get first-frame 'actions)))
+
+; Agents use the same semantic surface as humans. Coordinates resolve to an
+; inspectable intent; hit-testing never grants or executes its required authority.
+(def terminal-hit (hit-test first-frame 20 720))
+(list
+  (get terminal-hit 'id)
+  (get (get terminal-hit 'intent) 'action)
+  (get (get terminal-hit 'intent) 'requires))
+
+; Mold the running desktop through a revision-bound proposal. The new component,
+; its wording, its placement, and its action are all normal Agel values.
+(def customization
+  (list
+    (set-prop 'headline 'content "This operating system is becoming yours.")
+    (replace-node 'quick-settings
+      (button 'focus-mode "Enter focus mode"
+        (intent 'workspace/focus-mode 'workspace #t 'desktop/control)))
+    (set-prop 'dock 'gap 16)))
+
+(propose desktop human 0 customization)
+(run)
+(def preview (recv human))
+(list (car preview) (car (cdr preview))
+      (get (find-node (car (cdr (cdr preview))) 'focus-mode) 'kind))
+
+(commit desktop human)
+(run)
+(def committed (recv human))
+(def customized-scene (car (cdr (cdr committed))))
+
+; Layout is a separate supervised agent, not an opaque function hidden in a
+; compositor. It commits only a complete frame.
+(render-frame layout-engine human customized-scene default-viewport default-theme)
+(run)
+(def rendered (recv human))
+(def customized-frame (car (cdr rendered)))
+
+(list
+  (car rendered)
+  (get customized-frame 'theme)
+  (get (hit-test customized-frame 1100 50) 'id)
+  (get (get (hit-test customized-frame 1100 50) 'intent) 'target))
+
+; If an agent proposes geometry that cannot fit, the candidate is rejected and
+; the previous frame remains live in the layout agent's heap.
+(render-frame layout-engine human customized-scene (rect 0 0 20 20) default-theme)
+(run)
+(def rejected (recv human))
+(list
+  (car rejected)
+  (get (car (cdr rejected)) 'kind)
+  (frame? (get (get (agent-info layout-engine) 'heap) 'frame))
+  (get (agent-info layout-engine) 'status))
+
+; The entire renderer contract explains itself from inside Agel.
+layout-spec
+desktop-spec
+customized-frame

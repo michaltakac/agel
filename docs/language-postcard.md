@@ -19,7 +19,8 @@ with-handler with-restart invoke-restart
 defprotocol
 ```
 
-Everything else is a call. The seed builtins are arithmetic/equality; persistent
+Everything else is a call. The seed builtins are checked arithmetic and integer
+ordering (`<`); equality; persistent
 list/map construction and access; agent spawn/send/receive/scheduling/introspection;
 conditions; capability attenuation; and transactional model intent creation.
 The reflective pair `type-of` and `apply` is sufficient for the library-written

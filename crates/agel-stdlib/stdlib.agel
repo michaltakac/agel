@@ -105,7 +105,7 @@
   (def meta-base-env
     (fn ()
       (dict
-        '+ + '- - '* * '/ / '= =
+        '+ + '- - '* * '/ / '= = '< <
         'list list 'cons cons 'car car 'cdr cdr
         'dict dict 'get get 'assoc assoc 'count count
         'has-key? has-key? 'type-of type-of)))
@@ -493,3 +493,621 @@
   (def commit (fn (desktop reply) (send desktop (list 'commit reply))))
   (def discard (fn (desktop reply) (send desktop (list 'discard reply))))
   (def rollback (fn (desktop reply) (send desktop (list 'rollback reply)))))
+
+; Deterministic layout compiles a semantic scene to a renderer-neutral display
+; frame. The native renderer will consume these values; it does not own layout,
+; theme, hit-testing, or action meaning.
+(module agel/ui-layout
+  (import agel/sequence)
+  (import agel/ui)
+  (export
+    layout-spec cosmic-theme rect rect? theme? compile-frame frame?
+    display-list hit-test layout-protocol make-layout-agent render-frame hit-point)
+
+  (def layout-spec
+    (dict
+      'input '(scene viewport theme)
+      'output '(boxes commands actions)
+      'directions '(row column)
+      'commands '(fill stroke text)
+      'partition 'fixed-basis-plus-equal-flex
+      'hit-order 'last-action-first
+      'safety '(checked-arithmetic positive-extents bounded-by-runtime)))
+
+  (def cosmic-theme
+    (theme 'cosmic
+      (dict
+        'background 'space-950
+        'surface 'space-900
+        'panel 'space-850
+        'text 'space-050
+        'muted-text 'space-300
+        'accent 'accent-500
+        'on-accent 'space-000
+        'border 'space-700
+        'padding 12
+        'gap 8
+        'titlebar-height 32
+        'corner-radius 8)))
+
+  (def second (fn (values) (car (cdr values))))
+  (def integer? (fn (value) (= (type-of value) 'int)))
+  (def paint?
+    (fn (value)
+      (if (= (type-of value) 'symbol)
+          #t
+          (= (type-of value) 'string))))
+  (def positive? (fn (value) (if (integer? value) (< 0 value) #f)))
+  (def nonnegative? (fn (value) (if (integer? value) (if (< value 0) #f #t) #f)))
+
+  (def rect
+    (fn (x y width height)
+      (dict 'x x 'y y 'width width 'height height)))
+
+  (def rect?
+    (fn (value)
+      (if (= (type-of value) 'map)
+          (if (has-key? value 'x)
+              (if (has-key? value 'y)
+                  (if (has-key? value 'width)
+                      (if (has-key? value 'height)
+                          (if (integer? (get value 'x))
+                              (if (integer? (get value 'y))
+                                  (if (positive? (get value 'width))
+                                      (positive? (get value 'height))
+                                      #f)
+                                  #f)
+                              #f)
+                          #f)
+                      #f)
+                  #f)
+              #f)
+          #f)))
+
+  (def required-tokens
+    '(background surface panel text muted-text accent on-accent border
+      padding gap titlebar-height corner-radius))
+
+  (def paint-tokens
+    '(background surface panel text muted-text accent on-accent border))
+
+  (def has-tokens?
+    (fn (tokens names)
+      (if (= names nil)
+          #t
+          (if (has-key? tokens (car names))
+              (has-tokens? tokens (cdr names))
+              #f))))
+
+  (def paints?
+    (fn (tokens names)
+      (if (= names nil)
+          #t
+          (if (paint? (get tokens (car names)))
+              (paints? tokens (cdr names))
+              #f))))
+
+  (def theme?
+    (fn (value)
+      (if (= (type-of value) 'map)
+          (if (= (get value 'kind) 'theme)
+              (if (paint? (get value 'name))
+                  (let ((tokens (get value 'tokens)))
+                    (if (= (type-of tokens) 'map)
+                        (if (has-tokens? tokens required-tokens)
+                            (if (paints? tokens paint-tokens)
+                                (if (nonnegative? (get tokens 'padding))
+                                    (if (nonnegative? (get tokens 'gap))
+                                        (if (positive? (get tokens 'titlebar-height))
+                                            (nonnegative? (get tokens 'corner-radius))
+                                            #f)
+                                        #f)
+                                    #f)
+                                #f)
+                            #f)
+                        #f))
+                  #f)
+              #f)
+          #f)))
+
+  (def token (fn (style name) (get (get style 'tokens) name)))
+
+  (def prop-or
+    (fn (tree name fallback)
+      (if (has-key? (get tree 'props) name)
+          (get (get tree 'props) name)
+          fallback)))
+
+  (def node-padding
+    (fn (tree style)
+      (let ((kind (get tree 'kind)))
+        (prop-or tree 'padding
+          (if (= kind 'window)
+              (token style 'padding)
+              (if (= kind 'panel) (token style 'padding) 0))))))
+
+  (def node-gap
+    (fn (tree style)
+      (prop-or tree 'gap (token style 'gap))))
+
+  (def require-space
+    (fn (width height context)
+      (if (positive? width)
+          (if (positive? height)
+              #t
+              (signal 'ui/layout-overflow "layout has no vertical space" context))
+          (signal 'ui/layout-overflow "layout has no horizontal space" context))))
+
+  (def content-rect
+    (fn (tree bounds style)
+      (let ((padding (node-padding tree style))
+            (kind (get tree 'kind))
+            (titlebar (if (= (get tree 'kind) 'window)
+                          (token style 'titlebar-height)
+                          0)))
+        (if (nonnegative? padding)
+            (let ((x (+ (get bounds 'x) padding))
+                  (y (+ (get bounds 'y) padding titlebar))
+                  (width (- (get bounds 'width) (* padding 2)))
+                  (height (- (get bounds 'height) (* padding 2) titlebar)))
+              (begin
+                (require-space width height (get tree 'id))
+                (rect x y width height)))
+            (signal 'ui/invalid-layout "padding must be a non-negative integer"
+              (dict 'id (get tree 'id) 'padding padding))))))
+
+  (def empty-render
+    (fn () (dict 'boxes nil 'commands nil 'actions nil)))
+
+  (def merge-render
+    (fn (left right)
+      (dict
+        'boxes (append (get left 'boxes) (get right 'boxes))
+        'commands (append (get left 'commands) (get right 'commands))
+        'actions (append (get left 'actions) (get right 'actions)))))
+
+  (def box
+    (fn (tree bounds)
+      (dict 'id (get tree 'id) 'kind (get tree 'kind) 'bounds bounds)))
+
+  (def fill
+    (fn (id bounds color radius)
+      (dict 'op 'fill 'id id 'bounds bounds 'color color 'radius radius)))
+
+  (def stroke
+    (fn (id bounds color)
+      (dict 'op 'stroke 'id id 'bounds bounds 'color color)))
+
+  (def label
+    (fn (id bounds content color role)
+      (dict 'op 'text 'id id 'bounds bounds 'content content
+            'color color 'role role)))
+
+  (def titlebar-rect
+    (fn (bounds style)
+      (rect (get bounds 'x) (get bounds 'y) (get bounds 'width)
+            (token style 'titlebar-height))))
+
+  (def node-commands
+    (fn (tree bounds style)
+      (let ((kind (get tree 'kind))
+            (id (get tree 'id))
+            (props (get tree 'props))
+            (corner (token style 'corner-radius)))
+        (if (= kind 'window)
+            (if (< (get bounds 'height) (token style 'titlebar-height))
+                (signal 'ui/layout-overflow "window is shorter than its titlebar" id)
+                (list
+                  (fill id bounds (token style 'background) 0)
+                  (fill id (titlebar-rect bounds style) (token style 'surface) 0)
+                  (label id (titlebar-rect bounds style) (get props 'title)
+                         (token style 'text) 'title)))
+            (if (= kind 'panel)
+                (list
+                  (fill id bounds (token style 'panel) corner)
+                  (stroke id bounds (token style 'border)))
+                (if (= kind 'button)
+                    (list
+                      (fill id bounds (token style 'accent) corner)
+                      (label id bounds (get props 'label)
+                             (token style 'on-accent) 'button))
+                    (if (= kind 'text)
+                        (list
+                          (label id bounds (get props 'content)
+                                 (token style 'text) 'body))
+                        nil)))))))
+
+  (def node-actions
+    (fn (tree bounds)
+      (if (has-key? (get tree 'props) 'action)
+          (list
+            (dict 'id (get tree 'id) 'bounds bounds
+                  'intent (get (get tree 'props) 'action)))
+          nil)))
+
+  ; A child may request a fixed main-axis `basis`. Children without one share
+  ; the remaining space; the last flexible child receives the integer remainder.
+  (def basis-total
+    (fn (children)
+      (if (= children nil)
+          0
+          (let ((props (get (car children) 'props)))
+            (if (has-key? props 'basis)
+                (if (positive? (get props 'basis))
+                    (+ (get props 'basis) (basis-total (cdr children)))
+                    (signal 'ui/invalid-layout "basis must be a positive integer"
+                      (dict 'id (get (car children) 'id)
+                            'basis (get props 'basis))))
+                (basis-total (cdr children)))))))
+
+  (def flex-count
+    (fn (children)
+      (if (= children nil)
+          0
+          (+ (if (has-key? (get (car children) 'props) 'basis) 0 1)
+             (flex-count (cdr children))))))
+
+  (def layout-horizontal-rest
+    (fn (children x y height unit flex-remaining flex-left gap style)
+      (if (= children nil)
+          (empty-render)
+          (let ((fixed (has-key? (get (car children) 'props) 'basis))
+                (width
+                  (if (has-key? (get (car children) 'props) 'basis)
+                      (get (get (car children) 'props) 'basis)
+                      (if (= flex-left 1) flex-remaining unit))))
+            (merge-render
+              (compile-node (car children) (rect x y width height) style)
+              (layout-horizontal-rest
+                (cdr children) (+ x width gap) y height unit
+                (if fixed flex-remaining (- flex-remaining width))
+                (if fixed flex-left (- flex-left 1)) gap style))))))
+
+  (def layout-horizontal
+    (fn (children bounds gap style)
+      (let ((n (count children))
+            (fixed (basis-total children))
+            (flexible (flex-count children))
+            (available (- (get bounds 'width) (* gap (- (count children) 1)))))
+        (let ((remaining (- available fixed)))
+          (if (< available fixed)
+              (signal 'ui/layout-overflow "fixed row children exceed available width"
+                (dict 'bounds bounds 'fixed fixed 'gap gap))
+              (if (= flexible 0)
+                  (layout-horizontal-rest
+                    children (get bounds 'x) (get bounds 'y) (get bounds 'height)
+                    0 0 0 gap style)
+                  (if (< remaining flexible)
+                      (signal 'ui/layout-overflow "row cannot give each flexible child one pixel"
+                        (dict 'bounds bounds 'children n 'fixed fixed 'gap gap))
+                      (layout-horizontal-rest
+                        children (get bounds 'x) (get bounds 'y) (get bounds 'height)
+                        (/ remaining flexible) remaining flexible gap style))))))))
+
+  (def layout-vertical-rest
+    (fn (children x y width unit flex-remaining flex-left gap style)
+      (if (= children nil)
+          (empty-render)
+          (let ((fixed (has-key? (get (car children) 'props) 'basis))
+                (height
+                  (if (has-key? (get (car children) 'props) 'basis)
+                      (get (get (car children) 'props) 'basis)
+                      (if (= flex-left 1) flex-remaining unit))))
+            (merge-render
+              (compile-node (car children) (rect x y width height) style)
+              (layout-vertical-rest
+                (cdr children) x (+ y height gap) width unit
+                (if fixed flex-remaining (- flex-remaining height))
+                (if fixed flex-left (- flex-left 1)) gap style))))))
+
+  (def layout-vertical
+    (fn (children bounds gap style)
+      (let ((n (count children))
+            (fixed (basis-total children))
+            (flexible (flex-count children))
+            (available (- (get bounds 'height) (* gap (- (count children) 1)))))
+        (let ((remaining (- available fixed)))
+          (if (< available fixed)
+              (signal 'ui/layout-overflow "fixed column children exceed available height"
+                (dict 'bounds bounds 'fixed fixed 'gap gap))
+              (if (= flexible 0)
+                  (layout-vertical-rest
+                    children (get bounds 'x) (get bounds 'y) (get bounds 'width)
+                    0 0 0 gap style)
+                  (if (< remaining flexible)
+                      (signal 'ui/layout-overflow "column cannot give each flexible child one pixel"
+                        (dict 'bounds bounds 'children n 'fixed fixed 'gap gap))
+                      (layout-vertical-rest
+                        children (get bounds 'x) (get bounds 'y) (get bounds 'width)
+                        (/ remaining flexible) remaining flexible gap style))))))))
+
+  (def compile-children
+    (fn (tree bounds style)
+      (let ((children (get tree 'children))
+            (inside (content-rect tree bounds style))
+            (gap (node-gap tree style)))
+        (if (nonnegative? gap)
+            (if (= (get tree 'kind) 'row)
+                (layout-horizontal children inside gap style)
+                (layout-vertical children inside gap style))
+            (signal 'ui/invalid-layout "gap must be a non-negative integer"
+              (dict 'id (get tree 'id) 'gap gap))))))
+
+  (def compile-node
+    (fn (tree bounds style)
+      (let ((children-result
+              (if (= (get tree 'children) nil)
+                  (empty-render)
+                  (compile-children tree bounds style))))
+        (dict
+          'boxes (cons (box tree bounds) (get children-result 'boxes))
+          'commands (append (node-commands tree bounds style)
+                            (get children-result 'commands))
+          'actions (append (node-actions tree bounds)
+                           (get children-result 'actions))))))
+
+  (def command?
+    (fn (command)
+      (if (= (type-of command) 'map)
+          (if (has-key? command 'op)
+              (if (has-key? command 'id)
+                  (if (has-key? command 'bounds)
+                      (if (rect? (get command 'bounds))
+                          (let ((operation (get command 'op)))
+                                (if (= operation 'fill)
+                                    (if (has-key? command 'color)
+                                    (if (paint? (get command 'color))
+                                        (if (has-key? command 'radius)
+                                            (nonnegative? (get command 'radius))
+                                            #f)
+                                        #f)
+                                    #f)
+                                (if (= operation 'stroke)
+                                    (if (has-key? command 'color)
+                                        (paint? (get command 'color))
+                                        #f)
+                                    (if (= operation 'text)
+                                        (if (has-key? command 'content)
+                                            (if (= (type-of (get command 'content)) 'string)
+                                                (if (has-key? command 'color)
+                                                    (if (paint? (get command 'color))
+                                                        (has-key? command 'role)
+                                                        #f)
+                                                    #f)
+                                                #f)
+                                            #f)
+                                        #f))))
+                          #f)
+                      #f)
+                  #f)
+              #f)
+          #f)))
+
+  (def commands?
+    (fn (commands)
+      (if (= commands nil)
+          #t
+          (if (command? (car commands))
+              (commands? (cdr commands))
+              #f))))
+
+  (def boxes?
+    (fn (boxes)
+      (if (= boxes nil)
+          #t
+          (if (= (type-of (car boxes)) 'map)
+              (if (has-key? (car boxes) 'id)
+                  (if (has-key? (car boxes) 'kind)
+                      (if (rect? (get (car boxes) 'bounds))
+                          (boxes? (cdr boxes))
+                          #f)
+                      #f)
+                  #f)
+              #f))))
+
+  (def action?
+    (fn (action)
+      (if (= (type-of action) 'map)
+          (if (has-key? action 'id)
+              (if (rect? (get action 'bounds))
+                  (if (has-key? action 'intent)
+                      (if (= (type-of (get action 'intent)) 'map)
+                          (= (get (get action 'intent) 'kind) 'intent)
+                          #f)
+                      #f)
+                  #f)
+              #f)
+          #f)))
+
+  (def actions?
+    (fn (actions)
+      (if (= actions nil)
+          #t
+          (if (action? (car actions))
+              (actions? (cdr actions))
+              #f))))
+
+  (def frame?
+    (fn (value)
+      (if (= (type-of value) 'map)
+          (if (= (get value 'kind) 'display-frame)
+              (if (rect? (get value 'viewport))
+                  (if (paint? (get value 'theme))
+                      (if (has-key? value 'boxes)
+                          (if (boxes? (get value 'boxes))
+                              (if (has-key? value 'commands)
+                                  (if (commands? (get value 'commands))
+                                      (if (has-key? value 'actions)
+                                          (actions? (get value 'actions))
+                                          #f)
+                                      #f)
+                                  #f)
+                              #f)
+                          #f)
+                      #f)
+                  #f)
+              #f)
+          #f)))
+
+  (def compile-frame
+    (fn (scene viewport style)
+      (if (scene? scene)
+          (if (rect? viewport)
+              (if (theme? style)
+                  (let ((result (compile-node scene viewport style)))
+                    (let ((frame
+                            (dict
+                              'kind 'display-frame
+                              'viewport viewport
+                              'theme (get style 'name)
+                              'boxes (get result 'boxes)
+                              'commands (get result 'commands)
+                              'actions (get result 'actions))))
+                      (if (frame? frame)
+                          frame
+                          (signal 'ui/invalid-display-list
+                            "scene compiled to an invalid display frame" frame))))
+                  (signal 'ui/invalid-theme "layout requires a valid theme" style))
+              (signal 'ui/invalid-viewport "layout requires a positive rectangle" viewport))
+          (signal 'ui/invalid-scene "layout requires a valid scene" scene))))
+
+  (def display-list (fn (frame) (get frame 'commands)))
+
+  (def point-in?
+    (fn (bounds x y)
+      (if (< x (get bounds 'x))
+          #f
+          (if (< y (get bounds 'y))
+              #f
+              (if (< x (+ (get bounds 'x) (get bounds 'width)))
+                  (< y (+ (get bounds 'y) (get bounds 'height)))
+                  #f)))))
+
+  (def hit-actions
+    (fn (actions x y)
+      (if (= actions nil)
+          nil
+          (if (point-in? (get (car actions) 'bounds) x y)
+              (car actions)
+              (hit-actions (cdr actions) x y)))))
+
+  (def hit-test
+    (fn (frame x y)
+      (if (integer? x)
+          (if (integer? y)
+              (hit-actions (reverse (get frame 'actions)) x y)
+              (signal 'ui/invalid-point "hit-test y must be an integer" y))
+          (signal 'ui/invalid-point "hit-test x must be an integer" x))))
+
+  ; The layout engine itself is an agent. Rendering commits a new frame in one
+  ; turn; semantic hit-testing never executes the returned intent.
+  (defprotocol layout-protocol
+    (render agent map map map)
+    (hit agent int int))
+
+  (def attempt-frame
+    (fn (scene viewport style)
+      (with-handler (* problem)
+        (list 'error problem)
+        (list 'ok (compile-frame scene viewport style)))))
+
+  (def layout-behavior
+    (fn (self heap message)
+      (let ((operation (car message))
+            (reply (second message)))
+        (if (= operation 'render)
+            (let ((attempt
+                    (attempt-frame
+                      (car (cdr (cdr message)))
+                      (car (cdr (cdr (cdr message))))
+                      (car (cdr (cdr (cdr (cdr message))))))))
+              (if (= (car attempt) 'ok)
+                  (begin
+                    (send reply (list 'rendered (second attempt)))
+                    (dict 'frame (second attempt)))
+                  (begin
+                    (send reply (list 'render-rejected (second attempt)))
+                    heap)))
+            (if (= (get heap 'frame) nil)
+                (begin
+                  (send reply (list 'miss nil))
+                  heap)
+                (let ((hit
+                        (hit-test (get heap 'frame)
+                          (car (cdr (cdr message)))
+                          (car (cdr (cdr (cdr message)))))))
+                  (begin
+                    (send reply (if (= hit nil)
+                                    (list 'miss nil)
+                                    (list 'action hit)))
+                    heap)))))))
+
+  (def make-layout-agent
+    (fn (name)
+      (spawn name layout-behavior (dict 'frame nil) layout-protocol)))
+
+  (def render-frame
+    (fn (layout-agent reply scene viewport style)
+      (send layout-agent (list 'render reply scene viewport style))))
+
+  (def hit-point
+    (fn (layout-agent reply x y)
+      (send layout-agent (list 'hit reply x y)))))
+
+; The default shell is policy-free Agel data. Users and agents can replace any
+; part while keeping the same layout and renderer contracts.
+(module agel/desktop
+  (import agel/ui)
+  (import agel/ui-layout)
+  (export desktop-spec default-scene default-theme default-viewport)
+
+  (def desktop-spec
+    (dict
+      'inspiration 'cosmic
+      'components '(panel workspaces applets launcher workspace dock)
+      'mutation '(inspect propose preview commit rollback)
+      'automation 'semantic-intents
+      'principle 'agents-all-the-way-down))
+
+  (def default-theme cosmic-theme)
+  (def default-viewport (rect 0 0 1280 800))
+
+  (def app-intent
+    (fn (name) (intent 'application/open name nil 'application/launch)))
+
+  (def sized
+    (fn (tree basis)
+      (assoc tree 'props (assoc (get tree 'props) 'basis basis))))
+
+  (def default-scene
+    (fn ()
+      (window 'desktop "Agel"
+        (list
+          (sized
+            (row 'panel
+              (list
+                (button 'launcher "Applications"
+                  (intent 'launcher/toggle 'launcher nil 'desktop/control))
+                (button 'workspace-one "Workspace 1"
+                  (intent 'workspace/focus 1 nil 'desktop/control))
+                (text 'clock "Agel time")
+                (button 'quick-settings "Sound · Network · Power"
+                  (intent 'settings/toggle 'quick-settings nil 'settings/read))))
+            56)
+          (panel 'workspace
+            (list
+              (column 'welcome
+                (list
+                  (text 'headline "Welcome to your moldable operating system")
+                  (text 'hint
+                    "Ask an agent to reshape any component, then inspect its preview.")))))
+          (sized
+            (row 'dock
+              (list
+                (button 'terminal "Terminal" (app-intent 'terminal))
+                (button 'files "Files" (app-intent 'files))
+                (button 'workshop "Workshop" (app-intent 'workshop))
+                (button 'settings "Settings" (app-intent 'settings))
+                (button 'agent "Ask Agel"
+                  (intent 'agent/converse 'system-agent nil 'model/infer))))
+            72))))))

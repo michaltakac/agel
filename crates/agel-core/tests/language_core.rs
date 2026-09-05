@@ -347,6 +347,8 @@ fn reflection_and_apply_are_small_homoiconic_primitives() {
            (type-of +)
            (has-key? (dict 'present nil) 'present)
            (has-key? (dict 'present nil) 'missing)
+           (< 10 20)
+           (< 20 10)
            (apply + '(10 20 12))
            (apply (fn (x y) (* x y)) '(6 7)))",
     );
@@ -357,8 +359,18 @@ fn reflection_and_apply_are_small_homoiconic_primitives() {
             Value::Symbol("callable".into()),
             Value::Bool(true),
             Value::Bool(false),
+            Value::Bool(true),
+            Value::Bool(false),
             Value::Int(42),
             Value::Int(42),
         ])
     );
+}
+
+#[test]
+fn integer_ordering_is_checked_and_type_safe() {
+    let mut world = World::default();
+    assert_eq!(last(&mut world, "(< -10 0)"), Value::Bool(true));
+    let error = world.evaluate("(< 1 'two)").unwrap_err();
+    assert!(error.to_string().contains("< expects two integers"));
 }

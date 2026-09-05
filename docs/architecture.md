@@ -149,13 +149,17 @@ Each rung must be runnable and differentially testable against the rung below:
    semantic authority-bearing intents, structural validation, inspectable
    patches, and a typed preview/commit/discard/rollback desktop agent are Agel
    standard-library code. This is not yet a renderer or native graphical shell.
-21. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+21. **Default shell and deterministic layout (complete at v0.2.1):** a
+   COSMIC-inspired panel/workspace/dock scene, theme tokens, fixed/flexible
+   geometry, validated display lists, semantic hit-testing, and a transactional
+   layout agent are Agel library code. No pixel renderer is claimed yet.
+22. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-22. **POSIX personality:** a Rust C library and the filesystem and process
+23. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-23. **Local inference:** model inference in its own domain, over quantized
+24. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

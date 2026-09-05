@@ -147,7 +147,7 @@ fn main() -> io::Result<()> {
     println!("Agel agentic runtime — world revision {}", world.revision());
     if config.stdlib {
         println!(
-            "Standard library installed: agel/sequence, agel/result, agel/swarm, agel/meta, agel/ui"
+            "Standard library installed: agel/sequence, agel/result, agel/swarm, agel/meta, agel/ui, agel/ui-layout, agel/desktop"
         );
     }
     if providers.names().next().is_none() {

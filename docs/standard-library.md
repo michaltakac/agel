@@ -80,3 +80,28 @@ describes that surface as data from inside Agel.
 
 See [`agentic-desktop.md`](agentic-desktop.md) for the design and run
 `examples/agentic-desktop.agel` for an end-to-end live mutation demonstration.
+
+## `agel/ui-layout`
+
+`agel/ui-layout` deterministically compiles a valid scene, positive viewport,
+and valid theme into a transparent display frame. Fixed `basis` children and
+flexible siblings compose in rows and columns; integer division remainders go to
+the final flexible child. The output contains geometry boxes, ordered
+fill/stroke/text commands, and semantic action regions.
+
+`hit-test` searches the action regions from front to back and returns the
+component identity, bounds, and intent without executing it. The typed layout
+agent accepts `render` and `hit` messages. Failed layout preserves its preceding
+good frame and returns a structured rejection.
+
+## `agel/desktop`
+
+`agel/desktop` supplies the default COSMIC-inspired Agel shell as ordinary data:
+a panel with launcher/workspace/settings affordances, central workspace, and
+application dock. `default-theme`, `default-viewport`, `default-scene`, and the
+machine-readable `desktop-spec` are all replaceable language bindings rather
+than kernel policy.
+
+Run `examples/cosmic-desktop.agel` to compile the default shell, resolve pointer
+coordinates to semantic intents, customize it through the desktop agent,
+recompile it through the layout agent, and reject an impossible frame safely.
