@@ -1,0 +1,13 @@
+[package]
+name = "agel-vector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+agel-core = { path = "../agel-core" }
+agel-stdlib = { path = "../agel-stdlib" }
+
+[lints]
+workspace = true

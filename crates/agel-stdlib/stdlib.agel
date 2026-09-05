@@ -494,12 +494,258 @@
   (def discard (fn (desktop reply) (send desktop (list 'discard reply))))
   (def rollback (fn (desktop reply) (send desktop (list 'rollback reply)))))
 
+; Resolution-independent graphics are ordinary Agel values. Coordinates use
+; logical pixels; a frame's integer scale selects physical output density
+; without changing layout or hit-testing. The small native renderer validates
+; this IR again before touching an output surface.
+(module agel/vector
+  (import agel/sequence)
+  (export
+    vector-spec point transform identity-transform solid linear-gradient
+    move-to line-to curve-to close-path path rounded-rectangle ellipse
+    fill-shape stroke-shape draw-vector-text push-transform push-clip restore
+    paint? shape? vector-command? vector-commands? balanced-vector-commands?)
+
+  (def vector-spec
+    (dict
+      'coordinates 'logical-integer-pixels
+      'density 'integer-output-scale
+      'shapes '(rounded-rectangle ellipse path)
+      'path-segments '(move-to line-to curve-to close-path)
+      'paints '(solid linear-gradient)
+      'paint-space 'object-bounding-box-1024
+      'state '(transform clip restore)
+      'safety '(strict-validation balanced-state-stack host-revalidation)
+      'ownership 'agel))
+
+  (def integer? (fn (value) (= (type-of value) 'int)))
+  (def positive? (fn (value) (if (integer? value) (< 0 value) #f)))
+  (def nonnegative? (fn (value) (if (integer? value) (if (< value 0) #f #t) #f)))
+  (def string? (fn (value) (= (type-of value) 'string)))
+  (def id?
+    (fn (value)
+      (if (= (type-of value) 'symbol)
+          #t
+          (if (= (type-of value) 'string)
+              #t
+              (= (type-of value) 'int)))))
+
+  (def point (fn (x y) (dict 'kind 'point 'x x 'y y)))
+  (def transform
+    (fn (a b c d tx ty)
+      (dict 'kind 'transform 'a a 'b b 'c c 'd d 'tx tx 'ty ty)))
+  (def identity-transform (transform 1024 0 0 1024 0 0))
+  (def solid (fn (color) (dict 'kind 'solid 'color color)))
+  (def linear-gradient
+    (fn (from to start end)
+      (dict 'kind 'linear-gradient 'from from 'to to
+            'start start 'end end)))
+
+  (def move-to (fn (x y) (dict 'op 'move-to 'x x 'y y)))
+  (def line-to (fn (x y) (dict 'op 'line-to 'x x 'y y)))
+  (def curve-to
+    (fn (x1 y1 x2 y2 x y)
+      (dict 'op 'curve-to 'x1 x1 'y1 y1 'x2 x2 'y2 y2 'x x 'y y)))
+  (def close-path (fn () (dict 'op 'close-path)))
+  (def path (fn (segments) (dict 'kind 'path 'segments segments)))
+  (def rounded-rectangle
+    (fn (bounds radius)
+      (dict 'kind 'rounded-rectangle 'bounds bounds 'radius radius)))
+  (def ellipse
+    (fn (center radius-x radius-y)
+      (dict 'kind 'ellipse 'center center 'radius-x radius-x 'radius-y radius-y)))
+
+  (def fill-shape
+    (fn (id geometry paint)
+      (dict 'op 'fill-shape 'id id 'shape geometry 'paint paint)))
+  (def stroke-shape
+    (fn (id geometry paint width)
+      (dict 'op 'stroke-shape 'id id 'shape geometry 'paint paint 'width width)))
+  (def draw-vector-text
+    (fn (id bounds content paint role)
+      (dict 'op 'draw-text 'id id 'bounds bounds 'content content
+            'paint paint 'role role)))
+  (def push-transform (fn (matrix) (dict 'op 'push-transform 'transform matrix)))
+  (def push-clip (fn (geometry) (dict 'op 'push-clip 'shape geometry)))
+  (def restore (fn () (dict 'op 'restore)))
+
+  (def point?
+    (fn (value)
+      (if (= (type-of value) 'map)
+          (if (= (get value 'kind) 'point)
+              (if (integer? (get value 'x)) (integer? (get value 'y)) #f)
+              #f)
+          #f)))
+
+  (def transform?
+    (fn (value)
+      (if (= (type-of value) 'map)
+          (if (= (get value 'kind) 'transform)
+              (if (integer? (get value 'a))
+                  (if (integer? (get value 'b))
+                      (if (integer? (get value 'c))
+                          (if (integer? (get value 'd))
+                              (if (integer? (get value 'tx))
+                                  (integer? (get value 'ty)) #f)
+                              #f)
+                          #f)
+                      #f)
+                  #f)
+              #f)
+          #f)))
+
+  (def color? (fn (value) (string? value)))
+  (def normalized-point?
+    (fn (value)
+      (if (point? value)
+          (if (nonnegative? (get value 'x))
+              (if (< (get value 'x) 1025)
+                  (if (nonnegative? (get value 'y))
+                      (< (get value 'y) 1025) #f)
+                  #f)
+              #f)
+          #f)))
+  (def paint?
+    (fn (value)
+      (if (string? value)
+          #t
+          (if (= (type-of value) 'map)
+              (if (= (get value 'kind) 'solid)
+                  (color? (get value 'color))
+                  (if (= (get value 'kind) 'linear-gradient)
+                      (if (normalized-point? (get value 'from))
+                          (if (normalized-point? (get value 'to))
+                              (if (color? (get value 'start))
+                                  (color? (get value 'end)) #f)
+                              #f)
+                          #f)
+                      #f))
+              #f))))
+
+  (def rect-shape?
+    (fn (value)
+      (if (= (type-of (get value 'bounds)) 'map)
+          (if (integer? (get (get value 'bounds) 'x))
+              (if (integer? (get (get value 'bounds) 'y))
+                  (if (positive? (get (get value 'bounds) 'width))
+                      (positive? (get (get value 'bounds) 'height)) #f)
+                  #f)
+              #f)
+          #f)))
+
+  (def segment?
+    (fn (segment)
+      (if (= (type-of segment) 'map)
+          (let ((operation (get segment 'op)))
+            (if (= operation 'close-path)
+                #t
+                (if (= operation 'move-to)
+                    (if (integer? (get segment 'x)) (integer? (get segment 'y)) #f)
+                    (if (= operation 'line-to)
+                        (if (integer? (get segment 'x)) (integer? (get segment 'y)) #f)
+                        (if (= operation 'curve-to)
+                            (if (integer? (get segment 'x1))
+                                (if (integer? (get segment 'y1))
+                                    (if (integer? (get segment 'x2))
+                                        (if (integer? (get segment 'y2))
+                                            (if (integer? (get segment 'x))
+                                                (integer? (get segment 'y)) #f)
+                                            #f)
+                                        #f)
+                                    #f)
+                                #f)
+                            #f)))))
+          #f)))
+
+  (def segments?
+    (fn (segments)
+      (if (= segments nil)
+          #t
+          (if (segment? (car segments)) (segments? (cdr segments)) #f))))
+
+  (def shape?
+    (fn (value)
+      (if (= (type-of value) 'map)
+          (let ((kind (get value 'kind)))
+            (if (= kind 'rounded-rectangle)
+                (if (rect-shape? value) (nonnegative? (get value 'radius)) #f)
+                (if (= kind 'ellipse)
+                    (if (point? (get value 'center))
+                        (if (positive? (get value 'radius-x))
+                            (positive? (get value 'radius-y)) #f)
+                        #f)
+                    (if (= kind 'path)
+                        (if (= (get value 'segments) nil)
+                            #f
+                            (segments? (get value 'segments)))
+                        #f))))
+          #f)))
+
+  (def vector-command?
+    (fn (command)
+      (if (= (type-of command) 'map)
+          (if (has-key? command 'op)
+              (let ((operation (get command 'op)))
+                (if (= operation 'fill-shape)
+                    (if (id? (get command 'id))
+                        (if (shape? (get command 'shape))
+                            (paint? (get command 'paint)) #f)
+                        #f)
+                    (if (= operation 'stroke-shape)
+                        (if (id? (get command 'id))
+                            (if (shape? (get command 'shape))
+                                (if (paint? (get command 'paint))
+                                    (positive? (get command 'width)) #f)
+                                #f)
+                            #f)
+                        (if (= operation 'draw-text)
+                            (if (id? (get command 'id))
+                                (if (rect-shape? (dict 'bounds (get command 'bounds)))
+                                    (if (string? (get command 'content))
+                                        (if (= (type-of (get command 'role)) 'symbol)
+                                            (paint? (get command 'paint)) #f)
+                                        #f)
+                                    #f)
+                                #f)
+                            (if (= operation 'push-transform)
+                                (transform? (get command 'transform))
+                                (if (= operation 'push-clip)
+                                    (shape? (get command 'shape))
+                                    (= operation 'restore)))))))
+              #f)
+          #f)))
+
+  (def vector-commands?
+    (fn (commands)
+      (if (= commands nil)
+          #t
+          (if (vector-command? (car commands))
+              (vector-commands? (cdr commands)) #f))))
+
+  (def state-depth
+    (fn (commands depth)
+      (if (= commands nil)
+          depth
+          (let ((operation (get (car commands) 'op)))
+            (if (= operation 'restore)
+                (if (= depth 0) -1 (state-depth (cdr commands) (- depth 1)))
+                (if (= operation 'push-transform)
+                    (state-depth (cdr commands) (+ depth 1))
+                    (if (= operation 'push-clip)
+                        (state-depth (cdr commands) (+ depth 1))
+                        (state-depth (cdr commands) depth))))))))
+
+  (def balanced-vector-commands?
+    (fn (commands)
+      (if (vector-commands? commands) (= (state-depth commands 0) 0) #f))))
+
 ; Deterministic layout compiles a semantic scene to a renderer-neutral display
 ; frame. The native renderer will consume these values; it does not own layout,
 ; theme, hit-testing, or action meaning.
 (module agel/ui-layout
   (import agel/sequence)
   (import agel/ui)
+  (import agel/vector)
   (export
     layout-spec cosmic-theme rect rect? theme? compile-frame frame?
     display-list hit-test layout-protocol make-layout-agent render-frame hit-point)
@@ -517,14 +763,14 @@
   (def cosmic-theme
     (theme 'cosmic
       (dict
-        'background 'space-950
-        'surface 'space-900
-        'panel 'space-850
-        'text 'space-050
-        'muted-text 'space-300
-        'accent 'accent-500
-        'on-accent 'space-000
-        'border 'space-700
+        'background "#11131a"
+        'surface (linear-gradient (point 0 0) (point 0 1024) "#303544" "#20232e")
+        'panel "#252936"
+        'text "#f4f6ff"
+        'muted-text "#aeb5ca"
+        'accent (linear-gradient (point 0 0) (point 0 1024) "#8b7cff" "#6655e8")
+        'on-accent "#ffffff"
+        'border "#454b61"
         'padding 12
         'gap 8
         'titlebar-height 32
@@ -532,11 +778,9 @@
 
   (def second (fn (values) (car (cdr values))))
   (def integer? (fn (value) (= (type-of value) 'int)))
-  (def paint?
+  (def theme-name?
     (fn (value)
-      (if (= (type-of value) 'symbol)
-          #t
-          (= (type-of value) 'string))))
+      (if (= (type-of value) 'symbol) #t (= (type-of value) 'string))))
   (def positive? (fn (value) (if (integer? value) (< 0 value) #f)))
   (def nonnegative? (fn (value) (if (integer? value) (if (< value 0) #f #t) #f)))
 
@@ -591,7 +835,7 @@
     (fn (value)
       (if (= (type-of value) 'map)
           (if (= (get value 'kind) 'theme)
-              (if (paint? (get value 'name))
+              (if (theme-name? (get value 'name))
                   (let ((tokens (get value 'tokens)))
                     (if (= (type-of tokens) 'map)
                         (if (has-tokens? tokens required-tokens)
@@ -932,7 +1176,7 @@
       (if (= (type-of value) 'map)
           (if (= (get value 'kind) 'display-frame)
               (if (rect? (get value 'viewport))
-                  (if (paint? (get value 'theme))
+                  (if (theme-name? (get value 'theme))
                       (if (has-key? value 'boxes)
                           (if (boxes? (get value 'boxes))
                               (if (has-key? value 'commands)
@@ -1053,6 +1297,126 @@
   (def hit-point
     (fn (layout-agent reply x y)
       (send layout-agent (list 'hit reply x y)))))
+
+; The bridge from UI layout to the vector compositor is also Agel. It turns
+; the generic display list into a density-independent vector display list and
+; retains semantic action regions unchanged.
+(module agel/ui-vector
+  (import agel/sequence)
+  (import agel/ui-layout)
+  (import agel/vector)
+  (export
+    ui-vector-spec compile-vector-frame vector-frame? vector-display-list
+    vector-protocol make-vector-agent vectorize-frame)
+
+  (def ui-vector-spec
+    (dict
+      'input 'display-frame
+      'output 'vector-frame
+      'logical-units 'pixels
+      'physical-density 'integer-scale
+      'translation '(fill-to-shape stroke-to-shape text-to-vector-text)
+      'failure 'retain-last-good-vector-frame))
+
+  (def integer? (fn (value) (= (type-of value) 'int)))
+  (def positive? (fn (value) (if (integer? value) (< 0 value) #f)))
+
+  (def vectorize-command
+    (fn (command)
+      (let ((operation (get command 'op))
+            (id (get command 'id))
+            (bounds (get command 'bounds)))
+        (if (= operation 'fill)
+            (fill-shape id
+              (rounded-rectangle bounds (get command 'radius))
+              (get command 'color))
+            (if (= operation 'stroke)
+                (stroke-shape id (rounded-rectangle bounds 8)
+                  (get command 'color) 1)
+                (draw-vector-text id bounds (get command 'content)
+                  (get command 'color) (get command 'role)))))))
+
+  (def vectorize-commands
+    (fn (commands)
+      (if (= commands nil)
+          nil
+          (cons (vectorize-command (car commands))
+                (vectorize-commands (cdr commands))))))
+
+  (def vector-frame?
+    (fn (value)
+      (if (= (type-of value) 'map)
+          (if (= (get value 'kind) 'vector-frame)
+              (if (rect? (get value 'viewport))
+                  (if (positive? (get value 'scale))
+                      (if (positive? (get value 'physical-width))
+                          (if (positive? (get value 'physical-height))
+                              (if (balanced-vector-commands?
+                                    (get value 'commands))
+                                  (= (type-of (get value 'actions)) 'list)
+                                  #f)
+                              #f)
+                          #f)
+                      #f)
+                  #f)
+              #f)
+          #f)))
+
+  (def compile-vector-frame
+    (fn (frame scale)
+      (if (frame? frame)
+          (if (positive? scale)
+              (let ((viewport (get frame 'viewport))
+                    (commands (vectorize-commands (display-list frame))))
+                (let ((result
+                        (dict
+                          'kind 'vector-frame
+                          'viewport viewport
+                          'scale scale
+                          'physical-width (* (get viewport 'width) scale)
+                          'physical-height (* (get viewport 'height) scale)
+                          'commands commands
+                          'actions (get frame 'actions))))
+                  (if (vector-frame? result)
+                      result
+                      (signal 'vector/invalid-frame
+                        "vector compiler produced an invalid frame" result))))
+              (signal 'vector/invalid-scale
+                "output scale must be a positive integer" scale))
+          (signal 'vector/invalid-source-frame
+            "vector compiler requires a valid display frame" frame))))
+
+  (def vector-display-list (fn (frame) (get frame 'commands)))
+
+  (defprotocol vector-protocol (vectorize agent map int))
+
+  (def attempt-vector-frame
+    (fn (frame scale)
+      (with-handler (* problem)
+        (list 'error problem)
+        (list 'ok (compile-vector-frame frame scale)))))
+
+  (def vector-behavior
+    (fn (self heap message)
+      (let ((reply (car (cdr message)))
+            (attempt (attempt-vector-frame
+                       (car (cdr (cdr message)))
+                       (car (cdr (cdr (cdr message)))))))
+        (if (= (car attempt) 'ok)
+            (begin
+              (send reply (list 'vectorized (car (cdr attempt))))
+              (dict 'frame (car (cdr attempt))))
+            (begin
+              (send reply (list 'vector-rejected (car (cdr attempt))))
+              heap)))))
+
+  (def make-vector-agent
+    (fn (name)
+      (spawn name vector-behavior (dict 'frame nil) vector-protocol)))
+
+  (def vectorize-frame
+    (fn (vector-agent reply frame scale)
+      (send vector-agent (list 'vectorize reply frame scale)))))
 
 ; The default shell is policy-free Agel data. Users and agents can replace any
 ; part while keeping the same layout and renderer contracts.

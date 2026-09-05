@@ -1,0 +1,98 @@
+; v0.2.2 — a complete high-density desktop authored in Agel.
+;
+; Render and open it:
+;   cargo run -q -p agel-vector -- \
+;     --program examples/vector-desktop.agel \
+;     --output target/vector-desktop.svg
+;   open target/vector-desktop.svg
+
+(import agel/ui)
+(import agel/ui-layout)
+(import agel/ui-vector)
+(import agel/vector)
+
+(def fixed
+  (fn (tree size)
+    (assoc tree 'props (assoc (get tree 'props) 'basis size))))
+
+; A theme is data, not compositor policy. An agent can construct, inspect,
+; validate, preview, and transactionally replace this value while Agel runs.
+(def aurora-theme
+  (theme 'aurora
+    (dict
+      'background (linear-gradient (point 0 0) (point 1024 1024)
+                    "#10131f" "#171a2a")
+      'surface (linear-gradient (point 0 0) (point 0 1024)
+                 "#30364a" "#202432")
+      'panel "#24293a"
+      'text "#f6f7ff"
+      'muted-text "#aeb6d0"
+      'accent (linear-gradient (point 0 0) (point 1024 1024)
+                "#9b8cff" "#6254e7")
+      'on-accent "#ffffff"
+      'border "#4a526d"
+      'padding 14
+      'gap 10
+      'titlebar-height 36
+      'corner-radius 12)))
+
+(def launch
+  (fn (application)
+    (intent 'application/open application nil 'application/launch)))
+
+(def scene
+  (window 'desktop "Agel · agents all the way down"
+    (list
+      (fixed
+        (row 'command-bar
+          (list
+            (fixed (button 'launcher "Applications"
+                     (intent 'launcher/toggle 'launcher nil 'desktop/control)) 180)
+            (fixed (button 'workspace "Workspace 1"
+                     (intent 'workspace/focus 1 nil 'desktop/control)) 180)
+            (text 'conversation
+              "Tell Agel what you want this workspace to become…")
+            (fixed (button 'agent-status "● 3 agents ready"
+                     (intent 'agent/inspect 'all nil 'agent/read)) 180)))
+        58)
+      (row 'work-area
+        (list
+          (fixed
+            (panel 'navigator
+              (list
+                (text 'nav-title "Spaces")
+                (button 'today "Today" (launch 'today))
+                (button 'projects "Projects" (launch 'projects))
+                (button 'workshop-nav "Agent Workshop" (launch 'workshop))
+                (button 'system "System" (launch 'settings))))
+            240)
+          (panel 'canvas
+            (list
+              (fixed (text 'eyebrow "LIVE AGENTIC WORKSPACE") 52)
+              (fixed (text 'headline "Shape the system while it runs") 100)
+              (text 'explanation
+                "Language, applications, desktop and services are inspectable Agel values.")
+              (fixed
+                (row 'suggestions
+                  (list
+                    (button 'build "Build with an agent" (launch 'workshop))
+                    (button 'mold "Mold this desktop"
+                      (intent 'desktop/customize 'desktop nil 'model/infer))
+                    (button 'inspect "Inspect the system"
+                      (intent 'system/inspect 'world nil 'system/read))))
+                86)))))
+      (fixed
+        (row 'dock
+          (list
+            (button 'terminal "Terminal" (launch 'terminal))
+            (button 'files "Files" (launch 'files))
+            (button 'workshop "Workshop" (launch 'workshop))
+            (button 'ask-agel "Ask Agel"
+              (intent 'agent/converse 'system-agent nil 'model/infer))))
+        74))))
+
+; This final value is the renderer contract. Logical geometry stays 1440×900;
+; scale 2 requests a 2880×1800 output while semantic input stays logical.
+(compile-vector-frame
+  (compile-frame scene (rect 0 0 1440 900) aurora-theme)
+  2)

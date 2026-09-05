@@ -10,7 +10,9 @@ promise.
 - Patch releases repair a milestone without claiming a new capability rung.
 - `v0.2.0` begins the agentic desktop line with an Agel-authored scene and live
   change protocol. `v0.2.1` adds the Agel-authored default shell, layout compiler,
-  display-list contract, and semantic hit-testing. Minor releases may make
+  display-list contract, and semantic hit-testing. `v0.2.2` adds Agel-authored
+  vector primitives and UI-to-vector compilation plus a bounded deterministic
+  SVG output service. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

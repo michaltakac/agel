@@ -4,11 +4,12 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.1: a persistent native Agel workshop plus a
-COSMIC-inspired default shell, deterministic layout, renderer-neutral display
-lists, semantic hit-testing, and transactional desktop/layout agents written in
-Agel**. It retains the frozen kernel contract, portable isolation backend,
-unmodified seL4 backend, and
+The current repository is **v0.2.2: a persistent native Agel workshop plus a
+COSMIC-inspired default shell and a real, high-density vector graphics pipeline.
+Scenes, layout, paths, shapes, paints, transforms, clipping, display lists, and
+transactional desktop/layout/vector agents are written in Agel; a small bounded
+host service emits deterministic SVG**. It retains the frozen kernel contract,
+portable isolation backend, unmodified seL4 backend, and
 restartable privileged console service from the v0.1 line.
 
 Agel is still pre-production. Project releases follow the policy in
@@ -50,6 +51,13 @@ It provides:
 - deterministic fixed/flexible row and column layout written in Agel;
 - a COSMIC-inspired default panel, workspace, applets, launcher, and dock;
 - renderer-neutral fill/stroke/text display lists with strict validation;
+- resolution-independent paths, cubic curves, ellipses, rounded rectangles,
+  gradients, fixed-point transforms, clipping, strokes, and vector text written
+  in `agel/vector`;
+- an Agel-authored UI-to-vector compiler and typed vector agent that preserves
+  its last good frame after a rejected render;
+- deterministic 1×–8× SVG output through a bounded, dependency-free Rust
+  renderer that independently validates untrusted vector frames;
 - semantic hit-testing that returns inspectable intents without executing them;
 - an isolated layout agent that preserves its last good frame when compilation
   fails;
@@ -124,7 +132,8 @@ cargo run -p agel-cli
 ```
 
 The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/meta`,
-`agel/ui`, `agel/ui-layout`, and `agel/desktop` by default.
+`agel/ui`, `agel/vector`, `agel/ui-layout`, `agel/ui-vector`, and `agel/desktop`
+by default.
 Use `--no-stdlib` to expose only the minimal language substrate.
 
 Run the agentic desktop object model:
@@ -134,10 +143,19 @@ cargo run -q -p agel-cli < examples/agentic-desktop.agel
 cargo run -q -p agel-cli < examples/cosmic-desktop.agel
 ```
 
-This milestone compiles a live desktop to a complete display list in Agel but
-does not claim graphical output yet. The pixel renderer, input stack, and native
-scene interpreter are the next strata; see
-[`docs/agentic-desktop.md`](docs/agentic-desktop.md).
+Render a 2880×1800 desktop whose scene, layout, theme, gradients, and vector
+display list are authored in Agel:
+
+```sh
+cargo run -q -p agel-vector -- \
+  --program examples/vector-desktop.agel \
+  --output target/vector-desktop.svg
+open target/vector-desktop.svg
+```
+
+SVG is the first real output surface and remains sharp at arbitrary resolution.
+The native framebuffer compositor and input stack are the next strata; see
+[`docs/vector-graphics.md`](docs/vector-graphics.md).
 
 Example session:
 

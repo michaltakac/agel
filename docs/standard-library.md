@@ -94,6 +94,31 @@ component identity, bounds, and intent without executing it. The typed layout
 agent accepts `render` and `hit` messages. Failed layout preserves its preceding
 good frame and returns a structured rejection.
 
+## `agel/vector`
+
+`agel/vector` is the resolution-independent graphics postcard. It defines
+points, 1024-unit fixed-point affine transforms, solid and linear-gradient
+paints, rounded rectangles, ellipses, arbitrary paths with cubic Bézier curves,
+fill/stroke/text commands, and nested transform/clip state. These are persistent
+maps and lists rather than evaluator syntax or privileged renderer objects.
+
+`vector-command?`, `vector-commands?`, and `balanced-vector-commands?` validate
+the display stream, including underflow and leaked transform/clip frames.
+`vector-spec` describes the complete contract from inside Agel.
+
+## `agel/ui-vector`
+
+`agel/ui-vector` converts a valid layout frame to a validated vector frame.
+Logical geometry does not change with display density: an integer `scale` only
+sets physical dimensions. Its typed vector agent atomically installs a complete
+new frame and keeps the last good frame if a malformed source or density is
+proposed.
+
+The `agel-vector` executable is the first replaceable output service. It treats
+the language-produced frame as untrusted, checks structure, arithmetic,
+dimensions, colors, path budgets, state-stack balance, and output size again,
+then emits deterministic SVG without third-party dependencies.
+
 ## `agel/desktop`
 
 `agel/desktop` supplies the default COSMIC-inspired Agel shell as ordinary data:
@@ -105,3 +130,5 @@ than kernel policy.
 Run `examples/cosmic-desktop.agel` to compile the default shell, resolve pointer
 coordinates to semantic intents, customize it through the desktop agent,
 recompile it through the layout agent, and reject an impossible frame safely.
+Run `examples/vector-desktop.agel` for the polished 2× UI and
+`examples/vector-primitives.agel` for paths, gradients, clipping, and transforms.

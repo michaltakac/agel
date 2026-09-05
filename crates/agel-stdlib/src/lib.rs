@@ -443,4 +443,108 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn vector_graphics_are_validated_agel_data_and_density_independent() {
+        let mut world = installed();
+        let result = world
+            .evaluate(
+                "(import agel/desktop)
+                 (import agel/ui-layout)
+                 (import agel/vector)
+                 (import agel/ui-vector)
+                 (def layout
+                   (compile-frame (default-scene) default-viewport default-theme))
+                 (def retina (compile-vector-frame layout 2))
+                 (def same (compile-vector-frame layout 2))
+                 (list
+                   (vector-frame? retina)
+                   (= retina same)
+                   (get retina 'physical-width)
+                   (get retina 'physical-height)
+                   (count (vector-display-list retina))
+                   (balanced-vector-commands? (vector-display-list retina))
+                   (paint? (linear-gradient (point 0 0) (point 1024 1024)
+                             \"#000000\" \"#ffffff\"))
+                   (shape? (path (list (move-to 0 0) (line-to 4 4)
+                                       (close-path)))))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            result,
+            Value::List(vec![
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Int(2560),
+                Value::Int(1600),
+                Value::Int(24),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(true),
+            ])
+        );
+
+        let error = world
+            .evaluate("(compile-vector-frame layout 0)")
+            .unwrap_err();
+        assert!(error.to_string().contains("vector/invalid-scale"));
+        assert_eq!(
+            world
+                .evaluate("(balanced-vector-commands? (list (restore)))")
+                .unwrap()
+                .values
+                .pop(),
+            Some(Value::Bool(false))
+        );
+        assert_eq!(
+            world
+                .evaluate("(vector-command? (dict 'op 'fill-shape))")
+                .unwrap()
+                .values
+                .pop(),
+            Some(Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn vector_agent_retains_the_last_good_frame() {
+        let mut world = installed();
+        let result = world
+            .evaluate(
+                "(import agel/desktop)
+                 (import agel/ui-layout)
+                 (import agel/ui-vector)
+                 (def observer (spawn \"compositor\"))
+                 (def vectorizer (make-vector-agent \"vectorizer\"))
+                 (def layout
+                   (compile-frame (default-scene) default-viewport default-theme))
+                 (vectorize-frame vectorizer observer layout 2)
+                 (run 1)
+                 (def accepted (recv observer))
+                 (vectorize-frame vectorizer observer layout 0)
+                 (run 1)
+                 (def rejected (recv observer))
+                 (list
+                   (car accepted)
+                   (car rejected)
+                   (vector-frame? (get (get (agent-info vectorizer) 'heap) 'frame))
+                   (get (agent-info vectorizer) 'status))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            result,
+            Value::List(vec![
+                Value::Symbol("vectorized".into()),
+                Value::Symbol("vector-rejected".into()),
+                Value::Bool(true),
+                Value::Symbol("running".into()),
+            ])
+        );
+    }
 }

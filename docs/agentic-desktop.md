@@ -14,7 +14,13 @@ same scene to a framebuffer without taking ownership of application meaning.
 Agel v0.2.1 adds the language-owned half of that projection.
 `agel/ui-layout` compiles scenes into strictly validated, renderer-neutral
 display frames, and `agel/desktop` supplies a COSMIC-inspired default shell.
-This release still does not claim pixels on screen.
+
+Agel v0.2.2 completes the first hosted graphical path. `agel/vector` defines
+resolution-independent geometry and paint, `agel/ui-vector` translates layout
+frames, and the bounded `agel-vector` service produces real SVG output. The
+meaningful layers remain Agel code; the native service is a replaceable output
+boundary that validates the vector value again. This is graphical output, but
+not yet the native QEMU framebuffer or window/input server.
 
 ## Design
 
@@ -91,6 +97,10 @@ renderer containment, and independent recovery.
 ```sh
 cargo run -q -p agel-cli < examples/agentic-desktop.agel
 cargo run -q -p agel-cli < examples/cosmic-desktop.agel
+cargo run -q -p agel-vector -- \
+  --program examples/vector-desktop.agel \
+  --output target/vector-desktop.svg
+open target/vector-desktop.svg
 ```
 
 The final `ui-spec` expression is the machine-readable schema from inside Agel.
@@ -101,9 +111,9 @@ sending `discard` instead of `commit`.
 
 The next desktop work should preserve this separation:
 
-1. Add a software framebuffer renderer as a replaceable, unprivileged boundary
-   service and snapshot-test its output.
-2. Move the same scene interpreter into the native world and route keyboard and
+1. Add a software framebuffer compositor as a replaceable, unprivileged native
+   service, consuming the same tested vector IR.
+2. Move the same vector scene interpreter into the native world and route keyboard and
    pointer events through semantic, capability-checked intents.
 3. Split compositor, panel, launcher, notifications, settings, and applications
    into supervised agents.

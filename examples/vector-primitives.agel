@@ -1,0 +1,48 @@
+; v0.2.2 — Agel's vector postcard: paths, curves, gradients, transforms,
+; clipping, strokes, scalable text, and explicit high-density output.
+;
+;   cargo run -q -p agel-vector -- \
+;     --program examples/vector-primitives.agel \
+;     --output target/vector-primitives.svg
+
+(import agel/ui-layout)
+(import agel/vector)
+
+(def viewport (rect 0 0 800 500))
+(def backdrop
+  (linear-gradient (point 0 0) (point 1024 1024) "#101426" "#2c1f4a"))
+(def glow
+  (linear-gradient (point 0 0) (point 1024 1024) "#71e6ff" "#8b6cff"))
+
+(def mark
+  (path
+    (list
+      (move-to 250 310)
+      (curve-to 310 100 490 100 550 310)
+      (curve-to 475 250 325 250 250 310)
+      (close-path))))
+
+(dict
+  'kind 'vector-frame
+  'viewport viewport
+  'scale 2
+  'physical-width 1600
+  'physical-height 1000
+  'commands
+    (list
+      (fill-shape 'background (rounded-rectangle viewport 0) backdrop)
+      (push-clip (rounded-rectangle (rect 80 70 640 360) 36))
+      (fill-shape 'card (rounded-rectangle (rect 80 70 640 360) 36) "#20263a")
+      (fill-shape 'orb-left (ellipse (point 120 120) 180 180) "#334f78")
+      (fill-shape 'orb-right (ellipse (point 690 390) 220 220) "#432f73")
+      (restore)
+      (stroke-shape 'card-outline (rounded-rectangle (rect 80 70 640 360) 36)
+        "#687392" 2)
+      (push-transform (transform 1024 0 0 1024 0 -24))
+      (fill-shape 'agel-mark mark glow)
+      (restore)
+      (draw-vector-text 'title (rect 180 330 440 56)
+        "Agel vector graphics" "#f7f8ff" 'button)
+      (draw-vector-text 'caption (rect 180 382 440 32)
+        "ordinary Lisp data · resolution independent" "#bac4df" 'button))
+  'actions nil)
