@@ -65,7 +65,7 @@ jobs:
           path: target/sel4/microkit-sdk-2.3.0
           key: microkit-sdk-2.3.0-linux-x86-64
       - run: cargo fmt --manifest-path boot/microkit/Cargo.toml -- --check
-      - run: cargo clippy --manifest-path boot/microkit/Cargo.toml --release --lib --bins -- -D warnings
+      - run: cargo clippy --manifest-path boot/microkit/Cargo.toml --target aarch64-unknown-none-softfloat --release --lib --bins -- -D warnings
       - run: ./scripts/test-sel4.sh
       - name: The manifest must describe the kernel that was actually booted
         run: |

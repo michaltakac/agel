@@ -553,8 +553,9 @@ fn invariant_failure(step: &Step, response: &Response) -> Option<&'static str> {
             }
         }
         "capability/empty-slot" | "capability/out-of-range" | "capability/null-slot" => {
-            if response.status != Status::InvalidCapability {
-                return Some("naming a slot granted authority");
+            match response.status {
+                Status::InvalidCapability => {}
+                _ => return Some("naming a slot granted authority"),
             }
         }
         _ => {}
