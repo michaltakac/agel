@@ -263,13 +263,16 @@ pub unsafe fn install(trap_stack_top: u64, fault_stack_top: u64) {
         // The double-fault gate runs on its own stack; everything else uses the
         // TSS's ring-0 stack.
         let ist = if vector == 8 { 1 } else { 0 };
-        unsafe { (*idt)[vector] = GateDescriptor::interrupt(*stub as usize as u64, ist, false) };
+        unsafe {
+            (*idt)[vector] =
+                GateDescriptor::interrupt(*stub as *const () as usize as u64, ist, false)
+        };
     }
     unsafe {
         (*idt)[VECTOR_TIMER as usize] =
-            GateDescriptor::interrupt(timer_stub as usize as u64, 0, false);
+            GateDescriptor::interrupt(timer_stub as *const () as usize as u64, 0, false);
         (*idt)[VECTOR_SYSCALL as usize] =
-            GateDescriptor::interrupt(syscall_stub as usize as u64, 0, true);
+            GateDescriptor::interrupt(syscall_stub as *const () as usize as u64, 0, true);
     }
     let idt_pointer = Pseudo {
         limit: (IDT_ENTRIES * core::mem::size_of::<GateDescriptor>() - 1) as u16,

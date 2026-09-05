@@ -152,7 +152,7 @@ impl AddressSpace {
         frame: u64,
         access: Access,
     ) -> Result<(), MemoryError> {
-        if virtual_address % PAGE != 0 || frame % PAGE != 0 {
+        if !virtual_address.is_multiple_of(PAGE) || !frame.is_multiple_of(PAGE) {
             return Err(MemoryError::Misaligned);
         }
         if virtual_address < DOMAIN_BASE {
@@ -201,10 +201,10 @@ pub fn build_identity_window(
     user_code: core::ops::Range<u64>,
     user_rodata: core::ops::Range<u64>,
 ) -> Result<IdentityWindow, MemoryError> {
-    if user_code.start % PAGE != 0
-        || user_code.end % PAGE != 0
-        || user_rodata.start % PAGE != 0
-        || user_rodata.end % PAGE != 0
+    if !user_code.start.is_multiple_of(PAGE)
+        || !user_code.end.is_multiple_of(PAGE)
+        || !user_rodata.start.is_multiple_of(PAGE)
+        || !user_rodata.end.is_multiple_of(PAGE)
     {
         return Err(MemoryError::Misaligned);
     }

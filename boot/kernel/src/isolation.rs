@@ -39,7 +39,7 @@ pub fn run() -> ! {
         arch::NAME
     );
 
-    let entry = crate::user::agel_world_main as usize as u64;
+    let entry = crate::user::agel_world_main as *const () as usize as u64;
     if !arch::user_text_range().contains(&entry) {
         failed("the unprivileged entry point is not in user-executable text");
     }
@@ -86,7 +86,7 @@ pub fn run() -> ! {
 
 /// Run a persistent native Agel session entirely inside an unprivileged world.
 fn run_native_evaluator(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
-    let entry = crate::user::agel_evaluator_main as usize as u64;
+    let entry = crate::user::agel_evaluator_main as *const () as usize as u64;
     if !arch::user_text_range().contains(&entry) {
         failed("the evaluator entry point is not in user-executable text");
     }
@@ -202,10 +202,11 @@ fn expect_evaluation(
 /// Run the frozen corpus inside an unprivileged world and compare every answer
 /// against the reference model running in the supervisor.
 fn run_conformance(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
-    let mut world = match machine.create_world(crate::user::agel_world_main as usize as u64, 8) {
-        Ok(world) => world,
-        Err(reason) => failed(reason),
-    };
+    let mut world =
+        match machine.create_world(crate::user::agel_world_main as *const () as usize as u64, 8) {
+            Ok(world) => world,
+            Err(reason) => failed(reason),
+        };
     let mut reference = ModelKernel::new();
     reference.reset_to_conformance_domain();
 
@@ -281,7 +282,7 @@ fn run_conformance(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
 /// Make a fresh world misbehave in every way this architecture can, and require
 /// each one to be contained.
 fn run_containment(machine: &mut arch::Machine) {
-    let entry = crate::user::agel_world_main as usize as u64;
+    let entry = crate::user::agel_world_main as *const () as usize as u64;
     for provocation in arch::PROVOCATIONS {
         let mut hostile = match machine.create_world(entry, 4) {
             Ok(world) => world,

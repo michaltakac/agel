@@ -216,7 +216,13 @@ unsafe fn pause() {
 // inside `.user_text`; the supervisor's compiler-builtins remain unreachable.
 #[no_mangle]
 #[link_section = ".user_text"]
-unsafe extern "C" fn memcmp(left: *const u8, right: *const u8, count: usize) -> i32 {
+unsafe extern "C" fn memcmp(
+    left: *const core::ffi::c_void,
+    right: *const core::ffi::c_void,
+    count: usize,
+) -> i32 {
+    let left = left.cast::<u8>();
+    let right = right.cast::<u8>();
     let mut offset = 0;
     while offset < count {
         let a = unsafe { left.add(offset).read() };
@@ -231,18 +237,32 @@ unsafe extern "C" fn memcmp(left: *const u8, right: *const u8, count: usize) -> 
 
 #[no_mangle]
 #[link_section = ".user_text"]
-unsafe extern "C" fn memmove(destination: *mut u8, source: *const u8, count: usize) -> *mut u8 {
-    if (destination as usize) <= source as usize {
+unsafe extern "C" fn memmove(
+    destination: *mut core::ffi::c_void,
+    source: *const core::ffi::c_void,
+    count: usize,
+) -> *mut core::ffi::c_void {
+    let destination_bytes = destination.cast::<u8>();
+    let source_bytes = source.cast::<u8>();
+    if (destination_bytes as usize) <= source_bytes as usize {
         let mut offset = 0;
         while offset < count {
-            unsafe { destination.add(offset).write(source.add(offset).read()) };
+            unsafe {
+                destination_bytes
+                    .add(offset)
+                    .write(source_bytes.add(offset).read())
+            };
             offset += 1;
         }
     } else {
         let mut offset = count;
         while offset > 0 {
             offset -= 1;
-            unsafe { destination.add(offset).write(source.add(offset).read()) };
+            unsafe {
+                destination_bytes
+                    .add(offset)
+                    .write(source_bytes.add(offset).read())
+            };
         }
     }
     destination

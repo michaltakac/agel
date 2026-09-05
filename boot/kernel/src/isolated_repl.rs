@@ -18,8 +18,8 @@ pub fn run() -> ! {
         Ok(machine) => machine,
         Err(reason) => fatal(reason),
     };
-    let worker_entry = crate::user::agel_world_main as usize as u64;
-    let evaluator_entry = crate::user::agel_evaluator_main as usize as u64;
+    let worker_entry = crate::user::agel_world_main as *const () as usize as u64;
+    let evaluator_entry = crate::user::agel_evaluator_main as *const () as usize as u64;
     let mut driver = match machine.create_console_world(worker_entry, 8) {
         Ok(domain) => ServiceDomain::new(domain, worker_entry, 8),
         Err(reason) => fatal(reason),

@@ -104,8 +104,8 @@ static mut TRAP_STACK_TOP: u64 = 0;
 /// # Safety
 /// Must be called once, with interrupts masked, at EL1, with a valid stack.
 pub unsafe fn install(trap_stack_top: u64) -> Result<(), &'static str> {
-    let table = vector_table as usize as u64;
-    if table % 0x800 != 0 {
+    let table = vector_table as *const () as usize as u64;
+    if !table.is_multiple_of(0x800) {
         // `VBAR_EL1` ignores the low eleven bits, so a misplaced table would
         // silently dispatch every exception into the middle of something else.
         return Err("exception vector table is not 2 KiB aligned");

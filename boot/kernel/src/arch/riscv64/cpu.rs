@@ -101,8 +101,8 @@ static mut TIMER_INTERVAL: u64 = 0;
 /// # Safety
 /// Must be called once, with supervisor interrupts masked, in S-mode.
 pub unsafe fn install(trap_stack_top: u64) -> Result<(), &'static str> {
-    let handler = trap_entry as usize as u64;
-    if handler % 4 != 0 {
+    let handler = trap_entry as *const () as usize as u64;
+    if !handler.is_multiple_of(4) {
         // The low two bits of `stvec` are the vector mode, so a misaligned
         // handler would silently select vectored dispatch into nothing.
         return Err("trap handler is not four-byte aligned");
