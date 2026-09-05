@@ -73,7 +73,15 @@ cargo run -q -p agel-vector -- \
   --program examples/vector-primitives.agel \
   --output target/vector-primitives.svg
 open target/vector-primitives.svg
+
+cargo run -q -p agel-vector -- \
+  --program examples/kitchensink.agel \
+  --output target/agel-kitchensink.svg
 ```
+
+The kitchen-sink example combines the desktop and primitive demonstrations into
+a 2880×1800 agentic workstation. Its verified browser-rendered screenshot is
+stored at `output/playwright/agel-kitchensink.png`.
 
 Edit either `.agel` file and rerun the command. You can replace every visual
 value—hierarchy, text, sizes, radii, colors, gradients, paths, clips, and

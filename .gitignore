@@ -6,3 +6,4 @@
 __pycache__/
 *.pyc
 /boot/microkit/target/
+/.playwright-cli/

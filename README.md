@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.4: the first live graphical Agel desktop inside
+The current repository is **v0.2.5: the live graphical Agel desktop and its
+high-resolution kitchen-sink showcase. Since v0.2.4, the desktop runs inside
 QEMU. The QEMU-window keyboard and serial console feed a bounded Agel command
 surface whose semantic scene changes are validated, committed, inspected, and
 rolled back while the OS remains running. A dedicated ring-3 compositor remains
@@ -148,6 +149,23 @@ The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/meta`,
 `agel/ui`, `agel/vector`, `agel/ui-layout`, `agel/ui-vector`, and `agel/desktop`
 by default.
 Use `--no-stdlib` to expose only the minimal language substrate.
+
+### Graphical kitchen sink
+
+![Agel graphical kitchen sink](output/playwright/agel-kitchensink.png)
+
+The 2880×1800 screenshot above is rendered from
+[`examples/kitchensink.agel`](examples/kitchensink.agel): one ordinary Agel
+value combining the shell, agent graph, browser-specialization prompt,
+capability inspector, network trace, workshop, autonomous activity, gradients,
+clipping, paths, transforms, and scalable text. Rebuild its resolution-independent
+SVG with:
+
+```sh
+cargo run -q -p agel-vector -- \
+  --program examples/kitchensink.agel \
+  --output target/agel-kitchensink.svg
+```
 
 Run the agentic desktop object model:
 

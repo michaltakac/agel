@@ -16,7 +16,8 @@ promise.
   native compositor consuming an Agel-authored bounded vector stream, including
   retained-frame recovery. `v0.2.4` adds PS/2 and serial input, a visible native
   Agel command surface, and validated live scene commit, rejection, inspection,
-  and rollback. Minor releases may make
+  and rollback. `v0.2.5` adds the tested graphical kitchen-sink program and its
+  exact 2880×1800 browser-rendered screenshot. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

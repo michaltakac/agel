@@ -721,6 +721,7 @@ mod tests {
         for source in [
             include_str!("../../../examples/vector-desktop.agel"),
             include_str!("../../../examples/vector-primitives.agel"),
+            include_str!("../../../examples/kitchensink.agel"),
         ] {
             let mut world = World::default();
             agel_stdlib::install(&mut world, &EvaluationOptions::default()).unwrap();

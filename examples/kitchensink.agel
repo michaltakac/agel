@@ -1,0 +1,182 @@
+; Agel graphical kitchen sink — a dense agentic workstation made entirely from
+; ordinary Agel vector values. Logical geometry is 1440×900 and output is 2×.
+;
+;   cargo run -q -p agel-vector -- \
+;     --program examples/kitchensink.agel \
+;     --output target/agel-kitchensink.svg
+
+(import agel/ui-layout)
+(import agel/vector)
+
+(def viewport (rect 0 0 1440 900))
+(def backdrop
+  (linear-gradient (point 0 0) (point 1024 1024) "#0b1020" "#17142b"))
+(def surface
+  (linear-gradient (point 0 0) (point 0 1024) "#252c42" "#1a2032"))
+(def raised
+  (linear-gradient (point 0 0) (point 1024 1024) "#323b56" "#242a40"))
+(def accent
+  (linear-gradient (point 0 0) (point 1024 1024) "#58ddff" "#806cff"))
+(def success
+  (linear-gradient (point 0 0) (point 1024 0) "#3ee6a8" "#1dbb88"))
+
+(def link-a
+  (path (list (move-to 438 322) (curve-to 520 250 564 250 646 322))))
+(def link-b
+  (path (list (move-to 438 322) (curve-to 520 394 564 394 646 322))))
+(def trace-line
+  (path
+    (list
+      (move-to 1030 460) (line-to 1070 440) (line-to 1106 450)
+      (line-to 1148 404) (line-to 1192 430) (line-to 1236 382)
+      (line-to 1280 398) (line-to 1352 354))))
+
+(dict
+  'kind 'vector-frame
+  'viewport viewport
+  'scale 2
+  'physical-width 2880
+  'physical-height 1800
+  'commands
+    (list
+      ; Desktop and atmospheric vector layers.
+      (fill-shape 'background (rounded-rectangle viewport 0) backdrop)
+      (fill-shape 'glow-a (ellipse (point 1240 80) 360 280) "#202b50")
+      (fill-shape 'glow-b (ellipse (point 1260 850) 300 250) "#3a2457")
+      (fill-shape 'topbar (rounded-rectangle (rect 0 0 1440 58) 0) "#20263a")
+      (draw-vector-text 'brand (rect 24 13 120 34) "AGEL" "#f7f9ff" 'body)
+      (draw-vector-text 'motto (rect 130 13 300 34)
+        "AGENTS ALL THE WAY DOWN" "#aab5d2" 'title)
+      (fill-shape 'live-pill (rounded-rectangle (rect 1180 13 112 32) 16) "#183b38")
+      (fill-shape 'live-dot (ellipse (point 1201 29) 5 5) "#42e3a4")
+      (draw-vector-text 'live-label (rect 1208 13 80 32) "SYSTEM LIVE" "#7cf1c4" 'title)
+      (draw-vector-text 'clock (rect 1310 13 104 32) "09:41" "#dce3f5" 'button)
+
+      ; Navigation is a replaceable shell agent.
+      (fill-shape 'sidebar (rounded-rectangle (rect 20 78 224 800) 20) surface)
+      (draw-vector-text 'spaces (rect 38 96 160 36) "SPACES" "#f7f9ff" 'body)
+      (fill-shape 'workspace-active (rounded-rectangle (rect 36 146 192 58) 14) accent)
+      (draw-vector-text 'workspace-active-label (rect 48 158 168 34)
+        "WORKSPACE 1" "#ffffff" 'button)
+      (fill-shape 'nav-projects (rounded-rectangle (rect 36 216 192 52) 13) "#303851")
+      (draw-vector-text 'nav-projects-label (rect 48 225 168 34) "PROJECTS" "#dbe2f5" 'button)
+      (fill-shape 'nav-browser (rounded-rectangle (rect 36 280 192 52) 13) "#303851")
+      (draw-vector-text 'nav-browser-label (rect 48 289 168 34) "AGENT BROWSER" "#dbe2f5" 'button)
+      (fill-shape 'nav-workshop (rounded-rectangle (rect 36 344 192 52) 13) "#303851")
+      (draw-vector-text 'nav-workshop-label (rect 48 353 168 34) "WORKSHOP" "#dbe2f5" 'button)
+      (draw-vector-text 'agents-heading (rect 38 426 160 30) "RUNNING AGENTS" "#8491b3" 'title)
+      (fill-shape 'agent-dot-1 (ellipse (point 53 480) 6 6) "#42e3a4")
+      (draw-vector-text 'agent-1 (rect 60 461 154 38) "BROWSER SWARM" "#dbe2f5" 'title)
+      (fill-shape 'agent-dot-2 (ellipse (point 53 522) 6 6) "#58ddff")
+      (draw-vector-text 'agent-2 (rect 60 503 154 38) "UI COMPOSER" "#dbe2f5" 'title)
+      (fill-shape 'agent-dot-3 (ellipse (point 53 564) 6 6) "#9b8cff")
+      (draw-vector-text 'agent-3 (rect 60 545 154 38) "TRACE ANALYST" "#dbe2f5" 'title)
+      (fill-shape 'ask-button (rounded-rectangle (rect 36 802 192 54) 15) accent)
+      (draw-vector-text 'ask-label (rect 48 812 168 34) "ASK AGEL" "#ffffff" 'button)
+
+      ; Main workspace header and command surface.
+      (fill-shape 'workspace (rounded-rectangle (rect 260 78 1160 800) 20) "#151b2b")
+      (draw-vector-text 'eyebrow (rect 282 94 400 30)
+        "LIVE AGENTIC WORKSPACE / REV 42" "#68dfff" 'title)
+      (draw-vector-text 'headline (rect 282 124 600 46)
+        "THE SYSTEM IS AN INSPECTABLE VALUE" "#f7f9ff" 'body)
+      (fill-shape 'command (rounded-rectangle (rect 930 104 460 48) 14) "#0e1423")
+      (draw-vector-text 'prompt (rect 946 111 420 34)
+        "AGEL> (SPECIALIZE BROWSER THIS-PAGE)" "#9aebff" 'title)
+
+      ; Agent graph with paths, transforms, clipping and gradients.
+      (fill-shape 'graph-panel (rounded-rectangle (rect 282 176 700 370) 18) surface)
+      (draw-vector-text 'graph-title (rect 300 190 300 34) "AGENT GRAPH" "#f7f9ff" 'body)
+      (draw-vector-text 'graph-meta (rect 748 190 210 34) "6 NODES / 8 CHANNELS" "#8491b3" 'title)
+      (push-clip (rounded-rectangle (rect 300 234 664 288) 14))
+      (fill-shape 'graph-canvas (rounded-rectangle (rect 300 234 664 288) 14) "#101625")
+      (fill-shape 'graph-orb (ellipse (point 800 240) 220 170) "#202c51")
+      (stroke-shape 'link-a link-a "#4d678b" 3)
+      (stroke-shape 'link-b link-b "#4d678b" 3)
+      (stroke-shape 'link-c
+        (path (list (move-to 700 322) (line-to 822 322))) "#6c75a3" 3)
+      (fill-shape 'human-node (rounded-rectangle (rect 330 280 108 84) 18) raised)
+      (fill-shape 'human-icon (ellipse (point 384 306) 12 12) "#58ddff")
+      (draw-vector-text 'human-label (rect 340 320 88 30) "HUMAN" "#eef3ff" 'button)
+      (fill-shape 'router-node (rounded-rectangle (rect 536 274 164 96) 22) accent)
+      (draw-vector-text 'router-label (rect 548 298 140 34) "INTENT ROUTER" "#ffffff" 'button)
+      (draw-vector-text 'router-state (rect 548 330 140 24) "TRANSACTIONAL" "#e9e5ff" 'title)
+      (push-transform (transform 1024 0 0 1024 0 -4))
+      (fill-shape 'swarm-node (rounded-rectangle (rect 822 276 112 92) 20) "#263d52")
+      (draw-vector-text 'swarm-count (rect 832 288 92 34) "12" "#72e8ff" 'body)
+      (draw-vector-text 'swarm-label (rect 832 324 92 26) "SWARM" "#dce7f8" 'button)
+      (restore)
+      (fill-shape 'service-a (rounded-rectangle (rect 480 418 132 62) 14) "#283049")
+      (draw-vector-text 'service-a-label (rect 490 432 112 30) "BROWSER" "#cfd8ee" 'button)
+      (fill-shape 'service-b (rounded-rectangle (rect 628 418 132 62) 14) "#283049")
+      (draw-vector-text 'service-b-label (rect 638 432 112 30) "NETWORK" "#cfd8ee" 'button)
+      (fill-shape 'service-c (rounded-rectangle (rect 776 418 132 62) 14) "#283049")
+      (draw-vector-text 'service-c-label (rect 786 432 112 30) "RENDERER" "#cfd8ee" 'button)
+      (restore)
+
+      ; Capability and live-trace inspector.
+      (fill-shape 'inspector (rounded-rectangle (rect 998 176 394 370) 18) surface)
+      (draw-vector-text 'inspector-title (rect 1016 190 250 34)
+        "CAPABILITY INSPECTOR" "#f7f9ff" 'body)
+      (fill-shape 'cap-read (rounded-rectangle (rect 1016 238 358 54) 13) "#222b42")
+      (draw-vector-text 'cap-read-name (rect 1028 246 170 36) "DOM / READ" "#dce7f8" 'title)
+      (draw-vector-text 'cap-read-state (rect 1244 246 112 36) "DELEGATED" "#61e6b0" 'button)
+      (fill-shape 'cap-trace (rounded-rectangle (rect 1016 302 358 54) 13) "#222b42")
+      (draw-vector-text 'cap-trace-name (rect 1028 310 170 36) "TRACE / OBSERVE" "#dce7f8" 'title)
+      (draw-vector-text 'cap-trace-state (rect 1244 310 112 36) "BOUNDED" "#61e6b0" 'button)
+      (draw-vector-text 'trace-title (rect 1016 374 180 30) "NETWORK TRACE" "#8491b3" 'title)
+      (stroke-shape 'trace-grid
+        (path (list (move-to 1028 470) (line-to 1354 470))) "#35405e" 1)
+      (stroke-shape 'trace trace-line "#58ddff" 3)
+      (fill-shape 'trace-end (ellipse (point 1352 354) 6 6) "#9b8cff")
+      (draw-vector-text 'trace-stat (rect 1016 490 340 30)
+        "18 REQUESTS   42MS P95   0 DENIED" "#b8c4df" 'title)
+
+      ; Terminal and autonomous activity stream.
+      (fill-shape 'terminal (rounded-rectangle (rect 282 562 700 238) 18) "#0d1321")
+      (fill-shape 'terminal-bar (rounded-rectangle (rect 282 562 700 42) 18) "#242b40")
+      (fill-shape 'term-red (ellipse (point 306 583) 5 5) "#ff6b7a")
+      (fill-shape 'term-amber (ellipse (point 324 583) 5 5) "#ffc857")
+      (fill-shape 'term-green (ellipse (point 342 583) 5 5) "#42e3a4")
+      (draw-vector-text 'terminal-title (rect 360 567 250 32)
+        "AGEL WORKSHOP / WORLD 42" "#aeb9d3" 'title)
+      (draw-vector-text 'term-1 (rect 300 620 650 30)
+        "> (INSPECT BROWSER-AGENT)" "#73e5ff" 'title)
+      (draw-vector-text 'term-2 (rect 300 654 650 30)
+        "{STATUS RUNNING CHILDREN 12 CAPABILITIES 2}" "#cbd5ea" 'title)
+      (draw-vector-text 'term-3 (rect 300 688 650 30)
+        "> (PREVIEW (SPECIALIZE THIS-PAGE))" "#73e5ff" 'title)
+      (draw-vector-text 'term-4 (rect 300 722 650 30)
+        "PROOF 18/18   BUDGET 31%   READY TO COMMIT" "#72e6af" 'title)
+      (fill-shape 'cursor (rounded-rectangle (rect 300 766 10 3) 1) "#8b7cff")
+
+      (fill-shape 'activity (rounded-rectangle (rect 998 562 394 238) 18) surface)
+      (draw-vector-text 'activity-title (rect 1016 576 250 34)
+        "AUTONOMOUS ACTIVITY" "#f7f9ff" 'body)
+      (fill-shape 'activity-line (rounded-rectangle (rect 1032 626 2 132) 1) "#3a4665")
+      (fill-shape 'event-1 (ellipse (point 1033 638) 6 6) "#42e3a4")
+      (draw-vector-text 'event-1-title (rect 1048 619 308 30)
+        "TRACE CAPTURE COMPLETE" "#dce7f8" 'title)
+      (draw-vector-text 'event-1-meta (rect 1048 644 308 26)
+        "12 AGENTS / 18 REQUESTS" "#8491b3" 'title)
+      (fill-shape 'event-2 (ellipse (point 1033 694) 6 6) "#58ddff")
+      (draw-vector-text 'event-2-title (rect 1048 675 308 30)
+        "CANDIDATE BROWSER BUILT" "#dce7f8" 'title)
+      (draw-vector-text 'event-2-meta (rect 1048 700 308 26)
+        "ISOLATED WORLD / REV 7" "#8491b3" 'title)
+      (fill-shape 'event-3 (ellipse (point 1033 750) 6 6) "#9b8cff")
+      (draw-vector-text 'event-3-title (rect 1048 731 308 30)
+        "AWAITING HUMAN COMMIT" "#dce7f8" 'title)
+
+      ; Bottom status/dock.
+      (fill-shape 'statusbar (rounded-rectangle (rect 282 816 1110 42) 13) raised)
+      (draw-vector-text 'status-left (rect 298 821 420 32)
+        "RECOVERY READY   FRAME 71ACD98B" "#aab5d2" 'title)
+      (fill-shape 'proof-pill (rounded-rectangle (rect 1118 823 250 28) 14) success)
+      (draw-vector-text 'proof-label (rect 1130 822 226 30)
+        "ALL INVARIANTS HOLD" "#071d17" 'button))
+  'actions
+    (list
+      (dict 'intent 'agent/inspect 'target 'browser-swarm)
+      (dict 'intent 'browser/specialize 'target 'this-page)
+      (dict 'intent 'world/rollback 'target 41)))

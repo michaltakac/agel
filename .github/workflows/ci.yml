@@ -31,6 +31,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
       - run: ./scripts/test-bootstrap.sh
+      - run: ./scripts/test-kitchensink.sh
       - run: ./scripts/test-kernel-contract.sh
       - run: ./scripts/test-boot.sh
       - run: ./scripts/test-monitor.sh
