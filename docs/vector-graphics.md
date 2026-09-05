@@ -86,6 +86,7 @@ bootable system. Its deliberately smaller native stream is compiled from
 `boot/desktop/native-desktop.agel`, and the display domain revalidates every
 record before rasterization. See [`native-graphics.md`](native-graphics.md).
 
-Pointer/keyboard routing to semantic intents is next. Later acceleration can
+v0.2.4 routes PS/2 keyboard and serial bytes into bounded semantic desktop
+intents and live scene transactions. Pointer hit-testing and later acceleration can
 replace the raster backend without changing applications or granting model
 agents direct device authority.

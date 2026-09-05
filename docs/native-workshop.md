@@ -123,10 +123,11 @@ isolated REPL through a stateful, recursive, rollback-producing session.
 This is enough to write, organize, and retain small programs inside Agel itself,
 and to see an Agel-authored vector frame in the VM. It is not yet a self-hosted
 graphical development environment: the editor and storage codec are trusted
-Rust services, native graphics are build-time data rather than live evaluator
-state, and the hosted macro/module/agent/effect system is not in the VM. A
-semantic input router and live native scene replacement are the next useful
-rungs.
+Rust services, and the hosted macro/module/agent/effect system is not in the VM.
+Since v0.2.4 the graphical baseline can be changed through a bounded live Agel
+command surface and rolled back without rebooting. That parser is not yet the
+full native evaluator; merging the persistent source-cell workshop with the
+graphical scene agent is the next useful rung.
 
 ## v0.1.6 isolation boundary
 

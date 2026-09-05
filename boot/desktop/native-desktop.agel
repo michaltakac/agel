@@ -1,6 +1,7 @@
-; v0.2.3 native vector frame. This is ordinary Agel syntax compiled into the
+; v0.2.4 native vector baseline. This is ordinary Agel syntax compiled into the
 ; boot image by the bounded native-vector build adapter. The unprivileged
 ; compositor validates every 64-byte command again before touching its device.
+; Live semantic Agel forms create transactional derived frames from this value.
 (native-vector-frame 1024 768
   (background-gradient "#10131f" "#1c2033")
   (ellipse 820 180 260 210 "#252b4d")

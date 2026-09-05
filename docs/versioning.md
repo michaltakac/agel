@@ -14,7 +14,9 @@ promise.
   vector primitives and UI-to-vector compilation plus a bounded deterministic
   SVG output service. `v0.2.3` adds the VBE boot handoff and an unprivileged
   native compositor consuming an Agel-authored bounded vector stream, including
-  retained-frame recovery. Minor releases may make
+  retained-frame recovery. `v0.2.4` adds PS/2 and serial input, a visible native
+  Agel command surface, and validated live scene commit, rejection, inspection,
+  and rollback. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

@@ -408,7 +408,7 @@ only x86-64 has the interactive durable workspace. Signed images, a storage
 driver domain, power-cut injection at every sector transition, and the native
 agent runtime remain outside this claim.
 
-## v0.2.0–v0.2.3 agentic desktop and graphics
+## v0.2.0–v0.2.4 agentic desktop and graphics
 
 - **An agent publishes half a UI mutation:** desktop edits are persistent patch
   values applied to a candidate scene. Only a structurally valid whole scene may
@@ -448,8 +448,16 @@ agent runtime remain outside this claim.
   requires a contained page fault, creates a fresh domain, and requires that it
   sees the exact last-good framebuffer digest without redrawing.
 
-There is still no pointer driver, keyboard-to-intent router, accessibility
-bridge, font shaping, live native scene editor, GPU acceleration, or privileged
+The v0.2.4 keyboard-to-intent router accepts only a fixed, bounded grammar;
+input cannot submit framebuffer records or waive compositor validation. PS/2
+mouse bytes are drained separately rather than decoded as keyboard input. A
+candidate scene becomes current only after a complete validated render returns
+and produces a nonzero digest; syntax and policy rejection render only a
+diagnostic in the command bar, never the rejected candidate.
+
+There is still no pointer driver, separate unprivileged input domain,
+accessibility bridge, font shaping, full native evaluator-backed scene editor,
+GPU acceleration, or privileged
 UI action broker. The native build adapter consumes a small Agel vector source;
 it is not yet the full hosted evaluator running the standard-library UI stack.
 These remain explicit later boundaries.

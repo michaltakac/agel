@@ -77,6 +77,31 @@ pub fn console_read_byte() -> u8 {
     unsafe { hal::in8(COM1) }
 }
 
+/// Return one serial byte when available without blocking the graphical shell.
+#[cfg(feature = "native-graphics")]
+pub fn console_try_read_byte() -> Option<u8> {
+    if unsafe { hal::in8(COM1 + 5) } & 1 == 0 {
+        None
+    } else {
+        Some(unsafe { hal::in8(COM1) })
+    }
+}
+
+/// Return one byte from the legacy keyboard controller when its output buffer
+/// is ready. Decoding and policy stay outside the machine adapter.
+#[cfg(feature = "native-graphics")]
+pub fn keyboard_try_read_scancode() -> Option<u8> {
+    let status = unsafe { hal::in8(0x64) };
+    if status & 1 == 0 {
+        None
+    } else {
+        let byte = unsafe { hal::in8(0x60) };
+        // Bit 5 identifies the auxiliary (mouse) stream. Drain it here but do
+        // not let pointer bytes masquerade as keyboard authority.
+        (status & 0x20 == 0).then_some(byte)
+    }
+}
+
 #[cfg(feature = "isolated-repl")]
 pub use disk::{flush_disk, read_disk_sector, write_disk_sector};
 

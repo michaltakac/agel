@@ -161,13 +161,18 @@ Each rung must be runnable and differentially testable against the rung below:
    it consumes a build-validated Agel vector stream, rejects malformed records
    without changing the frame, and can fault and be replaced while the last
    good pixels remain. This is output, not yet interactive input.
-24. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+24. **Live native desktop (complete at v0.2.4):** nonblocking serial and PS/2
+   keyboard adapters normalize bytes into a visible command surface. A bounded
+   Lisp grammar produces semantic candidate scenes; complete frames are
+   validated and rendered before the revision advances, rejected input leaves
+   state untouched, and rollback restores the preceding scene while QEMU runs.
+25. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-25. **POSIX personality:** a Rust C library and the filesystem and process
+26. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-26. **Local inference:** model inference in its own domain, over quantized
+27. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

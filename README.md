@@ -4,11 +4,12 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.3: the first graphical Agel desktop inside
-QEMU. A build-validated Agel vector frame is rasterized at 1024×768×32 by a
-dedicated ring-3 compositor holding the framebuffer device grant; malformed
-commands preserve the last frame and a faulted compositor is contained and
-replaced**. The hosted scene, layout, paths, paints, transforms, clipping, and
+The current repository is **v0.2.4: the first live graphical Agel desktop inside
+QEMU. The QEMU-window keyboard and serial console feed a bounded Agel command
+surface whose semantic scene changes are validated, committed, inspected, and
+rolled back while the OS remains running. A dedicated ring-3 compositor remains
+the only component holding the framebuffer grant**. The hosted scene, layout,
+paths, paints, transforms, clipping, and
 transactional desktop/layout/vector agents remain written in Agel. It retains the frozen kernel contract,
 portable isolation backend, unmodified seL4 backend, and
 restartable privileged console service from the v0.1 line.
@@ -66,6 +67,10 @@ It provides:
   mapping, procedural resolution-independent cell-vector text, and no UI policy;
 - deterministic native framebuffer hashing, malformed-command rejection,
   compositor fault containment, replacement, and retained last-good pixels;
+- nonblocking serial and PS/2 keyboard input normalized into the same bounded
+  live-desktop stream, with mouse bytes explicitly separated;
+- a native graphical Agel command surface supporting transactional accent,
+  workspace, and title mutation plus inspect, help, and live rollback;
 - semantic hit-testing that returns inspectable intents without executing them;
 - an isolated layout agent that preserves its last good frame when compilation
   fails;
@@ -168,8 +173,21 @@ The same architecture now reaches a native QEMU framebuffer. Launch it with:
 ./scripts/run-graphics.sh
 ```
 
-The semantic keyboard/pointer input stack is the next stratum; see
-[`docs/vector-graphics.md`](docs/vector-graphics.md).
+Click the QEMU window and type directly into Agel OS, or type in the launching
+terminal. For example:
+
+```lisp
+(accent cyan)
+(workspace 2)
+(title "LIVE AGEL")
+(inspect)
+(rollback)
+```
+
+The command grammar and current trust boundary are documented in
+[`docs/native-graphics.md`](docs/native-graphics.md).
+Longer-range browser self-specialization and application fixed-point ideas are
+recorded as explicitly future work in [`docs/experiments.md`](docs/experiments.md).
 
 Example session:
 

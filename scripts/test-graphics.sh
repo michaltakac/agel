@@ -26,6 +26,7 @@ fi
 grep -q 'graphics\[x86_64\]: 1024x768x32, 31 Agel vector commands, digest 0x71acd98bb55c3d9f' "$output"
 grep -q 'graphics\[x86_64\]: malformed frame rejected; last good frame retained' "$output"
 grep -q 'graphics\[x86_64\]: compositor fault contained and replaced' "$output"
+grep -q 'graphics\[x86_64\]: live Lisp scene commit/reject/rollback \[ok\]' "$output"
 grep -q '^AGEL_GRAPHICS_OK' "$output"
 
 printf '%s\n' 'Agel native graphics: VBE -> ring-3 vector compositor -> retained/recovered frame [ok]'

@@ -39,12 +39,15 @@ pub fn write(text: &str) {
 }
 
 /// Emit raw bytes with no newline translation.
-#[cfg(not(any(
-    feature = "selftest",
-    feature = "monitor-selftest",
-    feature = "native-selftest",
-    feature = "isolation-selftest"
-)))]
+#[cfg(any(
+    feature = "native-graphics",
+    not(any(
+        feature = "selftest",
+        feature = "monitor-selftest",
+        feature = "native-selftest",
+        feature = "isolation-selftest"
+    ))
+))]
 pub fn write_bytes(bytes: &[u8]) {
     for byte in bytes {
         write_byte(*byte);

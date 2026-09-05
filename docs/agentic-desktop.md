@@ -25,8 +25,9 @@ not yet the native QEMU framebuffer or window/input server.
 Agel v0.2.3 adds that first native framebuffer boundary. A VBE handoff maps the
 display only into a dedicated ring-3 compositor. Its input is a bounded vector
 frame authored in Agel syntax, build-validated, and revalidated inside the
-domain. The native desktop is visible in QEMU today; pointer, keyboard, live
-scene editing, and the full hosted agent runtime are not yet native.
+domain. Since v0.2.4, keyboard and serial input can commit and roll back bounded
+native scene edits while QEMU runs. Pointer input and the full hosted agent
+runtime are not yet native.
 
 ## Design
 
@@ -118,8 +119,9 @@ sending `discard` instead of `commit`.
 
 The next desktop work should preserve this separation:
 
-1. Route keyboard and pointer events through a separate input domain into
-   semantic intents without granting device authority to application agents.
+1. Move the current supervisor-normalized keyboard adapter into a separate
+   input domain and add pointer events without granting device authority to
+   application agents.
 2. Move more of the hosted vector scene interpreter into the native world and
    pointer events through semantic, capability-checked intents.
 3. Split compositor, panel, launcher, notifications, settings, and applications

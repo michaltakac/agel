@@ -1,6 +1,6 @@
 # Native Agel graphics
 
-Agel v0.2.3 boots to an actual 1024×768×32 graphical desktop in QEMU. The path
+Agel v0.2.4 boots to an actual 1024×768×32 live graphical desktop in QEMU. The path
 is deliberately split so that visual meaning remains language data and display
 authority remains a narrow replaceable service:
 
@@ -19,8 +19,44 @@ Run it:
 ./scripts/run-graphics.sh
 ```
 
-The kernel prints its containment report on the terminal and then halts with
-the graphical frame visible. Stop QEMU from its window or with Ctrl-C.
+The kernel prints its containment report, draws a command surface, and remains
+live. Click the QEMU window to type through the emulated PS/2 keyboard, or type
+in the launching terminal through the serial adapter. Stop QEMU from its window
+or with Ctrl-C.
+
+## Live Agel forms
+
+The first native scene language is intentionally postcard-sized:
+
+```lisp
+(accent violet)
+(accent cyan)
+(accent amber)
+(workspace 1)
+(workspace 2)
+(workspace 3)
+(title "MY AGENTIC WORKSPACE")
+(inspect)
+(rollback)
+(help)
+```
+
+Both input adapters produce the same bounded byte stream. The visible line
+editor has a 48-byte input budget; titles are 1–28 ASCII letters, digits,
+spaces, or hyphens. Escape clears the line and Backspace edits it.
+
+A mutating form is decoded into a semantic intent rather than a drawing
+command. The supervisor derives a complete candidate vector frame from the
+immutable Agel baseline, and the ring-3 compositor revalidates every record.
+Only a successful complete render with a nonzero framebuffer digest advances
+the revision. Syntax or policy rejection leaves the retained scene unchanged;
+only the isolated diagnostic command bar is redrawn to report the rejection.
+`(rollback)` swaps the current and preceding semantic scenes and renders the
+restored value without rebooting.
+
+This bounded native parser is a bootstrap surface, not yet the full Agel
+evaluator. It proves the live input/intent/transaction/display loop while
+keeping the amount of pre-self-hosting Rust small and reviewable.
 
 ## Device handoff
 
@@ -58,18 +94,25 @@ the existing bounded shared page and is validated again. Drawing is clipped to
 the declared surface, arithmetic is widened or saturating where appropriate,
 and every command yields independently so the preemption budget applies.
 
-The graphical boot test proves three distinct properties:
+The graphical tests prove these properties:
 
 1. 31 Agel vector commands produce the fixed framebuffer digest
    `0x71acd98bb55c3d9f`.
 2. An unknown vector operation is rejected and the digest remains identical.
 3. A deliberate write to supervisor memory page-faults; a replacement display
    domain maps the same device and observes the unchanged last-good digest.
+4. A semantic candidate changes the framebuffer, a rejected candidate does
+   not, and rollback returns to the exact original framebuffer digest.
+5. Real serial input commits several changes while invalid input is rejected.
+6. QEMU-injected PS/2 scan codes become `(accent cyan)`, commit revision 1, and
+   produce a real PPM framebuffer capture.
 
 Run the headless proof with:
 
 ```sh
 ./scripts/test-graphics.sh
+./scripts/test-live-desktop.sh
+./scripts/test-live-keyboard.sh
 ```
 
 The framebuffer backend is currently a scalar software reference renderer. It
@@ -80,8 +123,10 @@ into the driver.
 
 ## What is next
 
-This frame is real but not interactive. The next native graphics rung is a
-separate keyboard/pointer domain that reports normalized input events to a
-semantic intent router. Live native scene replacement must then use the same
-preview, validation, commit, and rollback protocol as the hosted desktop rather
-than granting a natural-language agent direct framebuffer or input authority.
+The quickest route to working primarily inside Agel OS is to join this live
+graphical loop to the existing persistent native source-cell evaluator. That
+will let a user edit an Agel scene definition, preview it, commit it, reconstruct
+it after reboot, and roll it back from the graphical shell. Input normalization
+should then move from the supervisor into a separately restartable domain, with
+pointer events represented as semantic hit-test requests rather than ambient UI
+authority.

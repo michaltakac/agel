@@ -1,7 +1,7 @@
 #!/bin/sh
-# Open the native Agel vector desktop in QEMU. The compositor halts after
-# drawing so the framebuffer remains visible; stop QEMU from its window or
-# with Ctrl-C in this terminal.
+# Open the live native Agel vector desktop in QEMU. Click the window to type
+# through PS/2, or type in this terminal through serial. Stop QEMU from its
+# window or with Ctrl-C in this terminal.
 set -eu
 
 image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
