@@ -135,7 +135,11 @@ fn checksum(domain: &mut arch::Domain) -> Result<u64, &'static str> {
 }
 
 fn render(domain: &mut arch::Domain, count: usize) -> Result<(), &'static str> {
-    for command in VECTOR_STREAM[STREAM_HEADER_BYTES..].chunks_exact(RECORD_BYTES) {
+    let (commands, remainder) = VECTOR_STREAM[STREAM_HEADER_BYTES..].as_chunks::<RECORD_BYTES>();
+    if !remainder.is_empty() || commands.len() != count {
+        return Err("compiled vector command count disagrees");
+    }
+    for command in commands {
         for (offset, byte) in command.iter().enumerate() {
             domain.core().write_payload(offset, *byte);
         }
@@ -143,13 +147,6 @@ fn render(domain: &mut arch::Domain, count: usize) -> Result<(), &'static str> {
             .core()
             .write_shared(shared::ARGUMENTS, RECORD_BYTES as u64);
         request(domain, shared::COMMAND_DISPLAY_DRAW)?;
-    }
-    if VECTOR_STREAM[STREAM_HEADER_BYTES..]
-        .chunks_exact(RECORD_BYTES)
-        .len()
-        != count
-    {
-        return Err("compiled vector command count disagrees");
     }
     Ok(())
 }
