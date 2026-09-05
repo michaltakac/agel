@@ -4,10 +4,11 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.1.7: a persistent native Agel workshop with a frozen kernel
-contract, a portable isolation backend, the same contract running on an
-unmodified seL4 kernel, and the first privileged service split out into a
-restartable domain**.
+The current repository is **v0.2.0: a persistent native Agel workshop plus the
+first Agel-authored desktop stratum—a homoiconic retained scene, semantic action
+graph, and transactional preview/commit/rollback desktop agent**. It retains the
+frozen kernel contract, portable isolation backend, unmodified seL4 backend, and
+restartable privileged console service from the v0.1 line.
 
 Agel is still pre-production. Project releases follow the policy in
 [`docs/versioning.md`](docs/versioning.md); `v1.0.0` is reserved for the first
@@ -41,6 +42,9 @@ It provides:
 - typed round-robin worker pools with bounded transactional scheduling;
 - `type-of` and `apply`, the two small reflective primitives needed by libraries;
 - an `agel/meta` evaluator written in Agel for a lexical functional subset;
+- an `agel/ui` retained scene and semantic action model written in Agel;
+- inspectable UI patches and a typed desktop agent with validated preview,
+  atomic commit, discard, and live rollback;
 - an independent Common Lisp reference checked against the Rust seed; and
 - external A/B image canary, evidence-bound promotion, and rollback;
 - a modality-neutral text/voice interaction handoff with a 200 ms foreground
@@ -111,8 +115,19 @@ Agel currently requires only a Rust toolchain:
 cargo run -p agel-cli
 ```
 
-The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, and `agel/meta` by default.
+The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/meta`, and
+`agel/ui` by default.
 Use `--no-stdlib` to expose only the minimal language substrate.
+
+Run the agentic desktop object model:
+
+```sh
+cargo run -q -p agel-cli < examples/agentic-desktop.agel
+```
+
+This milestone models a live desktop in Agel but does not claim graphical output
+yet. The renderer, input stack, and native scene interpreter are the next strata;
+see [`docs/agentic-desktop.md`](docs/agentic-desktop.md).
 
 Example session:
 

@@ -1,0 +1,99 @@
+; v0.2.0 — a live desktop made from inspectable Agel values.
+;
+; Run:
+;   cargo run -q -p agel-cli < examples/agentic-desktop.agel
+;
+; There are no opaque widget objects here. The scene, semantic actions, edits,
+; preview, history, and desktop behavior are all ordinary Agel data or code.
+
+(import agel/ui)
+
+(def human (spawn "human-console"))
+
+(def save-world
+  (intent 'workspace/save 'workshop nil 'filesystem/write))
+
+(def ask-agel
+  (intent 'agent/ask 'system-agent
+    "Explain this workspace and suggest one safe improvement."
+    'model/infer))
+
+(def initial-scene
+  (window 'workshop "Agel — live system"
+    (list
+      (column 'workspace
+        (list
+          (text 'headline "The operating system is a program you can talk to.")
+          (panel 'editor
+            (list
+              (text 'source "(def future (agents-all-the-way-down))")
+              (row 'actions
+                (list
+                  (button 'save "Save world" save-world)
+                  (button 'ask "Ask Agel" ask-agel)))))
+          (text 'status "World revision 0 — stable"))))))
+
+(def desktop (make-desktop "moldable-desktop" initial-scene))
+
+; Inspect any part of the running desktop, including what authority an action
+; would require. Merely describing that authority does not grant it.
+(list
+  (scene? initial-scene)
+  (get (find-node initial-scene 'ask) 'kind)
+  (get (get (get (find-node initial-scene 'ask) 'props) 'action) 'requires))
+
+; An agent-generated proposal is just a patch list. It creates a preview and
+; leaves the visible scene untouched until an explicit commit message arrives.
+(def proposed-change
+  (list
+    (set-prop 'workshop 'title "Agel — shaped while running")
+    (set-prop 'headline 'content
+      "Every visible component is inspectable, patchable agent-owned data.")
+    (set-prop 'status 'content "Safe preview ready — inspect before commit")))
+
+(propose desktop human 0 proposed-change)
+(run)
+(def preview-result (recv human))
+(list
+  (car preview-result)
+  (car (cdr preview-result))
+  (get (get (car (cdr (cdr preview-result))) 'props) 'title)
+  (get (get (get (agent-info desktop) 'heap) 'scene) 'props))
+
+; Commit promotes the candidate atomically and preserves the previous scene.
+(commit desktop human)
+(run)
+(def commit-result (recv human))
+(list
+  (car commit-result)
+  (car (cdr commit-result))
+  (get (get (car (cdr (cdr commit-result))) 'props) 'title))
+
+; A structurally unsafe proposal (duplicate node identities) is rejected. The
+; desktop remains alive at the committed revision with no partial mutation.
+(propose desktop human 1
+  (list
+    (set-children 'actions
+      (list
+        (button 'collision "First" save-world)
+        (button 'collision "Second" ask-agel)))))
+(run)
+(def rejection (recv human))
+(list
+  (car rejection)
+  (car (cdr rejection))
+  (get (agent-info desktop) 'status)
+  (get (get (agent-info desktop) 'heap) 'revision))
+
+; Roll back live state without recreating the desktop agent.
+(rollback desktop human)
+(run)
+(def rollback-result (recv human))
+(list
+  (car rollback-result)
+  (car (cdr rollback-result))
+  (get (get (car (cdr (cdr rollback-result))) 'props) 'title))
+
+; The schema documents itself from within the language.
+ui-spec
+(agent-info desktop)

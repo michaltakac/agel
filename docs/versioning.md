@@ -8,8 +8,10 @@ promise.
 - `v0.0.5` through `v0.0.9` identify the hosted bootstrap milestones.
 - `v0.1.0` through `v0.1.7` identify the native workshop milestones.
 - Patch releases repair a milestone without claiming a new capability rung.
-- A future `v0.2.0` may make deliberate breaking changes while Agel is still
-  experimental; those changes must be documented and migration-tested.
+- `v0.2.0` begins the agentic desktop line with an Agel-authored scene and live
+  change protocol. Minor releases may make deliberate breaking changes while
+  Agel is still experimental; those changes must be documented and
+  migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.
 
 Project releases and protocol versions are separate namespaces. In particular,

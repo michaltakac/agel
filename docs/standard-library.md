@@ -1,4 +1,4 @@
-# Agel v0.0.8 standard library
+# Agel standard library
 
 The standard library is one Agel source file installed as one transaction. A
 syntax, module, or test error leaves no partial library behind. Its implementation
@@ -63,3 +63,20 @@ This is the first self-hosting stratum, not yet a replacement for the seed. It
 deliberately omits world mutation, macros, modules, agents, effects, and resource
 accounting of its own; the enclosing seed still supplies budgets and transaction
 rollback. Run `examples/metacircular.agel` to inspect code, closures, and results.
+
+## `agel/ui`
+
+`agel/ui` is the first language-level desktop stratum. It represents retained UI
+nodes, semantic capability requirements, patches, preview state, and revision
+history as persistent Agel data. A typed desktop agent validates proposed scene
+changes before commit and retains the preceding scene for live rollback.
+Proposals are bound to an expected base revision so delayed agents fail closed
+instead of overwriting newer work.
+
+The module exports generic and convenience node constructors, `scene?` and
+`find-node`, three inspectable patch constructors, patch application, and the
+`inspect`/`propose`/`commit`/`discard`/`rollback` desktop protocol. `ui-spec`
+describes that surface as data from inside Agel.
+
+See [`agentic-desktop.md`](agentic-desktop.md) for the design and run
+`examples/agentic-desktop.agel` for an end-to-end live mutation demonstration.

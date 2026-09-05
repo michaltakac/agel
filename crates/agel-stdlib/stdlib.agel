@@ -1,5 +1,5 @@
-; Agel v0.0.8 standard library. The evaluator remains small; ordinary Agel code
-; supplies reusable sequence, result, and orchestration abstractions.
+; Agel standard library. The evaluator remains small; ordinary Agel code
+; supplies reusable sequence, result, orchestration, and live UI abstractions.
 
 (module agel/sequence
   (export append reverse map filter foldl each)
@@ -176,3 +176,320 @@
                                   (meta-eval head environment)
                                   (meta-eval-list tail environment))))))
                   expression))))))
+
+; A retained, homoiconic UI and its transactional desktop agent. A UI is only
+; persistent Agel data: renderers are replaceable boundary services, not owners
+; of application state or behavior.
+(module agel/ui
+  (import agel/sequence)
+  (export
+    ui-spec node text button row column panel window theme intent
+    node? scene? find-node
+    set-prop replace-node set-children apply-patch apply-patches
+    desktop-protocol make-desktop inspect propose commit discard rollback)
+
+  (def ui-spec
+    (dict
+      'representation 'persistent-data
+      'node-keys '(kind id props children)
+      'patches '(set-prop replace-node set-children)
+      'lifecycle '(inspect propose commit discard rollback)
+      'safety '(unique-ids validated-preview transactional-turns)))
+
+  (def second (fn (values) (car (cdr values))))
+  (def third (fn (values) (car (cdr (cdr values)))))
+  (def fourth (fn (values) (car (cdr (cdr (cdr values))))))
+
+  (def node
+    (fn (kind id props children)
+      (dict 'kind kind 'id id 'props props 'children children)))
+
+  (def text
+    (fn (id content)
+      (node 'text id (dict 'content content) nil)))
+
+  (def button
+    (fn (id label action)
+      (node 'button id (dict 'label label 'action action) nil)))
+
+  (def row (fn (id children) (node 'row id (dict) children)))
+  (def column (fn (id children) (node 'column id (dict) children)))
+  (def panel (fn (id children) (node 'panel id (dict) children)))
+
+  (def window
+    (fn (id title children)
+      (node 'window id (dict 'title title) children)))
+
+  (def theme
+    (fn (name tokens)
+      (dict 'kind 'theme 'name name 'tokens tokens)))
+
+  ; Intents are semantic, inspectable actions. `requires` names the authority a
+  ; future input broker must supply; a UI event never manufactures authority.
+  (def intent
+    (fn (action target payload requires)
+      (dict 'kind 'intent 'action action 'target target
+            'payload payload 'requires requires)))
+
+  (def id-value?
+    (fn (value)
+      (if (= (type-of value) 'symbol)
+          #t
+          (= (type-of value) 'string))))
+
+  (def children-value?
+    (fn (value)
+      (if (= value nil) #t (= (type-of value) 'list))))
+
+  (def node-shape?
+    (fn (value)
+      (if (= (type-of value) 'map)
+          (if (has-key? value 'kind)
+              (if (has-key? value 'id)
+                  (if (has-key? value 'props)
+                      (if (has-key? value 'children)
+                          (if (= (type-of (get value 'kind)) 'symbol)
+                              (if (id-value? (get value 'id))
+                                  (if (= (type-of (get value 'props)) 'map)
+                                      (children-value? (get value 'children))
+                                      #f)
+                                  #f)
+                              #f)
+                          #f)
+                      #f)
+                  #f)
+              #f)
+          #f)))
+
+  (def valid-children?
+    (fn (children)
+      (if (= children nil)
+          #t
+          (if (node? (car children))
+              (valid-children? (cdr children))
+              #f))))
+
+  (def node?
+    (fn (value)
+      (if (node-shape? value)
+          (valid-children? (get value 'children))
+          #f)))
+
+  (def collect-child-ids
+    (fn (children)
+      (if (= children nil)
+          nil
+          (append
+            (collect-ids (car children))
+            (collect-child-ids (cdr children))))))
+
+  (def collect-ids
+    (fn (tree)
+      (cons (get tree 'id) (collect-child-ids (get tree 'children)))))
+
+  (def member?
+    (fn (value values)
+      (if (= values nil)
+          #f
+          (if (= value (car values))
+              #t
+              (member? value (cdr values))))))
+
+  (def unique?
+    (fn (values)
+      (if (= values nil)
+          #t
+          (if (member? (car values) (cdr values))
+              #f
+              (unique? (cdr values))))))
+
+  (def scene?
+    (fn (tree)
+      (if (node? tree)
+          (unique? (collect-ids tree))
+          #f)))
+
+  (def find-in-children
+    (fn (children id)
+      (if (= children nil)
+          nil
+          (let ((found (find-node (car children) id)))
+            (if (= found nil)
+                (find-in-children (cdr children) id)
+                found)))))
+
+  (def find-node
+    (fn (tree id)
+      (if (= (get tree 'id) id)
+          tree
+          (find-in-children (get tree 'children) id))))
+
+  ; Patches are also data and can be quoted, logged, reviewed, generated by an
+  ; agent, or passed through a verifier before they reach a desktop.
+  (def set-prop (fn (id key value) (list 'set-prop id key value)))
+  (def replace-node (fn (id replacement) (list 'replace-node id replacement)))
+  (def set-children (fn (id children) (list 'set-children id children)))
+
+  (def rewrite-children
+    (fn (children id transform)
+      (if (= children nil)
+          nil
+          (cons
+            (rewrite-node (car children) id transform)
+            (rewrite-children (cdr children) id transform)))))
+
+  (def rewrite-node
+    (fn (tree id transform)
+      (if (= (get tree 'id) id)
+          (transform tree)
+          (assoc tree 'children
+            (rewrite-children (get tree 'children) id transform)))))
+
+  (def require-target
+    (fn (tree id)
+      (if (= (find-node tree id) nil)
+          (signal 'ui/unknown-node "patch target does not exist" id)
+          tree)))
+
+  (def apply-patch
+    (fn (tree patch)
+      (if (= (type-of patch) 'list)
+          (let ((operation (car patch)))
+            (if (= operation 'set-prop)
+                (if (= (count patch) 4)
+                    (begin
+                      (require-target tree (second patch))
+                      (rewrite-node tree (second patch)
+                        (fn (target)
+                          (assoc target 'props
+                            (assoc (get target 'props) (third patch) (fourth patch))))))
+                    (signal 'ui/invalid-patch "set-prop expects id, key, value" patch))
+                (if (= operation 'replace-node)
+                    (if (= (count patch) 3)
+                        (begin
+                          (require-target tree (second patch))
+                          (rewrite-node tree (second patch) (fn (target) (third patch))))
+                        (signal 'ui/invalid-patch "replace-node expects id, node" patch))
+                    (if (= operation 'set-children)
+                        (if (= (count patch) 3)
+                            (begin
+                              (require-target tree (second patch))
+                              (rewrite-node tree (second patch)
+                                (fn (target) (assoc target 'children (third patch)))))
+                            (signal 'ui/invalid-patch "set-children expects id, children" patch))
+                        (signal 'ui/invalid-patch "unknown UI patch operation" patch)))))
+          (signal 'ui/invalid-patch "patch must be a list" patch))))
+
+  (def apply-patches
+    (fn (tree patches)
+      (if (= patches nil)
+          tree
+          (apply-patches (apply-patch tree (car patches)) (cdr patches)))))
+
+  (defprotocol desktop-protocol
+    (inspect agent)
+    (propose agent int list)
+    (commit agent)
+    (discard agent)
+    (rollback agent))
+
+  (def response
+    (fn (reply tag revision value)
+      (send reply (list tag revision value))))
+
+  (def attempt-patches
+    (fn (scene patches)
+      (with-handler (* problem)
+        (list 'error problem)
+        (list 'ok (apply-patches scene patches)))))
+
+  (def desktop-behavior
+    (fn (self heap message)
+      (let ((operation (car message))
+            (reply (second message))
+            (revision (get heap 'revision))
+            (scene (get heap 'scene)))
+        (if (= operation 'inspect)
+            (begin
+              (response reply 'desktop-state revision heap)
+              heap)
+            (if (= operation 'propose)
+                (let ((base-revision (third message))
+                      (patches (fourth message)))
+                  (if (= base-revision revision)
+                      (let ((attempt (attempt-patches scene patches)))
+                        (if (= (car attempt) 'ok)
+                            (let ((candidate (second attempt)))
+                              (if (scene? candidate)
+                                  (begin
+                                    (response reply 'preview revision candidate)
+                                    (assoc (assoc heap 'preview candidate) 'pending patches))
+                                  (begin
+                                    (response reply 'rejected revision
+                                      (dict 'kind 'ui/invalid-scene 'patches patches))
+                                    heap)))
+                            (begin
+                              (response reply 'rejected revision (second attempt))
+                              heap)))
+                      (begin
+                        (response reply 'rejected revision
+                          (dict 'kind 'ui/stale-revision
+                                'expected revision 'actual base-revision))
+                        heap)))
+                (if (= operation 'commit)
+                    (if (= (get heap 'preview) nil)
+                        (begin
+                          (response reply 'unchanged revision scene)
+                          heap)
+                        (let ((candidate (get heap 'preview))
+                              (next-revision (+ revision 1)))
+                          (begin
+                            (response reply 'committed next-revision candidate)
+                            (assoc
+                              (assoc
+                                (assoc
+                                  (assoc
+                                    (assoc heap 'previous scene)
+                                    'scene candidate)
+                                  'preview nil)
+                                'pending nil)
+                              'revision next-revision))))
+                    (if (= operation 'discard)
+                        (begin
+                          (response reply 'discarded revision scene)
+                          (assoc (assoc heap 'preview nil) 'pending nil))
+                        (if (= (get heap 'previous) nil)
+                            (begin
+                              (response reply 'unchanged revision scene)
+                              heap)
+                            (let ((previous (get heap 'previous))
+                                  (next-revision (+ revision 1)))
+                              (begin
+                                (response reply 'rolled-back next-revision previous)
+                                (assoc
+                                  (assoc
+                                    (assoc
+                                      (assoc
+                                        (assoc heap 'previous scene)
+                                        'scene previous)
+                                      'preview nil)
+                                    'pending nil)
+                                  'revision next-revision)))))))))))
+
+  (def make-desktop
+    (fn (name initial-scene)
+      (if (scene? initial-scene)
+          (spawn name desktop-behavior
+            (dict 'scene initial-scene 'preview nil 'previous nil
+                  'pending nil 'revision 0)
+            desktop-protocol)
+          (signal 'ui/invalid-scene "desktop requires a valid initial scene"
+            initial-scene))))
+
+  (def inspect (fn (desktop reply) (send desktop (list 'inspect reply))))
+  (def propose
+    (fn (desktop reply base-revision patches)
+      (send desktop (list 'propose reply base-revision patches))))
+  (def commit (fn (desktop reply) (send desktop (list 'commit reply))))
+  (def discard (fn (desktop reply) (send desktop (list 'discard reply))))
+  (def rollback (fn (desktop reply) (send desktop (list 'rollback reply)))))
