@@ -27,9 +27,10 @@ const POLL_LIMIT: usize = 10_000_000;
 pub fn read_disk_sector(lba: u32, sector: &mut [u8; 512]) -> Result<(), &'static str> {
     select(lba, COMMAND_READ)?;
     wait_for_data()?;
-    for chunk in sector.chunks_exact_mut(2) {
+    for index in 0..256 {
         let word = unsafe { hal::in16(DATA) };
-        chunk.copy_from_slice(&word.to_le_bytes());
+        let offset = index * 2;
+        sector[offset..offset + 2].copy_from_slice(&word.to_le_bytes());
     }
     finish()
 }
@@ -37,8 +38,14 @@ pub fn read_disk_sector(lba: u32, sector: &mut [u8; 512]) -> Result<(), &'static
 pub fn write_disk_sector(lba: u32, sector: &[u8; 512]) -> Result<(), &'static str> {
     select(lba, COMMAND_WRITE)?;
     wait_for_data()?;
-    for chunk in sector.chunks_exact(2) {
-        unsafe { hal::out16(DATA, u16::from_le_bytes([chunk[0], chunk[1]])) };
+    for index in 0..256 {
+        let offset = index * 2;
+        unsafe {
+            hal::out16(
+                DATA,
+                u16::from_le_bytes([sector[offset], sector[offset + 1]]),
+            )
+        };
     }
     finish()
 }
