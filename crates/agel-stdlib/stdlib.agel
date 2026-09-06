@@ -99,6 +99,439 @@
     (fn (pool reply payload)
       (send pool (list 'submit reply payload)))))
 
+; Fixed points for eager Agel and for transactional agent processes. `fix` is
+; the applicative-order (Z) form: recursive calls are delayed by a closure.
+; The agent driver turns each continuation into a separately scheduled turn,
+; making budgets, traces, model effects, and live evolution explicit data.
+(module agel/fixed-point
+  (import agel/sequence)
+  (export fix fix-bounded converge-bounded
+          fixed-policy fixed-continue fixed-done fixed-model
+          fixed-protocol make-fixed-agent
+          fixed-start fixed-propose fixed-commit fixed-discard fixed-inspect
+          fixed-point-spec)
+
+  (def fix
+    (fn (builder)
+      ((fn (self)
+         (builder (fn (value) ((self self) value))))
+       (fn (self)
+         (builder (fn (value) ((self self) value)))))))
+
+  (def fix-bounded
+    (fn (limit builder)
+      (if (= (type-of limit) 'int)
+          (if (< limit 0)
+              (signal 'fixed-point/invalid-budget
+                "fixed-point budget must be non-negative" limit)
+              (let
+                ((drive
+                   ((fn (self)
+                      (fn (remaining value)
+                        ((builder
+                           (fn (next)
+                             (if (< 0 remaining)
+                                 ((self self) (- remaining 1) next)
+                                 (signal 'fixed-point/exhausted
+                                   "fixed point exhausted its explicit step budget"
+                                   next))))
+                         value)))
+                    (fn (self)
+                      (fn (remaining value)
+                        ((builder
+                           (fn (next)
+                             (if (< 0 remaining)
+                                 ((self self) (- remaining 1) next)
+                                 (signal 'fixed-point/exhausted
+                                   "fixed point exhausted its explicit step budget"
+                                   next))))
+                         value))))))
+                (fn (value) (drive limit value))))
+          (signal 'fixed-point/invalid-budget
+            "fixed-point budget must be an integer" limit))))
+
+  (def converge-bounded
+    (fn (limit refine equivalent? initial)
+      ((fix-bounded limit
+         (fn (recur)
+           (fn (current)
+             (let ((candidate (refine current)))
+               (if (equivalent? current candidate)
+                   current
+                   (recur candidate))))))
+       initial)))
+
+  (def fixed-policy
+    (fn (max-steps trace-limit max-model-calls max-model-prompt-chars)
+      (if (= (type-of max-steps) 'int)
+          (if (= (type-of trace-limit) 'int)
+              (if (= (type-of max-model-calls) 'int)
+                  (if (= (type-of max-model-prompt-chars) 'int)
+                      (if (< max-steps 0)
+                          (signal 'fixed-point/invalid-policy
+                            "max steps must be non-negative" max-steps)
+                          (if (< trace-limit 0)
+                              (signal 'fixed-point/invalid-policy
+                                "trace limit must be non-negative" trace-limit)
+                              (if (< max-model-calls 0)
+                                  (signal 'fixed-point/invalid-policy
+                                    "model-call limit must be non-negative"
+                                    max-model-calls)
+                                  (if (< max-model-prompt-chars 0)
+                                      (signal 'fixed-point/invalid-policy
+                                        "model prompt limit must be non-negative"
+                                        max-model-prompt-chars)
+                                      (dict
+                                        'max-steps max-steps
+                                        'trace-limit trace-limit
+                                        'max-model-calls max-model-calls
+                                        'max-model-prompt-chars
+                                        max-model-prompt-chars)))))
+                      (signal 'fixed-point/invalid-policy
+                        "model prompt limit must be an integer"
+                        max-model-prompt-chars))
+                  (signal 'fixed-point/invalid-policy
+                    "model-call limit must be an integer" max-model-calls))
+              (signal 'fixed-point/invalid-policy
+                "trace limit must be an integer" trace-limit))
+          (signal 'fixed-point/invalid-policy
+            "max steps must be an integer" max-steps))))
+
+  (def fixed-continue
+    (fn (state observation)
+      (dict 'kind 'continue 'state state 'observation observation)))
+
+  (def fixed-done
+    (fn (result observation)
+      (dict 'kind 'done 'result result 'observation observation)))
+
+  (def fixed-model
+    (fn (state provider prompt observation)
+      (dict
+        'kind 'model
+        'state state
+        'provider provider
+        'prompt prompt
+        'observation observation)))
+
+  (defprotocol fixed-protocol
+    (fixed/start agent any)
+    (fixed/advance)
+    (fixed/propose int callable agent)
+    (fixed/commit int agent)
+    (fixed/discard agent)
+    (fixed/inspect agent))
+
+  (def fixed-transition?
+    (fn (transition)
+      (if (= (type-of transition) 'map)
+          (if (has-key? transition 'kind)
+              (has-key? transition 'observation)
+              #f)
+          #f)))
+
+  (def fixed-event-summary
+    (fn (event)
+      (if (= (type-of event) 'list)
+          (if (= (car event) 'system/model-result)
+              (list
+                'system/model-result
+                (car (cdr event))
+                (car (cdr (cdr event))))
+              (if (= (car event) 'system/model-error)
+                  (list
+                    'system/model-error
+                    (car (cdr event))
+                    (car (cdr (cdr event)))
+                    (car (cdr (cdr (cdr event)))))
+                  event))
+          event)))
+
+  (def fixed-record
+    (fn (heap event transition)
+      (let
+        ((entry
+           (dict
+             'step (get heap 'steps)
+             'version (get heap 'version)
+             'event (fixed-event-summary event)
+             'transition (get transition 'kind)
+             'observation (get transition 'observation))))
+        (if (< (count (get heap 'trace)) (get heap 'trace-limit))
+            (assoc heap 'trace (cons entry (get heap 'trace)))
+            (assoc heap 'trace-dropped (+ (get heap 'trace-dropped) 1))))))
+
+  (def fixed-exhaust
+    (fn (self heap reason)
+      (begin
+        (send (get heap 'reply)
+          (list
+            'fixed/exhausted self reason (get heap 'state)
+            (reverse (get heap 'trace))
+            (get heap 'version)
+            (get heap 'steps)
+            (get heap 'model-calls)))
+        (assoc heap 'status 'exhausted))))
+
+  (def fixed-finish
+    (fn (self heap result)
+      (begin
+        (send (get heap 'reply)
+          (list
+            'fixed/done self result
+            (reverse (get heap 'trace))
+            (get heap 'version)
+            (get heap 'steps)
+            (get heap 'model-calls)))
+        (assoc (assoc heap 'status 'done) 'result result))))
+
+  (def fixed-drive
+    (fn (self heap event)
+      (if (= (get heap 'status) 'running)
+          (if (= (get heap 'remaining) 0)
+              (fixed-exhaust self heap 'steps)
+              (let
+                ((transition
+                   ((get heap 'step) (get heap 'state) event)))
+                (if (fixed-transition? transition)
+                    (let
+                      ((charged
+                         (fixed-record
+                           (assoc
+                             (assoc heap 'remaining
+                               (- (get heap 'remaining) 1))
+                             'steps (+ (get heap 'steps) 1))
+                           event transition))
+                       (kind (get transition 'kind)))
+                      (if (= kind 'continue)
+                          (if (has-key? transition 'state)
+                              (begin
+                                (send self '(fixed/advance))
+                                (assoc charged 'state (get transition 'state)))
+                              (signal 'fixed-point/invalid-transition
+                                "continue transition needs state" transition))
+                          (if (= kind 'done)
+                              (if (has-key? transition 'result)
+                                  (fixed-finish self charged
+                                    (get transition 'result))
+                                  (signal 'fixed-point/invalid-transition
+                                    "done transition needs result" transition))
+                              (if (= kind 'model)
+                                  (if (has-key? transition 'state)
+                                      (if (has-key? transition 'provider)
+                                          (if (has-key? transition 'prompt)
+                                              (let
+                                                ((prompt (get transition 'prompt))
+                                                 (next-calls
+                                                   (+ (get charged 'model-calls) 1)))
+                                                (if (= (type-of prompt) 'string)
+                                                    (if (< (get charged 'model-limit)
+                                                           next-calls)
+                                                        (fixed-exhaust self charged
+                                                          'model-calls)
+                                                        (let
+                                                          ((next-chars
+                                                             (+
+                                                               (get charged
+                                                                 'model-prompt-chars)
+                                                               (count prompt))))
+                                                          (if (<
+                                                                (get charged
+                                                                  'model-prompt-limit)
+                                                                next-chars)
+                                                              (fixed-exhaust self charged
+                                                                'model-prompt-chars)
+                                                              (begin
+                                                                (model-request
+                                                                  (get transition 'provider)
+                                                                  prompt self)
+                                                                (assoc
+                                                                  (assoc
+                                                                    (assoc
+                                                                      (assoc charged 'state
+                                                                        (get transition 'state))
+                                                                      'model-calls next-calls)
+                                                                    'model-prompt-chars
+                                                                    next-chars)
+                                                                  'status 'waiting)))))
+                                                    (signal 'fixed-point/invalid-transition
+                                                      "model prompt must be a string"
+                                                      transition)))
+                                              (signal 'fixed-point/invalid-transition
+                                                "model transition needs prompt" transition))
+                                          (signal 'fixed-point/invalid-transition
+                                            "model transition needs provider" transition))
+                                      (signal 'fixed-point/invalid-transition
+                                        "model transition needs state" transition))
+                                  (signal 'fixed-point/invalid-transition
+                                    "unknown transition kind" transition)))))
+                    (signal 'fixed-point/invalid-transition
+                      "step must return a fixed transition" transition))))
+          heap)))
+
+  (def fixed-behavior
+    (fn (self heap message)
+      (let ((tag (car message)))
+        (if (= tag 'fixed/start)
+            (let
+              ((started
+                 (assoc
+                   (assoc
+                     (assoc
+                       (assoc
+                         (assoc
+                           (assoc
+                             (assoc
+                               (assoc heap 'state
+                                 (car (cdr (cdr message))))
+                               'reply (car (cdr message)))
+                             'remaining (get heap 'configured-steps))
+                           'steps 0)
+                         'trace nil)
+                       'trace-dropped 0)
+                     'model-calls 0)
+                   'model-prompt-chars 0)))
+              (fixed-drive self (assoc started 'status 'running)
+                (list 'fixed/start (car (cdr (cdr message))))))
+            (if (= tag 'fixed/advance)
+                (fixed-drive self heap '(fixed/advance))
+                (if (= tag 'fixed/propose)
+                    (let
+                      ((expected (car (cdr message)))
+                       (candidate (car (cdr (cdr message))))
+                       (reply (car (cdr (cdr (cdr message))))))
+                      (if (= expected (get heap 'version))
+                          (let
+                            ((staged
+                               (assoc
+                                 (assoc heap 'pending-step candidate)
+                                 'pending-base expected)))
+                            (begin
+                              (send reply
+                                (list 'fixed/preview self expected
+                                  (+ expected 1)))
+                              staged))
+                          (begin
+                            (send reply
+                              (list 'fixed/rejected self 'stale-version
+                                (get heap 'version)))
+                            heap)))
+                    (if (= tag 'fixed/commit)
+                        (let
+                          ((expected (car (cdr message)))
+                           (reply (car (cdr (cdr message)))))
+                          (if (= expected (get heap 'version))
+                              (if (= (get heap 'pending-base) expected)
+                                  (let
+                                    ((evolved
+                                       (assoc
+                                         (assoc
+                                           (assoc
+                                             (assoc heap 'step
+                                               (get heap 'pending-step))
+                                             'pending-step nil)
+                                           'pending-base nil)
+                                         'version (+ expected 1))))
+                                    (begin
+                                      (send reply
+                                        (list 'fixed/evolved self
+                                          (get evolved 'version)))
+                                      evolved))
+                                  (begin
+                                    (send reply
+                                      (list 'fixed/rejected self 'no-preview
+                                        (get heap 'version)))
+                                    heap))
+                              (begin
+                                (send reply
+                                  (list 'fixed/rejected self 'stale-version
+                                    (get heap 'version)))
+                                heap)))
+                        (if (= tag 'fixed/discard)
+                            (let
+                              ((discarded
+                                 (assoc
+                                   (assoc heap 'pending-step nil)
+                                   'pending-base nil)))
+                              (begin
+                                (send (car (cdr message))
+                                  (list 'fixed/discarded self
+                                    (get heap 'version)))
+                                discarded))
+                            (if (= tag 'fixed/inspect)
+                                (begin
+                                  (send (car (cdr message))
+                                    (list 'fixed/inspection self heap))
+                                  heap)
+                                (if (= tag 'system/model-result)
+                                    (fixed-drive self
+                                      (assoc heap 'status 'running) message)
+                                    (if (= tag 'system/model-error)
+                                        (fixed-drive self
+                                          (assoc heap 'status 'running) message)
+                                        (signal 'fixed-point/unexpected-message
+                                          "fixed-point driver received an unknown event"
+                                          message))))))))))))
+
+  (def make-fixed-agent
+    (fn (name step policy capabilities)
+      (let
+        ((heap
+           (dict
+             'step step
+             'state nil
+             'reply nil
+             'status 'idle
+             'result nil
+             'configured-steps (get policy 'max-steps)
+             'remaining (get policy 'max-steps)
+             'steps 0
+             'trace nil
+             'trace-limit (get policy 'trace-limit)
+             'trace-dropped 0
+             'model-calls 0
+             'model-limit (get policy 'max-model-calls)
+             'model-prompt-chars 0
+             'model-prompt-limit (get policy 'max-model-prompt-chars)
+             'pending-step nil
+             'pending-base nil
+             'version 0)))
+        (if (= capabilities nil)
+            (spawn name fixed-behavior heap fixed-protocol nil 'stop 0)
+            (spawn name fixed-behavior heap fixed-protocol nil 'stop 0
+              capabilities)))))
+
+  (def fixed-start
+    (fn (agent reply initial)
+      (send agent (list 'fixed/start reply initial))))
+
+  (def fixed-propose
+    (fn (agent expected-version next-step reply)
+      (send agent
+        (list 'fixed/propose expected-version next-step reply))))
+
+  (def fixed-commit
+    (fn (agent expected-version reply)
+      (send agent (list 'fixed/commit expected-version reply))))
+
+  (def fixed-discard
+    (fn (agent reply)
+      (send agent (list 'fixed/discard reply))))
+
+  (def fixed-inspect
+    (fn (agent reply)
+      (send agent (list 'fixed/inspect reply))))
+
+  (def fixed-point-spec
+    (dict
+      'representation 'explicit-transitions
+      'recursion 'scheduler-turns
+      'step-results '(continue done model)
+      'budgets '(steps trace model-calls model-prompt-chars)
+      'security '(fuel call-depth capabilities transactions supervision)
+      'evolution '(preview version-check commit discard message-ordered)
+      'model-cost 'explicit-only)))
+
 (module agel/meta
   (export meta-base-env meta-eval)
 

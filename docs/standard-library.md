@@ -51,6 +51,25 @@ Run the complete example:
 cargo run -q -p agel-cli < examples/worker-pool.agel
 ```
 
+## `agel/fixed-point`
+
+Agel already supports ordinary named recursion, which remains the default.
+`agel/fixed-point` adds explicit recursion-as-a-value where interception is
+useful: eager-safe `fix`, decreasing-gas `fix-bounded`, immutable
+`converge-bounded`, and a typed fixed-point agent driver.
+
+The agent driver turns each `fixed-continue` into a separately scheduled,
+transactional turn. Steps can finish, request a model, or continue with new
+state; policy bounds logical steps, trace retention, cooperative model calls,
+and cumulative prompt characters. `fixed-propose` stages a closure against an
+expected version; `fixed-commit` installs that preview at a message-ordered
+boundary, while `fixed-discard` drops it.
+
+This combinator is not the sandbox. Evaluator budgets, capability checks,
+transaction rollback, supervision, isolated heaps, and the explicit model
+dispatch gate remain the enforcing controls. The semantics, limitations, cost
+model, and examples are in [`agentic-fixed-points.md`](agentic-fixed-points.md).
+
 ## `agel/meta`
 
 `agel/meta` is an evaluator written in Agel. `meta-base-env` returns explicit

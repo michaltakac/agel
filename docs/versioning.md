@@ -20,7 +20,9 @@ promise.
   exact 2880×1800 browser-rendered screenshot. `v0.2.6` joins the graphical
   command surface to the protected native evaluator and crash-tolerant source
   workspace, including replay-validated save and reconstruction after reboot.
-  Minor releases may make
+  `v0.2.7` adds eager-safe and bounded lexical fixed points, immutable
+  convergence, and a transactional agent fixed-point driver with bounded
+  tracing, explicit model transitions, and message-ordered evolution. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

@@ -11,7 +11,7 @@ pub fn install(world: &mut World, options: &EvaluationOptions) -> Result<Commit,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agel_core::Value;
+    use agel_core::{ModelCompletion, Value};
 
     fn installed() -> World {
         let mut world = World::default();
@@ -101,6 +101,332 @@ mod tests {
             .evaluate("(import agel/swarm) (make-pool \"empty\" nil)")
             .unwrap_err();
         assert!(error.to_string().contains("swarm/no-workers"));
+    }
+
+    #[test]
+    fn eager_and_bounded_fixed_points_are_language_code() {
+        let mut world = installed();
+        let value = world
+            .evaluate(
+                "(import agel/fixed-point)
+                 (def factorial
+                   (fix
+                     (fn (recur)
+                       (fn (n)
+                         (if (= n 0) 1 (* n (recur (- n 1))))))))
+                 (def bounded-factorial
+                   (fix-bounded 6
+                     (fn (recur)
+                       (fn (n)
+                         (if (= n 0) 1 (* n (recur (- n 1))))))))
+                 (def converged
+                   (converge-bounded 8
+                     (fn (value) (if (< value 10) (+ value 3) value))
+                     = 0))
+                 (list (factorial 6) (bounded-factorial 6) converged)",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            value,
+            Value::List(vec![Value::Int(720), Value::Int(720), Value::Int(12)])
+        );
+
+        let error = world
+            .evaluate(
+                "(def too-small
+                   (fix-bounded 2
+                     (fn (recur)
+                       (fn (n)
+                         (if (= n 0) 1 (* n (recur (- n 1))))))))
+                 (too-small 6)",
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("fixed-point/exhausted"));
+    }
+
+    #[test]
+    fn agentic_fixed_point_is_turn_bounded_traced_and_exhaustible() {
+        let mut world = installed();
+        let value = world
+            .evaluate(
+                "(import agel/fixed-point)
+                 (def observer (spawn \"observer\"))
+                 (def countdown-step
+                   (fn (state event)
+                     (if (= state 0)
+                         (fixed-done 'launched (list 'at state))
+                         (fixed-continue (- state 1) (list 'at state)))))
+                 (def driver
+                   (make-fixed-agent \"countdown\" countdown-step
+                     (fixed-policy 8 8 0 0) nil))
+                 (fixed-start driver observer 3)
+                 (run 10)
+                 (def outcome (recv observer))
+                 (def heap (get (agent-info driver) 'heap))
+                 (list
+                   (car outcome)
+                   (car (cdr (cdr outcome)))
+                   (get heap 'status)
+                   (get heap 'steps)
+                   (get heap 'model-calls)
+                   (count (get heap 'trace))
+                   (get heap 'trace-dropped))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            value,
+            Value::List(vec![
+                Value::Symbol("fixed/done".into()),
+                Value::Symbol("launched".into()),
+                Value::Symbol("done".into()),
+                Value::Int(4),
+                Value::Int(0),
+                Value::Int(4),
+                Value::Int(0),
+            ])
+        );
+
+        let exhausted = world
+            .evaluate(
+                "(def bounded
+                   (make-fixed-agent \"bounded\" countdown-step
+                     (fixed-policy 2 1 0 0) nil))
+                 (fixed-start bounded observer 4)
+                 (run 10)
+                 (def stopped (recv observer))
+                 (def stopped-heap (get (agent-info bounded) 'heap))
+                 (list
+                   (car stopped)
+                   (car (cdr (cdr stopped)))
+                   (car (cdr (cdr (cdr stopped))))
+                   (get stopped-heap 'status)
+                   (get stopped-heap 'steps)
+                   (count (get stopped-heap 'trace))
+                   (get stopped-heap 'trace-dropped))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            exhausted,
+            Value::List(vec![
+                Value::Symbol("fixed/exhausted".into()),
+                Value::Symbol("steps".into()),
+                Value::Int(2),
+                Value::Symbol("exhausted".into()),
+                Value::Int(2),
+                Value::Int(1),
+                Value::Int(1),
+            ])
+        );
+    }
+
+    #[test]
+    fn agentic_fixed_point_model_use_is_explicit_and_counted() {
+        let mut world = World::default();
+        let host_capability = world.issue_capability("model/infer", "claude").unwrap();
+        let options = EvaluationOptions {
+            capabilities: vec![host_capability],
+            ..EvaluationOptions::default()
+        };
+        install(&mut world, &options).unwrap();
+        world
+            .evaluate_with(
+                "(import agel/fixed-point)
+                 (def model-cap (request-capability 'model/infer \"claude\"))
+                 (def observer (spawn \"observer\"))
+                 (def synthesis-step
+                   (fn (state event)
+                     (if (= (car event) 'fixed/start)
+                         (fixed-model 'waiting 'claude
+                           \"Give one bounded synthesis\" 'requesting)
+                         (if (= (car event) 'system/model-result)
+                             (fixed-done
+                               (car (cdr (cdr (cdr event)))) 'answered)
+                             (fixed-done 'provider-error 'failed)))))
+                 (def thinker
+                   (make-fixed-agent \"thinker\" synthesis-step
+                     (fixed-policy 4 4 1 100) (list model-cap)))
+                 (fixed-start thinker observer nil)
+                 (run)",
+                &options,
+            )
+            .unwrap();
+        let request = world.pending_model_requests().pop().unwrap();
+        assert_eq!(request.prompt, "Give one bounded synthesis");
+        assert_eq!(
+            world
+                .evaluate("(get (get (agent-info thinker) 'heap) 'status)")
+                .unwrap()
+                .values[0],
+            Value::Symbol("waiting".into())
+        );
+
+        world.claim_model_request(request.id, &options).unwrap();
+        world
+            .complete_model_request(
+                ModelCompletion::success(&request, "A replayable answer."),
+                &options,
+            )
+            .unwrap();
+        let value = world
+            .evaluate(
+                "(run)
+                 (def outcome (recv observer))
+                 (def heap (get (agent-info thinker) 'heap))
+                 (list
+                   (car outcome)
+                   (car (cdr (cdr outcome)))
+                   (get heap 'model-calls)
+                   (get heap 'status)
+                   (get (car (get heap 'trace)) 'event))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            value,
+            Value::List(vec![
+                Value::Symbol("fixed/done".into()),
+                Value::String("A replayable answer.".into()),
+                Value::Int(1),
+                Value::Symbol("done".into()),
+                Value::List(vec![
+                    Value::Symbol("system/model-result".into()),
+                    Value::Int(1),
+                    Value::Symbol("claude".into()),
+                ]),
+            ])
+        );
+
+        let limited = world
+            .evaluate(
+                "(def blocked
+                   (make-fixed-agent \"blocked\" synthesis-step
+                     (fixed-policy 3 3 0 100) (list model-cap)))
+                 (fixed-start blocked observer nil)
+                 (run)
+                 (def blocked-outcome (recv observer))
+                 (list
+                   (car blocked-outcome)
+                   (car (cdr (cdr blocked-outcome))))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert!(world.pending_model_requests().is_empty());
+        assert_eq!(
+            limited,
+            Value::List(vec![
+                Value::Symbol("fixed/exhausted".into()),
+                Value::Symbol("model-calls".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn agentic_fixed_point_evolves_at_a_message_ordered_boundary() {
+        let mut world = installed();
+        let value = world
+            .evaluate(
+                "(import agel/fixed-point)
+                 (def observer (spawn \"observer\"))
+                 (def slow
+                   (fn (state event)
+                     (if (= state 0)
+                         (fixed-done 'slow 'done)
+                         (fixed-continue (- state 1) (list 'slow state)))))
+                 (def fast
+                   (fn (state event)
+                     (if (< state 2)
+                         (fixed-done (list 'fast state) 'done)
+                         (fixed-continue (- state 2) (list 'fast state)))))
+                 (def driver
+                   (make-fixed-agent \"evolving\" slow
+                     (fixed-policy 10 10 0 0) nil))
+                 (fixed-start driver observer 5)
+                 (run 1)
+                 (fixed-propose driver 0 fast observer)
+                 (run 2)
+                 (def preview (recv observer))
+                 (fixed-commit driver 0 observer)
+                 (run 2)
+                 (def evolved (recv observer))
+                 (run 10)
+                 (def outcome (recv observer))
+                 (def heap (get (agent-info driver) 'heap))
+                 (list
+                   (car evolved)
+                   (car (cdr (cdr evolved)))
+                   (car preview)
+                   (car (cdr (cdr (cdr preview))))
+                   (car outcome)
+                   (car (cdr (cdr outcome)))
+                   (get heap 'version)
+                   (get heap 'steps))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            value,
+            Value::List(vec![
+                Value::Symbol("fixed/evolved".into()),
+                Value::Int(1),
+                Value::Symbol("fixed/preview".into()),
+                Value::Int(1),
+                Value::Symbol("fixed/done".into()),
+                Value::List(vec![Value::Symbol("fast".into()), Value::Int(0)]),
+                Value::Int(1),
+                Value::Int(5),
+            ])
+        );
+
+        let rejected_and_discarded = world
+            .evaluate(
+                "(fixed-propose driver 0 slow observer)
+                 (run 1)
+                 (def stale (recv observer))
+                 (fixed-propose driver 1 slow observer)
+                 (run 1)
+                 (def second-preview (recv observer))
+                 (fixed-discard driver observer)
+                 (run 1)
+                 (def discarded (recv observer))
+                 (def final-heap (get (agent-info driver) 'heap))
+                 (list
+                   (car stale)
+                   (car (cdr (cdr stale)))
+                   (car second-preview)
+                   (car discarded)
+                   (get final-heap 'version)
+                   (get final-heap 'pending-step))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(
+            rejected_and_discarded,
+            Value::List(vec![
+                Value::Symbol("fixed/rejected".into()),
+                Value::Symbol("stale-version".into()),
+                Value::Symbol("fixed/preview".into()),
+                Value::Symbol("fixed/discarded".into()),
+                Value::Int(1),
+                Value::Nil,
+            ])
+        );
     }
 
     #[test]

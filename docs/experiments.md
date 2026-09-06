@@ -22,8 +22,8 @@ own Agel definitions.
 
 ## Application fixed points and composition
 
-Explore a practical application-composition operator inspired by fixed-point
-combinators. Given two application agents, an `app-fix` agent can discover their
+Agel v0.2.7 adds `converge-bounded` and the transactional fixed-point agent as
+the first practical substrate for application composition. Given two application agents, a future `app-fix` agent can discover their
 protocols, construct an adapter graph, and repeatedly refine a combined
 application until its declared behavioral contract stabilizes. Examples:
 
@@ -32,10 +32,11 @@ application until its declared behavioral contract stabilizes. Examples:
 - browser + research notebook → a provenance-preserving investigation tool;
 - file manager + model swarm → a semantic project environment.
 
-The fixed point is over immutable application descriptions and executable
+The fixed point remains over immutable application descriptions and executable
 tests, never over unchecked privileges. Every iteration is inspectable, has a
 resource budget, and can be discarded; the last promoted application remains
-available for instant rollback.
+available for instant rollback. The implemented mechanics and their limits are
+documented in [`agentic-fixed-points.md`](agentic-fixed-points.md).
 
 ## Agents all the way down
 

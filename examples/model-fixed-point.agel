@@ -1,0 +1,62 @@
+; Two model-using fixed-point agents. This example creates at most one durable
+; request per agent; only the explicit :dispatch line invokes the external CLIs.
+;
+; Run with authenticated providers:
+; cargo run -q -p agel-cli -- --enable-claude --enable-codex \
+;   --claude-max-budget-usd 0.10 < examples/model-fixed-point.agel
+
+(import agel/fixed-point)
+
+(def claude-cap (request-capability 'model/infer "claude"))
+(def codex-cap (request-capability 'model/infer "codex"))
+(def human (spawn "human"))
+
+(def synthesis-step
+  (fn (state event)
+    (if (= (car event) 'fixed/start)
+        (fixed-model
+          state
+          (get state 'provider)
+          (get state 'prompt)
+          (list 'requesting (get state 'provider)))
+        (if (= (car event) 'system/model-result)
+            (fixed-done
+              (car (cdr (cdr (cdr event))))
+              (list 'answered (car (cdr (cdr event)))))
+            (fixed-done
+              (list 'provider-error (car (cdr (cdr (cdr event)))))
+              (list 'failed (car (cdr (cdr event)))))))))
+
+(def claude-agent
+  (make-fixed-agent "claude-fixed-point" synthesis-step
+    (fixed-policy 3 3 1 400)
+    (list claude-cap)))
+
+(def codex-agent
+  (make-fixed-agent "codex-fixed-point" synthesis-step
+    (fixed-policy 3 3 1 400)
+    (list codex-cap)))
+
+(fixed-start claude-agent human
+  (dict 'provider 'claude
+    'prompt "Name one safety invariant for an agent that evolves while running. One sentence."))
+(fixed-start codex-agent human
+  (dict 'provider 'codex
+    'prompt "Name one test for message-ordered hot evolution of an agent. One sentence."))
+
+; Local transactional turns create two outbox records, with no model cost yet.
+(run)
+(pending-model-requests)
+:requests
+
+; This is the explicit irreversible and potentially paid boundary.
+:dispatch
+
+; Completions re-enter as trusted messages and take the fixed points to `done`.
+(run)
+(list (recv human) (recv human))
+(list
+  (get (get (agent-info claude-agent) 'heap) 'model-calls)
+  (get (get (agent-info codex-agent) 'heap) 'model-calls))
+:effects
+:quit

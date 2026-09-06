@@ -1,0 +1,74 @@
+; Three different recursion tools, used where each one fits.
+; Run: cargo run -q -p agel-cli < examples/agentic-fixed-point.agel
+
+(import agel/fixed-point)
+
+; Ordinary named recursion remains the clearest default.
+(def named-factorial
+  (fn (n)
+    (if (= n 0) 1 (* n (named-factorial (- n 1))))))
+
+; `fix` creates anonymous recursion without a hard-coded global identity.
+(def anonymous-factorial
+  (fix
+    (fn (recur)
+      (fn (n)
+        (if (= n 0) 1 (* n (recur (- n 1))))))))
+
+; A fixed point over immutable application descriptions. A real app composer
+; would run contracts and return a new description on each refinement.
+(def composed-app
+  (converge-bounded 8
+    (fn (app)
+      (if (< (get app 'revision) 3)
+          (assoc
+            (assoc app 'revision (+ (get app 'revision) 1))
+            'surface '(mail calendar shared-search provenance))
+          app))
+    =
+    (dict 'revision 0 'surface '(mail calendar))))
+
+(list (named-factorial 6) (anonymous-factorial 6) composed-app)
+
+; The OS-useful fixed point: every continuation is a scheduler message and
+; therefore a separate transactional, observable, interruptible agent turn.
+(def human (spawn "human"))
+
+(def careful-step
+  (fn (state event)
+    (if (= state 0)
+        (fixed-done '(application stable) (list 'careful state))
+        (fixed-continue (- state 1) (list 'careful state)))))
+
+(def optimized-step
+  (fn (state event)
+    (if (< state 2)
+        (fixed-done (list 'optimized-at state) (list 'optimized state))
+        (fixed-continue (- state 2) (list 'optimized state)))))
+
+(def app-agent
+  (make-fixed-agent "live-application" careful-step
+    ; steps, retained trace entries, model calls, model prompt characters
+    (fixed-policy 10 8 0 0)
+    nil))
+
+(fixed-start app-agent human 5)
+(run 1)
+
+; The old step has yielded. Stage a replacement at expected version 0.
+(fixed-propose app-agent 0 optimized-step human)
+(run 2)
+(recv human)
+
+; A verifier could run canaries while the old step remains active. Commit only
+; the preview based on version 0; a delayed or duplicated commit fails closed.
+(fixed-commit app-agent 0 human)
+(run 2)
+(recv human)
+
+(run 10)
+(recv human)
+(fixed-inspect app-agent human)
+(run 1)
+(recv human)
+fixed-point-spec

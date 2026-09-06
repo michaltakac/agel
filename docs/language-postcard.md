@@ -30,4 +30,6 @@ There is intentionally no special syntax for agents, swarms, persistence,
 sandboxes, verification, or AI models. They are values and libraries built on
 the same few forms. `cargo run -p agel-cli -- --no-stdlib` starts exactly this
 postcard-sized substrate; the default CLI atomically installs the Agel-written
-standard library above it.
+standard library above it. This includes `agel/fixed-point`: even anonymous
+recursion, bounded convergence, and the agent continuation driver add no syntax
+or evaluator primitive.

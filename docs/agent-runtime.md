@@ -109,3 +109,9 @@ cargo run -q -p agel-core --example deterministic_replay
 
 These demonstrate typed stateful agents, rollback of a failed turn, bounded
 restart plus escalation, structured observability, and live snapshot branching.
+
+For work that logically continues itself, `agel/fixed-point` can represent each
+continuation as a new agent message. This adds a deliberate interception point
+for bounded trace, pausing, message-ordered code evolution, and explicit model
+requests without growing a recursive call stack. Ordinary agent behavior does
+not pay that overhead. See [`agentic-fixed-points.md`](agentic-fixed-points.md).

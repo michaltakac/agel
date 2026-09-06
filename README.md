@@ -4,8 +4,11 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.6: a persistent graphical Agel workshop. The
-desktop now evaluates real Agel forms in an independent ring-3 domain and saves
+The current repository is **v0.2.7: agentic fixed points above a persistent
+graphical Agel workshop. Long-lived agents can express each logical
+continuation as a bounded, traced, transactional scheduler turn; pause for an
+explicit model result; and adopt a new step closure at a message-ordered
+boundary. The desktop evaluates real Agel forms in an independent ring-3 domain and saves
 bounded named source cells to alternating checked disk slots, reconstructing
 the language world by replay after reboot. The QEMU-window keyboard and serial
 console also drive transactional live scene changes while a dedicated ring-3
@@ -45,6 +48,11 @@ It provides:
 - an atomic standard library written in Agel, not privileged Rust;
 - persistent sequence and tagged-result libraries; and
 - typed round-robin worker pools with bounded transactional scheduling;
+- eager-safe lexical fixed points, explicitly metered anonymous recursion, and
+  bounded convergence over immutable application descriptions;
+- an Agel-written agent fixed-point driver with explicit transitions,
+  decreasing step and model budgets, bounded redacted trace, and
+  message-ordered live code evolution;
 - `type-of` and `apply`, the two small reflective primitives needed by libraries;
 - checked integer ordering through the ordinary `<` builtin used by geometry;
 - an `agel/meta` evaluator written in Agel for a lexical functional subset;
@@ -216,8 +224,10 @@ in [`examples/graphical-workshop.txt`](examples/graphical-workshop.txt).
 
 The command grammar and current trust boundary are documented in
 [`docs/native-graphics.md`](docs/native-graphics.md).
-Longer-range browser self-specialization and application fixed-point ideas are
-recorded as explicitly future work in [`docs/experiments.md`](docs/experiments.md).
+The implemented fixed-point mechanics and their security and model-cost limits
+are documented in [`docs/agentic-fixed-points.md`](docs/agentic-fixed-points.md).
+Longer-range browser self-specialization remains in
+[`docs/experiments.md`](docs/experiments.md).
 
 Example session:
 
@@ -280,6 +290,15 @@ Library-defined orchestration demonstration:
 
 ```sh
 cargo run -q -p agel-cli < examples/worker-pool.agel
+cargo run -q -p agel-cli < examples/agentic-fixed-point.agel
+```
+
+The model-backed fixed-point example creates at most one request for each
+explicitly enabled provider; `:dispatch` remains visible:
+
+```sh
+cargo run -q -p agel-cli -- --enable-claude --enable-codex \
+  --claude-max-budget-usd 0.10 < examples/model-fixed-point.agel
 ```
 
 Metacircular and A/B bootstrap demonstrations:

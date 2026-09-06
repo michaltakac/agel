@@ -91,6 +91,13 @@ cargo run -q -p agel-cli -- --enable-claude --enable-codex \
   --claude-max-budget-usd 0.25 < examples/model-swarm.agel
 ```
 
+`examples/model-fixed-point.agel` demonstrates model requests inside bounded,
+traceable logical continuation loops. The fixed-point combinator does not call
+a provider automatically: only an explicit `fixed-model` transition creates an
+outbox record, and `:dispatch` remains the irreversible gate. See
+[`agentic-fixed-points.md`](agentic-fixed-points.md) for the full cost and trust
+analysis.
+
 ## Replay semantics
 
 Provider execution itself is never replayed. `ReplayInput::ClaimModel` records
