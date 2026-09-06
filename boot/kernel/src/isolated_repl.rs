@@ -13,9 +13,13 @@
 
 use crate::arch;
 use crate::monitor::RecoveryMonitor;
+use crate::native_session::{
+    replay as replay_workspace, request as evaluator_request_raw, reset as reset_evaluator,
+    ReplayFailure,
+};
 use crate::service::{ServiceDomain, ServiceWriter};
 use crate::workspace::{Workspace, MAX_CELL_NAME};
-use crate::world::{shared, Stop, PAYLOAD_BYTES};
+use crate::world::{shared, PAYLOAD_BYTES};
 use core::fmt::Write as _;
 
 /// Boot the protected interactive workshop.
@@ -277,14 +281,6 @@ pub fn run() -> ! {
     }
 }
 
-#[derive(Clone, Copy)]
-struct EvaluatorReply {
-    bytes: [u8; PAYLOAD_BYTES],
-    length: usize,
-    revision: u64,
-    error: bool,
-}
-
 // Boxing would introduce an allocator into the native supervisor. The large
 // variant is a deliberately bounded source workspace on its 512 KiB stack.
 #[allow(clippy::large_enum_variant)]
@@ -344,90 +340,6 @@ fn evaluator_request(
         driver_line(driver, b"");
     }
     reply.revision
-}
-
-fn evaluator_request_raw(
-    evaluator: &mut arch::Domain,
-    command: u64,
-    source: &[u8],
-) -> Result<EvaluatorReply, &'static str> {
-    if source.len() > PAYLOAD_BYTES {
-        return Err("request exceeds shared evaluator payload");
-    }
-    for (offset, byte) in source.iter().enumerate() {
-        evaluator.core().write_payload(offset, *byte);
-    }
-    evaluator
-        .core()
-        .write_shared(shared::ARGUMENTS, source.len() as u64);
-    evaluator.core().stage_command(command);
-    match evaluator.run() {
-        Stop::Replied => {}
-        Stop::Faulted(fault) => {
-            crate::kprint!(
-                "native evaluator contained: {} at {:#x}; restart required\n",
-                fault.name(),
-                fault.pc
-            );
-            return Err("domain fault; restart required");
-        }
-        Stop::BudgetExhausted => {
-            crate::kprint!("native evaluator contained: tick budget exhausted; restart required\n");
-            return Err("tick budget exhausted; restart required");
-        }
-    }
-
-    let error = evaluator.core().read_shared(shared::STATUS) != 0;
-    let length = (evaluator.core().read_shared(shared::VALUES) as usize).min(PAYLOAD_BYTES);
-    let revision = evaluator.core().read_shared(shared::VALUES + 1);
-    let mut response = [0_u8; PAYLOAD_BYTES];
-    for (offset, byte) in response.iter_mut().take(length).enumerate() {
-        *byte = evaluator.core().read_payload(offset);
-    }
-    Ok(EvaluatorReply {
-        bytes: response,
-        length,
-        revision,
-        error,
-    })
-}
-
-fn reset_evaluator(evaluator: &mut arch::Domain) -> Result<(), &'static str> {
-    evaluator_request_raw(evaluator, shared::COMMAND_EVALUATOR_RESET, b"").map(|_| ())
-}
-
-#[derive(Clone, Copy)]
-enum ReplayFailure {
-    Language(usize),
-    Transport {
-        ordinal: usize,
-        reason: &'static str,
-    },
-}
-
-fn replay_workspace(
-    evaluator: &mut arch::Domain,
-    workspace: &Workspace,
-) -> Result<u64, ReplayFailure> {
-    let reset = evaluator_request_raw(evaluator, shared::COMMAND_EVALUATOR_RESET, b"").map_err(
-        |reason| ReplayFailure::Transport {
-            ordinal: usize::MAX,
-            reason,
-        },
-    )?;
-    let mut revision = reset.revision;
-    for ordinal in 0..workspace.count() {
-        let cell = workspace
-            .cell(ordinal)
-            .ok_or(ReplayFailure::Language(ordinal))?;
-        let reply = evaluator_request_raw(evaluator, shared::COMMAND_EVALUATE, cell.source())
-            .map_err(|reason| ReplayFailure::Transport { ordinal, reason })?;
-        if reply.error {
-            return Err(ReplayFailure::Language(ordinal));
-        }
-        revision = reply.revision;
-    }
-    Ok(revision)
 }
 
 fn restore_workspace(

@@ -29,6 +29,12 @@ mod world;
 #[cfg(not(any(feature = "selftest", feature = "native-selftest")))]
 mod monitor;
 
+#[cfg(all(
+    target_arch = "x86_64",
+    any(feature = "isolated-repl", feature = "native-graphics")
+))]
+mod native_session;
+
 #[cfg(feature = "isolation-selftest")]
 mod contract;
 #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
@@ -45,7 +51,10 @@ mod memory;
 mod service;
 #[cfg(feature = "isolation-selftest")]
 mod user;
-#[cfg(all(target_arch = "x86_64", feature = "isolated-repl"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    any(feature = "isolated-repl", feature = "native-graphics")
+))]
 mod workspace;
 
 #[cfg(feature = "isolation-selftest")]

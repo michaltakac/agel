@@ -1,0 +1,22 @@
+; Type these one line at a time after ./scripts/run-graphics.sh.
+; Ordinary forms run in the isolated native Agel evaluator.
+(def square (fn (x) (* x x)))
+(square 12)
+
+; A cell is canonical source. Staging does not touch disk; :save first rebuilds
+; a fresh evaluator from every staged cell, then publishes a checked disk slot.
+:cell mathematics (def triangular (fn (n) (/ (* n (+ n 1)) 2)))
+:run mathematics
+(triangular 100)
+:workspace
+:save
+
+; Quit and launch ./scripts/run-graphics.sh again. The definition is replayed.
+:shutdown
+(triangular 100)
+
+; The visual shell remains transactional and independently rollbackable.
+(accent cyan)
+(title "MY LIVING SYSTEM")
+(inspect)
+(rollback)

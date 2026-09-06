@@ -4,12 +4,12 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.5: the live graphical Agel desktop and its
-high-resolution kitchen-sink showcase. Since v0.2.4, the desktop runs inside
-QEMU. The QEMU-window keyboard and serial console feed a bounded Agel command
-surface whose semantic scene changes are validated, committed, inspected, and
-rolled back while the OS remains running. A dedicated ring-3 compositor remains
-the only component holding the framebuffer grant**. The hosted scene, layout,
+The current repository is **v0.2.6: a persistent graphical Agel workshop. The
+desktop now evaluates real Agel forms in an independent ring-3 domain and saves
+bounded named source cells to alternating checked disk slots, reconstructing
+the language world by replay after reboot. The QEMU-window keyboard and serial
+console also drive transactional live scene changes while a dedicated ring-3
+compositor remains the only component holding the framebuffer grant**. The hosted scene, layout,
 paths, paints, transforms, clipping, and
 transactional desktop/layout/vector agents remain written in Agel. It retains the frozen kernel contract,
 portable isolation backend, unmodified seL4 backend, and
@@ -72,6 +72,10 @@ It provides:
   live-desktop stream, with mouse bytes explicitly separated;
 - a native graphical Agel command surface supporting transactional accent,
   workspace, and title mutation plus inspect, help, and live rollback;
+- real native Agel evaluation from that graphical surface in a second isolated
+  domain, with errors rolling back the evaluator transaction;
+- graphical named source-cell staging, replay-validated dual-slot save, reload,
+  and automatic reconstruction after reboot;
 - semantic hit-testing that returns inspectable intents without executing them;
 - an isolated layout agent that preserves its last good frame when compilation
   fails;
@@ -195,12 +199,20 @@ Click the QEMU window and type directly into Agel OS, or type in the launching
 terminal. For example:
 
 ```lisp
+(def square (fn (x) (* x x)))
+(square 12)
+:cell mathematics (def triangular (fn (n) (/ (* n (+ n 1)) 2)))
+:save
 (accent cyan)
 (workspace 2)
 (title "LIVE AGEL")
 (inspect)
 (rollback)
 ```
+
+Run `:help` inside the desktop for its command postcard. Named cells survive
+`:shutdown` and the next `./scripts/run-graphics.sh`; a complete walkthrough is
+in [`examples/graphical-workshop.txt`](examples/graphical-workshop.txt).
 
 The command grammar and current trust boundary are documented in
 [`docs/native-graphics.md`](docs/native-graphics.md).

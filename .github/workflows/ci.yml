@@ -40,6 +40,7 @@ jobs:
       - run: ./scripts/test-native-persistence.sh
       - run: ./scripts/test-graphics.sh
       - run: ./scripts/test-live-desktop.sh
+      - run: ./scripts/test-graphical-workshop.sh
       - run: ./scripts/test-live-keyboard.sh
       - run: ./scripts/test-isolation.sh
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none -- -D warnings

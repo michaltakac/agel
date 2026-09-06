@@ -7,7 +7,9 @@
 use crate::arch;
 use crate::console;
 use crate::kprint;
-use crate::world::{shared, Stop};
+use crate::native_session::{replay as replay_workspace, request as evaluator_request};
+use crate::workspace::Workspace;
+use crate::world::{shared, Stop, PAYLOAD_BYTES};
 
 const BOOT_GRAPHICS_MARKER: *const u32 = 0x6ff0 as *const u32;
 const MODE_INFO: usize = 0x7000;
@@ -18,7 +20,7 @@ const STREAM_HEADER_BYTES: usize = 16;
 const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
 const MAX_SCENE_COMMANDS: usize = 48;
-const INPUT_BYTES: usize = 48;
+const INPUT_BYTES: usize = PAYLOAD_BYTES;
 const DISPLAY_LINE_BYTES: usize = 22;
 
 const VIOLET: [u32; 3] = [0x92_85_ff, 0x62_54_e7, 0x9b_8c_ff];
@@ -455,14 +457,14 @@ fn render_overlay(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'stat
 
 #[derive(Clone, Copy)]
 struct StatusLine {
-    bytes: [u8; 28],
+    bytes: [u8; PAYLOAD_BYTES],
     len: usize,
 }
 
 impl StatusLine {
     fn new(text: &[u8]) -> Self {
         let mut status = Self {
-            bytes: [0; 28],
+            bytes: [0; PAYLOAD_BYTES],
             len: 0,
         };
         status.push(text);
@@ -482,8 +484,226 @@ impl StatusLine {
         }
     }
 
+    fn number_u64(&mut self, value: u64) {
+        let mut digits = [0_u8; 20];
+        let mut cursor = digits.len();
+        let mut remaining = value;
+        loop {
+            cursor -= 1;
+            digits[cursor] = b'0' + (remaining % 10) as u8;
+            remaining /= 10;
+            if remaining == 0 {
+                break;
+            }
+        }
+        self.push(&digits[cursor..]);
+    }
+
     fn get(&self) -> &[u8] {
         &self.bytes[..self.len]
+    }
+}
+
+fn restore_from_disk(evaluator: &mut arch::Domain) -> Result<(Workspace, u64, u64), &'static str> {
+    let candidates = crate::workspace::load()?;
+    let mut highest_generation = 0;
+    for loaded in candidates.into_iter().flatten() {
+        highest_generation = highest_generation.max(loaded.generation);
+        if let Ok(revision) = replay_workspace(evaluator, &loaded.workspace) {
+            return Ok((loaded.workspace, loaded.generation, revision));
+        }
+    }
+    let empty = Workspace::new();
+    let revision = replay_workspace(evaluator, &empty).map_err(|failure| failure.message())?;
+    Ok((empty, highest_generation, revision))
+}
+
+fn command_argument<'a>(line: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
+    line.strip_prefix(prefix).map(trim)
+}
+
+fn cell_definition(line: &[u8]) -> Option<(&[u8], &[u8])> {
+    let body = line.strip_prefix(b":cell ")?;
+    let split = body.iter().position(u8::is_ascii_whitespace)?;
+    let name = trim(&body[..split]);
+    let source = trim(&body[split + 1..]);
+    Some((name, source))
+}
+
+fn scene_command(line: &[u8]) -> bool {
+    let line = trim(line);
+    line.eq_ignore_ascii_case(b"(help)")
+        || line.eq_ignore_ascii_case(b"(inspect)")
+        || line.eq_ignore_ascii_case(b"(rollback)")
+        || line
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"(accent "))
+        || line
+            .get(..11)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"(workspace "))
+        || line
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"(title \""))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_workshop(
+    compositor: &mut arch::Domain,
+    evaluator: &mut arch::Domain,
+    current: &mut Scene,
+    previous: &mut Scene,
+    scene_revision: &mut u8,
+    evaluator_revision: &mut u64,
+    workspace: &mut Workspace,
+    committed_workspace: &mut Workspace,
+    generation: &mut u64,
+    dirty: &mut bool,
+    line: &[u8],
+) -> StatusLine {
+    let line = trim(line);
+    if line.is_empty() {
+        return StatusLine::new(b"READY");
+    }
+    if scene_command(line) {
+        return execute(compositor, current, previous, scene_revision, line);
+    }
+    if line == b":shutdown" {
+        arch::exit(true);
+    }
+    if line == b":help" {
+        return StatusLine::new(b"forms: Lisp evaluates | UI: (help) | cells: :cell NAME FORM :run NAME :show NAME :delete NAME :cells :workspace :save :reload | evaluator: :revision :rollback :defs :limits | :shutdown");
+    }
+    if line == b":revision" {
+        let mut status = StatusLine::new(b"EVAL REV ");
+        status.number_u64(*evaluator_revision);
+        return status;
+    }
+    if line == b":cells" {
+        let mut status = StatusLine::new(b"CELLS ");
+        status.number_u64(workspace.count() as u64);
+        for ordinal in 0..workspace.count() {
+            if let Some(cell) = workspace.cell(ordinal) {
+                status.push(b" ");
+                status.push(cell.name());
+            }
+        }
+        return status;
+    }
+    if line == b":workspace" {
+        let mut status = StatusLine::new(b"GEN ");
+        status.number_u64(*generation);
+        status.push(b" CELLS ");
+        status.number_u64(workspace.count() as u64);
+        status.push(if *dirty { b" DIRTY" } else { b" CLEAN" });
+        return status;
+    }
+    if line == b":save" {
+        return match replay_workspace(evaluator, workspace) {
+            Ok(revision) => match crate::workspace::save(workspace, *generation) {
+                Ok(next) => {
+                    *generation = next;
+                    *committed_workspace = *workspace;
+                    *evaluator_revision = revision;
+                    *dirty = false;
+                    let mut status = StatusLine::new(b"SAVED GENERATION ");
+                    status.number_u64(next);
+                    status
+                }
+                Err(reason) => {
+                    let _ = replay_workspace(evaluator, committed_workspace);
+                    StatusLine::new(reason.as_bytes())
+                }
+            },
+            Err(failure) => {
+                *evaluator_revision =
+                    replay_workspace(evaluator, committed_workspace).unwrap_or(*evaluator_revision);
+                StatusLine::new(failure.message().as_bytes())
+            }
+        };
+    }
+    if line == b":reload" {
+        return match restore_from_disk(evaluator) {
+            Ok((restored, restored_generation, revision)) => {
+                *workspace = restored;
+                *committed_workspace = restored;
+                *generation = restored_generation;
+                *evaluator_revision = revision;
+                *dirty = false;
+                StatusLine::new(b"WORKSPACE RELOADED")
+            }
+            Err(reason) => StatusLine::new(reason.as_bytes()),
+        };
+    }
+    if let Some((name, source)) = cell_definition(line) {
+        return match workspace.upsert(name, source) {
+            Ok(()) => {
+                *dirty = *workspace != *committed_workspace;
+                StatusLine::new(b"CELL STAGED - RUN OR SAVE")
+            }
+            Err(reason) => StatusLine::new(reason.as_bytes()),
+        };
+    }
+    if let Some(name) = command_argument(line, b":run ") {
+        return match workspace.find(name) {
+            Some(cell) => evaluator_status(
+                evaluator,
+                evaluator_revision,
+                shared::COMMAND_EVALUATE,
+                cell.source(),
+            ),
+            None => StatusLine::new(b"NO SUCH CELL"),
+        };
+    }
+    if let Some(name) = command_argument(line, b":show ") {
+        return workspace
+            .find(name)
+            .map(|cell| StatusLine::new(cell.source()))
+            .unwrap_or_else(|| StatusLine::new(b"NO SUCH CELL"));
+    }
+    if let Some(name) = command_argument(line, b":delete ") {
+        return match workspace.delete(name) {
+            Ok(()) => {
+                *dirty = *workspace != *committed_workspace;
+                StatusLine::new(b"CELL DELETED - SAVE")
+            }
+            Err(reason) => StatusLine::new(reason.as_bytes()),
+        };
+    }
+    let command = match line {
+        b":rollback" => shared::COMMAND_EVALUATOR_ROLLBACK,
+        b":defs" => shared::COMMAND_EVALUATOR_DEFS,
+        b":limits" => shared::COMMAND_EVALUATOR_LIMITS,
+        _ if line.starts_with(b":") => return StatusLine::new(b"UNKNOWN COMMAND - :HELP"),
+        _ => shared::COMMAND_EVALUATE,
+    };
+    evaluator_status(
+        evaluator,
+        evaluator_revision,
+        command,
+        if command == shared::COMMAND_EVALUATE {
+            line
+        } else {
+            b""
+        },
+    )
+}
+
+fn evaluator_status(
+    evaluator: &mut arch::Domain,
+    revision: &mut u64,
+    command: u64,
+    source: &[u8],
+) -> StatusLine {
+    match evaluator_request(evaluator, command, source) {
+        Ok(reply) => {
+            *revision = reply.revision;
+            let status = StatusLine::new(&reply.bytes[..reply.length]);
+            if reply.error {
+                console::write("evaluator transaction rolled back\n");
+            }
+            status
+        }
+        Err(reason) => StatusLine::new(reason.as_bytes()),
     }
 }
 
@@ -565,12 +785,31 @@ fn next_input(keyboard: &mut Keyboard) -> Option<u8> {
     arch::keyboard_try_read_scancode().and_then(|scan| keyboard.decode(scan))
 }
 
-fn interactive(compositor: &mut arch::Domain, mut current: Scene, mut previous: Scene) -> ! {
-    let mut revision = 0_u8;
+fn interactive(
+    machine: &mut arch::Machine,
+    compositor: &mut arch::Domain,
+    mut current: Scene,
+    mut previous: Scene,
+) -> ! {
+    let evaluator_entry = crate::user::agel_evaluator_main as *const () as usize as u64;
+    let mut evaluator = machine
+        .create_evaluator_world(evaluator_entry, 20)
+        .unwrap_or_else(|reason| failed(reason));
+    let (mut workspace, mut generation, mut evaluator_revision) =
+        restore_from_disk(&mut evaluator).unwrap_or_else(|reason| failed(reason));
+    let mut committed_workspace = workspace;
+    let mut dirty = false;
+    let mut scene_revision = 0_u8;
     let mut line = [0; INPUT_BYTES];
     let mut length = 0;
     let mut keyboard = Keyboard::new();
-    let mut status = StatusLine::new(b"READY - TYPE (HELP)");
+    let mut status = if generation == 0 {
+        StatusLine::new(b"AGEL READY - TYPE :HELP")
+    } else {
+        let mut status = StatusLine::new(b"RESTORED GEN ");
+        status.number_u64(generation);
+        status
+    };
     let frame = materialize(current, Some(&line[..length]), status.get())
         .unwrap_or_else(|reason| failed(reason));
     render_overlay(compositor, &frame).unwrap_or_else(|reason| failed(reason));
@@ -584,11 +823,17 @@ fn interactive(compositor: &mut arch::Domain, mut current: Scene, mut previous: 
         match byte {
             b'\r' | b'\n' => {
                 console::write("\n");
-                status = execute(
+                status = execute_workshop(
                     compositor,
+                    &mut evaluator,
                     &mut current,
                     &mut previous,
-                    &mut revision,
+                    &mut scene_revision,
+                    &mut evaluator_revision,
+                    &mut workspace,
+                    &mut committed_workspace,
+                    &mut generation,
+                    &mut dirty,
                     &line[..length],
                 );
                 console::write_bytes(status.get());
@@ -609,7 +854,7 @@ fn interactive(compositor: &mut arch::Domain, mut current: Scene, mut previous: 
                     length += 1;
                     console::write_byte(byte);
                 } else {
-                    status = StatusLine::new(b"INPUT LIMIT 48 BYTES");
+                    status = StatusLine::new(b"INPUT LIMIT 256 BYTES");
                 }
             }
             _ => {}
@@ -757,5 +1002,5 @@ pub fn run() -> ! {
     arch::exit(true);
 
     #[cfg(not(feature = "graphics-selftest"))]
-    interactive(&mut replacement, initial, initial)
+    interactive(&mut machine, &mut replacement, initial, initial)
 }

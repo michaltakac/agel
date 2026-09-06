@@ -17,7 +17,10 @@ promise.
   retained-frame recovery. `v0.2.4` adds PS/2 and serial input, a visible native
   Agel command surface, and validated live scene commit, rejection, inspection,
   and rollback. `v0.2.5` adds the tested graphical kitchen-sink program and its
-  exact 2880×1800 browser-rendered screenshot. Minor releases may make
+  exact 2880×1800 browser-rendered screenshot. `v0.2.6` joins the graphical
+  command surface to the protected native evaluator and crash-tolerant source
+  workspace, including replay-validated save and reconstruction after reboot.
+  Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

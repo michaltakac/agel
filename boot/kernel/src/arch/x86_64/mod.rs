@@ -7,7 +7,7 @@
 
 pub mod hal;
 
-#[cfg(feature = "isolated-repl")]
+#[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
 mod disk;
 
 #[cfg(feature = "isolation-selftest")]
@@ -102,7 +102,7 @@ pub fn keyboard_try_read_scancode() -> Option<u8> {
     }
 }
 
-#[cfg(feature = "isolated-repl")]
+#[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
 pub use disk::{flush_disk, read_disk_sector, write_disk_sector};
 
 /// Leave QEMU through the debug-exit device.

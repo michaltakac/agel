@@ -1,6 +1,6 @@
 # Native Agel graphics
 
-Agel v0.2.4 boots to an actual 1024×768×32 live graphical desktop in QEMU. The path
+Agel v0.2.6 boots to an actual 1024×768×32 live graphical workshop in QEMU. The path
 is deliberately split so that visual meaning remains language data and display
 authority remains a narrow replaceable service:
 
@@ -21,8 +21,9 @@ Run it:
 
 The kernel prints its containment report, draws a command surface, and remains
 live. Click the QEMU window to type through the emulated PS/2 keyboard, or type
-in the launching terminal through the serial adapter. Stop QEMU from its window
-or with Ctrl-C.
+in the launching terminal through the serial adapter. Use `:shutdown`, stop
+QEMU from its window, or press Ctrl-C. The disk is persistent: `:save` publishes
+source cells which are replayed on the next boot.
 
 ## Live Agel forms
 
@@ -42,7 +43,7 @@ The first native scene language is intentionally postcard-sized:
 ```
 
 Both input adapters produce the same bounded byte stream. The visible line
-editor has a 48-byte input budget; titles are 1–28 ASCII letters, digits,
+editor has the evaluator's 256-byte input budget; titles are 1–28 ASCII letters, digits,
 spaces, or hyphens. Escape clears the line and Backspace edits it.
 
 A mutating form is decoded into a semantic intent rather than a drawing
@@ -54,9 +55,43 @@ only the isolated diagnostic command bar is redrawn to report the rejection.
 `(rollback)` swaps the current and preceding semantic scenes and renders the
 restored value without rebooting.
 
-This bounded native parser is a bootstrap surface, not yet the full Agel
-evaluator. It proves the live input/intent/transaction/display loop while
-keeping the amount of pre-self-hosting Rust small and reviewable.
+These visual forms are the tiny scene-control surface. Every other Lisp form is
+sent through a bounded shared page to the existing native evaluator in a
+separate ring-3 domain. For example:
+
+```lisp
+(def square (fn (x) (* x x)))
+(square 12)
+```
+
+The result appears both in the graphical command bar and on serial. A language
+error rolls back its evaluator transaction without changing the desktop.
+
+## Durable source cells
+
+The graphical workshop owns the same crash-tolerant source format as the serial
+workshop:
+
+```text
+:cell mathematics (def triangular (fn (n) (/ (* n (+ n 1)) 2)))
+:run mathematics
+(triangular 100)
+:workspace
+:save
+```
+
+`:cell NAME FORM` stages one bounded named form. `:run`, `:show`, `:delete`, and
+`:cells` inspect and manipulate that source workspace. `:save` resets the
+evaluator and successfully replays every staged cell before publishing an
+alternating, CRC-checked raw-disk slot. A failed form or failed write restores
+the preceding committed evaluator. On boot, the newest structurally valid and
+semantically replayable generation wins; a broken newest generation falls back
+to its twin.
+
+This is deliberately source persistence, not a memory dump. Authority-bearing
+state, device handles, evaluator stacks, and Rust layouts never cross a reboot.
+See [`examples/graphical-workshop.txt`](../examples/graphical-workshop.txt) for a
+complete session. `:help` prints the self-documenting command postcard.
 
 ## Device handoff
 
@@ -106,12 +141,16 @@ The graphical tests prove these properties:
 5. Real serial input commits several changes while invalid input is rejected.
 6. QEMU-injected PS/2 scan codes become `(accent cyan)`, commit revision 1, and
    produce a real PPM framebuffer capture.
+7. Ordinary Lisp definitions evaluate in the independent evaluator domain.
+8. A named source cell is saved, the machine exits, the same disk reboots, and
+   the restored definition evaluates to the expected result.
 
 Run the headless proof with:
 
 ```sh
 ./scripts/test-graphics.sh
 ./scripts/test-live-desktop.sh
+./scripts/test-graphical-workshop.sh
 ./scripts/test-live-keyboard.sh
 ```
 
@@ -123,10 +162,8 @@ into the driver.
 
 ## What is next
 
-The quickest route to working primarily inside Agel OS is to join this live
-graphical loop to the existing persistent native source-cell evaluator. That
-will let a user edit an Agel scene definition, preview it, commit it, reconstruct
-it after reboot, and roll it back from the graphical shell. Input normalization
-should then move from the supervisor into a separately restartable domain, with
-pointer events represented as semantic hit-test requests rather than ambient UI
-authority.
+The next step is a language-owned graphical editor: multiline source cells,
+selectable transcript history, pointer focus through semantic hit-test requests,
+and preview/commit of a scene cell without leaving the desktop. Input
+normalization should move from the supervisor into a separately restartable
+domain rather than gaining ambient UI authority.
