@@ -1,6 +1,6 @@
 # Native Agel graphics
 
-Agel v0.2.8 boots to an actual 1024×768×32 live graphical workshop in QEMU. The path
+Agel v0.2.9 boots to an actual 1024×768×32 live graphical workshop in QEMU. The path
 is deliberately split so that visual meaning remains language data and display
 authority remains a narrow replaceable service:
 
@@ -19,11 +19,28 @@ Run it:
 ./scripts/run-graphics.sh
 ```
 
-The kernel prints its containment report, draws a command surface, and remains
-live. Click the QEMU window to type through the emulated PS/2 keyboard, or type
-in the launching terminal through the serial adapter. Use `:shutdown`, stop
-QEMU from its window, or press Ctrl-C. The disk is persistent: `:save` publishes
-source cells which are replayed on the next boot.
+The default launcher opens a local browser console with the real QEMU
+framebuffer and a host text field. Use your Slovak/macOS layout, Option symbols,
+dead keys, and Command-V paste there; Enter or **Run in Agel** submits one line
+to the guest. Clicking the image focuses the field without capturing your
+mouse. Stop the viewer and QEMU with Ctrl-C in the launching terminal. The disk
+is persistent: `:save` publishes source cells replayed on the next boot.
+
+`./scripts/run-graphics.sh --native` retains QEMU's direct window and serial
+terminal input. This physical PS/2 path uses a US layout, now including all
+ASCII punctuation, uppercase, Caps Lock, independent Shift keys, and Ctrl-U/C
+to clear the line (Ctrl-H backspaces). It does not inherit macOS text layout or
+Option dead-key composition. QEMU's Cocoa frontend controls mouse capture;
+its release shortcut is Control-Option-G by default (see QEMU's View menu and
+the [QEMU frontend keys](https://www.qemu.org/docs/master/system/keys.html)).
+
+The browser console is explicitly a host input bridge, not a native browser
+inside Agel. It binds only to loopback with a random session URL, checks POST
+origins, and exposes bounded text submission and framebuffer capture. It has
+no arbitrary command execution endpoint. Every form still executes in Agel's
+isolated evaluator, with 256 UTF-8 bytes per input. Source and the host
+transcript preserve Unicode; the seed framebuffer font uses `?` for unsupported
+bytes. Characters such as `≤` are not automatically new language operators.
 
 ## Live Agel forms
 
@@ -170,6 +187,7 @@ Run the headless proof with:
 ./scripts/test-live-desktop.sh
 ./scripts/test-graphical-workshop.sh
 ./scripts/test-live-keyboard.sh
+python3 scripts/test-graphical-console.py target/boot/agel-v1.img
 ```
 
 The framebuffer backend is currently a scalar software reference renderer. It

@@ -26,7 +26,9 @@ promise.
   is the first downward bootstrap of executable agents into the freestanding
   evaluator: bounded native mailboxes, deterministic scheduling, atomic
   behavior turns, inspection, and contained fault recovery run inside the
-  graphical OS. Minor releases may make
+  graphical OS. `v0.2.9` repairs native punctuation/modifiers and adds a
+  host-layout graphical console for Slovak/Unicode text composition and paste
+  without mouse capture. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

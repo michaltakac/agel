@@ -84,14 +84,18 @@ enum Intent {
 }
 
 struct Keyboard {
-    shift: bool,
+    shifts: u8,
+    controls: u8,
+    caps: bool,
     extended: bool,
 }
 
 impl Keyboard {
     const fn new() -> Self {
         Self {
-            shift: false,
+            shifts: 0,
+            controls: 0,
+            caps: false,
             extended: false,
         }
     }
@@ -101,18 +105,62 @@ impl Keyboard {
             self.extended = true;
             return None;
         }
-        if self.extended {
-            self.extended = false;
-            return None;
-        }
+        let extended = self.extended;
+        self.extended = false;
         let released = scan & 0x80 != 0;
         let code = scan & 0x7f;
+        if code == 0x1d {
+            let mask = if extended { 2 } else { 1 };
+            if released {
+                self.controls &= !mask;
+            } else {
+                self.controls |= mask;
+            }
+            return None;
+        }
+        if extended {
+            return if !released && code == 0x1c {
+                Some(b'\n')
+            } else {
+                None
+            };
+        }
         if code == 0x2a || code == 0x36 {
-            self.shift = !released;
+            let mask = if code == 0x2a { 1 } else { 2 };
+            if released {
+                self.shifts &= !mask;
+            } else {
+                self.shifts |= mask;
+            }
             return None;
         }
         if released {
             return None;
+        }
+        if code == 0x3a {
+            self.caps = !self.caps;
+            return None;
+        }
+        if self.controls != 0 {
+            return match code {
+                0x16 | 0x2e => Some(0x1b), // Ctrl-U/C: clear input
+                0x23 => Some(0x08),        // Ctrl-H: backspace
+                _ => None,
+            };
+        }
+        let shift = self.shifts != 0;
+        let letter = match code {
+            0x10..=0x19 => Some(b"qwertyuiop"[(code - 0x10) as usize]),
+            0x1e..=0x26 => Some(b"asdfghjkl"[(code - 0x1e) as usize]),
+            0x2c..=0x32 => Some(b"zxcvbnm"[(code - 0x2c) as usize]),
+            _ => None,
+        };
+        if let Some(letter) = letter {
+            return Some(if shift ^ self.caps {
+                letter.to_ascii_uppercase()
+            } else {
+                letter
+            });
         }
         Some(match code {
             0x01 => 0x1b,
@@ -122,14 +170,93 @@ impl Keyboard {
             0x02..=0x0b => {
                 const PLAIN: &[u8; 10] = b"1234567890";
                 const SHIFTED: &[u8; 10] = b"!@#$%^&*()";
-                let table = if self.shift { SHIFTED } else { PLAIN };
+                let table = if shift { SHIFTED } else { PLAIN };
                 table[(code - 0x02) as usize]
             }
-            0x10..=0x19 => b"qwertyuiop"[(code - 0x10) as usize],
-            0x1e..=0x26 => b"asdfghjkl"[(code - 0x1e) as usize],
-            0x2c..=0x32 => b"zxcvbnm"[(code - 0x2c) as usize],
-            0x0c => b'-',
-            0x28 if self.shift => b'"',
+            0x0c => {
+                if shift {
+                    b'_'
+                } else {
+                    b'-'
+                }
+            }
+            0x0d => {
+                if shift {
+                    b'+'
+                } else {
+                    b'='
+                }
+            }
+            0x1a => {
+                if shift {
+                    b'{'
+                } else {
+                    b'['
+                }
+            }
+            0x1b => {
+                if shift {
+                    b'}'
+                } else {
+                    b']'
+                }
+            }
+            0x27 => {
+                if shift {
+                    b':'
+                } else {
+                    b';'
+                }
+            }
+            0x28 => {
+                if shift {
+                    b'"'
+                } else {
+                    b'\''
+                }
+            }
+            0x29 => {
+                if shift {
+                    b'~'
+                } else {
+                    b'`'
+                }
+            }
+            0x2b => {
+                if shift {
+                    b'|'
+                } else {
+                    b'\\'
+                }
+            }
+            0x33 => {
+                if shift {
+                    b'<'
+                } else {
+                    b','
+                }
+            }
+            0x34 => {
+                if shift {
+                    b'>'
+                } else {
+                    b'.'
+                }
+            }
+            0x35 => {
+                if shift {
+                    b'?'
+                } else {
+                    b'/'
+                }
+            }
+            0x56 => {
+                if shift {
+                    b'>'
+                } else {
+                    b'<'
+                }
+            }
             _ => return None,
         })
     }
@@ -232,7 +359,15 @@ fn text_record(x: u32, y: u32, scale: u32, color: u32, text: &[u8]) -> [u8; RECO
     put_u32(&mut record, 4, color);
     let length = text.len().min(28);
     put_u32(&mut record, 8, length as u32);
-    record[36..36 + length].copy_from_slice(&text[..length]);
+    for (index, byte) in text[..length].iter().enumerate() {
+        // The seed font has ASCII glyphs. Keep UTF-8 in language source, but
+        // never pass unsupported bytes to the strict compositor protocol.
+        record[36 + index] = if byte.is_ascii_graphic() || *byte == b' ' {
+            *byte
+        } else {
+            b'?'
+        };
+    }
     record
 }
 
@@ -823,6 +958,11 @@ fn interactive(
         match byte {
             b'\r' | b'\n' => {
                 console::write("\n");
+                if core::str::from_utf8(&line[..length]).is_err() {
+                    length = 0;
+                    console::write("INVALID UTF-8\nlive-desktop> ");
+                    continue;
+                }
                 status = execute_workshop(
                     compositor,
                     &mut evaluator,
@@ -842,13 +982,16 @@ fn interactive(
             }
             0x08 | 0x7f if length > 0 => {
                 length -= 1;
+                while length > 0 && line[length] & 0xc0 == 0x80 {
+                    length -= 1;
+                }
                 console::write("\x08 \x08");
             }
             0x1b => {
                 length = 0;
                 status = StatusLine::new(b"INPUT CLEARED");
             }
-            byte if byte.is_ascii_graphic() || byte == b' ' => {
+            byte if byte.is_ascii_graphic() || byte == b' ' || byte >= 0x80 => {
                 if length < line.len() {
                     line[length] = byte;
                     length += 1;

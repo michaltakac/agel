@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Agel OS · Graphical console</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#10131c;color:#e6eaf2;font:15px system-ui}main{max-width:1100px;margin:auto;padding:20px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}h1{font-size:20px;margin:0}small{color:#aeb6ca}img{width:100%;display:block;border:1px solid #333d53;border-radius:10px;background:#000;min-height:200px}form{margin-top:18px}label{display:block;margin-bottom:8px}textarea{display:block;width:100%;resize:vertical;min-height:84px;font:17px ui-monospace,monospace;background:#1b2130;border:1px solid #64739a;border-radius:8px;color:#fff;padding:12px}button{background:#b9a5ff;color:#19142a;border:0;border-radius:6px;padding:10px 18px;font:inherit;cursor:pointer}button:disabled{opacity:.5}footer{display:flex;gap:16px;align-items:center;margin:10px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#171d29;padding:14px;border-radius:8px;max-height:280px;overflow:auto}#status{color:#bcc8e6}textarea:focus{outline:2px solid #b9a5ff}p{line-height:1.5}
+</style>
+<style>img{max-height:58vh;object-fit:contain}</style>
+<main><header><h1>Agel OS</h1><small>Live QEMU framebuffer · host-assisted input</small></header>
+<img id="frame" alt="Live Agel OS framebuffer">
+<form id="form"><label for="source">Agel command — uses your Mac’s keyboard layout</label>
+<textarea id="source" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="(+ 20 22)" aria-describedby="hint"></textarea>
+<footer><button id="send">Run in Agel</button><span id="status" role="status">Ready</span></footer></form>
+<small id="hint">Enter runs one line. Option symbols, Slovak dead keys, and ⌘V paste work here. Click the image to focus input. Your pointer stays free.</small>
+<pre id="transcript" aria-live="polite">Results from the running OS appear here.</pre>
+<p><small>This input panel is a host bridge. The guest evaluates your exact UTF-8 source. Its seed framebuffer font still shows unsupported non-ASCII glyphs as “?”. The text field and transcript retain the original characters. Character entry does not add language syntax: for example, ≤ is not an alias for &lt;.</small></p>
+</main>
+<script>
+const source=document.querySelector('#source'),button=document.querySelector('#send'),status=document.querySelector('#status'),transcript=document.querySelector('#transcript'),frame=document.querySelector('#frame');
+let busy=false,composing=false;
+source.addEventListener('compositionstart',()=>composing=true);
+source.addEventListener('compositionend',()=>composing=false);
+source.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.isComposing&&!composing&&event.keyCode!==229){event.preventDefault();document.querySelector('#form').requestSubmit();}});
+document.querySelector('#form').addEventListener('submit',async event=>{
+ event.preventDefault();if(busy||composing)return;const text=source.value;
+ const bytes=new TextEncoder().encode(text).length;
+ if(!bytes||bytes>256||/[\x00-\x1f\x7f]/.test(text)){status.textContent='Enter one line, at most 256 UTF-8 bytes.';return;}
+ busy=true;button.disabled=true;status.textContent='Running…';
+ try{const response=await fetch('input',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:text})});const data=await response.json();if(!response.ok)throw Error(data.error);transcript.textContent=('agel> '+text+'\n'+data.result+'\n'+transcript.textContent).slice(0,16000);status.textContent='Ready';source.select();}
+ catch(error){status.textContent=error.message;}
+ finally{busy=false;button.disabled=false;source.focus();}
+});
+frame.addEventListener('click',()=>source.focus());
+function refresh(){frame.src='frame.png?t='+Date.now();}
+frame.addEventListener('load',()=>setTimeout(refresh,500));
+frame.addEventListener('error',()=>setTimeout(refresh,2000));
+refresh();source.focus();
+</script></html>

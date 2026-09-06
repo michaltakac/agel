@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.8: native agents inside the persistent
+The current repository is **v0.2.9: layout-aware graphical input and native agents inside the persistent
 graphical Agel workshop. Fixed-memory actors now spawn, exchange bounded FIFO
 messages, run deterministic transactional turns, compose, expose live state,
 and contain a failed behavior inside the unprivileged evaluator domain. The
@@ -208,8 +208,10 @@ The same architecture now reaches a native QEMU framebuffer. Launch it with:
 ./scripts/run-graphics.sh
 ```
 
-Click the QEMU window and type directly into Agel OS, or type in the launching
-terminal. For example:
+The launcher shows the real QEMU framebuffer in a local browser console. Type
+in its command field using your host keyboard layout, including Slovak/Option
+symbols and paste, without mouse capture. Use `--native` for the direct QEMU
+window with a US physical keyboard layout. For example:
 
 ```lisp
 (def square (fn (x) (* x x)))

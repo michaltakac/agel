@@ -16,6 +16,18 @@ trap 'rm -f "$serial" "$monitor" "$frame"' EXIT
     printf 'sendkey %s\n' "$key"
     sleep 0.08
   done
+  # Quote/eval needs formerly missing apostrophe; comparison needs '<'.
+  for key in shift-9 e v a l spc apostrophe shift-9 shift-comma spc 1 spc 2 shift-0 shift-0 ret
+  do
+    printf 'sendkey %s\n' "$key"
+    sleep 0.08
+  done
+  # Shifted letters and underscore must survive physical input intact.
+  for key in shift-9 d e f spc shift-a shift-minus shift-b spc 4 2 shift-0 ret shift-a shift-minus shift-b ret
+  do
+    printf 'sendkey %s\n' "$key"
+    sleep 0.08
+  done
   sleep 2
   printf 'screendump %s\n' "$frame"
   sleep 1
@@ -29,6 +41,10 @@ trap 'rm -f "$serial" "$monitor" "$frame"' EXIT
 grep -q '^AGEL_GRAPHICS_OK' "$serial"
 grep -q 'live-desktop> (accent cyan)' "$serial"
 grep -q 'COMMITTED REV 1' "$serial"
+grep -Fq "live-desktop> (eval '(< 1 2))" "$serial"
+grep -q '^#t' "$serial"
+grep -Fq 'live-desktop> A_B' "$serial"
+grep -q '^42' "$serial"
 test "$(head -c 2 "$frame")" = P6
 
 printf '%s\n' 'Agel live desktop: PS/2 keyboard -> normalized form -> scene commit [ok]'
