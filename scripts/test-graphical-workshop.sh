@@ -41,6 +41,13 @@ boot "$first" \
   '(def answer 42)' \
   '(+ answer 8)' \
   ':cell durable (def durable 77)' \
+  ':cell actor-behavior (def accumulate (fn (self state message) (+ state message)))' \
+  ':run actor-behavior' \
+  '(def counter (spawn accumulate 0))' \
+  '(send counter 20)' \
+  '(send counter 22)' \
+  '(run 2)' \
+  '(agent-state counter)' \
   ':save' \
   ':shutdown'
 
@@ -48,15 +55,24 @@ has_line "$first" '^AGEL_GRAPHICS_OK$'
 has_line "$first" '^42$'
 has_line "$first" '^50$'
 has_line "$first" '^CELL STAGED - RUN OR SAVE$'
+has_line "$first" '^#<native-function>$'
+has_line "$first" '^#<native-agent:1>$'
+has_line "$first" '^42$'
 has_line "$first" '^SAVED GENERATION 1$'
 
 boot "$second" \
   '(+ durable 1)' \
+  '(def restored (spawn accumulate 40))' \
+  '(send restored 2)' \
+  '(step)' \
+  '(agent-state restored)' \
   ':workspace' \
   ':shutdown'
 
 has_line "$second" '^AGEL_GRAPHICS_OK$'
 has_line "$second" '^78$'
-has_line "$second" '^GEN 1 CELLS 1 CLEAN$'
+has_line "$second" '^#t$'
+has_line "$second" '^42$'
+has_line "$second" '^GEN 1 CELLS 2 CLEAN$'
 
-printf '%s\n' 'Agel graphical workshop: evaluate -> source commit -> reboot -> replay [ok]'
+printf '%s\n' 'Agel graphical workshop: native agents -> source commit -> reboot -> replay [ok]'

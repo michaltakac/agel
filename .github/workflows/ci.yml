@@ -37,6 +37,7 @@ jobs:
       - run: ./scripts/test-boot.sh
       - run: ./scripts/test-monitor.sh
       - run: ./scripts/test-native.sh
+      - run: sh ./scripts/test-native-agents.sh
       - run: ./scripts/test-native-repl.sh
       - run: ./scripts/test-native-persistence.sh
       - run: ./scripts/test-graphics.sh

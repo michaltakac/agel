@@ -22,7 +22,11 @@ promise.
   workspace, including replay-validated save and reconstruction after reboot.
   `v0.2.7` adds eager-safe and bounded lexical fixed points, immutable
   convergence, and a transactional agent fixed-point driver with bounded
-  tracing, explicit model transitions, and message-ordered evolution. Minor releases may make
+  tracing, explicit model transitions, and message-ordered evolution. `v0.2.8`
+  is the first downward bootstrap of executable agents into the freestanding
+  evaluator: bounded native mailboxes, deterministic scheduling, atomic
+  behavior turns, inspection, and contained fault recovery run inside the
+  graphical OS. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

@@ -1,0 +1,57 @@
+; Paste these one line at a time into ./scripts/run-graphics.sh.
+; The first cell makes the behavior survive reboot as Agel source.
+
+:cell accumulate (def accumulate (fn (self state message) (+ state message)))
+:save
+(def counter (spawn accumulate 0))
+(send counter 20)
+(send counter 22)
+(run 2)
+(agent-state counter)
+(agent-turns counter)
+
+; Agents can compose through ordinary messages. This forwarder stores another
+; agent as its state, sends to it transactionally, and returns that state.
+
+:cell forward (def forward (fn (self state message) (begin (send state message) state)))
+:save
+(def sink (spawn accumulate 0))
+(def relay (spawn forward sink))
+(send relay 42)
+(run 2)
+(agent-state sink)
+
+; Continuation scheduling: each self-message starts a fresh turn. You can
+; inspect the countdown between turns without growing a recursive call stack.
+
+(def countdown (fn (self state message) (if (< 0 state) (begin (send self message) (- state 1)) state)))
+(def task (spawn countdown 3))
+(send task 0)
+(run 2)
+(agent-state task)
+(run 2)
+(agent-state task)
+(agent-pending task)
+
+; A submitted form is one outer transaction: the run below is undone because
+; division fails, so the sink still has its old state and pending message.
+
+(send sink 8)
+(begin (run 1) (/ 1 0))
+(agent-state sink)
+(agent-pending sink)
+(step)
+(agent-state sink)
+
+; Failed behavior turns are contained to one actor. The poison input remains
+; inspectable until an explicit operator decision drops it and restarts.
+
+(def fragile (fn (self state message) (/ state message)))
+(def risky (spawn fragile 1))
+(send risky 0)
+(step)
+(agent-faulted? risky)
+(agent-pending risky)
+(drop-message risky)
+(restart-agent risky)
+(agent-faulted? risky)

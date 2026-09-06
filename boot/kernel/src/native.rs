@@ -14,6 +14,9 @@ const MAX_BODY: usize = 192;
 const MAX_ARGUMENTS: usize = 8;
 const MAX_DEPTH: u8 = 24;
 const INITIAL_FUEL: u16 = 2_000;
+const MAX_AGENTS: usize = 8;
+const MAX_MAILBOX: usize = 8;
+const MAX_RUN_TURNS: usize = 32;
 const NONE: u16 = u16::MAX;
 
 /// Every fixed native resource bound, named and reported from the constants the
@@ -30,6 +33,9 @@ pub const LIMITS: &[(&str, u64)] = &[
     ("body", MAX_BODY as u64),
     ("depth", MAX_DEPTH as u64),
     ("fuel", INITIAL_FUEL as u64),
+    ("agents", MAX_AGENTS as u64),
+    ("mailbox", MAX_MAILBOX as u64),
+    ("run-turns", MAX_RUN_TURNS as u64),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +43,7 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     Nil,
+    Agent(u8),
     Code { start: u16, end: u16 },
     Function,
 }
@@ -49,6 +56,7 @@ enum Scalar {
     Int(i64),
     Bool(bool),
     Nil,
+    Agent(u8),
 }
 
 #[derive(Clone, Copy)]
@@ -120,14 +128,47 @@ impl Binding {
     };
 }
 
+/// One fixed-memory native actor. Behaviors and messages are deliberately
+/// scalar at this bootstrap layer; richer protocols remain Agel libraries.
+#[derive(Clone, Copy)]
+struct Agent {
+    used: bool,
+    faulted: bool,
+    behavior: Function,
+    state: Scalar,
+    mailbox: [Scalar; MAX_MAILBOX],
+    mailbox_head: u8,
+    mailbox_length: u8,
+    turns: u64,
+}
+
+impl Agent {
+    const EMPTY: Self = Self {
+        used: false,
+        faulted: false,
+        behavior: Function::EMPTY,
+        state: Scalar::Nil,
+        mailbox: [Scalar::Nil; MAX_MAILBOX],
+        mailbox_head: 0,
+        mailbox_length: 0,
+        turns: 0,
+    };
+}
+
 #[derive(Clone, Copy)]
 struct World {
     bindings: [Binding; MAX_BINDINGS],
+    agents: [Agent; MAX_AGENTS],
+    scheduler_cursor: u8,
+    scheduler_active: bool,
 }
 
 impl World {
     const EMPTY: Self = Self {
         bindings: [Binding::EMPTY; MAX_BINDINGS],
+        agents: [Agent::EMPTY; MAX_AGENTS],
+        scheduler_cursor: 0,
+        scheduler_active: false,
     };
 
     fn find(&self, name: &[u8]) -> Option<usize> {
@@ -490,6 +531,17 @@ enum Builtin {
     Equal,
     Less,
     Eval,
+    Spawn,
+    Send,
+    Step,
+    Run,
+    AgentState,
+    AgentPending,
+    AgentTurns,
+    AgentFaulted,
+    RestartAgent,
+    DropMessage,
+    AgentCount,
 }
 
 #[derive(Clone, Copy)]
@@ -565,6 +617,7 @@ fn public_value(value: RuntimeValue, document: &Document) -> Result<Value, Error
         RuntimeValue::Scalar(Scalar::Int(value)) => Ok(Value::Int(value)),
         RuntimeValue::Scalar(Scalar::Bool(value)) => Ok(Value::Bool(value)),
         RuntimeValue::Scalar(Scalar::Nil) => Ok(Value::Nil),
+        RuntimeValue::Scalar(Scalar::Agent(id)) => Ok(Value::Agent(id)),
         RuntimeValue::Code(node) => {
             let node = document.nodes[node as usize];
             Ok(Value::Code {
@@ -739,6 +792,17 @@ fn evaluate_def(
             | b"="
             | b"<"
             | b"eval"
+            | b"spawn"
+            | b"send"
+            | b"step"
+            | b"run"
+            | b"agent-state"
+            | b"agent-pending"
+            | b"agent-turns"
+            | b"agent-faulted?"
+            | b"restart-agent"
+            | b"drop-message"
+            | b"agent-count"
     ) {
         return Err(Error("native core names cannot be redefined"));
     }
@@ -924,6 +988,34 @@ fn apply_builtin(
     depth: u8,
     fuel: &mut u16,
 ) -> Result<RuntimeValue, Error> {
+    match builtin {
+        Builtin::Spawn => return spawn_agent(arguments, world),
+        Builtin::Send => return send_agent(arguments, world),
+        Builtin::Step => {
+            if !arguments.is_empty() {
+                return Err(Error("step expects no arguments"));
+            }
+            return Ok(RuntimeValue::Scalar(Scalar::Bool(!matches!(
+                schedule_one(world, depth, fuel)?,
+                Schedule::Idle
+            ))));
+        }
+        Builtin::Run => return run_agents(arguments, world, depth, fuel),
+        Builtin::AgentState => return inspect_agent(arguments, world, AgentField::State),
+        Builtin::AgentPending => return inspect_agent(arguments, world, AgentField::Pending),
+        Builtin::AgentTurns => return inspect_agent(arguments, world, AgentField::Turns),
+        Builtin::AgentFaulted => return inspect_agent(arguments, world, AgentField::Faulted),
+        Builtin::RestartAgent => return restart_agent(arguments, world),
+        Builtin::DropMessage => return drop_message(arguments, world),
+        Builtin::AgentCount => {
+            if !arguments.is_empty() {
+                return Err(Error("agent-count expects no arguments"));
+            }
+            let count = world.agents.iter().filter(|agent| agent.used).count() as i64;
+            return Ok(RuntimeValue::Scalar(Scalar::Int(count)));
+        }
+        _ => {}
+    }
     if matches!(builtin, Builtin::Eval) {
         if let [RuntimeValue::Code(node)] = arguments {
             return evaluate_node(document, source, *node, world, locals, depth + 1, fuel);
@@ -949,6 +1041,201 @@ fn apply_builtin(
     }
     .ok_or(Error("integer overflow"))?;
     Ok(RuntimeValue::Scalar(Scalar::Int(result)))
+}
+
+fn spawn_agent(arguments: &[RuntimeValue], world: &mut World) -> Result<RuntimeValue, Error> {
+    let [RuntimeValue::Function(behavior), RuntimeValue::Scalar(state)] = arguments else {
+        return Err(Error("spawn expects a stored function and scalar state"));
+    };
+    if behavior.parameter_count != 3 {
+        return Err(Error("native agent behavior expects self, state, message"));
+    }
+    let index = world
+        .agents
+        .iter()
+        .position(|agent| !agent.used)
+        .ok_or(Error("native agent table is full"))?;
+    world.agents[index] = Agent {
+        used: true,
+        behavior: *behavior,
+        state: *state,
+        ..Agent::EMPTY
+    };
+    Ok(RuntimeValue::Scalar(Scalar::Agent((index + 1) as u8)))
+}
+
+fn send_agent(arguments: &[RuntimeValue], world: &mut World) -> Result<RuntimeValue, Error> {
+    let [RuntimeValue::Scalar(Scalar::Agent(id)), RuntimeValue::Scalar(message)] = arguments else {
+        return Err(Error("send expects an agent and scalar message"));
+    };
+    let index = agent_index(world, *id)?;
+    let agent = &mut world.agents[index];
+    if agent.faulted {
+        return Err(Error("cannot send to faulted native agent"));
+    }
+    if agent.mailbox_length as usize == MAX_MAILBOX {
+        return Err(Error("native agent mailbox is full"));
+    }
+    let tail = (agent.mailbox_head as usize + agent.mailbox_length as usize) % MAX_MAILBOX;
+    agent.mailbox[tail] = *message;
+    agent.mailbox_length += 1;
+    Ok(RuntimeValue::Scalar(Scalar::Int(i64::from(
+        agent.mailbox_length,
+    ))))
+}
+
+#[derive(Clone, Copy)]
+enum Schedule {
+    Idle,
+    Committed,
+    Faulted,
+}
+
+fn schedule_one(world: &mut World, depth: u8, fuel: &mut u16) -> Result<Schedule, Error> {
+    if world.scheduler_active {
+        return Err(Error("agent behavior cannot invoke the native scheduler"));
+    }
+    let mut scanned = 0;
+    let mut selected = None;
+    while scanned < MAX_AGENTS {
+        let index = world.scheduler_cursor as usize;
+        world.scheduler_cursor = ((index + 1) % MAX_AGENTS) as u8;
+        let agent = world.agents[index];
+        if agent.used && !agent.faulted && agent.mailbox_length > 0 {
+            selected = Some(index);
+            break;
+        }
+        scanned += 1;
+    }
+    let Some(index) = selected else {
+        return Ok(Schedule::Idle);
+    };
+
+    // A complete world checkpoint makes the behavior's state writes and sends
+    // atomic. On failure only the fault marker survives; the input remains in
+    // the mailbox for inspection and an explicit restart.
+    let checkpoint = *world;
+    let actor = world.agents[index];
+    let message = actor.mailbox[actor.mailbox_head as usize];
+    world.agents[index].mailbox_head = ((actor.mailbox_head as usize + 1) % MAX_MAILBOX) as u8;
+    world.agents[index].mailbox_length -= 1;
+    world.scheduler_active = true;
+    let arguments = [
+        RuntimeValue::Scalar(Scalar::Agent((index + 1) as u8)),
+        RuntimeValue::Scalar(actor.state),
+        RuntimeValue::Scalar(message),
+    ];
+    let result = apply_stored_function(actor.behavior, &arguments, world, depth + 1, fuel);
+    if *fuel == 0 {
+        return Err(Error("native evaluator fuel exhausted"));
+    }
+    match result {
+        Ok(RuntimeValue::Scalar(state)) => {
+            world.scheduler_active = false;
+            world.agents[index].state = state;
+            world.agents[index].turns = world.agents[index]
+                .turns
+                .checked_add(1)
+                .ok_or(Error("native agent turn counter exhausted"))?;
+            Ok(Schedule::Committed)
+        }
+        Ok(_) | Err(_) => {
+            *world = checkpoint;
+            world.agents[index].faulted = true;
+            Ok(Schedule::Faulted)
+        }
+    }
+}
+
+fn run_agents(
+    arguments: &[RuntimeValue],
+    world: &mut World,
+    depth: u8,
+    fuel: &mut u16,
+) -> Result<RuntimeValue, Error> {
+    if world.scheduler_active {
+        return Err(Error("agent behavior cannot invoke the native scheduler"));
+    }
+    let [RuntimeValue::Scalar(Scalar::Int(requested))] = arguments else {
+        return Err(Error("run expects one non-negative turn limit"));
+    };
+    let turns = usize::try_from(*requested)
+        .ok()
+        .filter(|turns| *turns <= MAX_RUN_TURNS)
+        .ok_or(Error("native scheduler turn limit exceeded"))?;
+    let mut performed = 0;
+    while performed < turns {
+        match schedule_one(world, depth, fuel)? {
+            Schedule::Idle => break,
+            Schedule::Committed | Schedule::Faulted => performed += 1,
+        }
+    }
+    Ok(RuntimeValue::Scalar(Scalar::Int(performed as i64)))
+}
+
+#[derive(Clone, Copy)]
+enum AgentField {
+    State,
+    Pending,
+    Turns,
+    Faulted,
+}
+
+fn inspect_agent(
+    arguments: &[RuntimeValue],
+    world: &World,
+    field: AgentField,
+) -> Result<RuntimeValue, Error> {
+    let [RuntimeValue::Scalar(Scalar::Agent(id))] = arguments else {
+        return Err(Error("agent inspector expects one agent"));
+    };
+    let agent = world.agents[agent_index(world, *id)?];
+    Ok(RuntimeValue::Scalar(match field {
+        AgentField::State => agent.state,
+        AgentField::Pending => Scalar::Int(i64::from(agent.mailbox_length)),
+        AgentField::Turns => Scalar::Int(i64::try_from(agent.turns).unwrap_or(i64::MAX)),
+        AgentField::Faulted => Scalar::Bool(agent.faulted),
+    }))
+}
+
+fn restart_agent(arguments: &[RuntimeValue], world: &mut World) -> Result<RuntimeValue, Error> {
+    if world.scheduler_active {
+        return Err(Error("native agent recovery requires the operator"));
+    }
+    let [RuntimeValue::Scalar(Scalar::Agent(id))] = arguments else {
+        return Err(Error("restart-agent expects one agent"));
+    };
+    let index = agent_index(world, *id)?;
+    world.agents[index].faulted = false;
+    Ok(RuntimeValue::Scalar(Scalar::Agent(*id)))
+}
+
+fn drop_message(arguments: &[RuntimeValue], world: &mut World) -> Result<RuntimeValue, Error> {
+    if world.scheduler_active {
+        return Err(Error("native agent recovery requires the operator"));
+    }
+    let [RuntimeValue::Scalar(Scalar::Agent(id))] = arguments else {
+        return Err(Error("drop-message expects one agent"));
+    };
+    let index = agent_index(world, *id)?;
+    let agent = &mut world.agents[index];
+    if agent.mailbox_length == 0 {
+        return Err(Error("native agent mailbox is empty"));
+    }
+    let message = agent.mailbox[agent.mailbox_head as usize];
+    agent.mailbox_head = ((agent.mailbox_head as usize + 1) % MAX_MAILBOX) as u8;
+    agent.mailbox_length -= 1;
+    Ok(RuntimeValue::Scalar(message))
+}
+
+fn agent_index(world: &World, id: u8) -> Result<usize, Error> {
+    let index = usize::from(id)
+        .checked_sub(1)
+        .ok_or(Error("invalid native agent"))?;
+    if index >= MAX_AGENTS || !world.agents[index].used {
+        return Err(Error("invalid native agent"));
+    }
+    Ok(index)
 }
 
 fn scalar_integers(arguments: &[RuntimeValue]) -> Result<[i64; 2], Error> {
@@ -987,6 +1274,17 @@ fn resolve_symbol(
         b"=" => Some(Builtin::Equal),
         b"<" => Some(Builtin::Less),
         b"eval" => Some(Builtin::Eval),
+        b"spawn" => Some(Builtin::Spawn),
+        b"send" => Some(Builtin::Send),
+        b"step" => Some(Builtin::Step),
+        b"run" => Some(Builtin::Run),
+        b"agent-state" => Some(Builtin::AgentState),
+        b"agent-pending" => Some(Builtin::AgentPending),
+        b"agent-turns" => Some(Builtin::AgentTurns),
+        b"agent-faulted?" => Some(Builtin::AgentFaulted),
+        b"restart-agent" => Some(Builtin::RestartAgent),
+        b"drop-message" => Some(Builtin::DropMessage),
+        b"agent-count" => Some(Builtin::AgentCount),
         _ => None,
     };
     if let Some(builtin) = builtin {
@@ -1032,4 +1330,113 @@ fn symbol_is(document: &Document, source: &[u8], node: u16, expected: &[u8]) -> 
 fn node_bytes<'a>(document: &Document, source: &'a [u8], node: u16) -> &'a [u8] {
     let node = document.nodes[node as usize];
     &source[node.start as usize..node.end as usize]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn eval(session: &mut Session, source: &str) -> Value {
+        session.evaluate(source.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn continuations_yield_fairly_and_world_rollback_restores_mailboxes() {
+        let mut session = Session::new();
+        eval(
+            &mut session,
+            "(def tick (fn (self state message) (begin (send self message) (+ state 1))))",
+        );
+        eval(&mut session, "(def a (spawn tick 0))");
+        eval(&mut session, "(def b (spawn tick 0))");
+        eval(&mut session, "(send a 1)");
+        eval(&mut session, "(send b 1)");
+        assert_eq!(eval(&mut session, "(run 4)"), Value::Int(4));
+        session.rollback().unwrap();
+        assert_eq!(eval(&mut session, "(agent-state a)"), Value::Int(0));
+        assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(1));
+        eval(&mut session, "(run 4)");
+        assert_eq!(eval(&mut session, "(agent-state a)"), Value::Int(2));
+        assert_eq!(eval(&mut session, "(agent-state b)"), Value::Int(2));
+    }
+
+    #[test]
+    fn faults_restore_sends_and_globals_and_preserve_the_poison_message() {
+        let mut session = Session::new();
+        eval(&mut session, "(def x 1)");
+        eval(
+            &mut session,
+            "(def bad (fn (self state message) (begin (def x 99) (send self 9) (/ 1 0))))",
+        );
+        eval(&mut session, "(def a (spawn bad 7))");
+        eval(&mut session, "(send a 42)");
+        eval(&mut session, "(step)");
+        assert_eq!(eval(&mut session, "x"), Value::Int(1));
+        assert_eq!(eval(&mut session, "(agent-state a)"), Value::Int(7));
+        assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(1));
+        assert_eq!(eval(&mut session, "(agent-faulted? a)"), Value::Bool(true));
+        assert_eq!(eval(&mut session, "(drop-message a)"), Value::Int(42));
+        eval(&mut session, "(restart-agent a)");
+        assert_eq!(eval(&mut session, "(agent-faulted? a)"), Value::Bool(false));
+    }
+
+    #[test]
+    fn nested_scheduling_and_recovery_are_rejected_even_with_zero_turns() {
+        for body in [
+            "(run 0)",
+            "(step)",
+            "(restart-agent self)",
+            "(drop-message self)",
+        ] {
+            let mut session = Session::new();
+            eval(
+                &mut session,
+                &format!("(def bad (fn (self state message) {body}))"),
+            );
+            eval(&mut session, "(def a (spawn bad 0))");
+            eval(&mut session, "(send a 1)");
+            eval(&mut session, "(step)");
+            assert_eq!(eval(&mut session, "(agent-faulted? a)"), Value::Bool(true));
+            assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(1));
+        }
+    }
+
+    #[test]
+    fn capacity_rejection_preserves_committed_world() {
+        let mut session = Session::new();
+        eval(&mut session, "(def tick (fn (self state message) message))");
+        eval(&mut session, "(def a (spawn tick 0))");
+        for _ in 0..MAX_MAILBOX {
+            eval(&mut session, "(send a 1)");
+        }
+        let revision = session.revision();
+        assert!(session.evaluate(b"(send a 2)").is_err());
+        assert_eq!(session.revision(), revision);
+        for _ in 1..MAX_AGENTS {
+            eval(&mut session, "(spawn tick 0)");
+        }
+        assert!(session.evaluate(b"(spawn tick 0)").is_err());
+        assert!(session.evaluate(b"(run 33)").is_err());
+        assert!(session.evaluate(b"(run -1)").is_err());
+        assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(8));
+    }
+
+    #[test]
+    fn shared_fuel_exhaustion_aborts_all_turns() {
+        let mut session = Session::new();
+        let work = "(+ 1 1) ".repeat(20);
+        eval(
+            &mut session,
+            &format!("(def tick (fn (self state message) (begin {work}(send self 1) state)))"),
+        );
+        eval(&mut session, "(def a (spawn tick 0))");
+        eval(&mut session, "(send a 1)");
+        assert_eq!(
+            session.evaluate(b"(run 32)"),
+            Err(Error("native evaluator fuel exhausted"))
+        );
+        assert_eq!(eval(&mut session, "(agent-turns a)"), Value::Int(0));
+        assert_eq!(eval(&mut session, "(agent-faulted? a)"), Value::Bool(false));
+        assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(1));
+    }
 }

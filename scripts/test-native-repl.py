@@ -15,7 +15,7 @@ class Harness:
     def __init__(self, image: str, *, persistent: bool = False) -> None:
         self.output: queue.Queue[bytes | None] = queue.Queue()
         self.transcript = bytearray()
-        self.deadline = time.monotonic() + 45.0
+        self.deadline = time.monotonic() + 60.0
         self.process = subprocess.Popen(
             [
                 "qemu-system-x86_64",
@@ -341,19 +341,51 @@ def main() -> int:
         harness.send(
             ":limits",
             "source=256 nodes=128 globals=24 name=24 params=4 locals=8 "
-            "args=8 body=192 depth=24 fuel=2000",
+            "args=8 body=192 depth=24 fuel=2000 agents=8 mailbox=8 run-turns=32",
             10,
         )
-        harness.send(":verify", "candidate B: isolated health evidence accepted", 10)
-        harness.send(":promote", "selected slot B; slot A retained for rollback", 10)
-        harness.send(":verify", "candidate B: isolated health evidence accepted", 10)
+        harness.send(
+            "(def accumulate (fn (self state message) (+ state message)))",
+            "#<native-function>",
+            11,
+        )
+        harness.send("(def counter (spawn accumulate 0))", "#<native-agent:1>", 12)
+        harness.send("(send counter 20)", "1", 13)
+        harness.send("(send counter 22)", "2", 14)
+        harness.send(
+            "(begin (run 1) (/ 1 0))",
+            "error: division by zero (transaction rolled back)",
+            14,
+        )
+        harness.send("(agent-pending counter)", "2", 15)
+        harness.send("(agent-state counter)", "0", 16)
+        harness.send("(run 2)", "2", 17)
+        harness.send("(agent-state counter)", "42", 18)
+        harness.send("(agent-turns counter)", "2", 19)
+        harness.send("(agent-count)", "1", 20)
+        harness.send(
+            "(def fragile (fn (self state message) (/ state message)))",
+            "#<native-function>",
+            21,
+        )
+        harness.send("(def broken (spawn fragile 1))", "#<native-agent:2>", 22)
+        harness.send("(send broken 0)", "1", 23)
+        harness.send("(step)", "#t", 24)
+        harness.send("(agent-faulted? broken)", "#t", 25)
+        harness.send("(agent-pending broken)", "1", 26)
+        harness.send("(drop-message broken)", "0", 27)
+        harness.send("(restart-agent broken)", "#<native-agent:2>", 28)
+        harness.send("(agent-faulted? broken)", "#f", 29)
+        harness.send(":verify", "candidate B: isolated health evidence accepted", 29)
+        harness.send(":promote", "selected slot B; slot A retained for rollback", 29)
+        harness.send(":verify", "candidate B: isolated health evidence accepted", 29)
         harness.send(
             ":promote",
             "denied: candidate B is already active; slot A remains rollback",
-            10,
+            29,
         )
-        harness.send(":fault", "watchdog fault: rolled back to slot A", 10)
-        harness.send(":recovery-status", "active slot: A (stable)", 10)
+        harness.send(":fault", "watchdog fault: rolled back to slot A", 29)
+        harness.send(":recovery-status", "active slot: A (stable)", 29)
 
         assert harness.process.stdin is not None
         for byte in b":shutdown":

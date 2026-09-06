@@ -13,10 +13,11 @@ possible, and it is not a substitute for isolation.
 This module currently runs in the hosted Agel agent runtime—the OS/application
 layer that already provides agents, protocols, snapshots, effects and real
 model adapters. The bootable graphical workshop currently exposes the smaller
-native evaluator and cannot yet spawn these agents. Porting the agent runtime
-and this ordinary Agel library into that persistent native workspace is a
-remaining bootstrap step; the implementation here is the executable semantic
-reference for that port.
+native evaluator. Since v0.2.8 it can spawn scalar native actors and schedule
+self-message continuations (see [native agents](native-agents.md)). Porting
+rich protocols, collections, effects, and this ordinary Agel library remains
+a bootstrap step; the implementation here is the executable semantic reference
+for that port.
 
 ## Review of the Y-combinator proposal
 

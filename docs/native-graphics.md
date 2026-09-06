@@ -1,6 +1,6 @@
 # Native Agel graphics
 
-Agel v0.2.6 boots to an actual 1024×768×32 live graphical workshop in QEMU. The path
+Agel v0.2.8 boots to an actual 1024×768×32 live graphical workshop in QEMU. The path
 is deliberately split so that visual meaning remains language data and display
 authority remains a narrow replaceable service:
 
@@ -66,6 +66,22 @@ separate ring-3 domain. For example:
 
 The result appears both in the graphical command bar and on serial. A language
 error rolls back its evaluator transaction without changing the desktop.
+
+The same evaluator now owns bounded executable agents. A behavior definition can
+be persisted as a cell, replayed on boot, and instantiated from the desktop:
+
+```lisp
+:cell accumulate (def accumulate (fn (self state message) (+ state message)))
+:save
+(def counter (spawn accumulate 0))
+(send counter 42)
+(step)
+(agent-state counter)
+```
+
+Agent state and mailboxes participate in native world transactions; failed
+behavior turns are contained and explicitly recoverable. See
+[`native-agents.md`](native-agents.md).
 
 ## Durable source cells
 
@@ -144,6 +160,8 @@ The graphical tests prove these properties:
 7. Ordinary Lisp definitions evaluate in the independent evaluator domain.
 8. A named source cell is saved, the machine exits, the same disk reboots, and
    the restored definition evaluates to the expected result.
+9. A native actor runs transactional mailbox turns in the graphical workshop;
+   its persisted behavior is replayed and spawns a fresh actor after reboot.
 
 Run the headless proof with:
 

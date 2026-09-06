@@ -34,6 +34,7 @@ pub fn native_repl() -> ! {
         match source {
             b":help" => console::write(
                 "forms: quote if begin def fn | builtins: + - * / = < eval\n\
+                 agents: spawn send step run agent-state agent-pending agent-turns agent-faulted? restart-agent drop-message agent-count\n\
                  commands: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :shutdown\n",
             ),
             b":revision" => {
@@ -149,6 +150,11 @@ fn write_value(value: native::Value, source: &[u8]) {
         native::Value::Bool(true) => console::write("#t"),
         native::Value::Bool(false) => console::write("#f"),
         native::Value::Nil => console::write("nil"),
+        native::Value::Agent(id) => {
+            console::write("#<native-agent:");
+            console::write_u64(u64::from(id));
+            console::write(">");
+        }
         native::Value::Code { start, end } => {
             console::write("'");
             console::write_bytes(&source[start as usize..end as usize]);
@@ -191,7 +197,29 @@ pub fn native_selftest() -> ! {
         && session
             .evaluate(b"(def fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1))))))")
             .is_ok()
-        && expect_int(&mut session, b"(fact 6)", 720);
+        && expect_int(&mut session, b"(fact 6)", 720)
+        && session
+            .evaluate(b"(def add-message (fn (self state message) (+ state message)))")
+            .is_ok()
+        && session.evaluate(b"(def native-actor (spawn add-message 0))")
+            == Ok(native::Value::Agent(1))
+        && expect_int(&mut session, b"(send native-actor 40)", 1)
+        && expect_int(&mut session, b"(send native-actor 2)", 2)
+        && expect_int(&mut session, b"(run 2)", 2)
+        && expect_int(&mut session, b"(agent-state native-actor)", 42)
+        && session
+            .evaluate(b"(begin (send native-actor 1) (send native-actor 2) (send native-actor 3) (send native-actor 4) (send native-actor 5) (send native-actor 6) (send native-actor 7) (send native-actor 8) (send native-actor 9))")
+            .is_err()
+        && expect_int(&mut session, b"(agent-pending native-actor)", 0)
+        && session
+            .evaluate(b"(def fail-after-send (fn (self state message) (begin (send state message) (/ 1 0))))")
+            .is_ok()
+        && session
+            .evaluate(b"(def failing-actor (spawn fail-after-send native-actor))")
+            .is_ok()
+        && expect_int(&mut session, b"(send failing-actor 9)", 1)
+        && expect_int(&mut session, b"(run 1)", 1)
+        && expect_int(&mut session, b"(agent-pending native-actor)", 0);
     if passed {
         console::write("AGEL_NATIVE_OK\n");
         arch::exit(true)

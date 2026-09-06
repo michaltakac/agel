@@ -4,11 +4,13 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.7: agentic fixed points above a persistent
-graphical Agel workshop. Long-lived agents can express each logical
-continuation as a bounded, traced, transactional scheduler turn; pause for an
-explicit model result; and adopt a new step closure at a message-ordered
-boundary. The desktop evaluates real Agel forms in an independent ring-3 domain and saves
+The current repository is **v0.2.8: native agents inside the persistent
+graphical Agel workshop. Fixed-memory actors now spawn, exchange bounded FIFO
+messages, run deterministic transactional turns, compose, expose live state,
+and contain a failed behavior inside the unprivileged evaluator domain. The
+hosted runtime retains richer typed protocols, supervision, model calls, and
+agentic fixed points while their primitives are bootstrapped downward. The
+desktop evaluates real Agel forms in an independent ring-3 domain and saves
 bounded named source cells to alternating checked disk slots, reconstructing
 the language world by replay after reboot. The QEMU-window keyboard and serial
 console also drive transactional live scene changes while a dedicated ring-3
@@ -84,6 +86,9 @@ It provides:
   domain, with errors rolling back the evaluator transaction;
 - graphical named source-cell staging, replay-validated dual-slot save, reload,
   and automatic reconstruction after reboot;
+- fixed-memory native agents with scalar state and messages, bounded FIFO
+  mailboxes, deterministic round-robin turns, transactional sends/state, live
+  inspection, and contained fault/drop/restart recovery;
 - semantic hit-testing that returns inspectable intents without executing them;
 - an isolated layout agent that preserves its last good frame when compilation
   fails;
@@ -210,7 +215,12 @@ terminal. For example:
 (def square (fn (x) (* x x)))
 (square 12)
 :cell mathematics (def triangular (fn (n) (/ (* n (+ n 1)) 2)))
+:cell accumulate (def accumulate (fn (self state message) (+ state message)))
 :save
+(def counter (spawn accumulate 0))
+(send counter 42)
+(step)
+(agent-state counter)
 (accent cyan)
 (workspace 2)
 (title "LIVE AGEL")
@@ -221,6 +231,10 @@ terminal. For example:
 Run `:help` inside the desktop for its command postcard. Named cells survive
 `:shutdown` and the next `./scripts/run-graphics.sh`; a complete walkthrough is
 in [`examples/graphical-workshop.txt`](examples/graphical-workshop.txt).
+The native actor walkthrough is
+[`examples/native-agents.txt`](examples/native-agents.txt), with its exact
+fault and transaction contract in
+[`docs/native-agents.md`](docs/native-agents.md).
 
 The command grammar and current trust boundary are documented in
 [`docs/native-graphics.md`](docs/native-graphics.md).

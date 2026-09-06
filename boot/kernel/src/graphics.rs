@@ -571,7 +571,7 @@ fn execute_workshop(
         arch::exit(true);
     }
     if line == b":help" {
-        return StatusLine::new(b"forms: Lisp evaluates | UI: (help) | cells: :cell NAME FORM :run NAME :show NAME :delete NAME :cells :workspace :save :reload | evaluator: :revision :rollback :defs :limits | :shutdown");
+        return StatusLine::new(b"forms: Lisp evaluates | agents: spawn send step run inspect/restart | UI: (help) | cells: :cell NAME FORM :run NAME :show NAME :delete NAME :cells :workspace :save :reload | evaluator: :revision :rollback :defs :limits | :shutdown");
     }
     if line == b":revision" {
         let mut status = StatusLine::new(b"EVAL REV ");

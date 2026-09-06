@@ -18,6 +18,9 @@ form. Implemented special forms and functions are:
 ```text
 quote  if  begin  def  fn
 +  -  *  /  =  <  eval
+spawn  send  step  run
+agent-state  agent-pending  agent-turns  agent-faulted?
+restart-agent  drop-message  agent-count
 ```
 
 Arithmetic and comparison currently take exactly two integers. `fn` accepts at
@@ -78,7 +81,8 @@ definition without rebooting the VM.
 
 The native seed permits 128 syntax nodes, 24 global definitions, 24-byte names,
 four function parameters, eight arguments/local slots, 192-byte stored bodies,
-24 reader/call levels, and 2,000 evaluation steps per submitted form. The serial
+24 reader/call levels, 2,000 evaluation steps per submitted form, eight native
+agents, eight messages per mailbox, and 32 turns per `run`. The serial
 input buffer is 256 bytes. These are explicit resource policy, not accidental
 allocation failures. `:limits` renders the table directly from the constants the
 evaluator enforces, so the console, this document, and the implementation cannot
@@ -121,13 +125,14 @@ recover the previous generation in every case.
 isolated REPL through a stateful, recursive, rollback-producing session.
 
 This is enough to write, organize, and retain small programs inside Agel itself,
-and to see an Agel-authored vector frame in the VM. It is not yet a self-hosted
-graphical development environment: the editor and storage codec are trusted
-Rust services, and the hosted macro/module/agent/effect system is not in the VM.
-Since v0.2.4 the graphical baseline can be changed through a bounded live Agel
-command surface and rolled back without rebooting. That parser is not yet the
-full native evaluator; merging the persistent source-cell workshop with the
-graphical scene agent is the next useful rung.
+and to run fixed-memory agents beside an Agel-authored vector frame in the VM.
+It is not yet a self-hosted graphical development environment: the editor and
+storage codec are trusted Rust services, and hosted macros, modules, effects,
+model adapters, and rich agent protocols are not yet in the VM. Since v0.2.6
+the graphical command surface and persistent source-cell workshop share the
+real native evaluator. Project v0.2.8 adds the downward-bootstrap actor seed;
+its exact transaction and containment semantics are in
+[`native-agents.md`](native-agents.md).
 
 ## v0.1.6 isolation boundary
 
