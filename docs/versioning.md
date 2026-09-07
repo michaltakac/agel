@@ -31,6 +31,9 @@ promise.
   without mouse capture. `v0.2.10` restores QEMU's direct window as the default
   and connects committed native Agel scene data to the compositor, including
   an Agel dock library, actor-driven repaint, rollback, and reboot replay.
+  `v0.2.11` adds the native agent workbench: pointer-to-agent actions, keyboard
+  focus, source inspection, isolated candidate previews, turn-boundary behavior
+  replacement, explicit promotion/discard, and persisted source upgrades.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

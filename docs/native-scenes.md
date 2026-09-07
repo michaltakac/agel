@@ -51,15 +51,21 @@ an actor turn, after rollback, after invalid geometry, and after reboot.
 
 ## What remains for “say it and the OS changes”
 
-1. Pointer events, semantic hit testing, focus, and a push-to-talk hotkey in
-   the native window. The present dock shapes have no click actions.
+The [v0.2.11 workbench](native-workbench.md) now adds native pointer events,
+semantic hit testing, library-defined focus/actions, source inspection and
+manual candidate preview/promotion. The older `dock.agel` example remains a
+visual-only example; `workbench.agel` is the interactive one.
+
+1. A push-to-talk hotkey and recording indicator in the native window.
 2. A microphone capture service and transcription adapter. A temporary native
    host companion can bridge audio while guest audio/network drivers mature;
    it should not replace the OS's display window.
 3. An intent agent that receives the transcript, reads the current scene/source
    revision, and asks an explicit model provider for a bounded code proposal.
-4. A candidate evaluator, validation, preview, and revision-checked promotion
-   of that proposal, retaining the last working source and frame.
+4. Connect model proposals to the existing bounded candidate evaluator and
+   extend validation to coupled source changes, richer protocols and state
+   migrations. Manual runtime promotion and persisted source edits are still
+   separate operations in v0.2.11.
 5. For animated SVG wallpapers: a bounded SVG subset/importer, an animation
    clock, per-frame CPU/allocation budgets, and an Agel wallpaper service.
    Loading arbitrary SVG or executing SVG scripts is not implemented here.

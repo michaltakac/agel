@@ -19,7 +19,7 @@ const RECORD_BYTES: usize = 64;
 const STREAM_HEADER_BYTES: usize = 16;
 const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
-const MAX_SCENE_COMMANDS: usize = 64;
+const MAX_SCENE_COMMANDS: usize = 80;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 const DISPLAY_LINE_BYTES: usize = 22;
 
@@ -35,6 +35,9 @@ struct Scene {
     title_len: u8,
     rectangles: [[u32; 7]; 12],
     rectangle_count: usize,
+    previewing: bool,
+    inspector: Option<StatusLine>,
+    pointer: Option<(u32, u32)>,
 }
 
 impl Scene {
@@ -49,6 +52,9 @@ impl Scene {
             title_len: text.len() as u8,
             rectangles: [[0; 7]; 12],
             rectangle_count: 0,
+            previewing: false,
+            inspector: None,
+            pointer: None,
         }
     }
 }
@@ -168,6 +174,7 @@ impl Keyboard {
         }
         Some(match code {
             0x01 => 0x1b,
+            0x0f => b'\t',
             0x0e => 0x08,
             0x1c => b'\n',
             0x39 => b' ',
@@ -451,6 +458,30 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         }
         frame.push(record)?;
     }
+    if let Some(text) = scene.inspector {
+        let mut panel = panel_record();
+        put_u32(&mut panel, 1, 270);
+        put_u32(&mut panel, 2, 290);
+        put_u32(&mut panel, 3, 720);
+        put_u32(&mut panel, 4, 250);
+        frame.push(panel)?;
+        frame.push(text_record(
+            292,
+            304,
+            2,
+            0xffffff,
+            b"AGENT SOURCE - ESC TO CLOSE",
+        ))?;
+        for (index, chunk) in text.get().chunks(28).enumerate() {
+            frame.push(text_record(
+                292,
+                330 + index as u32 * 22,
+                2,
+                0xae_b6_d0,
+                chunk,
+            ))?;
+        }
+    }
     if let Some(line) = line {
         let mut prompt = [b' '; 28];
         prompt[..6].copy_from_slice(b"AGEL> ");
@@ -464,6 +495,16 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         frame.push(panel_record())?;
         frame.push(text_record(270, 706, 2, accent[2], &prompt[..6 + length]))?;
         frame.push(text_record(270, 732, 2, 0xae_b6_d0, status))?;
+    }
+    if let Some((x, y)) = scene.pointer {
+        let mut cursor = [0; RECORD_BYTES];
+        for (index, word) in [2, x.min(1018), y.min(762), 6, 6, 2, 0xffffff]
+            .iter()
+            .enumerate()
+        {
+            put_u32(&mut cursor, index, *word);
+        }
+        frame.push(cursor)?;
     }
     Ok(frame)
 }
@@ -588,7 +629,9 @@ fn render(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'static str> 
 }
 
 fn render_overlay(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'static str> {
-    let start = frame.count.saturating_sub(3);
+    // A pointer, when visible, follows the three command-bar records.
+    let has_pointer = frame.count > 0 && record_u32(&frame.records[frame.count - 1], 0) == 2;
+    let start = frame.count.saturating_sub(if has_pointer { 4 } else { 3 });
     for command in &frame.records[start..frame.count] {
         for (offset, byte) in command.iter().enumerate() {
             domain.core().write_payload(offset, *byte);
@@ -716,13 +759,64 @@ fn execute_workshop(
     if line == b":shutdown" {
         arch::exit(true);
     }
+    if line == b":workbench" {
+        if workspace.count() != 0 || *evaluator_revision != 0 {
+            return StatusLine::new(b"WORKBENCH NEEDS A FRESH EMPTY WORLD");
+        }
+        let mut candidate = *workspace;
+        for (index, source) in include_bytes!("../../desktop/workbench.agel")
+            .split(|byte| *byte == b'\n')
+            .filter(|line| line.starts_with(b"("))
+            .enumerate()
+        {
+            let mut name = StatusLine::new(b"wb-");
+            name.number_u64(index as u64);
+            if let Err(reason) = candidate.upsert(name.get(), source) {
+                return StatusLine::new(reason.as_bytes());
+            }
+        }
+        return match replay_workspace(evaluator, &candidate) {
+            Ok(revision) => {
+                *workspace = candidate;
+                *evaluator_revision = revision;
+                *dirty = true;
+                StatusLine::new(b"WORKBENCH READY - CLICK OR TAB")
+            }
+            Err(failure) => {
+                let _ = replay_workspace(evaluator, workspace);
+                StatusLine::new(failure.message().as_bytes())
+            }
+        };
+    }
     if line == b":help" {
-        return StatusLine::new(b"Lisp: quote if begin def fn | agents: spawn send step run | scene: scene-clear scene-rect scene-count | UI: (help) | cells: :cell :run :show :delete :cells :workspace :save :reload | :revision :rollback :defs :limits :shutdown");
+        return StatusLine::new(b":workbench | :preview FORM :promote :discard :source ID | Tab focus, Enter activate | Lisp: quote if begin def fn | spawn send step run | scene-bind scene-hit scene-owner | :cell :run :show :delete :cells :save :reload | :revision :rollback :defs :limits :shutdown");
     }
     if line == b":revision" {
         let mut status = StatusLine::new(b"EVAL REV ");
         status.number_u64(*evaluator_revision);
         return status;
+    }
+    if let Some(source) = line.strip_prefix(b":preview ") {
+        return evaluator_status(
+            evaluator,
+            evaluator_revision,
+            shared::COMMAND_EVALUATOR_PREVIEW,
+            source,
+        );
+    }
+    if let Some(id) = line.strip_prefix(b":source ") {
+        if let Some(id) = core::str::from_utf8(id)
+            .ok()
+            .and_then(|s| s.parse::<u8>().ok())
+        {
+            return evaluator_status(
+                evaluator,
+                evaluator_revision,
+                shared::COMMAND_EVALUATOR_SOURCE,
+                &[id],
+            );
+        }
+        return StatusLine::new(b"SOURCE EXPECTS AGENT ID");
     }
     if line == b":cells" {
         let mut status = StatusLine::new(b"CELLS ");
@@ -816,6 +910,8 @@ fn execute_workshop(
         };
     }
     let command = match line {
+        b":promote" => shared::COMMAND_EVALUATOR_PROMOTE,
+        b":discard" => shared::COMMAND_EVALUATOR_DISCARD,
         b":rollback" => shared::COMMAND_EVALUATOR_ROLLBACK,
         b":defs" => shared::COMMAND_EVALUATOR_DEFS,
         b":limits" => shared::COMMAND_EVALUATOR_LIMITS,
@@ -924,11 +1020,21 @@ fn execute(
     }
 }
 
-fn next_input(keyboard: &mut Keyboard) -> Option<u8> {
+enum Input {
+    Byte(u8),
+    Pointer(bool),
+}
+
+fn next_input(keyboard: &mut Keyboard, pointer: &mut crate::pointer::Pointer) -> Option<Input> {
     if let Some(byte) = arch::console_try_read_byte() {
-        return Some(byte);
+        return Some(Input::Byte(byte));
     }
-    arch::keyboard_try_read_scancode().and_then(|scan| keyboard.decode(scan))
+    let (auxiliary, byte) = arch::input_try_read()?;
+    if auxiliary {
+        pointer.feed(byte).map(Input::Pointer)
+    } else {
+        keyboard.decode(byte).map(Input::Byte)
+    }
 }
 
 /// Pull committed language data through the bounded evaluator page. Validate
@@ -943,7 +1049,11 @@ fn synchronize_language_scene(
     let mut count = 0;
     let mut revision = 0;
     for index in 0..12 {
-        let reply = evaluator_request(evaluator, shared::COMMAND_EVALUATOR_SCENE, &[index as u8])?;
+        let reply = evaluator_request(
+            evaluator,
+            shared::COMMAND_EVALUATOR_SCENE,
+            &[index as u8 | if current.previewing { 128 } else { 0 }],
+        )?;
         if index == 0 {
             count = reply.bytes[0] as usize;
             revision = reply.revision;
@@ -1019,6 +1129,10 @@ fn interactive(
     let mut line = [0; INPUT_BYTES];
     let mut length = 0;
     let mut keyboard = Keyboard::new();
+    let mut pointer = crate::pointer::Pointer::new();
+    if !arch::pointer_enable() {
+        console::write("pointer unavailable; keyboard remains active\n");
+    }
     let mut status = if generation == 0 {
         StatusLine::new(b"AGEL READY - TYPE :HELP")
     } else {
@@ -1032,12 +1146,52 @@ fn interactive(
     console::write("live-desktop> ");
 
     loop {
-        let Some(byte) = next_input(&mut keyboard) else {
+        let Some(input) = next_input(&mut keyboard, &mut pointer) else {
             core::hint::spin_loop();
             continue;
         };
+        let byte = match input {
+            Input::Byte(byte) => byte,
+            Input::Pointer(pressed) => {
+                current.pointer = Some((pointer.x as u32, pointer.y as u32));
+                if pressed && pointer.y < 684 && current.inspector.is_none() && length == 0 {
+                    let mut command = StatusLine::new(b"(point ");
+                    command.number_u64(pointer.x as u64);
+                    command.push(b" ");
+                    command.number_u64(pointer.y as u64);
+                    command.push(b")");
+                    line[..command.len].copy_from_slice(command.get());
+                    length = command.len;
+                    b'\n'
+                } else {
+                    let frame = materialize(current, Some(&line[..length]), status.get())
+                        .unwrap_or_else(|reason| failed(reason));
+                    render(compositor, &frame).unwrap_or_else(|reason| failed(reason));
+                    continue;
+                }
+            }
+        };
+        let mut prompt_pending = false;
         match byte {
+            b'\t' => {
+                status = evaluator_status(
+                    &mut evaluator,
+                    &mut evaluator_revision,
+                    shared::COMMAND_EVALUATE,
+                    b"(focus-next)",
+                );
+                current.previewing = false;
+                if let Err(reason) =
+                    synchronize_language_scene(&mut evaluator, compositor, &mut current)
+                {
+                    status = StatusLine::new(reason.as_bytes());
+                }
+            }
             b'\r' | b'\n' => {
+                if length == 0 && workspace.find(b"wb-0").is_some() {
+                    line[..10].copy_from_slice(b"(activate)");
+                    length = 10;
+                }
                 console::write("\n");
                 if core::str::from_utf8(&line[..length]).is_err() {
                     length = 0;
@@ -1057,13 +1211,20 @@ fn interactive(
                     &mut dirty,
                     &line[..length],
                 );
+                current.previewing = line[..length].starts_with(b":preview ")
+                    && status.get().starts_with(b"CANDIDATE VALIDATED");
+                if line[..length].starts_with(b":source ") {
+                    current.inspector = Some(status);
+                } else {
+                    // Source is a snapshot; never label it as current after an edit.
+                    current.inspector = None;
+                }
                 if let Err(reason) =
                     synchronize_language_scene(&mut evaluator, compositor, &mut current)
                 {
                     status = StatusLine::new(reason.as_bytes());
                 }
-                console::write_bytes(status.get());
-                console::write("\nlive-desktop> ");
+                prompt_pending = true;
                 length = 0;
             }
             0x08 | 0x7f if length > 0 => {
@@ -1075,6 +1236,7 @@ fn interactive(
             }
             0x1b => {
                 length = 0;
+                current.inspector = None;
                 status = StatusLine::new(b"INPUT CLEARED");
             }
             byte if byte.is_ascii_graphic() || byte == b' ' || byte >= 0x80 => {
@@ -1090,7 +1252,15 @@ fn interactive(
         }
         let frame = materialize(current, Some(&line[..length]), status.get())
             .unwrap_or_else(|reason| failed(reason));
-        render_overlay(compositor, &frame).unwrap_or_else(|reason| failed(reason));
+        if prompt_pending || byte == 0x1b || byte == b'\t' {
+            render(compositor, &frame).unwrap_or_else(|reason| failed(reason));
+        } else {
+            render_overlay(compositor, &frame).unwrap_or_else(|reason| failed(reason));
+        }
+        if prompt_pending {
+            console::write_bytes(status.get());
+            console::write("\nlive-desktop> ");
+        }
     }
 }
 

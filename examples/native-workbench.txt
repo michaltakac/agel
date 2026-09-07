@@ -1,0 +1,19 @@
+; Start on a fresh empty native graphical world. Enter non-comment lines separately.
+:workbench
+; Click either colored dock icon. Or press Tab then Enter on an empty line.
+(inspect-agent)
+:source 1
+; Escape closes the source panel. Test an upgraded behavior in a candidate world.
+(def twice (fn (self state message) (begin (paint self (+ state (* message 2))) (+ state (* message 2)))))
+:preview (begin (agent-become dock twice) (activate))
+:promote
+; Immediately undo the promotion (before another evaluated form).
+:rollback
+; A faulty test turn cannot replace the live component.
+(def broken (fn (self state message) (/ 1 0)))
+:preview (begin (agent-become dock broken) (activate))
+(activate)
+; Persist the new behavior by updating its original source cell.
+:cell wb-3 (def behavior (fn (self state message) (begin (paint self (+ state (* message 2))) (+ state (* message 2)))))
+:save
+; Reboot reconstructs the updated behavior with its source-defined initial state.

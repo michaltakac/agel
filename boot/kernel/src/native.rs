@@ -165,6 +165,8 @@ struct World {
     scheduler_active: bool,
     scene: [[u32; 7]; MAX_SCENE_RECTS],
     scene_count: u8,
+    scene_ids: [i64; MAX_SCENE_RECTS],
+    scene_owners: [u8; MAX_SCENE_RECTS],
 }
 
 impl World {
@@ -175,6 +177,8 @@ impl World {
         scheduler_active: false,
         scene: [[0; 7]; MAX_SCENE_RECTS],
         scene_count: 0,
+        scene_ids: [0; MAX_SCENE_RECTS],
+        scene_owners: [0; MAX_SCENE_RECTS],
     };
 
     fn find(&self, name: &[u8]) -> Option<usize> {
@@ -207,6 +211,7 @@ pub struct Session {
     scratch: World,
     has_previous: bool,
     revision: u64,
+    candidate_revision: Option<u64>,
 }
 
 impl Session {
@@ -223,6 +228,14 @@ impl Session {
             None
         }
     }
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn candidate_scene(&self, index: usize) -> Option<(usize, Option<[u32; 7]>)> {
+        if self.candidate_revision != Some(self.revision) {
+            return None;
+        }
+        let count = self.scratch.scene_count as usize;
+        Some((count, (index < count).then(|| self.scratch.scene[index])))
+    }
     pub const fn new() -> Self {
         Self {
             active: World::EMPTY,
@@ -230,10 +243,12 @@ impl Session {
             scratch: World::EMPTY,
             has_previous: false,
             revision: 0,
+            candidate_revision: None,
         }
     }
 
     pub fn evaluate(&mut self, source: &[u8]) -> Result<Value, Error> {
+        self.candidate_revision = None;
         let next_revision = self
             .revision
             .checked_add(1)
@@ -252,9 +267,57 @@ impl Session {
         }
     }
 
+    /// Candidate evaluation preserves both the live world and its rollback point.
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn preview(&mut self, source: &[u8]) -> Result<(), Error> {
+        self.candidate_revision = None;
+        self.scratch = self.active;
+        evaluate_source(&mut self.scratch, source)?;
+        if self
+            .scratch
+            .agents
+            .iter()
+            .zip(self.active.agents.iter())
+            .any(|(after, before)| after.faulted && !before.faulted)
+        {
+            return Err(Error("candidate agent turn failed"));
+        }
+        self.candidate_revision = Some(self.revision);
+        Ok(())
+    }
+
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn promote(&mut self) -> Result<(), Error> {
+        if self.candidate_revision != Some(self.revision) {
+            return Err(Error("no current candidate; preview again"));
+        }
+        let revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(Error("revision exhausted"))?;
+        mem::swap(&mut self.previous, &mut self.active);
+        mem::swap(&mut self.active, &mut self.scratch);
+        self.has_previous = true;
+        self.revision = revision;
+        self.candidate_revision = None;
+        Ok(())
+    }
+
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn discard(&mut self) {
+        self.candidate_revision = None;
+    }
+
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn agent_source(&self, id: u8) -> Result<&[u8], Error> {
+        let agent = &self.active.agents[agent_index(&self.active, id)?];
+        Ok(&agent.behavior.body[..agent.behavior.body_length as usize])
+    }
+
     /// Clear language state without reusing a revision identifier.
     #[cfg(feature = "isolation-selftest")]
     pub fn reset(&mut self) {
+        self.candidate_revision = None;
         self.active = World::EMPTY;
         self.previous = World::EMPTY;
         self.scratch = World::EMPTY;
@@ -262,6 +325,7 @@ impl Session {
     }
 
     pub fn rollback(&mut self) -> Result<(), Error> {
+        self.candidate_revision = None;
         if !self.has_previous {
             return Err(Error("no previous native revision"));
         }
@@ -543,6 +607,10 @@ enum RuntimeValue {
 
 #[derive(Clone, Copy)]
 enum Builtin {
+    SceneBind,
+    SceneHit,
+    SceneOwner,
+    AgentBecome,
     SceneClear,
     SceneRect,
     SceneCount,
@@ -826,6 +894,10 @@ fn evaluate_def(
             | b"drop-message"
             | b"agent-count"
             | b"scene-clear"
+            | b"scene-bind"
+            | b"scene-hit"
+            | b"scene-owner"
+            | b"agent-become"
             | b"scene-rect"
             | b"scene-count"
     ) {
@@ -1020,6 +1092,8 @@ fn apply_builtin(
             }
             if matches!(builtin, Builtin::SceneClear) {
                 world.scene_count = 0;
+                world.scene_ids.fill(0);
+                world.scene_owners.fill(0);
             }
             return Ok(RuntimeValue::Scalar(Scalar::Int(i64::from(
                 world.scene_count,
@@ -1059,6 +1133,84 @@ fn apply_builtin(
             return Ok(RuntimeValue::Scalar(Scalar::Int(i64::from(
                 world.scene_count,
             ))));
+        }
+        Builtin::SceneBind => {
+            let [RuntimeValue::Scalar(Scalar::Int(id)), RuntimeValue::Scalar(Scalar::Agent(owner))] =
+                arguments
+            else {
+                return Err(Error(
+                    "scene-bind expects positive identity and owner agent",
+                ));
+            };
+            agent_index(world, *owner)?;
+            let count = world.scene_count as usize;
+            if *id <= 0 || count == 0 || world.scene_ids[..count].contains(id) {
+                return Err(Error("scene identity must be positive and unique"));
+            }
+            world.scene_ids[count - 1] = *id;
+            world.scene_owners[count - 1] = *owner;
+            return Ok(RuntimeValue::Scalar(Scalar::Int(*id)));
+        }
+        Builtin::SceneOwner => {
+            let [RuntimeValue::Scalar(Scalar::Int(id))] = arguments else {
+                return Err(Error("scene-owner expects an identity"));
+            };
+            let index = world.scene_ids[..world.scene_count as usize]
+                .iter()
+                .position(|value| *value == *id && *id > 0)
+                .ok_or(Error("no such scene identity"))?;
+            return Ok(RuntimeValue::Scalar(Scalar::Agent(
+                world.scene_owners[index],
+            )));
+        }
+        Builtin::SceneHit => {
+            let [RuntimeValue::Scalar(Scalar::Int(px)), RuntimeValue::Scalar(Scalar::Int(py))] =
+                arguments
+            else {
+                return Err(Error("scene-hit expects x y"));
+            };
+            for index in (0..world.scene_count as usize).rev() {
+                let [_, x, y, w, h, r, _] = world.scene[index].map(i64::from);
+                if *px < x || *py < y || *px >= x + w || *py >= y + h {
+                    continue;
+                }
+                // Match the compositor's discrete rounded-corner convention.
+                let (lx, ly) = (*px - x, *py - y);
+                let (dx, dy) = if lx < r && ly < r {
+                    (r - lx, r - ly)
+                } else if lx >= w - r && ly < r {
+                    (lx - (w - r - 1), r - ly)
+                } else if lx < r && ly >= h - r {
+                    (r - lx, ly - (h - r - 1))
+                } else if lx >= w - r && ly >= h - r {
+                    (lx - (w - r - 1), ly - (h - r - 1))
+                } else {
+                    (0, 0)
+                };
+                if dx * dx + dy * dy > r * r {
+                    continue;
+                }
+                return Ok(RuntimeValue::Scalar(Scalar::Int(world.scene_ids[index])));
+            }
+            return Ok(RuntimeValue::Scalar(Scalar::Int(0)));
+        }
+        Builtin::AgentBecome => {
+            let [RuntimeValue::Scalar(Scalar::Agent(id)), RuntimeValue::Function(behavior)] =
+                arguments
+            else {
+                return Err(Error("agent-become expects agent and stored function"));
+            };
+            if world.scheduler_active || behavior.parameter_count != 3 {
+                return Err(Error(
+                    "behavior replacement requires operator and three parameters",
+                ));
+            }
+            let index = agent_index(world, *id)?;
+            if world.agents[index].faulted {
+                return Err(Error("restart agent before replacing behavior"));
+            }
+            world.agents[index].behavior = *behavior;
+            return Ok(RuntimeValue::Scalar(Scalar::Agent(*id)));
         }
         Builtin::Spawn => return spawn_agent(arguments, world),
         Builtin::Send => return send_agent(arguments, world),
@@ -1339,6 +1491,10 @@ fn resolve_symbol(
     }
     let builtin = match name {
         b"scene-clear" => Some(Builtin::SceneClear),
+        b"scene-bind" => Some(Builtin::SceneBind),
+        b"scene-hit" => Some(Builtin::SceneHit),
+        b"scene-owner" => Some(Builtin::SceneOwner),
+        b"agent-become" => Some(Builtin::AgentBecome),
         b"scene-rect" => Some(Builtin::SceneRect),
         b"scene-count" => Some(Builtin::SceneCount),
         b"+" => Some(Builtin::Add),
@@ -1408,6 +1564,69 @@ fn node_bytes<'a>(document: &Document, source: &'a [u8], node: u16) -> &'a [u8] 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn workbench_preview_promote_reject_stale_and_rollback() {
+        let mut session = Session::new();
+        for source in include_str!("../../desktop/workbench.agel")
+            .lines()
+            .filter(|s| s.starts_with('('))
+        {
+            eval(&mut session, source);
+        }
+        assert_eq!(eval(&mut session, "(scene-hit 360 640)"), Value::Int(1));
+        assert_eq!(eval(&mut session, "(scene-hit 340 622)"), Value::Int(0));
+        assert_eq!(
+            eval(&mut session, "(scene-hit -9223372036854775808 640)"),
+            Value::Int(0)
+        );
+        let revision = session.revision();
+        let old = session.scene_record(1);
+        session.preview(b"(point 360 640)").unwrap();
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.scene_record(1), old);
+        assert_ne!(session.candidate_scene(1).unwrap().1, old);
+        session.promote().unwrap();
+        assert_ne!(session.scene_record(1), old);
+        session.rollback().unwrap();
+        assert_eq!(session.scene_record(1), old);
+        session.preview(b"(point 360 640)").unwrap();
+        eval(&mut session, "(inspect-agent)");
+        assert!(session.promote().is_err());
+        eval(
+            &mut session,
+            "(def broken (fn (self state message) (/ 1 0)))",
+        );
+        assert!(session
+            .preview(b"(begin (agent-become dock broken) (activate))")
+            .is_err());
+        assert_eq!(
+            eval(&mut session, "(agent-faulted? dock)"),
+            Value::Bool(false)
+        );
+        assert_eq!(eval(&mut session, "(activate)"), Value::Int(1));
+        session.preview(b"(point 360 640)").unwrap();
+        session.discard();
+        assert!(session.promote().is_err());
+        assert!(session.agent_source(1).unwrap().starts_with(b"(begin"));
+    }
+
+    #[test]
+    fn bindings_are_transactional_unique_and_occluded() {
+        let mut session = Session::new();
+        eval(&mut session, "(def b (fn (self state msg) state))");
+        eval(&mut session, "(def a (spawn b 0))");
+        eval(
+            &mut session,
+            "(begin (scene-rect 0 0 10 10 5 0) (scene-bind 77 a))",
+        );
+        assert_eq!(eval(&mut session, "(scene-hit 5 5)"), Value::Int(77));
+        assert!(session
+            .evaluate(b"(begin (scene-rect 0 0 10 10 0 0) (scene-bind 77 a))")
+            .is_err());
+        assert_eq!(session.scene_count(), 1);
+        eval(&mut session, "(scene-rect 0 0 10 10 0 0)");
+        assert_eq!(eval(&mut session, "(scene-hit 5 5)"), Value::Int(0));
+    }
     use super::*;
 
     #[test]

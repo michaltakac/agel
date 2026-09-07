@@ -1,0 +1,12 @@
+; Each form is a source cell. Policy, focus, inspection and actions are Agel.
+(def selected 1)
+(def widget (fn (x id owner color) (begin (scene-rect x 622 48 48 12 color) (scene-bind id owner))))
+(def paint (fn (self state) (begin (scene-clear) (scene-rect 318 610 372 72 20 3423048) (widget 340 1 self (if (= state 0) 7526143 16762967)) (widget 410 2 self 10194175))))
+(def behavior (fn (self state message) (begin (paint self (+ state message)) (+ state message))))
+(def dock (spawn behavior 0))
+(def focus (fn (id) (begin (scene-owner id) (def selected id) selected)))
+(def inspect-agent (fn () (agent-state (scene-owner selected))))
+(def activate (fn () (begin (send (scene-owner selected) selected) (run 1) (inspect-agent))))
+(def point (fn (x y) (begin (def hit (scene-hit x y)) (if (= hit 0) nil (begin (focus hit) (activate))))))
+(def focus-next (fn () (focus (if (= selected 1) 2 1))))
+(paint dock 0)

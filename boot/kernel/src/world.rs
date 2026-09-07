@@ -95,6 +95,10 @@ pub mod shared {
     pub const COMMAND_EVALUATOR_RESET: u64 = 0x8400;
     /// Read one committed native scene rectangle, without evaluating code.
     pub const COMMAND_EVALUATOR_SCENE: u64 = 0x8500;
+    pub const COMMAND_EVALUATOR_PREVIEW: u64 = 0x8600;
+    pub const COMMAND_EVALUATOR_PROMOTE: u64 = 0x8700;
+    pub const COMMAND_EVALUATOR_DISCARD: u64 = 0x8800;
+    pub const COMMAND_EVALUATOR_SOURCE: u64 = 0x8900;
     /// Rasterize one validated 64-byte native vector record.
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
     pub const COMMAND_DISPLAY_DRAW: u64 = 0x9000;

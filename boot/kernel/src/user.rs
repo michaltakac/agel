@@ -375,6 +375,39 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
                 },
             }
             unsafe { evaluator_finish(page, response_length, result.is_err(), session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_PREVIEW
+            || command == shared::COMMAND_EVALUATOR_PROMOTE
+            || command == shared::COMMAND_EVALUATOR_DISCARD
+            || command == shared::COMMAND_EVALUATOR_SOURCE
+        {
+            let length = (unsafe { page.add(shared::ARGUMENTS).read_volatile() } as usize)
+                .min(crate::world::PAYLOAD_BYTES);
+            let payload = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *const u8;
+            let source = unsafe { core::slice::from_raw_parts(payload, length) };
+            let result = match command {
+                shared::COMMAND_EVALUATOR_PREVIEW => session
+                    .preview(source)
+                    .map(|_| b"CANDIDATE VALIDATED - :PROMOTE".as_slice()),
+                shared::COMMAND_EVALUATOR_PROMOTE => {
+                    session.promote().map(|_| b"CANDIDATE PROMOTED".as_slice())
+                }
+                shared::COMMAND_EVALUATOR_SOURCE => {
+                    session.agent_source(source.first().copied().unwrap_or(0))
+                }
+                _ => {
+                    session.discard();
+                    Ok(b"CANDIDATE DISCARDED".as_slice())
+                }
+            };
+            let mut response_length = 0;
+            match result {
+                Ok(text) => unsafe { evaluator_text(page, &mut response_length, text) },
+                Err(error) => unsafe {
+                    evaluator_text(page, &mut response_length, b"error: ");
+                    evaluator_text(page, &mut response_length, error.0.as_bytes());
+                },
+            }
+            unsafe { evaluator_finish(page, response_length, result.is_err(), session.revision()) };
         } else if command == shared::COMMAND_EVALUATOR_ROLLBACK {
             let result = session.rollback();
             let mut response_length = 0;
@@ -429,15 +462,21 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
             let payload = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *mut u8;
             let index = unsafe { payload.read_volatile() } as usize;
             let mut response_length = 0;
-            unsafe { evaluator_push(page, &mut response_length, session.scene_count() as u8) };
-            if let Some(record) = session.scene_record(index) {
+            let scene = if index & 128 != 0 {
+                session.candidate_scene(index & 127)
+            } else {
+                Some((session.scene_count(), session.scene_record(index)))
+            };
+            let (count, record) = scene.unwrap_or((0, None));
+            unsafe { evaluator_push(page, &mut response_length, count as u8) };
+            if let Some(record) = record {
                 for word in record {
                     for byte in word.to_le_bytes() {
                         unsafe { evaluator_push(page, &mut response_length, byte) };
                     }
                 }
             }
-            unsafe { evaluator_finish(page, response_length, false, session.revision()) };
+            unsafe { evaluator_finish(page, response_length, scene.is_none(), session.revision()) };
         } else if command == shared::COMMAND_EVALUATOR_RESET {
             session.reset();
             unsafe { evaluator_finish(page, 0, false, session.revision()) };

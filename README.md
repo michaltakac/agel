@@ -4,7 +4,10 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.10: Agel-authored live native scenes and agents inside the persistent
+The current repository is **v0.2.11: a native agent workbench with pointer events,
+keyboard focus, source inspection, candidate preview/promotion and recoverable
+behavior replacement. See [the workbench guide](docs/native-workbench.md).
+Agel-authored live native scenes and agents run inside the persistent
 graphical Agel workshop. Fixed-memory actors now spawn, exchange bounded FIFO
 messages, run deterministic transactional turns, compose, expose live state,
 and contain a failed behavior inside the unprivileged evaluator domain. The

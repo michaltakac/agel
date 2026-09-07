@@ -90,16 +90,48 @@ pub fn console_try_read_byte() -> Option<u8> {
 /// Return one byte from the legacy keyboard controller when its output buffer
 /// is ready. Decoding and policy stay outside the machine adapter.
 #[cfg(feature = "native-graphics")]
-pub fn keyboard_try_read_scancode() -> Option<u8> {
+pub fn input_try_read() -> Option<(bool, u8)> {
     let status = unsafe { hal::in8(0x64) };
     if status & 1 == 0 {
         None
     } else {
         let byte = unsafe { hal::in8(0x60) };
-        // Bit 5 identifies the auxiliary (mouse) stream. Drain it here but do
-        // not let pointer bytes masquerade as keyboard authority.
-        (status & 0x20 == 0).then_some(byte)
+        Some((status & 0x20 != 0, byte))
     }
+}
+
+/// Enable the emulated PS/2 pointer with bounded controller waits. Missing
+/// devices leave keyboard/serial usable rather than hanging native startup.
+#[cfg(feature = "native-graphics")]
+pub fn pointer_enable() -> bool {
+    fn write(port: u16, byte: u8) -> bool {
+        for _ in 0..100_000 {
+            if unsafe { hal::in8(0x64) } & 2 == 0 {
+                unsafe { hal::out8(port, byte) };
+                return true;
+            }
+        }
+        false
+    }
+    if !write(0x64, 0xa8) {
+        return false;
+    }
+    for command in [0xf6, 0xf4] {
+        if !write(0x64, 0xd4) || !write(0x60, command) {
+            return false;
+        }
+        let mut acknowledged = false;
+        for _ in 0..100_000 {
+            if let Some((true, byte)) = input_try_read() {
+                acknowledged = byte == 0xfa;
+                break;
+            }
+        }
+        if !acknowledged {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
