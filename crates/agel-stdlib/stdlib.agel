@@ -655,31 +655,41 @@
               (if (= (type-of expression) 'list)
                   (let ((head (car expression))
                         (tail (cdr expression)))
-                    (if (= head 'quote)
-                        (car (meta-require-arity tail 1))
-                        (if (= head 'if)
-                            (let ((parts (meta-require-arity tail 3)))
-                              (if (meta-eval (car parts) environment)
-                                  (meta-eval (car (cdr parts)) environment)
-                                  (meta-eval (car (cdr (cdr parts))) environment)))
-                            (if (= head 'begin)
-                                (meta-sequence tail environment)
-                                (if (= head 'let)
-                                    (if (< (count tail) 2)
-                                        (signal 'arity "metacircular let expects bindings and a body")
-                                        (meta-sequence (cdr tail)
-                                          (meta-let-bindings (car tail) environment environment)))
-                                    (if (= head 'fn)
-                                        (if (< (count tail) 2)
-                                            (signal 'arity "metacircular fn expects parameters and a body")
-                                            (list 'meta/closure
-                                              (meta-parameters (car tail) (dict))
-                                              (cons 'begin (cdr tail))
-                                              environment))
-                                        (meta-apply
-                                          (meta-eval head environment)
-                                          (meta-eval-list tail environment))))))))
-                  expression))))))
+                    (let ((handler (get meta-forms head)))
+                      (if handler
+                          (handler tail environment)
+                          (meta-apply
+                            (meta-eval head environment)
+                            (meta-eval-list tail environment)))))
+                  expression)))))
+
+  ; Data-directed dispatch avoids retaining a chain of nested conditional
+  ; frames on every interpreted call. All form handlers remain ordinary Agel.
+  (def meta-quote
+    (fn (tail environment) (car (meta-require-arity tail 1))))
+  (def meta-if
+    (fn (tail environment)
+      (let ((parts (meta-require-arity tail 3)))
+        (if (meta-eval (car parts) environment)
+            (meta-eval (car (cdr parts)) environment)
+            (meta-eval (car (cdr (cdr parts))) environment)))))
+  (def meta-let
+    (fn (tail environment)
+      (if (< (count tail) 2)
+          (signal 'arity "metacircular let expects bindings and a body")
+          (meta-sequence (cdr tail)
+            (meta-let-bindings (car tail) environment environment)))))
+  (def meta-fn
+    (fn (tail environment)
+      (if (< (count tail) 2)
+          (signal 'arity "metacircular fn expects parameters and a body")
+          (list 'meta/closure
+            (meta-parameters (car tail) (dict))
+            (cons 'begin (cdr tail))
+            environment))))
+  (def meta-forms
+    (dict 'quote meta-quote 'if meta-if 'begin meta-sequence
+          'let meta-let 'fn meta-fn)))
 
 ; The seed only schedules the ordinary wrapper. Behavior evaluation, lexical
 ; scope and state threading are Agel code. No effects enter the base environment;

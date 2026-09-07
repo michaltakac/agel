@@ -484,8 +484,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn agel_interpreter_matches_the_shared_functional_corpus() {
+    fn assert_metacircular_corpus() {
         let mut interpreted = installed();
         interpreted.evaluate("(import agel/meta)").unwrap();
         for source in include_str!("../../../bootstrap/metacircular.forms")
@@ -515,6 +514,17 @@ mod tests {
                 "Agel accepted {source}"
             );
         }
+    }
+
+    #[test]
+    fn agel_interpreter_matches_the_shared_functional_corpus() {
+        // Linux's ordinary test-thread stack, explicitly exercised on macOS too.
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(assert_metacircular_corpus)
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

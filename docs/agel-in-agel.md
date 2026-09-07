@@ -9,7 +9,8 @@ in `crates/agel-stdlib/stdlib.agel`, not a new Rust evaluator primitive.
 `agel/meta` implements lexical lookup, closure representation and application,
 `quote`, lazy-branch `if`, `begin`, parallel `let`, multi-expression `fn` bodies,
 and recursive self-application. `apply` works with interpreted closures as well
-as supplied host callables. Binding initializers see the outer scope; repeated
+as supplied host callables. Special forms dispatch through an Agel map of Agel
+handlers rather than a deeply nested conditional chain. Binding initializers see the outer scope; repeated
 `let` names use the last binding in the body, matching the Rust seed. Duplicate
 function parameters and malformed bindings/closures are rejected.
 
@@ -76,11 +77,11 @@ with installation/environment setup excluded. At v0.2.13:
 
 | Expression | Rust seed steps | Agel interpreter steps |
 | --- | ---: | ---: |
-| `(+ 20 22)` | 4 | 245 |
-| Lexical capture adding 40 and 2 | 9 | 1,014 |
-| Recursive factorial of 5 | 88 | 8,143 |
+| `(+ 20 22)` | 4 | 227 |
+| Lexical capture adding 40 and 2 | 9 | 947 |
+| Recursive factorial of 5 | 88 | 7,651 |
 
-These roughly 61–113× step counts are **not wall-clock ratios or model tokens**.
+These roughly 57–105× step counts are **not wall-clock ratios or model tokens**.
 There is no AI call in evaluation or agent scheduling. Interpreting more Agel
 currently costs more host computation and consumes the same bounded fuel. Use
 this path for inspection and language experiments, not a claim of fast compiled
