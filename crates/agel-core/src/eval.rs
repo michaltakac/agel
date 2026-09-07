@@ -319,12 +319,12 @@ fn eval_fn(items: &[Expr], env: &Env, module: Option<&str>) -> Result<Value, Sig
         return Err(condition("arity", "fn expects parameters and a body"));
     }
     let params = parse_params("fn", &items[1])?;
-    Ok(Value::Closure(Closure {
+    Ok(Value::Closure(std::sync::Arc::new(Closure {
         params,
         body: items[2..].to_vec(),
         env: env.clone(),
         module: module.map(str::to_owned),
-    }))
+    })))
 }
 
 fn eval_let(
@@ -688,7 +688,7 @@ fn apply_inner(
                 ));
             }
             let mut call_env = closure.env.child();
-            for (param, value) in closure.params.into_iter().zip(arguments) {
+            for (param, value) in closure.params.iter().cloned().zip(arguments) {
                 call_env.insert(param, value);
             }
             runtime.call_depth += 1;

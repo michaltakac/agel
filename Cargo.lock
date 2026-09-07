@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "agel-cli"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-core",
  "agel-model",
@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "agel-core"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-integrity",
  "psm",
@@ -22,14 +22,14 @@ dependencies = [
 
 [[package]]
 name = "agel-effects"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-integrity",
 ]
 
 [[package]]
 name = "agel-image"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-core",
  "agel-integrity",
@@ -37,19 +37,19 @@ dependencies = [
 
 [[package]]
 name = "agel-integrity"
-version = "0.2.13"
+version = "0.2.14"
 
 [[package]]
 name = "agel-interaction"
-version = "0.2.13"
+version = "0.2.14"
 
 [[package]]
 name = "agel-kernel-abi"
-version = "0.2.13"
+version = "0.2.14"
 
 [[package]]
 name = "agel-model"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-core",
  "agel-effects",
@@ -57,14 +57,14 @@ dependencies = [
 
 [[package]]
 name = "agel-stdlib"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-core",
 ]
 
 [[package]]
 name = "agel-supervisor"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-core",
  "agel-image",
@@ -73,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "agel-vector"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-core",
  "agel-stdlib",
@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "agel-verify"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "agel-core",
  "agel-integrity",

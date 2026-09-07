@@ -1,0 +1,31 @@
+; Analyze once in Agel, execute repeatedly. No model calls or provider flags.
+(import agel/meta)
+(import agel/meta-agent)
+(def program '(let ((x 40)) (apply (fn (y) (+ x y)) '(2))))
+(def plan (meta-analyze program))
+(plan (meta-base-env))
+; => 42. The source remains ordinary inspectable data.
+program
+
+; One plan works against different environments; lookup is not frozen unsafely.
+(def arithmetic (meta-analyze '(+ x 2)))
+(def env (assoc (meta-base-env) 'x 40))
+(list (arithmetic env) (arithmetic (assoc env '+ -)))
+; => (42 38)
+
+; The behavior's body is analyzed once during construction, not each message.
+(def counter (make-analyzed-agent "analyzed counter"
+  '(fn (self state message)
+     (if (< message 0) (/ 1 0) (+ state message)))
+  0 (meta-base-env)))
+(send counter 20)
+(send counter 22)
+(run 2)
+(meta-agent-state counter)
+; => 42
+(meta-agent-source counter)
+(send counter -1)
+(run 1)
+(list (meta-agent-state counter) (get (agent-info counter) 'status))
+; => (42 stopped). Faster execution did not remove failed-turn recovery.
+:quit

@@ -498,6 +498,12 @@ mod tests {
                 .values
                 .pop();
             assert_eq!(actual, expected, "{source}");
+            let analyzed = interpreted
+                .evaluate(&format!("((meta-analyze '{source}) (meta-base-env))"))
+                .unwrap_or_else(|error| panic!("analyzing {source}: {error}"))
+                .values
+                .pop();
+            assert_eq!(analyzed, expected, "analyzed {source}");
         }
         for source in include_str!("../../../bootstrap/metacircular-errors.forms")
             .lines()
@@ -512,6 +518,12 @@ mod tests {
                     .evaluate(&format!("(meta-eval '{source} (meta-base-env))"))
                     .is_err(),
                 "Agel accepted {source}"
+            );
+            assert!(
+                interpreted
+                    .evaluate(&format!("((meta-analyze '{source}) (meta-base-env))"))
+                    .is_err(),
+                "analyzer accepted {source}"
             );
         }
     }
@@ -631,6 +643,103 @@ mod tests {
             .join("\n");
         let value = installed().evaluate(&source).unwrap().values.pop().unwrap();
         assert_eq!(value.to_string(), "(42 nil stopped)");
+        let analyzed_source = source.replace("make-meta-agent", "make-analyzed-agent");
+        let value = installed()
+            .evaluate(&analyzed_source)
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(value.to_string(), "(42 nil stopped)");
+        let example = include_str!("../../../examples/analyzed-agents.agel")
+            .lines()
+            .filter(|line| !line.starts_with(':'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            installed()
+                .evaluate(&example)
+                .unwrap()
+                .values
+                .pop()
+                .unwrap()
+                .to_string(),
+            "(42 stopped)"
+        );
+    }
+
+    #[test]
+    fn analyzed_plans_are_reusable_and_keep_environment_lookup_dynamic() {
+        let mut world = installed();
+        let value = world
+            .evaluate(
+                "(import agel/meta)
+             (def plan (meta-analyze '(+ x 2)))
+             (def env (assoc (meta-base-env) 'x 40))
+             (list (plan env) (plan (assoc env '+ -))
+                   (plan (assoc env 'x 10)))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(value.to_string(), "(42 38 12)");
+        assert!(world.evaluate("(plan nil)").is_err());
+        assert!(world.evaluate("((meta-analyze 42) nil)").is_err());
+    }
+
+    #[test]
+    fn analysis_does_not_execute_effects_or_dead_branches() {
+        let mut world = installed();
+        let value = world
+            .evaluate(
+                "(import agel/meta)
+             (def observer (spawn \"observer\"))
+             (def plan (meta-analyze '(begin
+                (send observer 42) (if #t 42 (/ 1 0)))))
+             (def env (assoc (assoc (meta-base-env) 'send send) 'observer observer))
+             (list (recv observer) (plan env) (recv observer))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(value.to_string(), "(nil 42 42)");
+        // Syntax errors may be found earlier by explicit analysis, including in
+        // branches that the reference interpreter would never execute.
+        assert!(world
+            .evaluate("(meta-analyze '(if #t 42 (fn (x x) x)))")
+            .is_err());
+    }
+
+    #[test]
+    fn analyzed_execution_reduces_work_without_removing_resource_limits() {
+        let mut world = installed();
+        world
+            .evaluate(
+                "(import agel/meta) (def env (meta-base-env))
+          (def source '((fn (self) (self self 5))
+            (fn (self n) (if (= n 0) 1 (* n (self self (- n 1)))))))
+          (def plan (meta-analyze source))",
+            )
+            .unwrap();
+        let reference = world.evaluate("(meta-eval source env)").unwrap();
+        let analyzed = world.evaluate("(plan env)").unwrap();
+        assert_eq!(reference.values, analyzed.values);
+        assert!(analyzed.steps_used * 3 < reference.steps_used * 2);
+
+        world
+            .evaluate(
+                "(def forever (meta-analyze
+          '((fn (self) (self self)) (fn (self) (self self)))))",
+            )
+            .unwrap();
+        let revision = world.revision();
+        let mut options = EvaluationOptions::default();
+        options.budget.fuel = 5_000;
+        let error = world.evaluate_with("(forever env)", &options).unwrap_err();
+        assert!(error.to_string().contains("resource/"), "{error}");
+        assert_eq!(world.revision(), revision);
     }
 
     #[test]

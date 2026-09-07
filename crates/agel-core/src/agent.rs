@@ -254,7 +254,7 @@ impl Event {
 pub(crate) struct Agent {
     pub name: String,
     pub mailbox: VecDeque<Value>,
-    pub behavior: Option<Closure>,
+    pub behavior: Option<std::sync::Arc<Closure>>,
     pub heap: Value,
     pub initial_heap: Value,
     pub protocol: Option<Protocol>,

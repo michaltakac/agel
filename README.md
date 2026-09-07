@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.13: an expanded Agel-in-Agel hosted interpreter and
+The current repository is **v0.2.14: reusable execution plans analyzed in Agel,
+shared immutable closure storage in the Rust bootstrap, and
 source-backed agents, alongside a native agent workbench with failure-safe source saves,
 bounded process execution, pointer events,
 keyboard focus, source inspection, candidate preview/promotion and recoverable
@@ -335,10 +336,16 @@ Metacircular and A/B bootstrap demonstrations:
 ```sh
 cargo run -q -p agel-cli < examples/metacircular.agel
 cargo run -q -p agel-cli < examples/metacircular-agents.agel
+cargo run -q -p agel-cli < examples/analyzed-agents.agel
+cargo run --release -q -p agel-stdlib --example meta_benchmark
 cargo run -q -p agel-stdlib --example metacircular_cost
 ./scripts/test-bootstrap.sh
 cargo run -q -p agel-supervisor --example ab_upgrade
 ```
+
+The current implementation and next performance steps are described in
+[self-hosting and performance](docs/self-hosting-performance.md), with dated
+primary research sources and explicitly scoped benchmark results.
 
 Two-lane human interaction and the bootable recovery monitor:
 

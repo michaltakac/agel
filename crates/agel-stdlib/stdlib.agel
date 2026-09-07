@@ -533,7 +533,7 @@
       'model-cost 'explicit-only)))
 
 (module agel/meta
-  (export meta-base-env meta-eval meta-apply)
+  (export meta-base-env meta-eval meta-apply meta-analyze)
 
   (def meta-base-env
     (fn ()
@@ -625,13 +625,16 @@
                 (meta-apply (car parts) (car (cdr parts))))
               (if (= (type-of function) 'list)
                   (if (= (count function) 4)
-                      (if (= (car function) 'meta/closure)
+                      (if (if (= (car function) 'meta/closure) #t
+                              (= (car function) 'meta/analyzed))
                           (let ((parameters (meta-parameters (car (cdr function)) (dict)))
                                 (environment (car (cdr (cdr (cdr function))))))
                             (if (= (type-of environment) 'map)
-                                (meta-eval
-                                  (car (cdr (cdr function)))
-                                  (meta-bind parameters arguments environment))
+                                (let ((local (meta-bind parameters arguments environment))
+                                      (body (car (cdr (cdr function)))))
+                                  (if (= (car function) 'meta/analyzed)
+                                      (body local)
+                                      (meta-eval body local)))
                                 (signal 'type "metacircular closure expects an environment map")))
                           (signal 'meta/not-callable "invalid metacircular closure" function))
                       (signal 'meta/not-callable "invalid metacircular closure" function))
@@ -689,14 +692,120 @@
             environment))))
   (def meta-forms
     (dict 'quote meta-quote 'if meta-if 'begin meta-sequence
-          'let meta-let 'fn meta-fn)))
+          'let meta-let 'fn meta-fn))
+
+  ; Analysis performs syntax work once, producing reusable Agel closures.
+  ; Execution still checks names, arity, arithmetic, authority and resources.
+  (def meta-analyze-list
+    (fn (expressions)
+      (if (= expressions nil) nil
+          (cons (meta-analyze-expression (car expressions))
+                (meta-analyze-list (cdr expressions))))))
+
+  (def meta-execute-list
+    (fn (plans environment)
+      (if (= plans nil) nil
+          (cons ((car plans) environment)
+                (meta-execute-list (cdr plans) environment)))))
+
+  (def meta-analyze-sequence
+    (fn (expressions)
+      (if (= expressions nil)
+          (fn (environment) nil)
+          (let ((first (meta-analyze-expression (car expressions))))
+            (if (= (cdr expressions) nil) first
+                (let ((rest (meta-analyze-sequence (cdr expressions))))
+                  (fn (environment) (begin (first environment) (rest environment)))))))))
+
+  (def meta-analyze-quote
+    (fn (tail)
+      (let ((value (car (meta-require-arity tail 1))))
+        (fn (environment) value))))
+
+  (def meta-analyze-if
+    (fn (tail)
+      (let ((parts (meta-require-arity tail 3)))
+        (let ((predicate (meta-analyze-expression (car parts)))
+              (yes (meta-analyze-expression (car (cdr parts))))
+              (no (meta-analyze-expression (car (cdr (cdr parts))))))
+          (fn (environment)
+            (if (predicate environment) (yes environment) (no environment)))))))
+
+  (def meta-analyze-fn
+    (fn (tail)
+      (if (< (count tail) 2)
+          (signal 'arity "analyzed fn expects parameters and a body")
+          (let ((parameters (meta-parameters (car tail) (dict)))
+                (body (meta-analyze-sequence (cdr tail))))
+            (fn (environment) (list 'meta/analyzed parameters body environment))))))
+
+  (def meta-analyze-bindings
+    (fn (bindings)
+      (if (meta-list? bindings)
+          (if (= bindings nil) nil
+              (let ((pair (car bindings)))
+                (if (meta-list? pair)
+                    (if (= (count pair) 2)
+                        (if (= (type-of (car pair)) 'symbol)
+                            (cons (list (car pair) (meta-analyze-expression (car (cdr pair))))
+                                  (meta-analyze-bindings (cdr bindings)))
+                            (signal 'syntax "analyzed let expects a symbol" pair))
+                        (signal 'syntax "analyzed let binding must be a pair" pair))
+                    (signal 'syntax "analyzed let binding must be a pair" pair))))
+          (signal 'type "analyzed let expects a binding list" bindings))))
+
+  (def meta-execute-bindings
+    (fn (bindings outer local)
+      (if (= bindings nil) local
+          (let ((pair (car bindings)))
+            (meta-execute-bindings (cdr bindings) outer
+              (assoc local (car pair) ((car (cdr pair)) outer)))))))
+
+  (def meta-analyze-let
+    (fn (tail)
+      (if (< (count tail) 2)
+          (signal 'arity "analyzed let expects bindings and a body")
+          (let ((bindings (meta-analyze-bindings (car tail)))
+                (body (meta-analyze-sequence (cdr tail))))
+            (fn (environment)
+              (body (meta-execute-bindings bindings environment environment)))))))
+
+  (def meta-analyze-application
+    (fn (expression)
+      (let ((operator (meta-analyze-expression (car expression)))
+            (arguments (meta-analyze-list (cdr expression))))
+        (fn (environment)
+          (meta-apply (operator environment) (meta-execute-list arguments environment))))))
+
+  (def meta-analyzers
+    (dict 'quote meta-analyze-quote 'if meta-analyze-if
+          'begin meta-analyze-sequence 'let meta-analyze-let 'fn meta-analyze-fn))
+
+  (def meta-analyze
+    (fn (expression)
+      (let ((plan (meta-analyze-expression expression)))
+        (fn (environment)
+          (if (= (type-of environment) 'map) (plan environment)
+              (signal 'type "analyzed execution expects an environment map"))))))
+
+  (def meta-analyze-expression
+    (fn (expression)
+      (if (= (type-of expression) 'symbol)
+          (fn (environment)
+            (if (has-key? environment expression) (get environment expression)
+                (signal 'name/unbound "unbound analyzed name" expression)))
+          (if (= (type-of expression) 'list)
+              (let ((analyzer (get meta-analyzers (car expression))))
+                (if analyzer (analyzer (cdr expression))
+                    (meta-analyze-application expression)))
+              (fn (environment) expression))))))
 
 ; The seed only schedules the ordinary wrapper. Behavior evaluation, lexical
 ; scope and state threading are Agel code. No effects enter the base environment;
 ; callers must explicitly supply any callable services they want exposed.
 (module agel/meta-agent
   (import agel/meta)
-  (export make-meta-agent meta-agent-state meta-agent-source)
+  (export make-meta-agent make-analyzed-agent meta-agent-state meta-agent-source)
 
   (def meta-agent-behavior
     (fn (self heap message)
@@ -706,9 +815,18 @@
 
   (def make-meta-agent
     (fn (name source state environment)
+      (make-source-agent name source state environment #f)))
+
+  (def make-analyzed-agent
+    (fn (name source state environment)
+      (make-source-agent name source state environment #t)))
+
+  (def make-source-agent
+    (fn (name source state environment analyzed)
       (if (= (type-of source) 'list)
           (if (= (car source) 'fn)
-              (let ((behavior (meta-eval source environment)))
+              (let ((behavior (if analyzed ((meta-analyze source) environment)
+                                  (meta-eval source environment))))
                 (if (= (count (car (cdr behavior))) 3)
                     (spawn name meta-agent-behavior
                       (dict 'source source 'behavior behavior 'state state) nil)

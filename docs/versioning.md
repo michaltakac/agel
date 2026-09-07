@@ -38,6 +38,9 @@ promise.
   strengthens process audit identities, and removes blanket dead-code suppression.
   `v0.2.13` expands the Agel-written functional interpreter and adds source-backed
   hosted agents, shared three-evaluator conformance, and bootstrap validation fixes.
+  `v0.2.14` adds reusable execution plans analyzed in Agel and opt-in analyzed
+  agents, plus structurally shared immutable closure code and lexical frames
+  in the hosted Rust bootstrap. No language syntax or native-kernel ABI changes.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

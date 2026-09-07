@@ -1,6 +1,7 @@
 use crate::agent::Protocol;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr {
@@ -58,15 +59,15 @@ pub enum Builtin {
 #[doc(hidden)]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Env {
-    bindings: BTreeMap<String, Value>,
-    parent: Option<Box<Env>>,
+    bindings: Arc<BTreeMap<String, Value>>,
+    parent: Option<Arc<Env>>,
 }
 
 impl Env {
     pub(crate) fn child(&self) -> Self {
         Self {
-            bindings: BTreeMap::new(),
-            parent: Some(Box::new(self.clone())),
+            bindings: Arc::default(),
+            parent: Some(Arc::new(self.clone())),
         }
     }
 
@@ -77,7 +78,7 @@ impl Env {
     }
 
     pub(crate) fn insert(&mut self, name: String, value: Value) {
-        self.bindings.insert(name, value);
+        Arc::make_mut(&mut self.bindings).insert(name, value);
     }
 }
 
@@ -156,7 +157,7 @@ pub enum Value {
     Module(String),
     Capability(Capability),
     #[doc(hidden)]
-    Closure(Closure),
+    Closure(Arc<Closure>),
     #[doc(hidden)]
     Builtin(Builtin),
 }
@@ -244,4 +245,24 @@ fn escape_string(value: &str) -> String {
             other => vec![other],
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lexical_frames_share_storage_but_writes_do_not_alias() {
+        let mut original = Env::default();
+        original.insert("x".into(), Value::Int(1));
+        let captured = original.clone();
+        assert!(Arc::ptr_eq(&original.bindings, &captured.bindings));
+        original.insert("x".into(), Value::Int(2));
+        assert!(!Arc::ptr_eq(&original.bindings, &captured.bindings));
+        let mut child = captured.child();
+        child.insert("x".into(), Value::Int(3));
+        assert_eq!(original.get("x"), Some(&Value::Int(2)));
+        assert_eq!(captured.get("x"), Some(&Value::Int(1)));
+        assert_eq!(child.get("x"), Some(&Value::Int(3)));
+    }
 }

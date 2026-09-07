@@ -1,6 +1,19 @@
 use agel_core::{Budget, EvaluationOptions, TransactionError, Value, World};
 
 #[test]
+fn immutable_closure_code_is_shared_across_lookups() {
+    let mut world = World::default();
+    let Value::Closure(first) = last(&mut world, "(def f (fn (x) (+ x 1)))") else {
+        panic!("expected closure");
+    };
+    let Value::Closure(second) = last(&mut world, "f") else {
+        panic!("expected closure");
+    };
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(last(&mut world, "(f 41)"), Value::Int(42));
+}
+
+#[test]
 fn small_embedding_stack_preserves_language_depth_limit_and_rollback() {
     std::thread::Builder::new()
         .stack_size(256 * 1024)

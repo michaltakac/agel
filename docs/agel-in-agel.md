@@ -1,5 +1,9 @@
 # Agel in Agel — v0.2.13
 
+For the v0.2.14 analyzed execution tier, current measurements and the compiler
+research direction, see [self-hosting and performance](self-hosting-performance.md).
+The step counts below are the historical v0.2.13 measurements.
+
 The hosted standard library now evaluates a larger functional Agel subset and
 uses it as the behavior engine for real scheduled agents. The implementation is
 in `crates/agel-stdlib/stdlib.agel`, not a new Rust evaluator primitive.
