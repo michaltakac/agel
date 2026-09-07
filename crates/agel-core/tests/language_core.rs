@@ -1,5 +1,35 @@
 use agel_core::{Budget, EvaluationOptions, TransactionError, Value, World};
 
+#[test]
+fn small_embedding_stack_preserves_language_depth_limit_and_rollback() {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut world = World::default();
+            world
+                .evaluate("(def loop (fn (n) (loop (+ n 1))))")
+                .unwrap();
+            let revision = world.revision();
+            let options = EvaluationOptions {
+                budget: Budget {
+                    max_call_depth: 64,
+                    ..Budget::default()
+                },
+                ..EvaluationOptions::default()
+            };
+            let error = world
+                .evaluate_with("(def temporary 42) (loop 0)", &options)
+                .unwrap_err();
+            assert!(error.to_string().contains("resource/call-depth"), "{error}");
+            assert_eq!(world.revision(), revision);
+            assert!(world.evaluate("temporary").is_err());
+            assert_eq!(last(&mut world, "(+ 20 22)"), Value::Int(42));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
 fn last(world: &mut World, source: &str) -> Value {
     world
         .evaluate(source)

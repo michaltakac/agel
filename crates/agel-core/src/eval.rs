@@ -165,6 +165,21 @@ fn eval(
     module: Option<&str>,
     runtime: &mut Runtime<'_>,
 ) -> Result<Value, Signal> {
+    // Language depth and fuel must fail before the embedding thread's machine
+    // stack does. Linux debug builds use appreciably larger frames than macOS.
+    // This is hosted bootstrap machinery, never linked into the native kernel.
+    stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+        eval_inner(expression, state, env, module, runtime)
+    })
+}
+
+fn eval_inner(
+    expression: &Expr,
+    state: &mut State,
+    env: &mut Env,
+    module: Option<&str>,
+    runtime: &mut Runtime<'_>,
+) -> Result<Value, Signal> {
     runtime.tick()?;
     match expression {
         Expr::Nil => Ok(Value::Nil),
@@ -642,6 +657,18 @@ fn eval_sequence(
 }
 
 fn apply(
+    function: Value,
+    arguments: Vec<Value>,
+    state: &mut State,
+    runtime: &mut Runtime<'_>,
+) -> Result<Value, Signal> {
+    // `apply` can also recurse through the ordinary apply builtin without eval.
+    stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+        apply_inner(function, arguments, state, runtime)
+    })
+}
+
+fn apply_inner(
     function: Value,
     arguments: Vec<Value>,
     state: &mut State,

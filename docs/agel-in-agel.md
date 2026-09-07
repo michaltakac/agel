@@ -20,6 +20,15 @@ is not opaque or an authority token. Its `type-of` is `list`, not `callable`;
 use exported `meta-apply` to invoke it from outside the interpreter. Multi-body
 functions are represented with a `begin` body, preserving the four-field format.
 
+Linux CI exposed a hosted machine-stack overflow during recursive interpretation.
+The Rust seed now uses [`stacker`](https://docs.rs/stacker/0.1.25/stacker/fn.maybe_grow.html)
+at evaluation/application boundaries, so recursive work can reach its existing
+language fuel/depth checks on small embedding stacks. This adds a hosted build
+dependency (and a C/assembly toolchain requirement), not an Agel primitive or a
+native-kernel dependency. It is not a global memory quota or a claim that every
+reader/value traversal is stack-independent. The corpus runs on an explicit
+2 MiB thread; a separate 256 KiB embedding test verifies depth-error rollback.
+
 ```lisp
 (import agel/meta)
 (meta-eval

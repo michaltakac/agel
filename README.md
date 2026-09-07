@@ -163,7 +163,8 @@ bootstrap plan.
 
 ## Try it
 
-Agel currently requires only a Rust toolchain:
+Hosted Agel requires a Rust toolchain and a C/assembly compiler for its stack
+protection dependency (Xcode command-line tools on macOS; GCC or Clang on Linux):
 
 ```sh
 cargo run -p agel-cli

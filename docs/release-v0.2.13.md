@@ -15,6 +15,12 @@ bootstrap, whose parameter and binding validation is also tightened.
 The CLI now derives its installed-module list from evaluated library results
 instead of a hardcoded banner.
 
+Linux CI also exposed a hosted machine-stack overflow before language resource
+limits fired. Recursive evaluator/application boundaries now grow their stack
+when needed, retaining existing fuel/depth checks. Tests exercise 256 KiB and
+2 MiB embedding threads. This uses the hosted-only `stacker` dependency and
+requires a C/assembly build toolchain; no native-kernel dependency was added.
+
 Try `examples/metacircular-agents.agel` through the hosted CLI. The new
 `metacircular_cost` Rust example measures interpreter work without model calls;
 the additional interpretation layer is substantially slower in evaluator steps,
