@@ -167,14 +167,13 @@ def persistence_test(image: str) -> None:
         first.process.stdin.write(b"\n")
         first.process.stdin.flush()
         first.expect_exact(
-            b"\r\nworkspace replay rejected at cell bad: error: division by zero\r\n"
-            b"workspace not saved; committed evaluator restored\r\n"
-            b"agel-native[4]> "
+            b"\r\nworkspace save failed: source candidate rejected; live world retained\r\n"
+            b"agel-native[2]> "
         )
         first.send(
             ":delete bad",
             "cell deleted from staged workspace; :save to commit",
-            4,
+            2,
         )
         shutdown(first)
     finally:
@@ -204,7 +203,7 @@ def persistence_test(image: str) -> None:
         second.send(
             ":save",
             "workspace generation 2 committed: 2 cells; evaluator rebuilt from cells; previous slot retained",
-            5,
+            4,
         )
         shutdown(second)
     finally:

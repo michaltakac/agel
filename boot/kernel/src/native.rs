@@ -308,6 +308,27 @@ impl Session {
         self.candidate_revision = None;
     }
 
+    /// Reconstruct saved source without resetting the running world.
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn begin_rebuild(&mut self) {
+        self.scratch = World::EMPTY;
+        self.candidate_revision = Some(self.revision);
+    }
+
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn stage(&mut self, source: &[u8]) -> Result<(), Error> {
+        if self.candidate_revision != Some(self.revision) {
+            return Err(Error("no current source candidate"));
+        }
+        self.candidate_revision = None;
+        evaluate_source(&mut self.scratch, source)?;
+        if self.scratch.agents.iter().any(|agent| agent.faulted) {
+            return Err(Error("source candidate agent turn failed"));
+        }
+        self.candidate_revision = Some(self.revision);
+        Ok(())
+    }
+
     #[cfg(any(feature = "isolation-selftest", test))]
     pub fn agent_source(&self, id: u8) -> Result<&[u8], Error> {
         let agent = &self.active.agents[agent_index(&self.active, id)?];
@@ -1564,6 +1585,24 @@ fn node_bytes<'a>(document: &Document, source: &'a [u8], node: u16) -> &'a [u8] 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn source_rebuild_failure_preserves_live_state_and_rollback() {
+        let mut session = Session::new();
+        eval(&mut session, "(def live 41)");
+        eval(&mut session, "(def live 42)");
+        let revision = session.revision();
+        session.begin_rebuild();
+        session.stage(b"(def live 99)").unwrap();
+        assert!(session.stage(b"(/ 1 0)").is_err());
+        assert!(session.promote().is_err());
+        assert_eq!(session.revision(), revision);
+        session.rollback().unwrap();
+        assert_eq!(eval(&mut session, "live"), Value::Int(41));
+        session.begin_rebuild();
+        session.stage(b"(def live 99)").unwrap();
+        session.promote().unwrap();
+        assert_eq!(eval(&mut session, "live"), Value::Int(99));
+    }
     #[test]
     fn workbench_preview_promote_reject_stale_and_rollback() {
         let mut session = Session::new();

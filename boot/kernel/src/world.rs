@@ -29,6 +29,7 @@ pub unsafe fn copy_supervisor_words(destination: *mut u8, source: *const u8, byt
 }
 
 /// Pages of stack given to a small contract or driver domain.
+#[cfg(not(feature = "native-graphics"))]
 pub const STACK_PAGES: u64 = 4;
 
 /// Pages reserved for a native evaluator domain.
@@ -99,6 +100,8 @@ pub mod shared {
     pub const COMMAND_EVALUATOR_PROMOTE: u64 = 0x8700;
     pub const COMMAND_EVALUATOR_DISCARD: u64 = 0x8800;
     pub const COMMAND_EVALUATOR_SOURCE: u64 = 0x8900;
+    pub const COMMAND_EVALUATOR_REBUILD: u64 = 0x8a00;
+    pub const COMMAND_EVALUATOR_STAGE: u64 = 0x8b00;
     /// Rasterize one validated 64-byte native vector record.
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
     pub const COMMAND_DISPLAY_DRAW: u64 = 0x9000;
@@ -168,6 +171,7 @@ impl Fault {
 }
 
 /// One deliberate misbehaviour and the containment it must produce.
+#[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 pub struct Provocation {
     /// Command written into the shared page.
     pub command: u64,
@@ -230,6 +234,7 @@ impl DomainCore {
     }
 
     /// Place one contract invocation in the shared page for the world to make.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn stage_invocation(&mut self, request: &agel_kernel_abi::Request) {
         self.write_shared(shared::OPERATION, u64::from(request.operation.code()));
         self.write_shared(shared::CAPABILITY, u64::from(request.capability));
@@ -245,6 +250,7 @@ impl DomainCore {
     }
 
     /// Read back what the world reported, validating it as untrusted input.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn collect_response(&self) -> agel_kernel_abi::Response {
         use agel_kernel_abi::{Response, Status};
         let status = Status::from_code(self.read_shared(shared::STATUS) as u16)

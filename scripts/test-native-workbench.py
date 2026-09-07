@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
     try:
         assert "WORKBENCH READY" in machine.submit(":workbench")
         original = dock_pixel(machine)
-        assert "CANDIDATE VALIDATED" in machine.submit(":preview (point 360 640)")
+        assert "CANDIDATE VALIDATED" in machine.submit("  :preview (point 360 640)  ")
         assert dock_pixel(machine) != original
         assert "CANDIDATE DISCARDED" in machine.submit(":discard")
         assert dock_pixel(machine) == original
@@ -83,6 +83,11 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
         assert "CANDIDATE VALIDATED" in machine.submit(":preview (begin (agent-become dock twice) (activate))")
         assert "CANDIDATE PROMOTED" in machine.submit(":promote")
         value(machine, "(inspect-agent)", 7)
+        assert "CELL STAGED" in machine.submit(":cell invalid (/ 1 0)")
+        assert "source candidate rejected" in machine.submit(":save")
+        value(machine, "(inspect-agent)", 7)
+        assert "(* message 2)" in machine.submit(":source 1")
+        assert "CELL DELETED" in machine.submit(":delete invalid")
         # Persist source, not a raw heap or ephemeral counter value.
         assert "CELL STAGED" in machine.submit(":cell wb-3 (def behavior (fn (self state message) (begin (paint self (+ state (* message 2))) (+ state (* message 2)))))")
         assert "SAVED GENERATION 1" in machine.submit(":save")

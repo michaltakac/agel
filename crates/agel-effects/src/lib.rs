@@ -10,6 +10,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -364,7 +365,19 @@ impl ProcessSandbox {
             kind: EffectKind::Process,
             operation: operation.into(),
             resource: spec.executable.to_string_lossy().into_owned(),
-            payload_digest: sha256(&spec.stdin),
+            payload_digest: {
+                let mut payload = b"agel/process/v2\0".to_vec();
+                field(
+                    &mut payload,
+                    self.limits.workspace.to_string_lossy().as_bytes(),
+                );
+                field(&mut payload, &(spec.arguments.len() as u64).to_be_bytes());
+                for argument in &spec.arguments {
+                    field(&mut payload, argument.as_bytes());
+                }
+                field(&mut payload, &spec.stdin);
+                sha256(&payload)
+            },
         };
         if !self.allowed_executables.contains(&spec.executable) {
             let reason = format!("executable {:?} is not allowlisted", spec.executable);
@@ -404,6 +417,9 @@ impl ProcessSandbox {
     }
 
     fn spawn(&self, workspace: &Path, spec: ProcessSpec) -> Result<ProcessOutput, EffectError> {
+        let deadline = Instant::now()
+            .checked_add(self.limits.timeout)
+            .ok_or_else(|| EffectError::Io("process timeout is out of range".into()))?;
         let mut command = Command::new(&spec.executable);
         command
             .args(&spec.arguments)
@@ -426,27 +442,44 @@ impl ProcessSandbox {
         let stdout = child.stdout.take().expect("piped stdout exists");
         let stderr = child.stderr.take().expect("piped stderr exists");
         let output_limit = self.limits.max_output_bytes;
-        let stdout_reader = thread::spawn(move || read_bounded(stdout, output_limit));
-        let stderr_reader = thread::spawn(move || read_bounded(stderr, output_limit));
-        let deadline = Instant::now()
-            .checked_add(self.limits.timeout)
-            .ok_or_else(|| EffectError::Io("process timeout is out of range".into()))?;
-        let status = loop {
-            match child
-                .try_wait()
-                .map_err(|e| EffectError::Io(e.to_string()))?
-            {
-                Some(status) => break status,
-                None if Instant::now() >= deadline => {
-                    terminate_process_group(&mut child);
-                    join_input(input)?;
-                    let _ = join_reader(stdout_reader)?;
-                    let _ = join_reader(stderr_reader)?;
-                    return Err(EffectError::TimedOut);
-                }
-                None => thread::sleep(Duration::from_millis(10)),
+        let exceeded = Arc::new(AtomicBool::new(false));
+        let stdout_exceeded = exceeded.clone();
+        let stderr_exceeded = exceeded.clone();
+        let stdout_reader =
+            thread::spawn(move || read_bounded(stdout, output_limit, &stdout_exceeded));
+        let stderr_reader =
+            thread::spawn(move || read_bounded(stderr, output_limit, &stderr_exceeded));
+        let mut status = None;
+        let failure = loop {
+            if exceeded.load(Ordering::Relaxed) {
+                break Some(EffectError::OutputLimitExceeded);
             }
+            if status.is_none() {
+                match child.try_wait() {
+                    Ok(result) => status = result,
+                    Err(error) => break Some(EffectError::Io(error.to_string())),
+                }
+            }
+            // A parent may exit while a descendant still owns a pipe. Do not
+            // leave the deadline behind and block indefinitely in join().
+            if status.is_some()
+                && input.is_finished()
+                && stdout_reader.is_finished()
+                && stderr_reader.is_finished()
+            {
+                break None;
+            }
+            if Instant::now() >= deadline {
+                break Some(EffectError::TimedOut);
+            }
+            thread::sleep(Duration::from_millis(10));
         };
+        if let Some(error) = failure {
+            terminate_process_group(&mut child);
+            // Do not let a process that escaped its group extend the caller's
+            // deadline through inherited pipes. This wrapper is not confinement.
+            return Err(error);
+        }
         join_input(input)?;
         let (stdout, stdout_exceeded) = join_reader(stdout_reader)?;
         let (stderr, stderr_exceeded) = join_reader(stderr_reader)?;
@@ -454,7 +487,7 @@ impl ProcessSandbox {
             return Err(EffectError::OutputLimitExceeded);
         }
         Ok(ProcessOutput {
-            status: status.code().unwrap_or(-1),
+            status: status.expect("completed child").code().unwrap_or(-1),
             stdout,
             stderr,
         })
@@ -486,7 +519,11 @@ impl fmt::Display for EffectError {
 
 impl std::error::Error for EffectError {}
 
-fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<(Vec<u8>, bool)> {
+fn read_bounded(
+    mut reader: impl Read,
+    limit: usize,
+    overflow: &AtomicBool,
+) -> io::Result<(Vec<u8>, bool)> {
     let mut retained = Vec::new();
     let mut exceeded = false;
     let mut buffer = [0_u8; 8192];
@@ -498,6 +535,9 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<(Vec<u8>, boo
         let remaining = limit.saturating_sub(retained.len());
         retained.extend_from_slice(&buffer[..read.min(remaining)]);
         exceeded |= read > remaining;
+        if exceeded {
+            overflow.store(true, Ordering::Relaxed);
+        }
     }
     Ok((retained, exceeded))
 }
@@ -544,6 +584,70 @@ fn terminate_process_group(child: &mut Child) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn shell(script: &str, timeout: Duration, limit: usize) -> Result<ProcessOutput, EffectError> {
+        let mut limits = ProcessLimits::new(std::env::temp_dir());
+        limits.timeout = timeout;
+        limits.max_output_bytes = limit;
+        ProcessSandbox::new(limits).allow_executable("/bin/sh").run(
+            Principal::host(),
+            "test",
+            ProcessSpec {
+                executable: "/bin/sh".into(),
+                arguments: vec!["-c".into(), script.into()],
+                stdin: vec![],
+            },
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_covers_descendant_pipes_after_parent_exit() {
+        let start = Instant::now();
+        assert_eq!(
+            shell("/bin/sleep 2 & exit 0", Duration::from_millis(100), 100),
+            Err(EffectError::TimedOut)
+        );
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_overflow_terminates_before_timeout() {
+        let start = Instant::now();
+        assert_eq!(
+            shell(
+                "while :; do printf abcdefghijklmnop; done",
+                Duration::from_secs(3),
+                64
+            ),
+            Err(EffectError::OutputLimitExceeded)
+        );
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_audit_binds_argument_boundaries() {
+        let sandbox = ProcessSandbox::new(ProcessLimits::new(std::env::temp_dir()))
+            .allow_executable("/bin/echo");
+        for args in [vec!["a", "bc"], vec!["ab", "c"]] {
+            sandbox
+                .run(
+                    Principal::host(),
+                    "test",
+                    ProcessSpec {
+                        executable: "/bin/echo".into(),
+                        arguments: args.into_iter().map(str::to_owned).collect(),
+                        stdin: vec![],
+                    },
+                )
+                .unwrap();
+        }
+        let records = sandbox.audit_log().records();
+        assert_ne!(records[0].key, records[2].key);
+    }
 
     #[test]
     fn policy_is_default_deny_and_intent_keys_bind_every_field() {

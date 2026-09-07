@@ -19,6 +19,7 @@
 
 use crate::arch;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};
+#[cfg(not(feature = "isolated-repl"))]
 use agel_kernel_abi::Status;
 use core::fmt;
 
@@ -34,6 +35,7 @@ pub struct ServiceHandle {
 
 impl ServiceHandle {
     /// The generation this handle was issued against.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn generation(self) -> u32 {
         self.generation
     }
@@ -54,6 +56,7 @@ pub enum ServiceError {
 
 impl ServiceError {
     /// The contract status this corresponds to.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn status(self) -> Status {
         match self {
             Self::Stale => Status::StaleGeneration,
@@ -62,6 +65,7 @@ impl ServiceError {
     }
 
     /// A short name for serial reports.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn name(self) -> &'static str {
         match self {
             Self::Stale => "stale-generation",
@@ -74,20 +78,26 @@ impl ServiceError {
 /// An unprivileged driver domain the supervisor can lose and replace.
 pub struct ServiceDomain {
     domain: arch::Domain,
+    #[cfg(not(feature = "isolated-repl"))]
     entry: u64,
+    #[cfg(not(feature = "isolated-repl"))]
     ticks: u32,
     generation: u32,
+    #[cfg(not(feature = "isolated-repl"))]
     restarts: u32,
 }
 
 impl ServiceDomain {
     /// Adopt `domain` as generation one of a service entered at `entry`.
-    pub fn new(domain: arch::Domain, entry: u64, ticks: u32) -> Self {
+    pub fn new(domain: arch::Domain, _entry: u64, _ticks: u32) -> Self {
         Self {
             domain,
-            entry,
-            ticks,
+            #[cfg(not(feature = "isolated-repl"))]
+            entry: _entry,
+            #[cfg(not(feature = "isolated-repl"))]
+            ticks: _ticks,
             generation: 1,
+            #[cfg(not(feature = "isolated-repl"))]
             restarts: 0,
         }
     }
@@ -100,16 +110,19 @@ impl ServiceDomain {
     }
 
     /// The current generation.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn generation(&self) -> u32 {
         self.generation
     }
 
     /// How many times this service has been replaced.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn restarts(&self) -> u32 {
         self.restarts
     }
 
     /// Whether the service is currently stopped.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn stopped(&self) -> Option<Stop> {
         self.domain.stopped()
     }
@@ -144,6 +157,7 @@ impl ServiceDomain {
 
     /// Ask the driver to do something that will stop it, for the test that
     /// proves the supervisor survives losing it.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn provoke(&mut self, command: u64) -> Stop {
         self.domain.provoke(command)
     }
@@ -154,6 +168,7 @@ impl ServiceDomain {
     /// which is stated rather than hidden here as everywhere else. What matters
     /// for the restart claim is that the replacement is a different domain with
     /// a different address space, not a resumed one.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn restart(&mut self, machine: &mut arch::Machine) -> Result<(), &'static str> {
         let replacement = machine.create_console_world(self.entry, self.ticks)?;
         self.domain = replacement;
@@ -194,6 +209,7 @@ impl<'a> ServiceWriter<'a> {
 
     /// Write through `service` using a handle the caller already holds, which
     /// may be older than the service's current generation.
+    #[cfg(not(feature = "isolated-repl"))]
     pub fn with_handle(service: &'a mut ServiceDomain, handle: ServiceHandle) -> Self {
         Self {
             service,

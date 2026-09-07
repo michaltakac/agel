@@ -1,5 +1,23 @@
 # Typed effects and copy-on-write sandboxes
 
+## v0.2.12 audit corrections
+
+Process deadlines now cover pipe completion even when the immediate child has
+already exited. Output overflow triggers termination without waiting for the
+deadline. Invalid deadline arithmetic is rejected before a process is spawned.
+Process audit payloads now bind the configured workspace, length-delimited
+argument vector and stdin, rather than stdin alone. This changes process audit
+keys; it does not change the separate model outbox's request identity.
+
+This remains a trusted-process wrapper, not native-code confinement. On failure
+it kills the Unix process group and does not wait indefinitely for I/O helpers.
+A malicious descendant that leaves that group can survive and keep a helper
+thread blocked through inherited pipes. Windows cleanup only targets the direct
+child. Strong process-tree isolation and resource reclamation require an OS
+sandbox boundary; no VM/Chimera guarantee is implied by these timeout repairs.
+
+## Original effect boundary
+
 Agel v0.0.6 gives host effects one vocabulary and one interposition point. The
 language core still only creates transactional intents. A trusted host decides
 whether an intent may cross into the operating system.

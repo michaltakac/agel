@@ -379,12 +379,21 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
             || command == shared::COMMAND_EVALUATOR_PROMOTE
             || command == shared::COMMAND_EVALUATOR_DISCARD
             || command == shared::COMMAND_EVALUATOR_SOURCE
+            || command == shared::COMMAND_EVALUATOR_REBUILD
+            || command == shared::COMMAND_EVALUATOR_STAGE
         {
             let length = (unsafe { page.add(shared::ARGUMENTS).read_volatile() } as usize)
                 .min(crate::world::PAYLOAD_BYTES);
             let payload = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *const u8;
             let source = unsafe { core::slice::from_raw_parts(payload, length) };
             let result = match command {
+                shared::COMMAND_EVALUATOR_REBUILD => {
+                    session.begin_rebuild();
+                    Ok(b"SOURCE CANDIDATE STARTED".as_slice())
+                }
+                shared::COMMAND_EVALUATOR_STAGE => session
+                    .stage(source)
+                    .map(|_| b"SOURCE CELL VALIDATED".as_slice()),
                 shared::COMMAND_EVALUATOR_PREVIEW => session
                     .preview(source)
                     .map(|_| b"CANDIDATE VALIDATED - :PROMOTE".as_slice()),

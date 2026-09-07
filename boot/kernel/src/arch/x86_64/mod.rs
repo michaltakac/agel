@@ -20,7 +20,10 @@ mod memory;
 #[cfg(feature = "isolation-selftest")]
 pub use domain::Domain;
 
-#[cfg(feature = "isolation-selftest")]
+#[cfg(all(
+    feature = "isolation-selftest",
+    not(any(feature = "isolated-repl", feature = "native-graphics"))
+))]
 use crate::world::Provocation;
 
 /// Short label used in serial reports.
@@ -187,7 +190,10 @@ pub fn fault_name(cause: u64) -> &'static str {
 }
 
 /// Every way an x86-64 world can misbehave, and the containment each must earn.
-#[cfg(feature = "isolation-selftest")]
+#[cfg(all(
+    feature = "isolation-selftest",
+    not(any(feature = "isolated-repl", feature = "native-graphics"))
+))]
 pub const PROVOCATIONS: &[Provocation] = &[
     Provocation {
         command: crate::world::shared::COMMAND_FAULT_WRITE,
@@ -263,6 +269,7 @@ impl Machine {
     }
 
     /// Build a protection domain entered in ring 3 at `entry`.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn create_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
         Domain::new(
             &mut self.pool,
@@ -294,6 +301,7 @@ impl Machine {
 
     /// Build a protection domain that is additionally granted the console
     /// device: on x86-64, eight I/O ports and nothing else.
+    #[cfg(not(feature = "native-graphics"))]
     pub fn create_console_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
         Domain::new(
             &mut self.pool,
@@ -320,6 +328,7 @@ impl Machine {
     }
 
     /// Frames the pool has not handed out.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn frames_remaining(&self) -> u64 {
         self.pool.remaining()
     }

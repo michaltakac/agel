@@ -13,10 +13,6 @@
 
 #![no_std]
 #![no_main]
-#![cfg_attr(
-    any(feature = "isolated-repl", feature = "native-graphics"),
-    allow(dead_code)
-)]
 
 use core::panic::PanicInfo;
 
@@ -26,7 +22,11 @@ mod console;
 #[cfg(feature = "isolation-selftest")]
 mod world;
 
-#[cfg(not(any(feature = "selftest", feature = "native-selftest")))]
+#[cfg(not(any(
+    feature = "selftest",
+    feature = "native-selftest",
+    feature = "native-graphics"
+)))]
 mod monitor;
 
 #[cfg(all(
@@ -43,13 +43,16 @@ mod display_user;
 mod graphics;
 #[cfg(all(target_arch = "x86_64", feature = "isolated-repl"))]
 mod isolated_repl;
-#[cfg(feature = "isolation-selftest")]
+#[cfg(all(
+    feature = "isolation-selftest",
+    not(any(feature = "isolated-repl", feature = "native-graphics"))
+))]
 mod isolation;
 #[cfg(feature = "isolation-selftest")]
 mod memory;
 #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
 mod pointer;
-#[cfg(feature = "isolation-selftest")]
+#[cfg(all(feature = "isolation-selftest", not(feature = "native-graphics")))]
 mod service;
 #[cfg(feature = "isolation-selftest")]
 mod user;

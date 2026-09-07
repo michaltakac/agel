@@ -81,6 +81,7 @@ impl FramePool {
     }
 
     /// Frames still available.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn remaining(&self) -> u64 {
         (arch::POOL_END - self.next) / PAGE
     }

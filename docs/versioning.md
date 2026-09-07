@@ -34,6 +34,8 @@ promise.
   `v0.2.11` adds the native agent workbench: pointer-to-agent actions, keyboard
   focus, source inspection, isolated candidate previews, turn-boundary behavior
   replacement, explicit promotion/discard, and persisted source upgrades.
+  `v0.2.12` repairs failed-save recovery and process deadline/output enforcement,
+  strengthens process audit identities, and removes blanket dead-code suppression.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

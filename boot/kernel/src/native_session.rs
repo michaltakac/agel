@@ -61,6 +61,7 @@ pub fn request(
     })
 }
 
+#[cfg(feature = "isolated-repl")]
 pub fn reset(evaluator: &mut arch::Domain) -> Result<(), &'static str> {
     request(evaluator, shared::COMMAND_EVALUATOR_RESET, b"").map(|_| ())
 }
@@ -75,12 +76,48 @@ pub enum ReplayFailure {
 }
 
 impl ReplayFailure {
+    #[cfg(feature = "native-graphics")]
     pub fn message(self) -> &'static str {
         match self {
-            Self::Language(_) => "workspace replay rejected",
-            Self::Transport { reason, .. } => reason,
+            Self::Language(ordinal) => {
+                crate::kprint!("workspace replay rejected at cell {}\n", ordinal);
+                "workspace replay rejected"
+            }
+            Self::Transport { ordinal, reason } => {
+                crate::kprint!("workspace transport failed at cell {}\n", ordinal);
+                reason
+            }
         }
     }
+}
+
+/// Validate every source cell in an empty candidate, publish disk, then adopt
+/// the candidate. No failed validation or disk write resets the live evaluator.
+pub fn save(
+    evaluator: &mut arch::Domain,
+    workspace: &Workspace,
+    generation: u64,
+) -> Result<(u64, u64), &'static str> {
+    request(evaluator, shared::COMMAND_EVALUATOR_REBUILD, b"")?;
+    for ordinal in 0..workspace.count() {
+        let cell = workspace.cell(ordinal).ok_or("missing source cell")?;
+        let reply = request(evaluator, shared::COMMAND_EVALUATOR_STAGE, cell.source())?;
+        if reply.error {
+            return Err("source candidate rejected; live world retained");
+        }
+    }
+    let next = match crate::workspace::save(workspace, generation) {
+        Ok(next) => next,
+        Err(reason) => {
+            let _ = request(evaluator, shared::COMMAND_EVALUATOR_DISCARD, b"");
+            return Err(reason);
+        }
+    };
+    let reply = request(evaluator, shared::COMMAND_EVALUATOR_PROMOTE, b"")?;
+    if reply.error {
+        return Err("source saved; live promotion failed; reload required");
+    }
+    Ok((next, reply.revision))
 }
 
 pub fn replay(evaluator: &mut arch::Domain, workspace: &Workspace) -> Result<u64, ReplayFailure> {

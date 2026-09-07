@@ -142,9 +142,8 @@ pub fn run() -> ! {
                 generation,
                 dirty,
             ),
-            b":save" => match replay_workspace(&mut evaluator, &workspace) {
-                Ok(candidate_revision) => match crate::workspace::save(&workspace, generation) {
-                    Ok(next_generation) => {
+            b":save" => match crate::native_session::save(&mut evaluator, &workspace, generation) {
+                    Ok((next_generation, candidate_revision)) => {
                         generation = next_generation;
                         committed_workspace = workspace;
                         dirty = false;
@@ -157,27 +156,7 @@ pub fn run() -> ! {
                             b"workspace save failed: ",
                             reason.as_bytes(),
                         );
-                        revision = restore_workspace(
-                            &mut evaluator,
-                            &committed_workspace,
-                            &mut driver,
-                        );
                     }
-                },
-                Err(failure) => {
-                    report_replay_failure(
-                        &mut driver,
-                        &workspace,
-                        failure,
-                        &mut evaluator,
-                    );
-                    driver_line(
-                        &mut driver,
-                        b"workspace not saved; committed evaluator restored",
-                    );
-                    revision =
-                        restore_workspace(&mut evaluator, &committed_workspace, &mut driver);
-                }
             },
             b":reload" => match load_replay_candidates(&mut evaluator, &mut driver) {
                 Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {

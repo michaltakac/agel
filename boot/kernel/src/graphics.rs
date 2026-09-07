@@ -838,27 +838,17 @@ fn execute_workshop(
         return status;
     }
     if line == b":save" {
-        return match replay_workspace(evaluator, workspace) {
-            Ok(revision) => match crate::workspace::save(workspace, *generation) {
-                Ok(next) => {
-                    *generation = next;
-                    *committed_workspace = *workspace;
-                    *evaluator_revision = revision;
-                    *dirty = false;
-                    let mut status = StatusLine::new(b"SAVED GENERATION ");
-                    status.number_u64(next);
-                    status
-                }
-                Err(reason) => {
-                    let _ = replay_workspace(evaluator, committed_workspace);
-                    StatusLine::new(reason.as_bytes())
-                }
-            },
-            Err(failure) => {
-                *evaluator_revision =
-                    replay_workspace(evaluator, committed_workspace).unwrap_or(*evaluator_revision);
-                StatusLine::new(failure.message().as_bytes())
+        return match crate::native_session::save(evaluator, workspace, *generation) {
+            Ok((next, revision)) => {
+                *generation = next;
+                *committed_workspace = *workspace;
+                *evaluator_revision = revision;
+                *dirty = false;
+                let mut status = StatusLine::new(b"SAVED GENERATION ");
+                status.number_u64(next);
+                status
             }
+            Err(reason) => StatusLine::new(reason.as_bytes()),
         };
     }
     if line == b":reload" {
@@ -1211,9 +1201,9 @@ fn interactive(
                     &mut dirty,
                     &line[..length],
                 );
-                current.previewing = line[..length].starts_with(b":preview ")
+                current.previewing = trim(&line[..length]).starts_with(b":preview ")
                     && status.get().starts_with(b"CANDIDATE VALIDATED");
-                if line[..length].starts_with(b":source ") {
+                if trim(&line[..length]).starts_with(b":source ") {
                     current.inspector = Some(status);
                 } else {
                     // Source is a snapshot; never label it as current after an edit.
@@ -1397,9 +1387,9 @@ pub fn run() -> ! {
     console::write("graphics[x86_64]: live Lisp scene commit/reject/rollback [ok]\n");
     console::write("AGEL_GRAPHICS_OK\n");
 
-    #[cfg(feature = "graphics-selftest")]
-    arch::exit(true);
-
-    #[cfg(not(feature = "graphics-selftest"))]
+    // Keep the production entry type-checked in the selftest build as well.
+    if cfg!(feature = "graphics-selftest") {
+        arch::exit(true);
+    }
     interactive(&mut machine, &mut replacement, initial, initial)
 }

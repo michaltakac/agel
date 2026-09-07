@@ -89,7 +89,12 @@ original behavior cell, then save:
 
 Save/reboot reconstructs the world from source, including the new behavior.
 The demo counter starts at its source-defined initial value; it is not a saved
-heap snapshot. `:save` already replay-validates source before disk publication.
+heap snapshot. `:save` replay-validates source before disk publication.
+Since v0.2.12, this reconstruction happens in a candidate bank: rejected source
+or a failed disk write retains the live world and its rollback point. A successful
+save adopts the reconstructed candidate as one new revision, regardless of cell
+count. Disk publication and live adoption are separate steps; a domain failure
+between them requires reload/recovery, not a claim of cross-device atomicity.
 Use `:reload` to reconstruct the last saved source workspace.
 
 ## Small primitives, library policy

@@ -8,6 +8,7 @@ use super::cpu::{self, TrapFrame};
 use super::memory::{AddressSpace, DOMAIN_BASE};
 use crate::memory::{Access, FramePool, MemoryError, PAGE};
 use crate::world::{DomainCore, Fault, Stop};
+#[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 use agel_kernel_abi::{Request, Response, Status};
 
 /// Virtual address of a domain's stack region.
@@ -91,6 +92,7 @@ impl Domain {
     }
 
     /// Ask the world to perform one contract invocation and report the answer.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn invoke_in_world(&mut self, request: &Request) -> Response {
         self.core.stage_invocation(request);
         match self.run() {
@@ -103,6 +105,7 @@ impl Domain {
 
     /// Ask the world to do something it is not allowed to do, and report how it
     /// was stopped.
+    #[cfg(not(feature = "native-graphics"))]
     pub fn provoke(&mut self, command: u64) -> Stop {
         self.core.stage_command(command);
         self.run()
@@ -132,6 +135,7 @@ impl Domain {
     }
 
     /// The domain's recorded stop reason, if it has one.
+    #[cfg(not(feature = "native-graphics"))]
     pub fn stopped(&self) -> Option<Stop> {
         self.core.stopped()
     }
