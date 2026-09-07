@@ -1,0 +1,5 @@
+; Native dock library. Each non-comment line fits one persistent source cell.
+; Geometry and appearance belong to Agel; the compositor only draws records.
+(def dock-icon (fn (x color) (scene-rect x 622 48 48 12 color)))
+(def dock-icons (fn () (begin (dock-icon 340 7526143) (dock-icon 410 10194175) (dock-icon 480 16762967) (dock-icon 550 7929759) (dock-icon 620 16745405))))
+(def dock-paint (fn (color) (begin (scene-clear) (scene-rect 318 610 372 72 20 color) (dock-icons))))

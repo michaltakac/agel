@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.9: layout-aware graphical input and native agents inside the persistent
+The current repository is **v0.2.10: Agel-authored live native scenes and agents inside the persistent
 graphical Agel workshop. Fixed-memory actors now spawn, exchange bounded FIFO
 messages, run deterministic transactional turns, compose, expose live state,
 and contain a failed behavior inside the unprivileged evaluator domain. The
@@ -208,10 +208,9 @@ The same architecture now reaches a native QEMU framebuffer. Launch it with:
 ./scripts/run-graphics.sh
 ```
 
-The launcher shows the real QEMU framebuffer in a local browser console. Type
-in its command field using your host keyboard layout, including Slovak/Option
-symbols and paste, without mouse capture. Use `--native` for the direct QEMU
-window with a US physical keyboard layout. For example:
+The launcher boots into QEMU's own graphical window. Its direct PS/2 input
+uses the guest's US layout. The optional `--web` console supplies host keyboard
+layout composition, including Slovak/Option symbols and paste. For example:
 
 ```lisp
 (def square (fn (x) (* x x)))
@@ -237,6 +236,11 @@ The native actor walkthrough is
 [`examples/native-agents.txt`](examples/native-agents.txt), with its exact
 fault and transaction contract in
 [`docs/native-agents.md`](docs/native-agents.md).
+For an Agel-authored dock that appears live, changes through actor messages,
+rolls back, and survives reboot, follow
+[`examples/native-dock.txt`](examples/native-dock.txt). Its small drawing
+contract and the next voice-control steps are in
+[`docs/native-scenes.md`](docs/native-scenes.md).
 
 The command grammar and current trust boundary are documented in
 [`docs/native-graphics.md`](docs/native-graphics.md).

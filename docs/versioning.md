@@ -28,7 +28,10 @@ promise.
   behavior turns, inspection, and contained fault recovery run inside the
   graphical OS. `v0.2.9` repairs native punctuation/modifiers and adds a
   host-layout graphical console for Slovak/Unicode text composition and paste
-  without mouse capture. Minor releases may make
+  without mouse capture. `v0.2.10` restores QEMU's direct window as the default
+  and connects committed native Agel scene data to the compositor, including
+  an Agel dock library, actor-driven repaint, rollback, and reboot replay.
+  Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

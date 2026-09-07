@@ -1,12 +1,13 @@
 #!/bin/sh
-# Open the real QEMU framebuffer with host-layout text input in a browser.
-# --native selects QEMU's direct PS/2 window (US physical keyboard layout).
+# Boot Agel in QEMU's own graphical window.
+# --web selects the optional host-layout text bridge.
 # Named source cells remain on the same persistent disk across launches.
 set -eu
 
 image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
 test -n "$image" && test -f "$image"
-if test "${1:-}" != "--native"; then
+if test "${1:-}" = "--web"; then
+  shift
   exec python3 ./scripts/graphical-console.py "$image" "$@"
 fi
 printf '%s\n' 'Direct QEMU input uses a US physical layout. Use the default browser console for Slovak/macOS text input.'

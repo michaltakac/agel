@@ -1,0 +1,20 @@
+; Run ./scripts/run-graphics.sh. Paste one line at a time in its terminal,
+; or use ./scripts/run-graphics.sh --web for host-layout text input.
+; The dock is authored entirely with ordinary native Agel functions.
+:cell dock-icon (def dock-icon (fn (x color) (scene-rect x 622 48 48 12 color)))
+:cell dock-icons (def dock-icons (fn () (begin (dock-icon 340 7526143) (dock-icon 410 10194175) (dock-icon 480 16762967) (dock-icon 550 7929759) (dock-icon 620 16745405))))
+:cell dock-paint (def dock-paint (fn (color) (begin (scene-clear) (scene-rect 318 610 372 72 20 color) (dock-icons))))
+:cell desktop (dock-paint 3423048)
+:save
+; The dock now appears and returns after reboot.
+; Repaint it through a native actor, with no rebuild or host renderer.
+(def dock-behavior (fn (self state message) (begin (dock-paint message) message)))
+(def dock (spawn dock-behavior 3423048))
+(send dock 4609905)
+(step)
+; Roll back the last turn: the dock and actor state revert together.
+:rollback
+; Invalid geometry cannot erase the committed dock.
+(begin (scene-clear) (scene-rect 0 0 9999 80 10 123))
+(scene-count)
+; Query returns 6 (one dock panel plus five icons).

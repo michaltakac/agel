@@ -93,6 +93,8 @@ pub mod shared {
     /// Replace the evaluator session with a fresh empty transactional world.
     /// This is a supervisor-only workspace reconstruction primitive.
     pub const COMMAND_EVALUATOR_RESET: u64 = 0x8400;
+    /// Read one committed native scene rectangle, without evaluating code.
+    pub const COMMAND_EVALUATOR_SCENE: u64 = 0x8500;
     /// Rasterize one validated 64-byte native vector record.
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
     pub const COMMAND_DISPLAY_DRAW: u64 = 0x9000;

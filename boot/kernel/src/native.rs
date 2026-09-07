@@ -17,6 +17,7 @@ const INITIAL_FUEL: u16 = 2_000;
 const MAX_AGENTS: usize = 8;
 const MAX_MAILBOX: usize = 8;
 const MAX_RUN_TURNS: usize = 32;
+const MAX_SCENE_RECTS: usize = 12;
 const NONE: u16 = u16::MAX;
 
 /// Every fixed native resource bound, named and reported from the constants the
@@ -36,6 +37,7 @@ pub const LIMITS: &[(&str, u64)] = &[
     ("agents", MAX_AGENTS as u64),
     ("mailbox", MAX_MAILBOX as u64),
     ("run-turns", MAX_RUN_TURNS as u64),
+    ("scene-rects", MAX_SCENE_RECTS as u64),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,6 +163,8 @@ struct World {
     agents: [Agent; MAX_AGENTS],
     scheduler_cursor: u8,
     scheduler_active: bool,
+    scene: [[u32; 7]; MAX_SCENE_RECTS],
+    scene_count: u8,
 }
 
 impl World {
@@ -169,6 +173,8 @@ impl World {
         agents: [Agent::EMPTY; MAX_AGENTS],
         scheduler_cursor: 0,
         scheduler_active: false,
+        scene: [[0; 7]; MAX_SCENE_RECTS],
+        scene_count: 0,
     };
 
     fn find(&self, name: &[u8]) -> Option<usize> {
@@ -204,6 +210,19 @@ pub struct Session {
 }
 
 impl Session {
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn scene_count(&self) -> usize {
+        self.active.scene_count as usize
+    }
+
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn scene_record(&self, index: usize) -> Option<[u32; 7]> {
+        if index < self.scene_count() {
+            Some(self.active.scene[index])
+        } else {
+            None
+        }
+    }
     pub const fn new() -> Self {
         Self {
             active: World::EMPTY,
@@ -524,6 +543,9 @@ enum RuntimeValue {
 
 #[derive(Clone, Copy)]
 enum Builtin {
+    SceneClear,
+    SceneRect,
+    SceneCount,
     Add,
     Subtract,
     Multiply,
@@ -803,6 +825,9 @@ fn evaluate_def(
             | b"restart-agent"
             | b"drop-message"
             | b"agent-count"
+            | b"scene-clear"
+            | b"scene-rect"
+            | b"scene-count"
     ) {
         return Err(Error("native core names cannot be redefined"));
     }
@@ -989,6 +1014,52 @@ fn apply_builtin(
     fuel: &mut u16,
 ) -> Result<RuntimeValue, Error> {
     match builtin {
+        Builtin::SceneClear | Builtin::SceneCount => {
+            if !arguments.is_empty() {
+                return Err(Error("scene-clear/count expect no arguments"));
+            }
+            if matches!(builtin, Builtin::SceneClear) {
+                world.scene_count = 0;
+            }
+            return Ok(RuntimeValue::Scalar(Scalar::Int(i64::from(
+                world.scene_count,
+            ))));
+        }
+        Builtin::SceneRect => {
+            if arguments.len() != 6 {
+                return Err(Error("scene-rect expects x y width height radius rgb"));
+            }
+            let mut record = [0_u32; 7];
+            record[0] = 2;
+            for (index, value) in arguments.iter().enumerate() {
+                let RuntimeValue::Scalar(Scalar::Int(value)) = value else {
+                    return Err(Error("scene-rect expects integers"));
+                };
+                record[index + 1] = u32::try_from(*value)
+                    .map_err(|_| Error("scene rectangle value out of range"))?;
+            }
+            let [_, x, y, width, height, radius, color] = record;
+            if width == 0
+                || height == 0
+                || x > 1024
+                || y > 684
+                || width > 1024 - x
+                || height > 684 - y
+                || radius > width / 2
+                || radius > height / 2
+                || color > 0xffffff
+            {
+                return Err(Error("scene rectangle exceeds drawable bounds"));
+            }
+            if world.scene_count as usize == MAX_SCENE_RECTS {
+                return Err(Error("native scene command limit exceeded"));
+            }
+            world.scene[world.scene_count as usize] = record;
+            world.scene_count += 1;
+            return Ok(RuntimeValue::Scalar(Scalar::Int(i64::from(
+                world.scene_count,
+            ))));
+        }
         Builtin::Spawn => return spawn_agent(arguments, world),
         Builtin::Send => return send_agent(arguments, world),
         Builtin::Step => {
@@ -1267,6 +1338,9 @@ fn resolve_symbol(
         return Ok(local.value);
     }
     let builtin = match name {
+        b"scene-clear" => Some(Builtin::SceneClear),
+        b"scene-rect" => Some(Builtin::SceneRect),
+        b"scene-count" => Some(Builtin::SceneCount),
         b"+" => Some(Builtin::Add),
         b"-" => Some(Builtin::Subtract),
         b"*" => Some(Builtin::Multiply),
@@ -1335,6 +1409,53 @@ fn node_bytes<'a>(document: &Document, source: &'a [u8], node: u16) -> &'a [u8] 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scene_is_part_of_the_transactional_actor_world() {
+        let mut session = Session::new();
+        eval(&mut session, "(scene-rect 318 610 372 72 20 3423048)");
+        let original = session.scene_record(0);
+        assert!(session
+            .evaluate(b"(begin (scene-clear) (scene-rect 0 0 9999 80 10 123))")
+            .is_err());
+        assert_eq!(session.scene_record(0), original);
+        eval(&mut session, "(def paint (fn (self state message) (begin (scene-clear) (scene-rect 318 610 372 72 20 message) message)))");
+        eval(&mut session, "(def a (spawn paint 0))");
+        eval(&mut session, "(send a 4609905)");
+        eval(&mut session, "(step)");
+        assert_eq!(session.scene_record(0).unwrap()[6], 4609905);
+        session.rollback().unwrap();
+        assert_eq!(session.scene_record(0), original);
+        assert_eq!(eval(&mut session, "(agent-state a)"), Value::Int(0));
+        eval(
+            &mut session,
+            "(def bad (fn (self state message) (begin (scene-clear) (/ 1 0))))",
+        );
+        eval(&mut session, "(def b (spawn bad 0))");
+        eval(&mut session, "(send b 1)");
+        eval(&mut session, "(run 2)");
+        assert_eq!(session.scene_count(), 1);
+        assert_eq!(eval(&mut session, "(agent-faulted? b)"), Value::Bool(true));
+    }
+
+    #[test]
+    fn scene_bounds_and_capacity_are_enforced() {
+        let mut session = Session::new();
+        for source in [
+            "(scene-rect -1 0 1 1 0 0)",
+            "(scene-rect 0 0 0 1 0 0)",
+            "(scene-rect 0 680 1 8 0 0)",
+            "(scene-rect 0 0 8 8 5 0)",
+            "(scene-rect 0 0 8 8 0 16777216)",
+        ] {
+            assert!(session.evaluate(source.as_bytes()).is_err());
+        }
+        for _ in 0..12 {
+            eval(&mut session, "(scene-rect 0 0 10 10 0 0)");
+        }
+        assert!(session.evaluate(b"(scene-rect 0 0 10 10 0 0)").is_err());
+        assert_eq!(session.scene_count(), 12);
+    }
 
     fn eval(session: &mut Session, source: &str) -> Value {
         session.evaluate(source.as_bytes()).unwrap()

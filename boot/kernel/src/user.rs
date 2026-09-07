@@ -425,6 +425,19 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
                 unsafe { evaluator_u64(page, &mut response_length, *bound) };
             }
             unsafe { evaluator_finish(page, response_length, false, session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_SCENE {
+            let payload = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *mut u8;
+            let index = unsafe { payload.read_volatile() } as usize;
+            let mut response_length = 0;
+            unsafe { evaluator_push(page, &mut response_length, session.scene_count() as u8) };
+            if let Some(record) = session.scene_record(index) {
+                for word in record {
+                    for byte in word.to_le_bytes() {
+                        unsafe { evaluator_push(page, &mut response_length, byte) };
+                    }
+                }
+            }
+            unsafe { evaluator_finish(page, response_length, false, session.revision()) };
         } else if command == shared::COMMAND_EVALUATOR_RESET {
             session.reset();
             unsafe { evaluator_finish(page, 0, false, session.revision()) };

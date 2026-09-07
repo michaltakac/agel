@@ -19,7 +19,7 @@ const RECORD_BYTES: usize = 64;
 const STREAM_HEADER_BYTES: usize = 16;
 const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
-const MAX_SCENE_COMMANDS: usize = 48;
+const MAX_SCENE_COMMANDS: usize = 64;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 const DISPLAY_LINE_BYTES: usize = 22;
 
@@ -33,6 +33,8 @@ struct Scene {
     workspace: u8,
     title: [u8; 28],
     title_len: u8,
+    rectangles: [[u32; 7]; 12],
+    rectangle_count: usize,
 }
 
 impl Scene {
@@ -45,6 +47,8 @@ impl Scene {
             workspace: 1,
             title,
             title_len: text.len() as u8,
+            rectangles: [[0; 7]; 12],
+            rectangle_count: 0,
         }
     }
 }
@@ -440,6 +444,13 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         }
         frame.push(record)?;
     }
+    for rectangle in &scene.rectangles[..scene.rectangle_count] {
+        let mut record = [0; RECORD_BYTES];
+        for (index, word) in rectangle.iter().enumerate() {
+            put_u32(&mut record, index, *word);
+        }
+        frame.push(record)?;
+    }
     if let Some(line) = line {
         let mut prompt = [b' '; 28];
         prompt[..6].copy_from_slice(b"AGEL> ");
@@ -706,7 +717,7 @@ fn execute_workshop(
         arch::exit(true);
     }
     if line == b":help" {
-        return StatusLine::new(b"forms: Lisp evaluates | agents: spawn send step run inspect/restart | UI: (help) | cells: :cell NAME FORM :run NAME :show NAME :delete NAME :cells :workspace :save :reload | evaluator: :revision :rollback :defs :limits | :shutdown");
+        return StatusLine::new(b"Lisp: quote if begin def fn | agents: spawn send step run | scene: scene-clear scene-rect scene-count | UI: (help) | cells: :cell :run :show :delete :cells :workspace :save :reload | :revision :rollback :defs :limits :shutdown");
     }
     if line == b":revision" {
         let mut status = StatusLine::new(b"EVAL REV ");
@@ -920,6 +931,74 @@ fn next_input(keyboard: &mut Keyboard) -> Option<u8> {
     arch::keyboard_try_read_scancode().and_then(|scan| keyboard.decode(scan))
 }
 
+/// Pull committed language data through the bounded evaluator page. Validate
+/// the complete candidate before any command reaches the display domain.
+fn synchronize_language_scene(
+    evaluator: &mut arch::Domain,
+    compositor: &mut arch::Domain,
+    current: &mut Scene,
+) -> Result<(), &'static str> {
+    let mut candidate = *current;
+    candidate.rectangles = [[0; 7]; 12];
+    let mut count = 0;
+    let mut revision = 0;
+    for index in 0..12 {
+        let reply = evaluator_request(evaluator, shared::COMMAND_EVALUATOR_SCENE, &[index as u8])?;
+        if index == 0 {
+            count = reply.bytes[0] as usize;
+            revision = reply.revision;
+        }
+        if reply.error
+            || count > 12
+            || reply.bytes[0] as usize != count
+            || reply.revision != revision
+        {
+            return Err("invalid native scene envelope");
+        }
+        if count == 0 && reply.length == 1 {
+            break;
+        }
+        if reply.length != 29 {
+            return Err("invalid native scene record length");
+        }
+        let mut rect = [0_u32; 7];
+        for (field, value) in rect.iter_mut().enumerate() {
+            let start = 1 + field * 4;
+            *value = u32::from_le_bytes(reply.bytes[start..start + 4].try_into().unwrap());
+        }
+        let [opcode, x, y, width, height, radius, rgb] = rect;
+        if opcode != 2
+            || x > 1024
+            || y > 684
+            || width == 0
+            || height == 0
+            || width > 1024 - x
+            || height > 684 - y
+            || radius > width / 2
+            || radius > height / 2
+            || rgb > 0xffffff
+        {
+            return Err("native scene rectangle rejected");
+        }
+        candidate.rectangles[index] = rect;
+        if index + 1 == count {
+            break;
+        }
+    }
+    candidate.rectangle_count = count;
+    if current.rectangle_count == count && current.rectangles == candidate.rectangles {
+        return Ok(());
+    }
+    let frame = materialize(candidate, None, b"")?;
+    if let Err(reason) = render(compositor, &frame) {
+        let old = materialize(*current, None, b"")?;
+        let _ = render(compositor, &old);
+        return Err(reason);
+    }
+    *current = candidate;
+    Ok(())
+}
+
 fn interactive(
     machine: &mut arch::Machine,
     compositor: &mut arch::Domain,
@@ -935,6 +1014,8 @@ fn interactive(
     let mut committed_workspace = workspace;
     let mut dirty = false;
     let mut scene_revision = 0_u8;
+    synchronize_language_scene(&mut evaluator, compositor, &mut current)
+        .unwrap_or_else(|reason| failed(reason));
     let mut line = [0; INPUT_BYTES];
     let mut length = 0;
     let mut keyboard = Keyboard::new();
@@ -976,6 +1057,11 @@ fn interactive(
                     &mut dirty,
                     &line[..length],
                 );
+                if let Err(reason) =
+                    synchronize_language_scene(&mut evaluator, compositor, &mut current)
+                {
+                    status = StatusLine::new(reason.as_bytes());
+                }
                 console::write_bytes(status.get());
                 console::write("\nlive-desktop> ");
                 length = 0;

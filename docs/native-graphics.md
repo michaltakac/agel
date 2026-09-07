@@ -1,6 +1,6 @@
 # Native Agel graphics
 
-Agel v0.2.9 boots to an actual 1024×768×32 live graphical workshop in QEMU. The path
+Agel v0.2.10 boots to an actual 1024×768×32 live graphical workshop in QEMU. The path
 is deliberately split so that visual meaning remains language data and display
 authority remains a narrow replaceable service:
 
@@ -19,14 +19,15 @@ Run it:
 ./scripts/run-graphics.sh
 ```
 
-The default launcher opens a local browser console with the real QEMU
+The default launcher boots into QEMU's own native window. `--web` optionally
+opens a local browser console with the real QEMU
 framebuffer and a host text field. Use your Slovak/macOS layout, Option symbols,
 dead keys, and Command-V paste there; Enter or **Run in Agel** submits one line
 to the guest. Clicking the image focuses the field without capturing your
 mouse. Stop the viewer and QEMU with Ctrl-C in the launching terminal. The disk
 is persistent: `:save` publishes source cells replayed on the next boot.
 
-`./scripts/run-graphics.sh --native` retains QEMU's direct window and serial
+`./scripts/run-graphics.sh` (also accepting `--native`) uses QEMU's direct window and serial
 terminal input. This physical PS/2 path uses a US layout, now including all
 ASCII punctuation, uppercase, Caps Lock, independent Shift keys, and Ctrl-U/C
 to clear the line (Ctrl-H backspaces). It does not inherit macOS text layout or
@@ -101,6 +102,11 @@ behavior turns are contained and explicitly recoverable. See
 [`native-agents.md`](native-agents.md).
 
 ## Durable source cells
+
+Since v0.2.10, ordinary evaluated Agel can build a live vector overlay through
+`scene-clear`, `scene-rect`, and `scene-count`. The dock library, actor-driven
+redraw, bounds, and persistence walkthrough are in
+[`native-scenes.md`](native-scenes.md).
 
 The graphical workshop owns the same crash-tolerant source format as the serial
 workshop:
@@ -188,6 +194,7 @@ Run the headless proof with:
 ./scripts/test-graphical-workshop.sh
 ./scripts/test-live-keyboard.sh
 python3 scripts/test-graphical-console.py target/boot/agel-v1.img
+python3 scripts/test-native-dock.py target/boot/agel-v1.img
 ```
 
 The framebuffer backend is currently a scalar software reference renderer. It
