@@ -100,12 +100,27 @@
         (t (error "Agel value is not callable"))))
 
 (defun eval-let (bindings body environment)
+  (unless (listp bindings) (error "Agel let requires bindings"))
   (let ((values
           (mapcar (lambda (binding)
+                    (unless (and (listp binding) (= (length binding) 2)
+                                 (agel-name-p (first binding)))
+                      (error "Agel let requires name/value pairs"))
                     (cons (name (first binding))
                           (agel-eval (second binding) environment)))
                   bindings)))
-    (eval-sequence body (append values environment))))
+    ;; All initializers use the outer scope; the last repeated name wins.
+    (eval-sequence body (append (reverse values) environment))))
+
+(defun agel-name-p (value)
+  (and (symbolp value) value (not (member value '(t :false)))))
+
+(defun validate-parameters (parameters)
+  (unless (and (listp parameters) (every #'agel-name-p parameters))
+    (error "Agel fn requires symbolic parameters"))
+  (unless (= (length parameters) (length (remove-duplicates parameters)))
+    (error "Agel fn repeats a parameter"))
+  parameters)
 
 (defun agel-eval (expression &optional environment)
   (cond
@@ -126,7 +141,7 @@
                      environment))
          ((and (symbolp head) (string= (name head) "fn"))
           (when (< (length tail) 2) (error "Agel fn requires a body"))
-          (make-agel-closure :parameters (first tail)
+          (make-agel-closure :parameters (validate-parameters (first tail))
                              :body (rest tail)
                              :environment environment))
          ((and (symbolp head) (string= (name head) "let"))
@@ -209,3 +224,5 @@
 
 (run-conformance)
 (run-error-conformance)
+(run-conformance "bootstrap/metacircular.forms")
+(run-error-conformance "bootstrap/metacircular-errors.forms")

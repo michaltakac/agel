@@ -103,11 +103,21 @@ fn main() -> io::Result<()> {
     let mut world = World::default();
     let mut options = EvaluationOptions::default();
     let mut providers = ProviderRegistry::default();
-    if config.stdlib {
-        agel_stdlib::install(&mut world, &options).map_err(|error| {
+    let installed_modules = if config.stdlib {
+        let commit = agel_stdlib::install(&mut world, &options).map_err(|error| {
             io::Error::other(format!("cannot install standard library: {error}"))
         })?;
-    }
+        commit
+            .values
+            .into_iter()
+            .filter_map(|value| match value {
+                agel_core::Value::Module(name) => Some(name),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let mut limits = CommandLimits::new(&config.workspace);
     limits.timeout = config.timeout;
     limits.max_output_bytes = config.max_output_bytes;
@@ -147,7 +157,8 @@ fn main() -> io::Result<()> {
     println!("Agel agentic runtime — world revision {}", world.revision());
     if config.stdlib {
         println!(
-            "Standard library installed: agel/sequence, agel/result, agel/swarm, agel/fixed-point, agel/meta, agel/ui, agel/vector, agel/ui-layout, agel/ui-vector, agel/desktop"
+            "Standard library installed: {}",
+            installed_modules.join(", ")
         );
     }
     if providers.names().next().is_none() {

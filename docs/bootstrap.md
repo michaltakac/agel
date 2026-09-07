@@ -36,6 +36,12 @@ Nested lexical capture works:
 ; => 42
 ```
 
+Since v0.2.13 the library also implements `begin`, parallel `let`, multi-body
+functions and interpreted `apply`, and drives source-backed hosted agent turns.
+Shared functional success/error corpora are checked across all three evaluators.
+See [Agel in Agel](agel-in-agel.md) for executable examples, measured interpreter
+overhead and the explicit boundary between this hosted library and native Agel.
+
 The two new seed primitives are general Lisp fundamentals: `type-of` observes a
 value category and `apply` invokes a callable with an argument list. Neither
 grants authority.

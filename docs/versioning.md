@@ -36,6 +36,8 @@ promise.
   replacement, explicit promotion/discard, and persisted source upgrades.
   `v0.2.12` repairs failed-save recovery and process deadline/output enforcement,
   strengthens process audit identities, and removes blanket dead-code suppression.
+  `v0.2.13` expands the Agel-written functional interpreter and adds source-backed
+  hosted agents, shared three-evaluator conformance, and bootstrap validation fixes.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

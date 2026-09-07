@@ -533,7 +533,7 @@
       'model-cost 'explicit-only)))
 
 (module agel/meta
-  (export meta-base-env meta-eval)
+  (export meta-base-env meta-eval meta-apply)
 
   (def meta-base-env
     (fn ()
@@ -541,7 +541,28 @@
         '+ + '- - '* * '/ / '= = '< <
         'list list 'cons cons 'car car 'cdr cdr
         'dict dict 'get get 'assoc assoc 'count count
-        'has-key? has-key? 'type-of type-of)))
+        'has-key? has-key? 'type-of type-of
+        'dissoc dissoc 'keys keys 'apply 'meta/apply)))
+
+  (def meta-list?
+    (fn (value)
+      (if (= value nil) #t (= (type-of value) 'list))))
+
+  (def meta-parameters
+    (fn (parameters seen)
+      (if (meta-list? parameters)
+          (if (= parameters nil)
+              nil
+              (if (= (type-of (car parameters)) 'symbol)
+                  (if (has-key? seen (car parameters))
+                      (signal 'syntax/duplicate-parameter
+                        "metacircular fn repeats a parameter" (car parameters))
+                      (begin
+                        (meta-parameters (cdr parameters)
+                          (assoc seen (car parameters) #t))
+                        parameters))
+                  (signal 'syntax "metacircular parameter must be a symbol" parameters)))
+          (signal 'syntax "metacircular fn expects a parameter list" parameters))))
 
   (def meta-require-arity
     (fn (arguments expected)
@@ -568,20 +589,62 @@
             (meta-eval (car expressions) environment)
             (meta-eval-list (cdr expressions) environment)))))
 
+  (def meta-sequence
+    (fn (expressions environment)
+      (if (= expressions nil)
+          nil
+          (let ((value (meta-eval (car expressions) environment)))
+            (if (= (cdr expressions) nil)
+                value
+                (meta-sequence (cdr expressions) environment))))))
+
+  ; Binding initializers all see the outer environment (parallel let, not let*).
+  ; Repeated names follow the seed: the last binding wins in the body.
+  (def meta-let-bindings
+    (fn (bindings outer local)
+      (if (meta-list? bindings)
+          (if (= bindings nil)
+              local
+              (let ((pair (car bindings)))
+                (if (meta-list? pair)
+                    (if (= (count pair) 2)
+                        (if (= (type-of (car pair)) 'symbol)
+                            (meta-let-bindings (cdr bindings) outer
+                              (assoc local (car pair)
+                                (meta-eval (car (cdr pair)) outer)))
+                            (signal 'syntax "metacircular let expects a symbol" pair))
+                        (signal 'syntax "metacircular let binding must be a pair" pair))
+                    (signal 'syntax "metacircular let binding must be a pair" pair))))
+          (signal 'type "metacircular let expects a binding list" bindings))))
+
   (def meta-apply
     (fn (function arguments)
-      (if (= (type-of function) 'list)
-          (if (= (car function) 'meta/closure)
-              (meta-eval
-                (car (cdr (cdr function)))
-                (meta-bind
-                  (car (cdr function))
-                  arguments
-                  (car (cdr (cdr (cdr function))))))
-              (signal 'meta/not-callable "invalid metacircular closure" function))
-          (apply function arguments))))
+      (if (meta-list? arguments)
+          (if (= function 'meta/apply)
+              (let ((parts (meta-require-arity arguments 2)))
+                (meta-apply (car parts) (car (cdr parts))))
+              (if (= (type-of function) 'list)
+                  (if (= (count function) 4)
+                      (if (= (car function) 'meta/closure)
+                          (let ((parameters (meta-parameters (car (cdr function)) (dict)))
+                                (environment (car (cdr (cdr (cdr function))))))
+                            (if (= (type-of environment) 'map)
+                                (meta-eval
+                                  (car (cdr (cdr function)))
+                                  (meta-bind parameters arguments environment))
+                                (signal 'type "metacircular closure expects an environment map")))
+                          (signal 'meta/not-callable "invalid metacircular closure" function))
+                      (signal 'meta/not-callable "invalid metacircular closure" function))
+                  (apply function arguments)))
+          (signal 'type "metacircular apply expects an argument list" arguments))))
 
   (def meta-eval
+    (fn (expression environment)
+      (if (= (type-of environment) 'map)
+          (meta-evaluate expression environment)
+          (signal 'type "metacircular evaluation expects an environment map"))))
+
+  (def meta-evaluate
     (fn (expression environment)
       (if (= expression nil)
           nil
@@ -599,16 +662,55 @@
                               (if (meta-eval (car parts) environment)
                                   (meta-eval (car (cdr parts)) environment)
                                   (meta-eval (car (cdr (cdr parts))) environment)))
-                            (if (= head 'fn)
-                                (let ((parts (meta-require-arity tail 2)))
-                                  (list 'meta/closure
-                                    (car parts)
-                                    (car (cdr parts))
-                                    environment))
-                                (meta-apply
-                                  (meta-eval head environment)
-                                  (meta-eval-list tail environment))))))
+                            (if (= head 'begin)
+                                (meta-sequence tail environment)
+                                (if (= head 'let)
+                                    (if (< (count tail) 2)
+                                        (signal 'arity "metacircular let expects bindings and a body")
+                                        (meta-sequence (cdr tail)
+                                          (meta-let-bindings (car tail) environment environment)))
+                                    (if (= head 'fn)
+                                        (if (< (count tail) 2)
+                                            (signal 'arity "metacircular fn expects parameters and a body")
+                                            (list 'meta/closure
+                                              (meta-parameters (car tail) (dict))
+                                              (cons 'begin (cdr tail))
+                                              environment))
+                                        (meta-apply
+                                          (meta-eval head environment)
+                                          (meta-eval-list tail environment))))))))
                   expression))))))
+
+; The seed only schedules the ordinary wrapper. Behavior evaluation, lexical
+; scope and state threading are Agel code. No effects enter the base environment;
+; callers must explicitly supply any callable services they want exposed.
+(module agel/meta-agent
+  (import agel/meta)
+  (export make-meta-agent meta-agent-state meta-agent-source)
+
+  (def meta-agent-behavior
+    (fn (self heap message)
+      (assoc heap 'state
+        (meta-apply (get heap 'behavior)
+          (list self (get heap 'state) message)))))
+
+  (def make-meta-agent
+    (fn (name source state environment)
+      (if (= (type-of source) 'list)
+          (if (= (car source) 'fn)
+              (let ((behavior (meta-eval source environment)))
+                (if (= (count (car (cdr behavior))) 3)
+                    (spawn name meta-agent-behavior
+                      (dict 'source source 'behavior behavior 'state state) nil)
+                    (signal 'arity "metacircular agent expects self state message")))
+              (signal 'syntax "metacircular agent source must be a fn"))
+          (signal 'syntax "metacircular agent source must be a fn"))))
+
+  (def meta-agent-state
+    (fn (agent) (get (get (agent-info agent) 'heap) 'state)))
+
+  (def meta-agent-source
+    (fn (agent) (get (get (agent-info agent) 'heap) 'source))))
 
 ; A retained, homoiconic UI and its transactional desktop agent. A UI is only
 ; persistent Agel data: renderers are replaceable boundary services, not owners

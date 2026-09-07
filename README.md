@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.12: a native agent workbench with failure-safe source saves,
+The current repository is **v0.2.13: an expanded Agel-in-Agel hosted interpreter and
+source-backed agents, alongside a native agent workbench with failure-safe source saves,
 bounded process execution, pointer events,
 keyboard focus, source inspection, candidate preview/promotion and recoverable
 behavior replacement. See [the workbench guide](docs/native-workbench.md).
@@ -61,7 +62,9 @@ It provides:
   message-ordered live code evolution;
 - `type-of` and `apply`, the two small reflective primitives needed by libraries;
 - checked integer ordering through the ordinary `<` builtin used by geometry;
-- an `agel/meta` evaluator written in Agel for a lexical functional subset;
+- an `agel/meta` evaluator written in Agel for a lexical functional subset,
+  with shared three-evaluator conformance tests and inspectable source-backed
+  hosted agents in `agel/meta-agent` (see [Agel in Agel](docs/agel-in-agel.md));
 - an `agel/ui` retained scene and semantic action model written in Agel;
 - inspectable UI patches and a typed desktop agent with validated preview,
   atomic commit, discard, and live rollback;
@@ -166,7 +169,8 @@ Agel currently requires only a Rust toolchain:
 cargo run -p agel-cli
 ```
 
-The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/meta`,
+The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/fixed-point`,
+`agel/meta`, `agel/meta-agent`,
 `agel/ui`, `agel/vector`, `agel/ui-layout`, `agel/ui-vector`, and `agel/desktop`
 by default.
 Use `--no-stdlib` to expose only the minimal language substrate.
@@ -329,6 +333,8 @@ Metacircular and A/B bootstrap demonstrations:
 
 ```sh
 cargo run -q -p agel-cli < examples/metacircular.agel
+cargo run -q -p agel-cli < examples/metacircular-agents.agel
+cargo run -q -p agel-stdlib --example metacircular_cost
 ./scripts/test-bootstrap.sh
 cargo run -q -p agel-supervisor --example ab_upgrade
 ```

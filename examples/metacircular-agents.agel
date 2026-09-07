@@ -1,0 +1,27 @@
+; Hosted CLI demo. No provider flags, inference calls or paid tokens required.
+(import agel/meta)
+(import agel/meta-agent)
+
+; An agent's program is a list, not a hidden host closure.
+(def source '(fn (self state message)
+  (let ((next (+ state message)))
+    (send observer (list 'counter self next))
+    (if (< message 0) (/ 1 0) next))))
+(def observer (spawn "observer"))
+; Expose only the services/names this program needs, in addition to pure basics.
+(def services (assoc (assoc (meta-base-env) 'send send) 'observer observer))
+(def counter (make-meta-agent "Agel-in-Agel" source 0 services))
+(meta-agent-source counter)
+(send counter 20)
+(send counter 22)
+(run 2)
+(meta-agent-state counter)
+; => 42; these are real scheduled turns evaluated by the Agel library.
+(list (recv observer) (recv observer))
+
+; A send followed by failure must not leak its message or change state.
+(send counter -1)
+(run 1)
+(list (meta-agent-state counter) (recv observer) (get (agent-info counter) 'status))
+; => (42 nil stopped)
+:quit

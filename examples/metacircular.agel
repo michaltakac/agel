@@ -12,4 +12,8 @@
 (def program '((fn (meaning) (list 'answer meaning)) 42))
 program
 (meta-eval program env)
+
+; Lexical let, multi-expression bodies and interpreted higher-order apply.
+(meta-eval '(let ((x 40)) (begin (+ x 1) ((fn (y) (+ x y)) 2))) env)
+(meta-eval '(apply (fn (x y) (+ x y)) '(20 22)) env)
 :quit

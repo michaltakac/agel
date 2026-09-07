@@ -464,9 +464,163 @@ mod tests {
             "(meta-eval '(if #t 42) meta-env)",
             "(meta-eval '((fn (x) x)) meta-env)",
             "(meta-eval '((fn (x) x) 1 2) meta-env)",
+            "(meta-eval '(fn (x x) x) meta-env)",
+            "(meta-eval '(fn (42) 42) meta-env)",
+            "(meta-eval '(fn x x) meta-env)",
+            "(meta-eval '(fn ()) meta-env)",
+            "(meta-eval '(let ()) meta-env)",
+            "(meta-eval '(let (42) 0) meta-env)",
+            "(meta-eval '(let ((x 1 2)) x) meta-env)",
+            "(meta-eval '(let ((42 1)) 42) meta-env)",
+            "(meta-eval '(let ((x 1) (y x)) y) meta-env)",
+            "(meta-eval 42 nil)",
+            "(meta-apply '(meta/closure) nil)",
+            "(meta-apply '(meta/closure (x x) x nil) '(1 2))",
+            "(meta-apply + 42)",
+            "(meta-eval '(apply + 42) meta-env)",
+            "(meta-eval '(apply +) meta-env)",
         ] {
             assert!(world.evaluate(source).is_err(), "accepted {source}");
         }
+    }
+
+    #[test]
+    fn agel_interpreter_matches_the_shared_functional_corpus() {
+        let mut interpreted = installed();
+        interpreted.evaluate("(import agel/meta)").unwrap();
+        for source in include_str!("../../../bootstrap/metacircular.forms")
+            .lines()
+            .filter(|line| line.starts_with('('))
+        {
+            let expected = World::default().evaluate(source).unwrap().values.pop();
+            let actual = interpreted
+                .evaluate(&format!("(meta-eval '{source} (meta-base-env))"))
+                .unwrap_or_else(|error| panic!("{source}: {error}"))
+                .values
+                .pop();
+            assert_eq!(actual, expected, "{source}");
+        }
+        for source in include_str!("../../../bootstrap/metacircular-errors.forms")
+            .lines()
+            .filter(|line| line.starts_with('('))
+        {
+            assert!(
+                World::default().evaluate(source).is_err(),
+                "seed accepted {source}"
+            );
+            assert!(
+                interpreted
+                    .evaluate(&format!("(meta-eval '{source} (meta-base-env))"))
+                    .is_err(),
+                "Agel accepted {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn metacircular_agents_execute_source_and_roll_back_failed_sends() {
+        let mut world = installed();
+        let value = world
+            .evaluate(
+                "(import agel/meta) (import agel/meta-agent)
+             (def observer (spawn \"observer\"))
+             (def source '(fn (self state message)
+               (let ((next (+ state message)))
+                 (send observer (list 'answer next))
+                 (if (< message 0) (/ 1 0) next))))
+             (def worker (make-meta-agent \"interpreted\" source 0
+               (assoc (assoc (meta-base-env) 'send send) 'observer observer)))
+             (send worker 42) (run 1)
+             (list (meta-agent-state worker) (recv observer)
+                   (= source (meta-agent-source worker))
+                   (type-of (get (get (agent-info worker) 'heap) 'behavior)))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(value.to_string(), "(42 (answer 42) #t list)");
+        let value = world
+            .evaluate(
+                "(send worker -1) (run 1)
+             (list (meta-agent-state worker) (recv observer)
+                   (get (agent-info worker) 'status))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(value.to_string(), "(42 nil stopped)");
+    }
+
+    #[test]
+    fn metacircular_agents_validate_source_before_spawning() {
+        let mut world = installed();
+        world
+            .evaluate("(import agel/meta) (import agel/meta-agent)")
+            .unwrap();
+        for source in ["42", "'(begin 42)", "'(fn (a b) a)", "'(fn (a a c) a)"] {
+            let revision = world.revision();
+            assert!(world
+                .evaluate(&format!(
+                    "(make-meta-agent \"invalid\" {source} 0 (meta-base-env))"
+                ))
+                .is_err());
+            assert_eq!(world.revision(), revision);
+        }
+        let value = world
+            .evaluate(
+                "(make-meta-agent \"valid\" '(fn (self state message) state)
+               0 (meta-base-env))",
+            )
+            .unwrap()
+            .values
+            .pop()
+            .unwrap();
+        assert_eq!(value, Value::Agent(1));
+    }
+
+    #[test]
+    fn metacircular_execution_keeps_host_resource_limits() {
+        let mut world = installed();
+        world.evaluate("(import agel/meta)").unwrap();
+        let revision = world.revision();
+        let mut options = EvaluationOptions::default();
+        options.budget.fuel = 5_000;
+        let error = world
+            .evaluate_with(
+                "(meta-eval '((fn (self) (self self)) (fn (self) (self self)))
+               (meta-base-env))",
+                &options,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("resource/"), "{error}");
+        assert_eq!(world.revision(), revision);
+    }
+
+    #[test]
+    fn metacircular_environment_does_not_implicitly_expose_host_names() {
+        let mut world = installed();
+        world
+            .evaluate("(import agel/meta) (def host-secret 42)")
+            .unwrap();
+        for expression in ["host-secret", "send", "spawn", "model-request", "meta-eval"] {
+            let error = world
+                .evaluate(&format!("(meta-eval '{expression} (meta-base-env))"))
+                .unwrap_err();
+            assert!(error.to_string().contains("name/unbound"), "{error}");
+        }
+    }
+
+    #[test]
+    fn metacircular_agent_example_is_executable_documentation() {
+        let source = include_str!("../../../examples/metacircular-agents.agel")
+            .lines()
+            .filter(|line| !line.starts_with(':'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let value = installed().evaluate(&source).unwrap().values.pop().unwrap();
+        assert_eq!(value.to_string(), "(42 nil stopped)");
     }
 
     #[test]

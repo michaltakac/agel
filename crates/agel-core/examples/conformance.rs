@@ -25,4 +25,21 @@ fn main() {
         );
         println!("error");
     }
+
+    let source = std::fs::read_to_string("bootstrap/metacircular.forms")
+        .expect("metacircular conformance corpus exists");
+    let mut world = World::default();
+    for value in world.evaluate(&source).unwrap().values {
+        println!("{value}");
+    }
+    for source in include_str!("../../../bootstrap/metacircular-errors.forms")
+        .lines()
+        .filter(|line| line.starts_with('('))
+    {
+        assert!(
+            World::default().evaluate(source).is_err(),
+            "accepted {source}"
+        );
+        println!("error");
+    }
 }
