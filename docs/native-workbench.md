@@ -1,7 +1,9 @@
 # Native agent workbench
 
 v0.2.11 is a small, real native programming playground, not a browser simulation.
-Start `./scripts/run-graphics.sh`. In a **fresh empty** world enter:
+Start `./scripts/run-graphics.sh --workbench`. This uses a separate persistent
+`target/boot/agel-workbench.img`, preserving your existing workshop disk. On its
+first boot, in the **fresh empty** world enter:
 
 ```text
 :workbench
@@ -10,8 +12,10 @@ Start `./scripts/run-graphics.sh`. In a **fresh empty** world enter:
 This stages eleven named source cells (`wb-0` through `wb-10`) from
 [`workbench.agel`](../boot/desktop/workbench.agel), then reconstructs them inside
 the unprivileged native evaluator. It refuses to overwrite an existing world.
-Existing users can stage the library manually with non-conflicting cell names;
-do not erase your disk to try a demo. Use a separate disposable image if desired.
+After `:save`, this separate workbench restores on subsequent launches. Do not
+erase your existing disk to try the demo. Plain `./scripts/run-graphics.sh`
+continues to use your original workshop. Add `--web` after `--workbench` if you
+need the optional host-layout text bridge.
 
 ## Try it inside the OS
 
