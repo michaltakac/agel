@@ -1,0 +1,16 @@
+; Managed JIT: pure state transitions, captured configuration, and behavior replacement.
+; Run via: cargo run --release -q -p agel-jit --example self_host
+(fn (counter)
+  (let ((make-step
+          (fn (increment)
+            (fn (state)
+              (assoc state 'counter (+ (get state 'counter) increment)))))
+        (factorial
+          (fn (self n)
+            (if (= n 0) 1 (* n (self self (- n 1)))))))
+    (let ((before (dict 'counter counter))
+          (behaviors (dict 'original (make-step 1) 'upgraded (make-step 2))))
+      (dict 'before before
+            'original ((get behaviors 'original) before)
+            'upgraded ((get behaviors 'upgraded) before)
+            'factorial-10 (factorial factorial 10)))))

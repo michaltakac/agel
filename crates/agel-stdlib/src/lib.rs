@@ -2,7 +2,17 @@
 
 use agel_core::{Commit, EvaluationOptions, TransactionError, World};
 
-pub const SOURCE: &str = include_str!("../stdlib.agel");
+/// Closed Agel frontend, also used as input to its own native compilation.
+pub const NATIVE_COMPILER: &str = include_str!("../native-compiler.agel");
+
+pub const SOURCE: &str = concat!(
+    include_str!("../stdlib.agel"),
+    "\n(module agel/native (export native-compile native-compiler-source)\n(def native-compile ",
+    include_str!("../native-compiler.agel"),
+    ")\n(def native-compiler-source '",
+    include_str!("../native-compiler.agel"),
+    "))\n"
+);
 
 pub fn install(world: &mut World, options: &EvaluationOptions) -> Result<Commit, TransactionError> {
     world.evaluate_with(SOURCE, options)

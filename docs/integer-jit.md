@@ -1,5 +1,9 @@
 # The first real JIT — v0.2.15
 
+For the subsequent closure/collection tier and compiler bootstrap agreement,
+see [v0.2.16 managed native compilation](managed-jit.md). This document describes
+the still-supported, deliberately narrow unboxed integer tier.
+
 Agel now has a hosted machine-code path, not just an analyzed interpreter.
 `agel/jit` lowers a restricted function to inspectable IR **in Agel**.
 `agel-jit`, a separate Rust crate, validates that IR and uses Cranelift to emit

@@ -7,6 +7,8 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, Linkage, Module};
 use std::fmt;
 
+pub mod managed;
+
 const MAX_NODES: usize = 256;
 const MAX_DEPTH: usize = 32;
 const MAX_ARGUMENTS: usize = 8;
@@ -173,7 +175,8 @@ impl Drop for ExecutableMemory {
     fn drop(&mut self) {
         if let Some(module) = self.0.take() {
             // SAFETY: invocations borrow Compiled; no invocation can outlive this
-            // owner. Entry pointers never escape and there are no foreign calls.
+            // owner. Both backends keep entry pointers private; any managed
+            // callbacks have returned before the invocation borrow can end.
             unsafe {
                 module.free_memory();
             }

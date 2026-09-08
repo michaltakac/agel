@@ -11,6 +11,7 @@ cranelift-codegen = "=0.123.14"
 cranelift-frontend = "=0.123.14"
 cranelift-jit = "=0.123.14"
 cranelift-module = "=0.123.14"
+stacker = "0.1.25"
 
 [dev-dependencies]
 agel-stdlib = { path = "../agel-stdlib" }

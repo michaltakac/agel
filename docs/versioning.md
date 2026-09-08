@@ -44,6 +44,9 @@ promise.
   `v0.2.15` adds an Agel-authored integer-IR compiler and an isolated hosted
   Cranelift JIT backend with checked arithmetic, bounded validation and code
   lifetime ownership. The optional JIT crate requires Rust 1.86 or newer.
+  `v0.2.16` adds a self-compiling Agel frontend, managed native closures and
+  immutable collections, metered calls/recursion, and three-stage IR agreement.
+  Rust still supplies runtime primitives, validation and machine-code emission.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

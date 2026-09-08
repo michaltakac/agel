@@ -4,8 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.15: an Agel-authored integer-IR compiler with a
-validated hosted machine-code JIT, alongside reusable execution plans analyzed in Agel,
+The current repository is **v0.2.16: a self-compiling Agel frontend with native
+lexical closures, immutable collections and metered calls, plus the compact
+integer machine-code JIT, alongside reusable execution plans analyzed in Agel,
 shared immutable closure storage in the Rust bootstrap, and
 source-backed agents, alongside a native agent workbench with failure-safe source saves,
 bounded process execution, pointer events,
@@ -30,6 +31,17 @@ restartable privileged console service from the v0.1 line.
 Agel is still pre-production. Project releases follow the policy in
 [`docs/versioning.md`](docs/versioning.md); `v1.0.0` is reserved for the first
 production-ready system. The separately versioned kernel contract remains v1.0.
+
+Try the compiler bootstrap and native closure workshop (Rust 1.86+):
+
+```sh
+cargo run --release -q -p agel-jit --example self_host
+```
+
+It checks identical IR across the seed and two native compiler stages, then
+runs captured, replaceable behaviors over immutable state. See
+[the managed JIT contract](docs/managed-jit.md). The frontend self-compiles;
+the whole language runtime and OS are **not** yet self-hosted.
 
 It provides:
 
