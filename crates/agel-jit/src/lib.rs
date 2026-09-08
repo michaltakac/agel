@@ -8,6 +8,7 @@ use cranelift_module::{default_libcall_names, Linkage, Module};
 use std::fmt;
 
 pub mod managed;
+pub mod state;
 
 const MAX_NODES: usize = 256;
 const MAX_DEPTH: usize = 32;

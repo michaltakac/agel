@@ -1,5 +1,9 @@
 # Managed native compilation and frontend self-compilation — v0.2.16
 
+Historical v0.2.16 contract. [v0.2.17](native-tail-agents.md) extends this tier
+with v2 tail-call IR, primitive caching and an isolated compiled agent scheduler.
+The v1 IR remains accepted; the old no-tail-call limitation below describes v0.2.16.
+
 The Agel frontend can now compile its own source. This is a tested, restricted
 compiler bootstrap, **not complete self-hosting of Agel or the OS**.
 

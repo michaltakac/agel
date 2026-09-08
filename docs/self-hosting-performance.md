@@ -1,5 +1,10 @@
 # Self-hosting without permanent interpreter overhead
 
+Current follow-up: [v0.2.17](native-tail-agents.md) implements tail calls and an
+Agel-authored compiled scheduler. The historical research/milestone notes below
+describe earlier tiers; the new paired benchmark compares the same compiler IR
+with optimization switches on/off, not interpreter and JIT workloads mixed together.
+
 Research checked on 2026-09-07. Implemented milestone: v0.2.14.
 
 Update: [v0.2.15](integer-jit.md) implements a first hosted machine-code backend

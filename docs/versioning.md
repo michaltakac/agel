@@ -47,6 +47,9 @@ promise.
   `v0.2.16` adds a self-compiling Agel frontend, managed native closures and
   immutable collections, metered calls/recursion, and three-stage IR agreement.
   Rust still supplies runtime primitives, validation and machine-code emission.
+  `v0.2.17` adds Agel-authored tail-call annotations with native trampolining,
+  primitive-handle reuse, and an isolated Agel-written compiled scheduler with
+  explicit peer permissions and revision-checked atomic batch commits.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

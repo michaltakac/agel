@@ -4,8 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.16: a self-compiling Agel frontend with native
-lexical closures, immutable collections and metered calls, plus the compact
+The current repository is **v0.2.17: a self-compiling Agel frontend with validated
+tail calls, an Agel-written compiled mailbox scheduler, native lexical closures,
+immutable collections and metered calls, plus the compact
 integer machine-code JIT, alongside reusable execution plans analyzed in Agel,
 shared immutable closure storage in the Rust bootstrap, and
 source-backed agents, alongside a native agent workbench with failure-safe source saves,
@@ -42,6 +43,17 @@ It checks identical IR across the seed and two native compiler stages, then
 runs captured, replaceable behaviors over immutable state. See
 [the managed JIT contract](docs/managed-jit.md). The frontend self-compiles;
 the whole language runtime and OS are **not** yet self-hosted.
+
+Try the isolated, compiled Agel scheduler and paired compiler benchmark:
+
+```sh
+cargo run --release -q -p agel-jit --example agent_swarm
+cargo run --release -q -p agel-jit --example compiler_bench
+```
+
+[Tail calls and compiled actors](docs/native-tail-agents.md) describes the
+transaction, peer-permission and resource boundaries. This scheduler is not
+yet integrated into hosted `World` actors or the freestanding OS.
 
 It provides:
 

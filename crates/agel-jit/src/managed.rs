@@ -68,6 +68,23 @@ pub struct Outcome {
     pub fuel_used: u64,
     pub allocated_values: usize,
     pub allocated_edges: usize,
+    pub tail_calls: u64,
+    pub peak_call_depth: usize,
+}
+
+/// Diagnostic switches for paired performance/conformance comparisons.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeOptions {
+    pub tail_calls: bool,
+    pub cache_builtins: bool,
+}
+impl Default for NativeOptions {
+    fn default() -> Self {
+        Self {
+            tail_calls: true,
+            cache_builtins: true,
+        }
+    }
 }
 
 enum Node {
@@ -77,7 +94,7 @@ enum Node {
     Closure(usize),
     If(Box<Node>, Box<Node>, Box<Node>),
     Begin(Vec<Node>),
-    Call(Box<Node>, Vec<Node>),
+    Call(Box<Node>, Vec<Node>, bool),
 }
 struct Function {
     arity: usize,
@@ -88,6 +105,7 @@ struct Program {
     constants: Vec<Value>,
     nodes: usize,
     text: usize,
+    tail_ir: bool,
 }
 fn sequence(value: &Value) -> Result<&[Value], Fault> {
     match value {
@@ -144,7 +162,13 @@ impl Program {
         }
         Ok(())
     }
-    fn node(&mut self, value: &Value, scopes: &[usize], depth: usize) -> Result<Node, Fault> {
+    fn node(
+        &mut self,
+        value: &Value,
+        scopes: &[usize],
+        depth: usize,
+        tail: bool,
+    ) -> Result<Node, Fault> {
         self.count(depth)?;
         let xs = sequence(value)?;
         let Some(head) = xs.first() else {
@@ -182,31 +206,37 @@ impl Program {
                 });
                 let mut local = scopes.to_vec();
                 local.push(arity);
-                let body = self.node(body, &local, depth + 1)?;
+                let body = self.node(body, &local, depth + 1, true)?;
                 self.functions[id].body = body;
                 Node::Closure(id)
             }
             ("if", [p, y, n]) => Node::If(
-                Box::new(self.node(p, scopes, depth + 1)?),
-                Box::new(self.node(y, scopes, depth + 1)?),
-                Box::new(self.node(n, scopes, depth + 1)?),
+                Box::new(self.node(p, scopes, depth + 1, false)?),
+                Box::new(self.node(y, scopes, depth + 1, tail)?),
+                Box::new(self.node(n, scopes, depth + 1, tail)?),
             ),
             ("begin", forms) => Node::Begin(
                 forms
                     .iter()
-                    .map(|v| self.node(v, scopes, depth + 1))
+                    .enumerate()
+                    .map(|(i, v)| self.node(v, scopes, depth + 1, tail && i + 1 == forms.len()))
                     .collect::<Result<_, _>>()?,
             ),
-            ("call", [function, arguments]) => {
+            (op @ ("call" | "tail-call"), [function, arguments]) => {
+                let is_tail = op == "tail-call";
+                if is_tail && (!self.tail_ir || !tail) {
+                    return Err(Fault::Invalid("tail call outside tail position or v2 IR"));
+                }
                 let args = sequence(arguments)?;
                 if args.len() > MAX_ARITY {
                     return Err(Fault::Invalid("call arity limit"));
                 }
                 Node::Call(
-                    Box::new(self.node(function, scopes, depth + 1)?),
+                    Box::new(self.node(function, scopes, depth + 1, false)?),
                     args.iter()
-                        .map(|v| self.node(v, scopes, depth + 1))
+                        .map(|v| self.node(v, scopes, depth + 1, false))
                         .collect::<Result<_, _>>()?,
+                    is_tail,
                 )
             }
             _ => return Err(Fault::Invalid("unknown or malformed node")),
@@ -214,7 +244,7 @@ impl Program {
     }
     fn parse(ir: &Value) -> Result<Self, Fault> {
         let xs = sequence(ir)?;
-        if xs.len() != 2 || name(&xs[0])? != "agel/native-v1" {
+        if xs.len() != 2 || !matches!(name(&xs[0])?, "agel/native-v1" | "agel/native-v2") {
             return Err(Fault::Invalid("unknown IR version"));
         }
         let mut program = Self {
@@ -222,8 +252,9 @@ impl Program {
             constants: vec![Value::Nil],
             nodes: 0,
             text: 0,
+            tail_ir: name(&xs[0])? == "agel/native-v2",
         };
-        if !matches!(program.node(&xs[1], &[], 0)?, Node::Closure(0)) {
+        if !matches!(program.node(&xs[1], &[], 0, false)?, Node::Closure(0)) {
             return Err(Fault::Invalid("entry must be a function"));
         }
         Ok(program)
@@ -236,14 +267,21 @@ pub struct Native {
     code: Vec<*const u8>,
     arities: Vec<usize>,
     constants: Vec<Value>,
+    options: NativeOptions,
 }
 
 impl Native {
     pub fn compile(ir: &Value) -> Result<Self, Fault> {
-        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || Self::compile_inner(ir))
+        Self::compile_with(ir, NativeOptions::default())
     }
 
-    fn compile_inner(ir: &Value) -> Result<Self, Fault> {
+    pub fn compile_with(ir: &Value, options: NativeOptions) -> Result<Self, Fault> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            Self::compile_inner(ir, options)
+        })
+    }
+
+    fn compile_inner(ir: &Value, options: NativeOptions) -> Result<Self, Fault> {
         let program = Program::parse(ir)?;
         let mut builder =
             JITBuilder::new(default_libcall_names()).map_err(|e| Fault::Backend(e.to_string()))?;
@@ -293,6 +331,7 @@ impl Native {
                     helper: helper_ref,
                     runtime,
                     failure,
+                    tail_calls: options.tail_calls,
                 };
                 let result = emitter.node(&function.body, env);
                 b.ins().return_(&[result]);
@@ -319,16 +358,25 @@ impl Native {
             code,
             arities: program.functions.iter().map(|f| f.arity).collect(),
             constants: program.constants,
+            options,
         })
     }
 
     pub fn invoke(&self, arguments: &[Value], limits: Limits) -> Result<Outcome, Fault> {
+        if arguments.len() != self.arities[0] {
+            return Err(Fault::Arity);
+        }
+        self.invoke_refs(&arguments.iter().collect::<Vec<_>>(), limits)
+    }
+
+    /// Import borrowed values without cloning an entire host state beforehand.
+    pub fn invoke_refs(&self, arguments: &[&Value], limits: Limits) -> Result<Outcome, Fault> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             self.invoke_inner(arguments, limits)
         })
     }
 
-    fn invoke_inner(&self, arguments: &[Value], limits: Limits) -> Result<Outcome, Fault> {
+    fn invoke_inner(&self, arguments: &[&Value], limits: Limits) -> Result<Outcome, Fault> {
         if arguments.len() != self.arities[0] {
             return Err(Fault::Arity);
         }
@@ -342,6 +390,10 @@ impl Native {
             edges: 0,
             text: 0,
             depth: 0,
+            peak_depth: 0,
+            tail_calls: 0,
+            pending_tail: None,
+            builtins: vec![None; PRIMITIVES.len()],
             constants: vec![None; self.constants.len()],
             error: None,
         };
@@ -359,6 +411,8 @@ impl Native {
             fuel_used: limits.fuel - run.fuel,
             allocated_values: run.values.len() + run.frames.len() + run.exported,
             allocated_edges: run.edges,
+            tail_calls: run.tail_calls,
+            peak_call_depth: run.peak_depth,
         })
     }
 }
@@ -368,6 +422,7 @@ struct Emitter<'a, 'b> {
     helper: cranelift_codegen::ir::FuncRef,
     runtime: cranelift_codegen::ir::Value,
     failure: cranelift_codegen::ir::Block,
+    tail_calls: bool,
 }
 
 impl Emitter<'_, '_> {
@@ -421,14 +476,19 @@ impl Emitter<'_, '_> {
                 }
                 result
             }
-            Node::Call(function, arguments) => {
+            Node::Call(function, arguments, tail) => {
                 let function = self.node(function, env);
                 let mut args = self.int(1);
                 for argument in arguments {
                     let argument = self.node(argument, env);
                     args = self.helper(7, args, argument, zero);
                 }
-                self.helper(8, function, args, zero)
+                self.helper(
+                    if *tail && self.tail_calls { 9 } else { 8 },
+                    function,
+                    args,
+                    zero,
+                )
             }
             Node::If(predicate, yes, no) => {
                 let test = self.node(predicate, env);
@@ -479,6 +539,10 @@ struct Run<'a> {
     edges: usize,
     text: usize,
     depth: usize,
+    peak_depth: usize,
+    tail_calls: u64,
+    pending_tail: Option<(Handle, Vec<Handle>)>,
+    builtins: Vec<Option<Handle>>,
     constants: Vec<Option<Handle>>,
     error: Option<Fault>,
 }
@@ -650,22 +714,55 @@ impl Run<'_> {
         if self.depth >= self.limits.call_depth.min(256) {
             return Err(Fault::Depth);
         }
-        self.spend(1)?;
-        let entry = *self.native.code.get(function).ok_or(Fault::Internal)?;
         self.depth += 1;
+        self.peak_depth = self.peak_depth.max(self.depth);
         // Check the semantic depth limit first; segment growth prevents a small
         // host thread stack from failing before that deterministic limit.
         let result = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-            self.enter_native(entry, env)
+            self.trampoline(function, env)
         });
         self.depth -= 1;
-        if let Some(error) = self.error.take() {
-            return Err(error);
-        }
-        if result == 0 {
-            Err(Fault::Internal)
-        } else {
-            Ok(result)
+        result
+    }
+    fn trampoline(&mut self, mut function: usize, mut env: usize) -> Result<Handle, Fault> {
+        'entry: loop {
+            self.spend(1)?;
+            let entry = *self.native.code.get(function).ok_or(Fault::Internal)?;
+            let result = self.enter_native(entry, env);
+            if let Some(error) = self.error.take() {
+                return Err(error);
+            }
+            if result == 0 {
+                return Err(Fault::Internal);
+            }
+            let Some((mut target, mut args)) = self.pending_tail.take() else {
+                return Ok(result);
+            };
+            loop {
+                self.spend(1)?;
+                match self.snapshot(target)? {
+                    Datum::Closure {
+                        function: next,
+                        environment,
+                    } => {
+                        if args.len() != self.native.arities[next] {
+                            return Err(Fault::Arity);
+                        }
+                        env = self.frame(Some(environment), args)?;
+                        function = next;
+                        continue 'entry;
+                    }
+                    Datum::Builtin(id) if PRIMITIVES[id] == "apply" => {
+                        if args.len() != 2 {
+                            return Err(Fault::Arity);
+                        }
+                        target = args[0];
+                        args = self.copy_list(args[1])?;
+                    }
+                    Datum::Builtin(id) => return self.primitive(id, &args),
+                    _ => return Err(Fault::Type),
+                }
+            }
         }
     }
     #[allow(unsafe_code)]
@@ -697,6 +794,7 @@ impl Run<'_> {
                 }
                 self.spend(1)?;
                 self.depth += 1;
+                self.peak_depth = self.peak_depth.max(self.depth);
                 let result =
                     stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.primitive(id, args));
                 self.depth -= 1;
@@ -739,7 +837,18 @@ impl Run<'_> {
                 function: a,
                 environment: b,
             }),
-            4 => self.alloc(Datum::Builtin(a)),
+            4 => {
+                if self.native.options.cache_builtins {
+                    if let Some(value) = self.builtins[a] {
+                        return Ok(value);
+                    }
+                }
+                let value = self.alloc(Datum::Builtin(a))?;
+                if self.native.options.cache_builtins {
+                    self.builtins[a] = Some(value);
+                }
+                Ok(value)
+            }
             6 => Ok(
                 if matches!(self.datum(a)?, Datum::Nil | Datum::Bool(false)) {
                     1
@@ -755,6 +864,15 @@ impl Run<'_> {
             8 => {
                 let args = self.copy_list(b)?;
                 self.call(a, &args)
+            }
+            9 => {
+                self.spend(1)?;
+                if self.pending_tail.is_some() {
+                    return Err(Fault::Internal);
+                }
+                self.pending_tail = Some((a, self.copy_list(b)?));
+                self.tail_calls += 1;
+                Ok(1)
             }
             _ => Err(Fault::Internal),
         }

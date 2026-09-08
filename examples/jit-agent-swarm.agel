@@ -1,0 +1,18 @@
+; Construction and source composition happen in Agel. The Rust example compiles
+; this source using the native frontend, then owns the atomic commit point.
+(import agel/native-agents)
+(def swarm-sources
+  (dict
+    'relay '(fn (heap message)
+              (dict 'state (+ heap 1) 'outbox (list (list 'sink message))))
+    'sink '(fn (heap message)
+             (dict 'state (cons message heap) 'outbox nil))))
+(def swarm-world
+  (native-send
+    (native-send
+      (native-spawn
+        (native-spawn (native-empty 16) 'relay 'relay 0 '(sink))
+        'sink 'sink nil nil)
+      'relay 10)
+    'sink 20))
+(native-system-source swarm-sources)

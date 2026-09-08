@@ -1,0 +1,45 @@
+; Construction APIs for the isolated compiled scheduler, not World/spawn actors.
+(module agel/native-agents
+  (import agel/native)
+  (import agel/native-agent-kernel)
+  (export native-empty native-spawn native-send native-system-source)
+  (def require
+    (fn (ok) (if ok #t (signal 'native/agents "invalid native actor construction"))))
+  (def native-empty
+    (fn (capacity)
+      (begin (require (= (type-of capacity) 'int)) (require (< 0 capacity))
+        (dict 'agents (dict) 'front nil 'back nil 'pending 0 'turns 0 'capacity capacity))))
+  (def native-spawn
+    (fn (world id kind state peers)
+      (begin
+        (require (= (type-of id) 'symbol))
+        (require (= (type-of kind) 'symbol))
+        (require (if (has-key? (get world 'agents) id) #f #t))
+        (assoc world 'agents
+          (assoc (get world 'agents) id (dict 'kind kind 'state state 'peers peers))))))
+  (def native-send
+    (fn (world receiver message)
+      (begin
+        (require (has-key? (get world 'agents) receiver))
+        (require (< (get world 'pending) (get world 'capacity)))
+        (assoc (assoc world 'back (cons (list receiver message) (get world 'back)))
+          'pending (+ 1 (get world 'pending))))))
+  (def native-system-source
+    (fn (sources)
+      (let ((collect
+              (fn (self names)
+                (if (= (count names) 0) nil
+                    (let ((source (get sources (car names))))
+                      (begin
+                        (require (= (type-of (car names)) 'symbol))
+                        ; Compile each behavior alone: no free world/turns names
+                        ; can acquire ambient authority during later composition.
+                        (native-compile source)
+                        (require (= (count (car (cdr source))) 2))
+                        (cons (list 'quote (car names))
+                          (cons source (self self (cdr names))))))))))
+        (begin
+          (require (= (type-of sources) 'map))
+          (list 'fn '(world turns)
+            (list native-agent-kernel-source
+              (cons 'dict (collect collect (keys sources))) 'world 'turns)))))))

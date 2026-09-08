@@ -154,7 +154,7 @@ fn budgets_cover_input_collections_output_expansion_and_small_host_stacks() {
 
     let ir = evaluate(
         &mut w,
-        "(native-compile '(fn () (let ((f (fn (self) (self self)))) (f f))))",
+        "(native-compile '(fn () (let ((f (fn (self) (+ 1 (self self))))) (f f))))",
     );
     std::thread::Builder::new()
         .stack_size(64 * 1024)
@@ -252,7 +252,10 @@ fn compiler_compiles_itself_and_bootstrap_stages_agree() {
 #[test]
 fn limits_errors_and_repeated_invocations_are_isolated() {
     let mut w = world();
-    let loop_code = compile(&mut w, "(fn () (let ((f (fn (self) (self self)))) (f f)))");
+    let loop_code = compile(
+        &mut w,
+        "(fn () (let ((f (fn (self) (+ 1 (self self))))) (f f)))",
+    );
     assert_eq!(
         loop_code
             .invoke(

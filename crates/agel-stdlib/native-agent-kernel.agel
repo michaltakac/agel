@@ -1,0 +1,94 @@
+; Closed, effect-free scheduler. The host commits its returned world atomically.
+(fn (behaviors world limit)
+  (let ((require (fn (ok) (if ok #t (signal 'native/agents "invalid state, message, or authority"))))
+        (list? (fn (x) (if (= x nil) #t (= (type-of x) 'list)))))
+    (let ((member (fn (self x xs)
+                    (if (= (count xs) 0) #f (if (= x (car xs)) #t (self self x (cdr xs))))))
+          (reverse (fn (self xs out)
+                     (if (= (count xs) 0) out (self self (cdr xs) (cons (car xs) out))))))
+      (let ((check-peer (fn (self xs)
+                          (begin (require (list? xs))
+                            (if (= (count xs) 0) #t
+                                (begin (require (= (type-of (car xs)) 'symbol))
+                                  (self self (cdr xs)))))))
+            (check-event (fn (event)
+                           (begin (require (list? event)) (require (= (count event) 2))
+                             (require (has-key? (get world 'agents) (car event)))))))
+        (begin
+          (require (= (type-of behaviors) 'map))
+          (require (= (type-of world) 'map))
+          (require (= (count world) 6))
+          (require (= (type-of (get world 'agents)) 'map))
+          (require (has-key? world 'front))
+          (require (has-key? world 'back))
+          (require (list? (get world 'front)))
+          (require (list? (get world 'back)))
+          (require (= (type-of (get world 'capacity)) 'int))
+          (require (< 0 (get world 'capacity)))
+          (require (= (get world 'pending) (+ (count (get world 'front)) (count (get world 'back)))))
+          (require (if (< (get world 'capacity) (get world 'pending)) #f #t))
+          (require (= (type-of (get world 'turns)) 'int))
+          (require (< -1 (get world 'turns)))
+          (require (= (type-of limit) 'int))
+          (require (< -1 limit))
+          ((fn (check) (check check (keys (get world 'agents))))
+            (fn (self ids)
+              (if (= (count ids) 0) #t
+                  (let ((actor (get (get world 'agents) (car ids))))
+                    (begin
+                      (require (= (type-of (car ids)) 'symbol))
+                      (require (= (type-of actor) 'map))
+                      (require (= (count actor) 3))
+                      (require (has-key? actor 'state))
+                      (require (has-key? actor 'peers))
+                      (require (= (type-of (get actor 'kind)) 'symbol))
+                      (require (has-key? behaviors (get actor 'kind)))
+                      (require (= (type-of (get behaviors (get actor 'kind))) 'callable))
+                      (check-peer check-peer (get actor 'peers))
+                      (self self (cdr ids)))))))
+          ((fn (check)
+             (begin (check check (get world 'front)) (check check (get world 'back))))
+            (fn (self xs)
+              (if (= (count xs) 0) #t (begin (check-event (car xs)) (self self (cdr xs))))))
+          (let ((enqueue
+                  (fn (self outbox peers next)
+                    (begin
+                      (require (list? outbox))
+                      (if (= (count outbox) 0) next
+                          (let ((event (car outbox)))
+                            (begin
+                              (check-event event)
+                              (require (member member (car event) peers))
+                              (require (< (get next 'pending) (get next 'capacity)))
+                              (self self (cdr outbox) peers
+                                (assoc (assoc next 'back (cons event (get next 'back)))
+                                  'pending (+ 1 (get next 'pending)))))))))))
+            ((fn (drive) (drive drive world limit))
+              (fn (self current remaining)
+                (if (= remaining 0) current
+                    (if (= (count (get current 'front)) 0)
+                        (if (= (count (get current 'back)) 0) current
+                            (self self
+                              (assoc (assoc current 'front (reverse reverse (get current 'back) nil)) 'back nil)
+                              remaining))
+                        (let ((event (car (get current 'front))))
+                          (let ((actor (get (get current 'agents) (car event))))
+                            (let ((result ((get behaviors (get actor 'kind))
+                                           (get actor 'state) (car (cdr event)))))
+                              (begin
+                                (require (= (type-of result) 'map))
+                                (require (= (count result) 2))
+                                (require (has-key? result 'state))
+                                (require (has-key? result 'outbox))
+                                (let ((next
+                                        (assoc
+                                          (assoc
+                                            (assoc current 'agents
+                                              (assoc (get current 'agents) (car event)
+                                                (assoc actor 'state (get result 'state))))
+                                            'front (cdr (get current 'front)))
+                                          'pending (- (get current 'pending) 1))))
+                                  (self self
+                                    (assoc (enqueue enqueue (get result 'outbox) (get actor 'peers) next)
+                                      'turns (+ 1 (get current 'turns)))
+                                    (- remaining 1)))))))))))))))))
