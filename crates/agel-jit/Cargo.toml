@@ -1,0 +1,22 @@
+[package]
+name = "agel-jit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.86"
+
+[dependencies]
+agel-core = { path = "../agel-core" }
+cranelift-codegen = "=0.123.14"
+cranelift-frontend = "=0.123.14"
+cranelift-jit = "=0.123.14"
+cranelift-module = "=0.123.14"
+
+[dev-dependencies]
+agel-stdlib = { path = "../agel-stdlib" }
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "warn"

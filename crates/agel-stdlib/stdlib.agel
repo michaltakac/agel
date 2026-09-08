@@ -800,6 +800,90 @@
                     (meta-analyze-application expression)))
               (fn (environment) expression))))))
 
+; Language-owned lowering and a portable oracle for the restricted native IR.
+(module agel/jit
+  (export jit-compile jit-run)
+
+  (def require-count
+    (fn (values expected)
+      (if (= (count values) expected) values
+          (signal 'jit/arity "unsupported JIT form arity" values))))
+  (def slots
+    (fn (names index env)
+      (if (= names nil) env
+          (if (= (type-of names) 'list)
+              (if (= (type-of (car names)) 'symbol)
+                  (if (has-key? binary-ops (car names))
+                      (signal 'jit/parameter "JIT arithmetic names are reserved")
+                      (if (has-key? env (car names))
+                      (signal 'jit/parameter "duplicate JIT parameter")
+                      (slots (cdr names) (+ index 1) (assoc env (car names) index))))
+                  (signal 'jit/parameter "JIT parameters must be symbols"))
+              (signal 'jit/parameter "JIT parameters must be a list")))))
+  (def binary-ops (dict '+ 'add '- 'sub '* 'mul '= 'eq '< 'lt))
+  (def lower
+    (fn (source env)
+      (if (= (type-of source) 'int) (list 'i64 source)
+          (if (= (type-of source) 'bool) (list 'bool source)
+              (if (= (type-of source) 'symbol)
+                  (if (has-key? env source) (list 'arg (get env source))
+                      (signal 'jit/unbound "JIT function has a free name" source))
+                  (if (= (type-of source) 'list)
+                      (let ((head (car source)) (tail (cdr source)))
+                        (if (= head 'if)
+                            (let ((parts (require-count tail 3)))
+                              (list 'if (lower (car parts) env)
+                                (lower (car (cdr parts)) env)
+                                (lower (car (cdr (cdr parts))) env)))
+                            (let ((op (get binary-ops head)))
+                              (if op
+                                  (let ((parts (require-count tail 2)))
+                                    (list op (lower (car parts) env)
+                                      (lower (car (cdr parts)) env)))
+                                  (signal 'jit/unsupported "unsupported JIT operation" head)))))
+                      (signal 'jit/unsupported "unsupported JIT literal" source)))))))
+  (def jit-compile
+    (fn (source)
+      (if (= (type-of source) 'list)
+          (let ((parts (require-count source 3)))
+            (if (= (car parts) 'fn)
+                (let ((parameters (car (cdr parts))))
+                  (let ((env (slots parameters 0 (dict))))
+                    (if (< 8 (count parameters))
+                        (signal 'jit/limit "at most eight JIT arguments")
+                        (list 'agel/jit-v1 (count parameters)
+                          (lower (car (cdr (cdr parts))) env)))))
+                (signal 'jit/syntax "JIT source must be a single-body fn")))
+          (signal 'jit/syntax "JIT source must be a fn"))))
+
+  ; Portable Agel oracle for compiler-produced IR. The native backend performs
+  ; its own structural/type/size validation; this is not that trusted validator.
+  (def at
+    (fn (values index)
+      (if (= values nil) (signal 'jit/argument "argument index out of range")
+          (if (= index 0) (car values) (at (cdr values) (- index 1))))))
+  (def operations (dict 'add + 'sub - 'mul * 'eq = 'lt <))
+  (def execute
+    (fn (node arguments)
+      (let ((op (car node)) (tail (cdr node)))
+        (if (= op 'i64) (car tail)
+            (if (= op 'bool) (car tail)
+                (if (= op 'arg) (at arguments (car tail))
+                    (if (= op 'if)
+                        (if (execute (car tail) arguments)
+                            (execute (car (cdr tail)) arguments)
+                            (execute (car (cdr (cdr tail))) arguments))
+                        ((get operations op) (execute (car tail) arguments)
+                          (execute (car (cdr tail)) arguments)))))))))
+  (def jit-run
+    (fn (ir arguments)
+      (begin
+        (require-count ir 3)
+        (if (= (car ir) 'agel/jit-v1)
+            (begin (require-count arguments (car (cdr ir)))
+              (execute (car (cdr (cdr ir))) arguments))
+            (signal 'jit/format "unknown JIT IR version"))))))
+
 ; The seed only schedules the ordinary wrapper. Behavior evaluation, lexical
 ; scope and state threading are Agel code. No effects enter the base environment;
 ; callers must explicitly supply any callable services they want exposed.

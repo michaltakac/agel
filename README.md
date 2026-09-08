@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.14: reusable execution plans analyzed in Agel,
+The current repository is **v0.2.15: an Agel-authored integer-IR compiler with a
+validated hosted machine-code JIT, alongside reusable execution plans analyzed in Agel,
 shared immutable closure storage in the Rust bootstrap, and
 source-backed agents, alongside a native agent workbench with failure-safe source saves,
 bounded process execution, pointer events,
@@ -173,6 +174,7 @@ cargo run -p agel-cli
 
 The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/fixed-point`,
 `agel/meta`, `agel/meta-agent`,
+`agel/jit`,
 `agel/ui`, `agel/vector`, `agel/ui-layout`, `agel/ui-vector`, and `agel/desktop`
 by default.
 Use `--no-stdlib` to expose only the minimal language substrate.
@@ -338,6 +340,7 @@ cargo run -q -p agel-cli < examples/metacircular.agel
 cargo run -q -p agel-cli < examples/metacircular-agents.agel
 cargo run -q -p agel-cli < examples/analyzed-agents.agel
 cargo run --release -q -p agel-stdlib --example meta_benchmark
+cargo run --release -q -p agel-jit --example native
 cargo run -q -p agel-stdlib --example metacircular_cost
 ./scripts/test-bootstrap.sh
 cargo run -q -p agel-supervisor --example ab_upgrade
@@ -346,6 +349,8 @@ cargo run -q -p agel-supervisor --example ab_upgrade
 The current implementation and next performance steps are described in
 [self-hosting and performance](docs/self-hosting-performance.md), with dated
 primary research sources and explicitly scoped benchmark results.
+The opt-in [integer JIT](docs/integer-jit.md) generates actual host machine code;
+it requires Rust 1.86+ and is not linked into the ordinary CLI or native kernel.
 
 Two-lane human interaction and the bootable recovery monitor:
 

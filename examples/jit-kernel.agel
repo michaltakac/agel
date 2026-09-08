@@ -1,0 +1,8 @@
+; Source lowering is Agel code. This file returns inspectable JIT IR.
+; The ordinary CLI prints IR; the agel-jit native example compiles and runs it.
+(import agel/jit)
+(def kernel-source
+  '(fn (x limit)
+     (if (< x limit) (+ (* x x) 1) limit)))
+(def kernel-ir (jit-compile kernel-source))
+kernel-ir

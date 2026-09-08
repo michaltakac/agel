@@ -41,6 +41,9 @@ promise.
   `v0.2.14` adds reusable execution plans analyzed in Agel and opt-in analyzed
   agents, plus structurally shared immutable closure code and lexical frames
   in the hosted Rust bootstrap. No language syntax or native-kernel ABI changes.
+  `v0.2.15` adds an Agel-authored integer-IR compiler and an isolated hosted
+  Cranelift JIT backend with checked arithmetic, bounded validation and code
+  lifetime ownership. The optional JIT crate requires Rust 1.86 or newer.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

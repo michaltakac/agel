@@ -2,6 +2,10 @@
 
 Research checked on 2026-09-07. Implemented milestone: v0.2.14.
 
+Update: [v0.2.15](integer-jit.md) implements a first hosted machine-code backend
+for a finite integer subset and an Agel-authored IR compiler. The broader stages
+below remain necessary for full self-compilation and general agent JIT execution.
+
 ## Decision
 
 Being written in Rust does not make interpreted Agel execute like compiled Rust.
