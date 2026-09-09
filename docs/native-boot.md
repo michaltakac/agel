@@ -132,8 +132,9 @@ assembly lives in `boot/bios`.
 Since v0.1.6, `./scripts/run-qemu.sh` boots an x86-64 interactive workshop whose
 evaluator lives on a private 512 KiB bounded domain stack and whose output goes
 through the v0.1.5 console domain, and since v0.2.27 reads its serial input
-through that same domain. The same evaluator path is tested on AArch64
-and RISC-V. seL4 still runs only the frozen contract. v0.1.7 adds alternating, checksummed native source-image
+through that same domain. Since v0.2.28 `./scripts/run-qemu.sh aarch64` and
+`riscv64` boot the same interactive workshop on those machines, without a
+disk. seL4 still runs only the frozen contract. v0.1.7 adds alternating, checksummed native source-image
 slots and boot-time replay; since v0.2.26 the ATA driver is an unprivileged,
 restartable domain granted exactly the disk's ports, while the slot policy and
 codec stay in the supervisor and the images are not signed. There is no allocator, hardware watchdog, full agent

@@ -90,6 +90,10 @@ promise.
   pointer input into an 8042 driver domain granted only its two ports; the
   supervisor no longer touches an input port on any interactive path. Decoding
   and policy are unchanged.
+  `v0.2.28` runs the interactive serial workshop on AArch64 and RISC-V from the
+  same source as x86-64, with storage optional and reported absent, and drives
+  all three with the same harness in CI. No language, format or contract
+  change.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

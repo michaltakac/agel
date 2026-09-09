@@ -67,6 +67,9 @@ pub fn reset(evaluator: &mut arch::Domain) -> Result<(), &'static str> {
     request(evaluator, shared::COMMAND_EVALUATOR_RESET, b"").map(|_| ())
 }
 
+// The workshop compiles its whole disk path on every machine; only x86-64 has
+// a device that reaches it, so elsewhere these fields are written, never read.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub enum ReplayFailure {
     Language(usize),
@@ -95,6 +98,25 @@ impl ReplayFailure {
 /// Validate every source cell in an empty candidate, publish disk, then adopt
 /// the candidate. No failed validation or disk write resets the live evaluator.
 pub fn save(
+    evaluator: &mut arch::Domain,
+    storage: Option<&mut ServiceDomain>,
+    workspace: &Workspace,
+    generation: u64,
+) -> Result<(u64, u64), &'static str> {
+    let Some(storage) = storage else {
+        return Err("no storage device on this machine");
+    };
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (evaluator, storage, workspace, generation);
+        Err("no storage device on this machine")
+    }
+    #[cfg(target_arch = "x86_64")]
+    save_to_disk(evaluator, storage, workspace, generation)
+}
+
+#[cfg(target_arch = "x86_64")]
+fn save_to_disk(
     evaluator: &mut arch::Domain,
     storage: &mut ServiceDomain,
     workspace: &Workspace,

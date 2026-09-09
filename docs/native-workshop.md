@@ -1,7 +1,7 @@
 # The native Agel workshop
 
 `./scripts/run-qemu.sh` now boots directly into an Agel REPL on the freestanding
-kernel; [`examples/native-workshop.agel`](../examples/native-workshop.agel) is a
+kernel, on x86-64 by default or on AArch64 and RISC-V with an argument; [`examples/native-workshop.agel`](../examples/native-workshop.agel) is a
 form-by-form session to type into it. Since v0.1.6, source crosses a bounded shared page into an unprivileged
 evaluator domain, its transactional state lives on that domain's private stack,
 and results are printed through a separate console-driver domain. Evaluation
@@ -195,6 +195,10 @@ writable and executable.
 
 Since v0.2.27 the serial reader polls the console driver domain rather than
 the port; the recovery commands remain supervisor code.
-The AArch64 and RISC-V isolation images run the same evaluator corpus but do not
-yet expose an interactive UART workshop. This is a protected language workshop,
+Since v0.2.28 the same interactive workshop runs on AArch64 and RISC-V:
+`./scripts/run-qemu.sh aarch64` or `riscv64` boots it on QEMU's `virt`
+machine, with the evaluator in an EL0 or U-mode domain and every byte in and
+out crossing the console driver domain. Those machines have no disk, so the
+named-cell editor works in memory and `:save`/`:reload` answer "no storage
+device on this machine" rather than pretending to persist. This is a protected language workshop,
 not yet the full hosted agent runtime or a durable self-hosted environment.

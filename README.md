@@ -4,7 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.27: input leaves the supervisor too, with serial bytes read
+The current repository is **v0.2.28: the interactive workshop runs on all three research
+machines, with the AArch64 and RISC-V sessions driven over their UARTs by the same
+prompt-synchronized test as x86-64; input leaves the supervisor too, with serial bytes read
 through the console driver domain and keyboard/pointer bytes through an 8042 driver domain
 granted only two ports; the disk leaves the supervisor into an unprivileged,
 restartable ATA driver domain granted exactly nine I/O ports, with generation-checked handles
@@ -238,7 +240,10 @@ It provides:
   workshop path touches an input port from the supervisor; and
 - the fixed-memory native evaluator running unprivileged on x86-64, AArch64,
   and RISC-V, with its transactional world on a private bounded stack and only
-  a shared-page request/reply boundary to the supervisor; and
+  a shared-page request/reply boundary to the supervisor;
+- the interactive serial workshop on all three of those machines, reached
+  through `./scripts/run-qemu.sh [aarch64|riscv64]`, with the two diskless
+  machines editing named cells in memory; and
 - a native named-source-cell editor whose canonical workspace is committed to
   alternating CRC-checked disk slots, replayed after reboot, and recovered from
   the preceding generation when the newest image is torn, corrupt, or fails
@@ -516,6 +521,8 @@ kernel-contract transcript, and the isolation suite with:
 ```sh
 ./scripts/test-native.sh
 ./scripts/test-native-repl.sh
+./scripts/test-native-repl.sh aarch64    # the same session on the other machines
+./scripts/test-native-repl.sh riscv64
 ./scripts/test-native-persistence.sh     # save, reboot, reject, recover
 ./scripts/test-kernel-contract.sh
 ./scripts/test-isolation.sh              # x86-64, AArch64 and RISC-V

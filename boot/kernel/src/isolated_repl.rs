@@ -37,11 +37,23 @@ pub fn run() -> ! {
         Ok(domain) => ServiceDomain::new(domain, ServiceKind::Console, worker_entry, 8),
         Err(reason) => fatal(reason),
     };
-    let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
-    let mut storage = match machine.create_storage_world(storage_entry, 50) {
-        Ok(domain) => ServiceDomain::new(domain, ServiceKind::Storage, storage_entry, 50),
-        Err(reason) => fatal(reason),
+    // Only x86-64 has a disk. The other machines run the same workshop with an
+    // in-memory workspace and say so rather than pretending to persist.
+    #[cfg(target_arch = "x86_64")]
+    let mut storage = {
+        let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
+        match machine.create_storage_world(storage_entry, 50) {
+            Ok(domain) => Some(ServiceDomain::new(
+                domain,
+                ServiceKind::Storage,
+                storage_entry,
+                50,
+            )),
+            Err(reason) => fatal(reason),
+        }
     };
+    #[cfg(not(target_arch = "x86_64"))]
+    let mut storage: Option<ServiceDomain> = None;
     let mut evaluator = match machine.create_evaluator_world(evaluator_entry, 20) {
         Ok(domain) => domain,
         Err(reason) => fatal(reason),
@@ -60,7 +72,7 @@ pub fn run() -> ! {
         b"Evaluator: unprivileged domain; output: restartable console domain; storage: unprivileged disk driver domain; source workspace: dual-slot disk image. Type :help.",
     );
 
-    match load_replay_candidates(&mut evaluator, &mut driver, &mut storage) {
+    match load_replay_candidates(&mut evaluator, &mut driver, storage.as_mut()) {
         Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {
             workspace = loaded.workspace;
             committed_workspace = loaded.workspace;
@@ -152,7 +164,7 @@ pub fn run() -> ! {
             ),
             b":save" => match crate::native_session::save(
                 &mut evaluator,
-                &mut storage,
+                storage.as_mut(),
                 &workspace,
                 generation,
             ) {
@@ -171,7 +183,7 @@ pub fn run() -> ! {
                         );
                     }
             },
-            b":reload" => match load_replay_candidates(&mut evaluator, &mut driver, &mut storage) {
+            b":reload" => match load_replay_candidates(&mut evaluator, &mut driver, storage.as_mut()) {
                 Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {
                     workspace = loaded.workspace;
                     committed_workspace = loaded.workspace;
@@ -276,6 +288,8 @@ pub fn run() -> ! {
 // Boxing would introduce an allocator into the native supervisor. The large
 // variant is a deliberately bounded source workspace on its 512 KiB stack.
 #[allow(clippy::large_enum_variant)]
+// Only x86-64 has a disk to construct these from; see `load_replay_candidates`.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 enum DiskWorkspace {
     Empty,
     Restored(crate::workspace::LoadedWorkspace, u64),
@@ -283,6 +297,24 @@ enum DiskWorkspace {
 }
 
 fn load_replay_candidates(
+    evaluator: &mut arch::Domain,
+    driver: &mut ServiceDomain,
+    storage: Option<&mut ServiceDomain>,
+) -> Result<DiskWorkspace, &'static str> {
+    let Some(storage) = storage else {
+        return Err("no storage device on this machine");
+    };
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (evaluator, driver, storage);
+        Err("no storage device on this machine")
+    }
+    #[cfg(target_arch = "x86_64")]
+    load_from_disk(evaluator, driver, storage)
+}
+
+#[cfg(target_arch = "x86_64")]
+fn load_from_disk(
     evaluator: &mut arch::Domain,
     driver: &mut ServiceDomain,
     storage: &mut ServiceDomain,
@@ -439,6 +471,7 @@ fn report_restored(driver: &mut ServiceDomain, count: usize, generation: u64) {
     out.flush();
 }
 
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 fn report_replay_failure(
     driver: &mut ServiceDomain,
     workspace: &Workspace,

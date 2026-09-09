@@ -260,13 +260,17 @@ Each rung must be runnable and differentially testable against the rung below:
    raw keyboard and pointer bytes and performs the pointer-enable handshake.
    Decoding and policy stay in the supervisor; an ungranted world touching the
    controller faults, and CI asserts it.
-43. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+43. **Workshop on three machines (complete at v0.2.28):** the interactive
+   serial workshop builds and runs on AArch64 and RISC-V as well as x86-64,
+   sharing one source, with storage optional and reported absent rather than
+   faked; the same prompt-synchronized harness drives all three under QEMU.
+44. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-44. **POSIX personality:** a Rust C library and the filesystem and process
+45. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-45. **Local inference:** model inference in its own domain, over quantized
+46. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

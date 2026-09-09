@@ -15,6 +15,7 @@ mod memory;
 
 pub use domain::Domain;
 
+#[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 use crate::world::Provocation;
 
 /// Short label used in serial reports.
@@ -116,6 +117,7 @@ pub fn fault_name(cause: u64) -> &'static str {
 /// earn. There is no divide provocation: AArch64 has no integer divide
 /// exception, and inventing one for symmetry would be a test that proves
 /// nothing about this machine.
+#[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 pub const PROVOCATIONS: &[Provocation] = &[
     Provocation {
         command: crate::world::shared::COMMAND_FAULT_WRITE,
@@ -184,6 +186,7 @@ impl Machine {
         Ok(Self { pool, identity })
     }
 
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     /// Build a protection domain entered in EL0 at `entry`.
     pub fn create_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
         Domain::new(
@@ -228,6 +231,7 @@ impl Machine {
         .map_err(|error| error.name())
     }
 
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     /// Frames the pool has not handed out.
     pub fn frames_remaining(&self) -> u64 {
         self.pool.remaining()

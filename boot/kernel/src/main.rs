@@ -29,10 +29,7 @@ mod world;
 )))]
 mod monitor;
 
-#[cfg(all(
-    target_arch = "x86_64",
-    any(feature = "isolated-repl", feature = "native-graphics")
-))]
+#[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
 mod native_session;
 
 #[cfg(feature = "isolation-selftest")]
@@ -41,7 +38,7 @@ mod contract;
 mod display_user;
 #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
 mod graphics;
-#[cfg(all(target_arch = "x86_64", feature = "isolated-repl"))]
+#[cfg(feature = "isolated-repl")]
 mod isolated_repl;
 #[cfg(all(
     feature = "isolation-selftest",
@@ -56,10 +53,7 @@ mod pointer;
 mod service;
 #[cfg(feature = "isolation-selftest")]
 mod user;
-#[cfg(all(
-    target_arch = "x86_64",
-    any(feature = "isolated-repl", feature = "native-graphics")
-))]
+#[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
 mod workspace;
 
 #[cfg(feature = "isolation-selftest")]
@@ -130,7 +124,6 @@ pub fn agel_main() -> ! {
     }
 
     #[cfg(all(
-        target_arch = "x86_64",
         feature = "isolated-repl",
         not(any(feature = "selftest", feature = "monitor-selftest"))
     ))]

@@ -621,6 +621,24 @@ Timers, networking and model brokering are still the supervisor's. The input
 driver exists only on the x86-64 graphics build, and the frame pool still
 never reclaims a replaced domain's frames.
 
+## v0.2.28
+
+- **A workshop that exists on one machine:** the interactive serial workshop
+  had been x86-64 only, so the claim that the evaluator is contained on three
+  machines rested on a non-interactive corpus elsewhere. It now runs on all
+  three from one source, and the prompt-synchronized harness types every byte
+  and checks every echo, prompt and revision on each.
+- **Persistence faked where there is no disk:** the diskless machines report
+  "no storage device on this machine" for `:save` and `:reload` and keep the
+  in-memory editor; nothing pretends a cell survived a reboot.
+- **A disk path compiled where it cannot run:** the image codec and slot
+  protocol are gated to x86-64 with the device, and the few result types the
+  shared workshop names are marked as unreachable there rather than silenced
+  wholesale.
+
+The AArch64 and RISC-V workshops have no storage, no graphics and no
+keyboard; the recovery monitor on every machine is still in-memory policy.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

@@ -5,19 +5,28 @@
 //! invalidates the older slot, writes its payload, and publishes its header
 //! last; boot accepts only a bounded, checksummed, canonically decoded image.
 
+#[cfg(target_arch = "x86_64")]
 use crate::service::{ServiceDomain, ServiceError};
+#[cfg(target_arch = "x86_64")]
 use crate::user::storage_status;
 
 pub const MAX_CELLS: usize = 16;
 pub const MAX_CELL_NAME: usize = 24;
 pub const MAX_CELL_SOURCE: usize = crate::world::PAYLOAD_BYTES;
 
+#[cfg(target_arch = "x86_64")]
 const SLOT_A: u32 = 256;
+#[cfg(target_arch = "x86_64")]
 const SLOT_B: u32 = 272;
+#[cfg(target_arch = "x86_64")]
 const SLOT_SECTORS: u32 = 16;
+#[cfg(target_arch = "x86_64")]
 const PAYLOAD_SECTORS: usize = SLOT_SECTORS as usize - 1;
+#[cfg(target_arch = "x86_64")]
 const PAYLOAD_BYTES: usize = PAYLOAD_SECTORS * 512;
+#[cfg(target_arch = "x86_64")]
 const MAGIC: &[u8; 8] = b"AGELWS1\0";
+#[cfg(target_arch = "x86_64")]
 const FORMAT_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -113,6 +122,7 @@ impl Workspace {
         Ok(())
     }
 
+    #[cfg(target_arch = "x86_64")]
     fn encode(&self, bytes: &mut [u8; PAYLOAD_BYTES]) -> Result<usize, &'static str> {
         bytes.fill(0);
         let mut cursor = 0;
@@ -127,6 +137,7 @@ impl Workspace {
         Ok(cursor)
     }
 
+    #[cfg(target_arch = "x86_64")]
     fn decode(bytes: &[u8]) -> Result<Self, &'static str> {
         let mut cursor = 0;
         let count = take_u16(bytes, &mut cursor)? as usize;
@@ -157,6 +168,9 @@ impl Workspace {
     }
 }
 
+// Constructed only by the x86-64 disk path; the workshop's result type names
+// it on every machine.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct LoadedWorkspace {
     pub workspace: Workspace,
@@ -165,6 +179,7 @@ pub struct LoadedWorkspace {
 
 /// Translate a storage service failure into the workspace's own vocabulary.
 /// The driver carries codes; the supervisor decides what they mean.
+#[cfg(target_arch = "x86_64")]
 fn storage_message(error: ServiceError) -> &'static str {
     match error {
         ServiceError::Stale => "storage driver handle is stale",
@@ -180,6 +195,7 @@ fn storage_message(error: ServiceError) -> &'static str {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 fn read_sector(
     storage: &mut ServiceDomain,
     lba: u32,
@@ -191,6 +207,7 @@ fn read_sector(
         .map_err(storage_message)
 }
 
+#[cfg(target_arch = "x86_64")]
 fn write_sector(
     storage: &mut ServiceDomain,
     lba: u32,
@@ -202,6 +219,7 @@ fn write_sector(
         .map_err(storage_message)
 }
 
+#[cfg(target_arch = "x86_64")]
 fn flush(storage: &mut ServiceDomain) -> Result<(), &'static str> {
     let handle = storage.handle();
     storage.flush(handle).map_err(storage_message)
@@ -209,6 +227,7 @@ fn flush(storage: &mut ServiceDomain) -> Result<(), &'static str> {
 
 /// Read both slots independently and return valid candidates newest-first.
 /// A localized read failure cannot hide a valid twin slot.
+#[cfg(target_arch = "x86_64")]
 pub fn load(storage: &mut ServiceDomain) -> Result<[Option<LoadedWorkspace>; 2], &'static str> {
     let a = load_slot(storage, SLOT_A);
     let b = load_slot(storage, SLOT_B);
@@ -225,6 +244,7 @@ pub fn load(storage: &mut ServiceDomain) -> Result<[Option<LoadedWorkspace>; 2],
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn save(
     storage: &mut ServiceDomain,
     workspace: &Workspace,
@@ -277,6 +297,7 @@ pub fn save(
     Ok(next)
 }
 
+#[cfg(target_arch = "x86_64")]
 fn load_slot(
     storage: &mut ServiceDomain,
     slot: u32,
@@ -342,11 +363,13 @@ fn validate_name(name: &[u8]) -> Result<(), &'static str> {
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 fn checksum_parts(first: &[u8], second: &[u8]) -> u32 {
     let crc = checksum_update(0xffff_ffff_u32, first);
     !checksum_update(crc, second)
 }
 
+#[cfg(target_arch = "x86_64")]
 fn checksum_update(mut crc: u32, bytes: &[u8]) -> u32 {
     for byte in bytes {
         crc ^= u32::from(*byte);
@@ -358,14 +381,17 @@ fn checksum_update(mut crc: u32, bytes: &[u8]) -> u32 {
     crc
 }
 
+#[cfg(target_arch = "x86_64")]
 fn put_u8(bytes: &mut [u8], cursor: &mut usize, value: u8) -> Result<(), &'static str> {
     put_bytes(bytes, cursor, &[value])
 }
 
+#[cfg(target_arch = "x86_64")]
 fn put_u16(bytes: &mut [u8], cursor: &mut usize, value: u16) -> Result<(), &'static str> {
     put_bytes(bytes, cursor, &value.to_be_bytes())
 }
 
+#[cfg(target_arch = "x86_64")]
 fn put_bytes(bytes: &mut [u8], cursor: &mut usize, value: &[u8]) -> Result<(), &'static str> {
     let end = cursor
         .checked_add(value.len())
@@ -378,15 +404,18 @@ fn put_bytes(bytes: &mut [u8], cursor: &mut usize, value: &[u8]) -> Result<(), &
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 fn take_u8(bytes: &[u8], cursor: &mut usize) -> Result<u8, &'static str> {
     Ok(take_bytes(bytes, cursor, 1)?[0])
 }
 
+#[cfg(target_arch = "x86_64")]
 fn take_u16(bytes: &[u8], cursor: &mut usize) -> Result<u16, &'static str> {
     let value = take_bytes(bytes, cursor, 2)?;
     Ok(u16::from_be_bytes([value[0], value[1]]))
 }
 
+#[cfg(target_arch = "x86_64")]
 fn take_bytes<'a>(
     bytes: &'a [u8],
     cursor: &mut usize,

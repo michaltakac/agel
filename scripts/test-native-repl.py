@@ -11,38 +11,81 @@ import time
 import zlib
 
 
+# The x86-64 debug-exit device maps the guest's clean value 0x10 to host status
+# 33; the other two machines leave cleanly with status 0 and the success token.
+EXPECTED_EXIT = {"x86_64": 33, "aarch64": 0, "riscv64": 0}
+
+
+def qemu_command(architecture: str, image: str, persistent: bool) -> list[str]:
+    serial = [
+        "-display",
+        "none",
+        "-monitor",
+        "none",
+        "-chardev",
+        "stdio,id=serial0,signal=off,mux=off",
+        "-serial",
+        "chardev:serial0",
+        "-no-reboot",
+    ]
+    if architecture == "x86_64":
+        return [
+            "qemu-system-x86_64",
+            "-machine",
+            "pc,accel=tcg",
+            "-m",
+            "64M",
+            *serial,
+            "-device",
+            "isa-debug-exit,iobase=0xf4,iosize=0x04",
+            "-boot",
+            "order=c,strict=on",
+            "-drive",
+            (
+                f"format=raw,file={image}"
+                if persistent
+                else f"format=raw,file={image},snapshot=on"
+            ),
+        ]
+    if architecture == "aarch64":
+        return [
+            "qemu-system-aarch64",
+            "-machine",
+            "virt",
+            "-cpu",
+            "cortex-a72",
+            "-m",
+            "128M",
+            *serial,
+            "-kernel",
+            image,
+        ]
+    if architecture == "riscv64":
+        return [
+            "qemu-system-riscv64",
+            "-machine",
+            "virt",
+            "-m",
+            "128M",
+            *serial,
+            "-bios",
+            "default",
+            "-kernel",
+            image,
+        ]
+    raise ValueError(f"unknown architecture {architecture}")
+
+
 class Harness:
-    def __init__(self, image: str, *, persistent: bool = False) -> None:
+    def __init__(
+        self, image: str, *, persistent: bool = False, architecture: str = "x86_64"
+    ) -> None:
         self.output: queue.Queue[bytes | None] = queue.Queue()
         self.transcript = bytearray()
-        self.deadline = time.monotonic() + 60.0
+        self.deadline = time.monotonic() + 90.0
+        self.architecture = architecture
         self.process = subprocess.Popen(
-            [
-                "qemu-system-x86_64",
-                "-machine",
-                "pc,accel=tcg",
-                "-m",
-                "64M",
-                "-display",
-                "none",
-                "-monitor",
-                "none",
-                "-chardev",
-                "stdio,id=serial0,signal=off,mux=off",
-                "-serial",
-                "chardev:serial0",
-                "-no-reboot",
-                "-device",
-                "isa-debug-exit,iobase=0xf4,iosize=0x04",
-                "-boot",
-                "order=c,strict=on",
-                "-drive",
-                (
-                    f"format=raw,file={image}"
-                    if persistent
-                    else f"format=raw,file={image},snapshot=on"
-                ),
-            ],
+            qemu_command(architecture, image, persistent),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -299,15 +342,30 @@ def shutdown(harness: Harness) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) not in (2, 3):
-        print("usage: test-native-repl.py IMAGE [--persistence]", file=sys.stderr)
+    arguments = sys.argv[1:]
+    architecture = "x86_64"
+    if "--arch" in arguments:
+        index = arguments.index("--arch")
+        if index + 1 >= len(arguments):
+            print("--arch needs a value", file=sys.stderr)
+            return 2
+        architecture = arguments[index + 1]
+        del arguments[index : index + 2]
+    if architecture not in EXPECTED_EXIT:
+        print(f"unknown architecture {architecture}", file=sys.stderr)
         return 2
-    if len(sys.argv) == 3:
-        if sys.argv[2] != "--persistence":
+    if len(arguments) not in (1, 2):
+        print("usage: test-native-repl.py IMAGE [--persistence] [--arch ARCH]", file=sys.stderr)
+        return 2
+    if len(arguments) == 2:
+        if arguments[1] != "--persistence":
             print("unknown test mode", file=sys.stderr)
             return 2
+        if architecture != "x86_64":
+            print("persistence needs a disk; only x86-64 has one", file=sys.stderr)
+            return 2
         try:
-            persistence_test(sys.argv[1])
+            persistence_test(arguments[0])
         except Exception as error:
             print(f"native persistence test failed: {error}", file=sys.stderr)
             return 1
@@ -315,10 +373,14 @@ def main() -> int:
             "Agel native workspace: edit -> reboot -> semantic, corruption, and torn-write fallback [ok]"
         )
         return 0
-    harness = Harness(sys.argv[1])
+    harness = Harness(arguments[0], architecture=architecture)
     failure: Exception | None = None
     try:
         harness.expect_until(b"AGEL_NATIVE_READY")
+        if architecture == "x86_64":
+            harness.expect_until(b"workspace: no persisted image; starting empty")
+        else:
+            harness.expect_until(b"workspace storage unavailable: no storage device on this machine")
         harness.expect_until(b"agel-native[0]> ")
         harness.send("(+ 20 22)", "42", 1)
         harness.send("(def native-answer 40)", "40", 2)
@@ -420,8 +482,9 @@ def main() -> int:
         harness.process.stdin.flush()
         harness.expect_exact(b"\r\n")
         exit_code = harness.process.wait(timeout=harness.remaining(8.0))
-        if exit_code != 33:
-            raise RuntimeError(f"QEMU exit status {exit_code}, expected 33")
+        expected = EXPECTED_EXIT[architecture]
+        if exit_code != expected:
+            raise RuntimeError(f"QEMU exit status {exit_code}, expected {expected}")
     except Exception as error:  # test harness must always show the VM transcript
         failure = error
     finally:
@@ -430,7 +493,7 @@ def main() -> int:
         print(f"native REPL test failed: {failure}", file=sys.stderr)
         print(harness.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
         return 1
-    print("Agel native serial REPL: synchronized end-to-end session [ok]")
+    print(f"Agel native serial REPL [{architecture}]: synchronized end-to-end session [ok]")
     return 0
 
 

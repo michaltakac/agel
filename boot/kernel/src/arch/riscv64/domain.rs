@@ -8,6 +8,7 @@ use super::cpu::{self, reg, TrapFrame};
 use super::memory::{AddressSpace, IdentityWindow, DOMAIN_BASE};
 use crate::memory::{Access, FramePool, MemoryError, PAGE};
 use crate::world::{DomainCore, Fault, Stop};
+#[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 use agel_kernel_abi::{Request, Response, Status};
 
 /// Virtual address of a domain's stack region.
@@ -59,6 +60,7 @@ impl Domain {
         })
     }
 
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     /// Ask the world to perform one contract invocation and report the answer.
     pub fn invoke_in_world(&mut self, request: &Request) -> Response {
         self.core.stage_invocation(request);

@@ -847,7 +847,7 @@ fn execute_workshop(
         return status;
     }
     if line == b":save" {
-        return match crate::native_session::save(evaluator, storage, workspace, *generation) {
+        return match crate::native_session::save(evaluator, Some(storage), workspace, *generation) {
             Ok((next, revision)) => {
                 *generation = next;
                 *committed_workspace = *workspace;
