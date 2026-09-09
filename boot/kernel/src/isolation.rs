@@ -369,6 +369,8 @@ fn run_storage_driver(machine: &mut arch::Machine) {
     );
 
     let stale = storage.handle();
+    let frames_before = machine.frames_remaining();
+    let held = storage.frames();
     match storage.provoke(shared::COMMAND_FAULT_WRITE) {
         Stop::Faulted(fault) => kprint!(
             "isolation[{}]: the storage driver faulted: {} at {:#x}\n",
@@ -381,6 +383,14 @@ fn run_storage_driver(machine: &mut arch::Machine) {
     if let Err(reason) = storage.restart(machine) {
         failed(reason);
     }
+    if machine.frames_remaining() != frames_before {
+        failed("replacing the storage driver leaked or lost frames");
+    }
+    kprint!(
+        "isolation[{}]: the storage driver's {} frames were reclaimed and its replacement built from them\n",
+        arch::NAME,
+        held
+    );
     match storage.read_sector(stale, 0, &mut sector) {
         Err(ServiceError::Stale) => kprint!(
             "isolation[{}]: replaced the storage driver; a handle from generation {} was refused: {}\n",
@@ -414,6 +424,8 @@ fn run_storage_driver(machine: &mut arch::Machine) {
 /// a server that no longer remembers the conversation.
 fn run_driver_restart(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
     let stale = driver.handle();
+    let frames_before = machine.frames_remaining();
+    let held = driver.frames();
 
     match driver.provoke(shared::COMMAND_FAULT_WRITE) {
         Stop::Faulted(fault) => kprint!(
@@ -439,6 +451,17 @@ fn run_driver_restart(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
         arch::NAME,
         driver.generation(),
         driver.restarts()
+    );
+    // A driver that dies and is replaced costs nothing lasting: the pool has
+    // exactly as many frames as before the fault, because the replacement
+    // was built from the frames the stopped domain gave back.
+    if machine.frames_remaining() != frames_before {
+        failed("replacing the console driver leaked or lost frames");
+    }
+    kprint!(
+        "isolation[{}]: the console driver's {} frames were reclaimed and its replacement built from them\n",
+        arch::NAME,
+        held
     );
 
     // A handle from before the restart must fail closed.

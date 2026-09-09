@@ -123,6 +123,10 @@ promise.
   `v0.2.34` adds power-cut injection: `:cut-power N` in the serial workshop
   tears the N-th sector write and halts, and `scripts/test-power-cut.sh`
   sweeps every write of a save on all three machines. No format change.
+  `v0.2.35` makes the frame pool reclaim: every domain records the frames it
+  was built from, a replaced driver domain gives them back, and its
+  replacement is built from them, asserted on all three machines. No format
+  change.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

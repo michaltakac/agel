@@ -6,7 +6,7 @@
 
 use super::cpu::{self, PortGrant, TrapFrame};
 use super::memory::{AddressSpace, DOMAIN_BASE};
-use crate::memory::{Access, FramePool, MemoryError, PAGE};
+use crate::memory::{Access, FrameLedger, FramePool, MemoryError, PAGE};
 use crate::world::{DomainCore, Fault, Stop};
 #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 use agel_kernel_abi::{Request, Response, Status};
@@ -27,12 +27,52 @@ pub struct Domain {
     /// Which device this domain is the driver for, if any. The device is
     /// granted for the duration of its entries and withheld for everyone else's.
     grant: PortGrant,
+    /// Every frame this domain was built from, for reclamation.
+    frames: FrameLedger,
 }
 
 impl Domain {
     /// Build a domain with a private stack and one shared page, entering at
     /// `entry` in ring 3.
     pub fn new(
+        pool: &mut FramePool,
+        identity_pdpt: u64,
+        entry: u64,
+        tick_budget: u32,
+        grant: PortGrant,
+        stack_pages: u64,
+    ) -> Result<Self, MemoryError> {
+        pool.open_ledger();
+        let built = Self::build(pool, identity_pdpt, entry, tick_budget, grant, stack_pages);
+        Self::close(pool, built)
+    }
+
+    /// Finish a build: attach the ledger, or give the frames back.
+    #[inline(never)]
+    fn close(pool: &mut FramePool, built: Result<Self, MemoryError>) -> Result<Self, MemoryError> {
+        let frames = pool.close_ledger();
+        match built {
+            Ok(mut domain) => {
+                domain.frames = frames;
+                Ok(domain)
+            }
+            Err(error) => {
+                pool.reclaim(&frames);
+                Err(error)
+            }
+        }
+    }
+
+    /// The frames this domain was built from.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    pub fn frames(&self) -> &FrameLedger {
+        &self.frames
+    }
+
+    // Built once in machine code: inlining this into every constructor
+    // duplicated the whole domain build and cost the x86-64 image its budget.
+    #[inline(never)]
+    fn build(
         pool: &mut FramePool,
         identity_pdpt: u64,
         entry: u64,
@@ -56,6 +96,7 @@ impl Domain {
             frame: TrapFrame::user(entry, stack_top, SHARED_BASE),
             core: DomainCore::new(shared_physical, tick_budget),
             grant,
+            frames: FrameLedger::EMPTY,
         })
     }
 
@@ -73,7 +114,22 @@ impl Domain {
         physical: u64,
         bytes: u64,
     ) -> Result<(Self, u64), MemoryError> {
-        let mut domain = Self::new(pool, identity_pdpt, entry, tick_budget, PortGrant::None, 8)?;
+        pool.open_ledger();
+        let built = Self::build_display(pool, identity_pdpt, entry, tick_budget, physical, bytes);
+        let page_offset = physical & (PAGE - 1);
+        Self::close(pool, built).map(|domain| (domain, DISPLAY_BASE + page_offset))
+    }
+
+    #[cfg(feature = "native-graphics")]
+    fn build_display(
+        pool: &mut FramePool,
+        identity_pdpt: u64,
+        entry: u64,
+        tick_budget: u32,
+        physical: u64,
+        bytes: u64,
+    ) -> Result<Self, MemoryError> {
+        let mut domain = Self::build(pool, identity_pdpt, entry, tick_budget, PortGrant::None, 8)?;
         let page_offset = physical & (PAGE - 1);
         let physical_start = physical - page_offset;
         let mapped_bytes = page_offset
@@ -88,7 +144,7 @@ impl Domain {
                 Access::UserDevice,
             )?;
         }
-        Ok((domain, DISPLAY_BASE + page_offset))
+        Ok(domain)
     }
 
     /// Ask the world to perform one contract invocation and report the answer.

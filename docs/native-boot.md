@@ -217,6 +217,6 @@ v0.2.33 with a disk: a virtio block device behind QEMU's virtio-mmio transport,
 driven from an unprivileged domain. seL4 still runs only the frozen contract. v0.1.7 adds alternating, checksummed native source-image
 slots and boot-time replay; since v0.2.26 the ATA driver is an unprivileged,
 restartable domain granted exactly the disk's ports, while the slot policy and
-codec stay in the supervisor and the images are not signed. There is no allocator, hardware watchdog, full agent
-runtime, or frame reclamation in the VM. Mutable language state is nevertheless
+codec stay in the supervisor and the images are not signed. There is no general allocator, hardware watchdog or full agent
+runtime in the VM; since v0.2.35 a replaced domain's frames are reclaimed. Mutable language state is nevertheless
 no longer the component responsible for recovering itself.

@@ -48,8 +48,10 @@ pub enum DeviceGrant {
     /// One page of device registers at the console window.
     Console(u64),
     /// One page of device registers at the storage window plus one ordinary
-    /// frame at the DMA window, whose physical address the device is told.
-    Storage { device: u64, dma: u64 },
+    /// frame, allocated with the domain, at the DMA window. The domain's
+    /// shared page is told where the registers are inside the window and the
+    /// frame's physical address, which is what the device must be told.
+    Storage { page: u64, register_offset: u64 },
 }
 
 /// Why a memory request could not be satisfied.
@@ -64,6 +66,12 @@ pub enum MemoryError {
     OutsideDomainWindow,
     /// The address is not page aligned.
     Misaligned,
+    /// A domain would need more frames than a ledger can name.
+    #[cfg_attr(
+        any(feature = "isolated-repl", feature = "native-graphics"),
+        allow(dead_code)
+    )]
+    LedgerFull,
 }
 
 impl MemoryError {
@@ -73,44 +81,182 @@ impl MemoryError {
             Self::OutOfFrames => "frame pool exhausted",
             Self::OutsideDomainWindow => "address outside the domain window",
             Self::Misaligned => "address is not page aligned",
+            Self::LedgerFull => "domain needs more frames than a ledger names",
         }
     }
 }
 
-/// A bump allocator over the architecture's fixed physical frame range.
+/// Frames a domain was built from, so that a replaced domain gives them back.
 ///
-/// Frames are never freed in this phase. That is stated rather than hidden: a
-/// reclaim path is later work, and pretending to have one would make the
-/// resource-accounting story look finished when it is not.
+/// A domain is built in one go and never grows, so its frames are known when
+/// it is: the pool records every frame it hands out while a ledger is open.
+/// The bound is a fixed resource policy like every other native bound: the
+/// evaluator's 128 stack pages, its tables and its shared page fit with room
+/// to spare, and a domain that would need more is refused rather than
+/// tracked partially. It is sized tightly because every domain carries one
+/// and the x86-64 image has a 254-sector budget.
+#[derive(Clone, Copy)]
+#[cfg_attr(
+    any(feature = "isolated-repl", feature = "native-graphics"),
+    allow(dead_code)
+)]
+pub struct FrameLedger {
+    frames: [u64; FrameLedger::CAPACITY],
+    count: usize,
+}
+
+impl FrameLedger {
+    /// Reclamation exists where restart exists: the self-test builds replace
+    /// domains and account for their frames; the interactive workshops never
+    /// replace one, so there the ledger is a single word and the x86-64 image
+    /// keeps its 254-sector budget.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    pub const CAPACITY: usize = 160;
+    #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
+    pub const CAPACITY: usize = 1;
+
+    pub const EMPTY: Self = Self {
+        frames: [0; Self::CAPACITY],
+        count: 0,
+    };
+
+    /// How many frames the ledger names.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    #[cfg_attr(
+        any(feature = "isolated-repl", feature = "native-graphics"),
+        allow(dead_code)
+    )]
+    fn record(&mut self, frame: u64) -> Result<(), MemoryError> {
+        if self.count >= Self::CAPACITY {
+            return Err(MemoryError::LedgerFull);
+        }
+        self.frames[self.count] = frame;
+        self.count += 1;
+        Ok(())
+    }
+}
+
+/// The architecture's fixed physical frame range: a bump allocator for
+/// frames never handed out yet, and a bounded list of frames given back by
+/// replaced domains, which are handed out again first.
+///
+/// Every frame is zeroed when it is handed out, whichever list it came from,
+/// so nothing a dead domain wrote reaches its successor.
 pub struct FramePool {
     next: u64,
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    free: [u64; FramePool::FREE_CAPACITY],
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    free_count: usize,
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    ledger: Option<FrameLedger>,
 }
 
 impl FramePool {
+    /// Frames the free list can hold: a replaced driver gives back about ten,
+    /// so this is dozens of restarts, and the list is sized for the image
+    /// budget rather than for replacing evaluators, which nothing does yet.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    const FREE_CAPACITY: usize = 192;
+
     /// A pool covering the whole fixed range this architecture reserves.
     pub const fn new() -> Self {
         Self {
             next: arch::POOL_START,
+            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+            free: [0; Self::FREE_CAPACITY],
+            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+            free_count: 0,
+            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+            ledger: None,
         }
     }
 
-    /// Frames still available.
+    /// Frames still available: never handed out, plus given back.
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn remaining(&self) -> u64 {
-        (arch::POOL_END - self.next) / PAGE
+        (arch::POOL_END - self.next) / PAGE + self.free_count as u64
     }
 
-    /// Take one zeroed frame.
+    /// Take one zeroed frame, from the free list first.
     pub fn allocate(&mut self) -> Result<u64, MemoryError> {
+        #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+        let frame = if self.free_count > 0 {
+            self.free_count -= 1;
+            self.free[self.free_count]
+        } else {
+            self.bump()?
+        };
+        #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
+        let frame = self.bump()?;
+        #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+        if let Some(ledger) = self.ledger.as_mut() {
+            if let Err(error) = ledger.record(frame) {
+                // The frame is not lost: an unrecorded frame goes straight
+                // back, and the domain being built is refused.
+                self.give_back(frame);
+                return Err(error);
+            }
+        }
+        // Safety: the frame is inside the pool, which the kernel identity-maps
+        // and which no live domain holds.
+        unsafe { zero_frame(frame) };
+        Ok(frame)
+    }
+
+    fn bump(&mut self) -> Result<u64, MemoryError> {
         if self.next >= arch::POOL_END {
             return Err(MemoryError::OutOfFrames);
         }
         let frame = self.next;
         self.next += PAGE;
-        // Safety: the frame is inside the pool, which the kernel identity-maps
-        // and which no other allocation has handed out.
-        unsafe { zero_frame(frame) };
         Ok(frame)
+    }
+
+    /// Start recording the frames handed out, for a domain being built.
+    pub fn open_ledger(&mut self) {
+        #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+        {
+            self.ledger = Some(FrameLedger::EMPTY);
+        }
+    }
+
+    /// Stop recording and return what was handed out since the ledger opened.
+    pub fn close_ledger(&mut self) -> FrameLedger {
+        #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+        {
+            self.ledger.take().unwrap_or(FrameLedger::EMPTY)
+        }
+        #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
+        FrameLedger::EMPTY
+    }
+
+    /// Give a dead domain's frames back. The caller must have dropped every
+    /// translation to them: the frames are handed out again to whoever
+    /// allocates next, zeroed, and a domain that still mapped one would be
+    /// sharing memory with its successor.
+    pub fn reclaim(&mut self, ledger: &FrameLedger) {
+        #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+        for frame in ledger.frames[..ledger.count].iter().rev() {
+            self.give_back(*frame);
+        }
+        #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
+        let _ = ledger;
+    }
+
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    fn give_back(&mut self, frame: u64) {
+        if self.free_count < Self::FREE_CAPACITY {
+            self.free[self.free_count] = frame;
+            self.free_count += 1;
+        }
+        // A full free list leaks the frame rather than corrupting the list;
+        // the list is sized so that this does not happen in practice, and a
+        // leaked frame is the failure this module had before reclamation.
     }
 
     /// Take `pages` contiguous frames and return the address just past the last

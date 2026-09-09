@@ -6,7 +6,7 @@
 
 use super::cpu::{self, reg, TrapFrame};
 use super::memory::{AddressSpace, IdentityWindow, DOMAIN_BASE};
-use crate::memory::{Access, DeviceGrant, FramePool, MemoryError, PAGE};
+use crate::memory::{Access, DeviceGrant, FrameLedger, FramePool, MemoryError, PAGE};
 use crate::world::{DomainCore, Fault, Stop};
 #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 use agel_kernel_abi::{Request, Response, Status};
@@ -28,12 +28,47 @@ pub struct Domain {
     space: AddressSpace,
     frame: TrapFrame,
     core: DomainCore,
+    /// Every frame this domain was built from, for reclamation.
+    frames: FrameLedger,
 }
 
 impl Domain {
     /// Build a domain with a private stack and one shared page, entering at
     /// `entry` in U-mode.
     pub fn new(
+        pool: &mut FramePool,
+        identity: IdentityWindow,
+        entry: u64,
+        tick_budget: u32,
+        grant: DeviceGrant,
+        stack_pages: u64,
+    ) -> Result<Self, MemoryError> {
+        pool.open_ledger();
+        let built = Self::build(pool, identity, entry, tick_budget, grant, stack_pages);
+        let frames = pool.close_ledger();
+        match built {
+            Ok(mut domain) => {
+                domain.frames = frames;
+                Ok(domain)
+            }
+            Err(error) => {
+                // Nothing of a half-built domain is live; its frames go back.
+                pool.reclaim(&frames);
+                Err(error)
+            }
+        }
+    }
+
+    /// The frames this domain was built from.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    pub fn frames(&self) -> &FrameLedger {
+        &self.frames
+    }
+
+    // Built once in machine code: inlining this into every constructor
+    // duplicated the whole domain build and cost the x86-64 image its budget.
+    #[inline(never)]
+    fn build(
         pool: &mut FramePool,
         identity: IdentityWindow,
         entry: u64,
@@ -51,14 +86,28 @@ impl Domain {
         // A device is mapped into exactly one domain. Every other world has
         // no translation for it at all, so reaching it is not a permission
         // failure but an absence.
+        let mut core = DomainCore::new(shared_physical, tick_budget);
         match grant {
             DeviceGrant::Nothing => {}
             DeviceGrant::Console(device) => {
                 space.map(pool, DEVICE_BASE, device, Access::UserDevice)?;
             }
-            DeviceGrant::Storage { device, dma } => {
-                space.map(pool, STORAGE_DEVICE_BASE, device, Access::UserDevice)?;
+            DeviceGrant::Storage {
+                page,
+                register_offset,
+            } => {
+                space.map(pool, STORAGE_DEVICE_BASE, page, Access::UserDevice)?;
+                let dma = pool.allocate()?;
                 space.map(pool, DMA_BASE, dma, Access::UserData)?;
+                // The driver learns where its registers and its DMA frame
+                // are from the shared page: the register window's offset
+                // inside the granted page, and the frame's physical address,
+                // which is what the device must be told.
+                core.write_shared(
+                    crate::world::shared::DEVICE_MMIO,
+                    STORAGE_DEVICE_BASE + register_offset,
+                );
+                core.write_shared(crate::world::shared::DEVICE_DMA, dma);
             }
         }
         // The stack grows down from the top of the last mapped stack page. The
@@ -68,7 +117,8 @@ impl Domain {
         Ok(Self {
             space,
             frame: TrapFrame::user(entry, stack_top, SHARED_BASE),
-            core: DomainCore::new(shared_physical, tick_budget),
+            core,
+            frames: FrameLedger::EMPTY,
         })
     }
 

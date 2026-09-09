@@ -328,14 +328,25 @@ impl ServiceDomain {
         self.domain.provoke(command)
     }
 
+    /// Frames the current domain holds.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    pub fn frames(&self) -> usize {
+        self.domain.frames().count()
+    }
+
     /// Replace the service with a fresh domain at a new generation.
     ///
-    /// The old domain's frames are not reclaimed; the frame pool never frees,
-    /// which is stated rather than hidden here as everywhere else. What matters
-    /// for the restart claim is that the replacement is a different domain with
-    /// a different address space, not a resumed one.
+    /// The stopped domain's frames go back to the pool first, so the
+    /// replacement is built from them and a service that dies and is
+    /// replaced costs nothing lasting. The stopped domain is never entered
+    /// again (its stop reason is latched and every request checks it), so
+    /// the translations it still holds to those frames are dead. The
+    /// replacement is a different domain with a different address space, not
+    /// a resumed one.
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn restart(&mut self, machine: &mut arch::Machine) -> Result<(), &'static str> {
+        let stopped = *self.domain.frames();
+        machine.reclaim(&stopped);
         let replacement = match self.kind {
             ServiceKind::Console => machine.create_console_world(self.entry, self.ticks)?,
             ServiceKind::Storage => machine.create_storage_world(self.entry, self.ticks)?,

@@ -4,7 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.34: a power cut at every one of the eighteen sector writes of a
+The current repository is **v0.2.35: a driver domain that dies and is replaced costs nothing lasting,
+because the frame pool takes a dead domain's frames back and builds its replacement from them, proved
+on all three research machines; a power cut at every one of the eighteen sector writes of a
 workspace save, on every machine, leaves a whole generation, proved by a fault-injection command
 that tears the write and halts; the durable workspace and the recovery plane exist on all three
 research machines, with a virtio block device driven from an unprivileged domain on AArch64 and

@@ -811,6 +811,32 @@ to the image; a drive with a volatile cache that lies about flushes is
 outside what this suite can show. The sweep covers workspace saves; kernel
 staging and the selector are host-side writes.
 
+## v0.2.35
+
+- **A restart that costs frames forever:** every section above v0.1.5 has
+  said that the frame pool never reclaims, so a driver restarted in a loop
+  would exhaust it. Each domain now records the frames it was built from in
+  a bounded ledger, a replaced domain gives them back before its replacement
+  is built, and the isolation self-test on all three machines requires the
+  pool to hold exactly as many frames after a restart as before the fault.
+- **A frame that carries the dead domain's data:** frames are zeroed when
+  handed out, whichever list they came from, so a successor built from a
+  predecessor's frames starts from nothing.
+- **A translation that outlives the frame:** a reclaimed frame is still
+  named by the stopped domain's tables until that domain is dropped. The
+  stopped domain never runs again: its stop reason is latched and every
+  request checks it before entering. The assertion found the one frame the
+  ledger missed, the storage DMA page allocated outside the build; it is
+  inside now.
+
+Not claimed: only replaced domains give frames back; the evaluator and the
+workshop's domains live for the session, and no world can ask the kernel for
+memory, the contract's memory group being outside every profile. The free
+list is bounded and a frame that would not fit is leaked rather than
+misfiled. Reclamation is compiled only where restart is, in the self-test
+builds; the interactive workshops never replace a domain and carry none of
+it, which the x86-64 image budget required.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

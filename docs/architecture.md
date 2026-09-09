@@ -263,7 +263,10 @@ Each rung must be runnable and differentially testable against the rung below:
    of a port; an 8042 driver domain granted only ports 0x60 and 0x64 delivers
    raw keyboard and pointer bytes and performs the pointer-enable handshake.
    Decoding and policy stay in the supervisor; an ungranted world touching the
-   controller faults, and CI asserts it.
+   controller faults, and CI asserts it. Since v0.2.35 a replaced driver
+   domain gives its frames back and its replacement is built from them, so
+   a restart costs nothing lasting; CI asserts the pool's count on every
+   machine.
 43. **Workshop on three machines (complete at v0.2.28):** the interactive
    serial workshop builds and runs on AArch64 and RISC-V as well as x86-64,
    sharing one source, with storage optional and reported absent rather than

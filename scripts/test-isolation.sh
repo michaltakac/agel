@@ -158,6 +158,12 @@ run_architecture() {
     "$output_file"
   grep -q "isolation\[$architecture\]: the replacement console driver is printing this line" \
     "$output_file"
+  # A replaced driver's frames go back to the pool and its replacement is
+  # built from them; the pool holds as many frames after as before.
+  grep -Eq "isolation\[$architecture\]: the console driver's [0-9]+ frames were reclaimed and its replacement built from them" \
+    "$output_file"
+  grep -Eq "isolation\[$architecture\]: the storage driver's [0-9]+ frames were reclaimed and its replacement built from them" \
+    "$output_file"
   if grep -q 'this line must never appear' "$output_file"; then
     printf '%s\n' "$architecture: a stale handle printed anyway" >&2
     exit 1

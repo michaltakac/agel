@@ -253,34 +253,32 @@ impl Machine {
         let device = find_virtio_block()
             .ok_or("no virtio block device (modern MMIO transport) on this machine")?;
         let page = device & !(crate::memory::PAGE - 1);
-        let dma = self.pool.allocate().map_err(|error| error.name())?;
-        let mut domain = Domain::new(
+        Domain::new(
             &mut self.pool,
             self.identity,
             entry,
             ticks,
-            DeviceGrant::Storage { device: page, dma },
+            DeviceGrant::Storage {
+                page,
+                register_offset: device - page,
+            },
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())?;
-        // The driver learns where its registers and its DMA frame are from
-        // the shared page: the register window's offset inside the granted
-        // page, and the frame's physical address, which is what the device
-        // must be told.
-        domain.core().write_shared(
-            crate::world::shared::DEVICE_MMIO,
-            STORAGE_DEVICE_VADDR + (device - page),
-        );
-        domain
-            .core()
-            .write_shared(crate::world::shared::DEVICE_DMA, dma);
-        Ok(domain)
+        .map_err(|error| error.name())
     }
 
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     /// Frames the pool has not handed out.
     pub fn frames_remaining(&self) -> u64 {
         self.pool.remaining()
+    }
+
+    /// Give a dead domain's frames back to the pool. The caller promises the
+    /// domain will never run again; it is stopped, and the frames are handed
+    /// out zeroed to whoever allocates next.
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    pub fn reclaim(&mut self, frames: &crate::memory::FrameLedger) {
+        self.pool.reclaim(frames);
     }
 }
 
