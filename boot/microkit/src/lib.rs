@@ -21,5 +21,13 @@
 #![deny(missing_docs)]
 
 pub mod microkit;
+/// The fixed-memory native Agel evaluator, the same source the research
+/// kernels run in their evaluator domains, compiled here into the world
+/// protection domain. It holds no authority: it is Rust over a bounded
+/// world on this domain's stack, and every result leaves through the
+/// serial domain's page like everything else the world says.
+#[allow(missing_docs, dead_code)]
+#[path = "../../kernel/src/native.rs"]
+pub mod native;
 pub mod protocol;
 pub mod serial;

@@ -20,6 +20,7 @@ use core::fmt::Write as _;
 
 use agel_kernel_abi::{conformance, write_step, Kernel};
 use agel_microkit::microkit::{self, Channel};
+use agel_microkit::native;
 use agel_microkit::protocol::BrokerKernel;
 use agel_microkit::serial::{Writer, WORLD_BUFFER_VADDR};
 
@@ -78,10 +79,75 @@ pub extern "C" fn init() {
     }
     out.flush();
 
+    // The same native evaluator the research kernels run in their evaluator
+    // domains, here in an unprivileged seL4 protection domain: the same
+    // forms, the same answers, the same transactional rollback.
+    match run_native_evaluator() {
+        Ok(()) => {
+            let _ = writeln!(
+                out,
+                "world: native Agel evaluated factorial with transactional rollback in an unprivileged protection domain"
+            );
+        }
+        Err(failure) => {
+            let _ = writeln!(out, "AGEL_SEL4_FAILED: native evaluator: {failure}");
+        }
+    }
+    out.flush();
+
     // Microkit has no exit. Faulting at a known address is how this domain
     // hands control to its parent, and the address says it got here on purpose.
     // Safety: does not return.
     unsafe { microkit::fault_deliberately(COMPLETION_MARKER) };
+}
+
+/// The evaluator corpus every research backend's isolation self-test runs.
+fn run_native_evaluator() -> Result<(), &'static str> {
+    let mut session = native::Session::new();
+    expect(&mut session, b"(+ 20 22)", Ok(native::Value::Int(42)), 1)?;
+    expect(
+        &mut session,
+        b"(def fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1))))))",
+        Ok(native::Value::Function),
+        2,
+    )?;
+    expect(&mut session, b"(fact 6)", Ok(native::Value::Int(720)), 3)?;
+    expect(
+        &mut session,
+        b"(begin (def answer 42) answer)",
+        Ok(native::Value::Int(42)),
+        4,
+    )?;
+    expect(
+        &mut session,
+        b"(begin (def answer 99) (/ 1 0))",
+        Err(native::Error("division by zero")),
+        4,
+    )?;
+    expect(&mut session, b"answer", Ok(native::Value::Int(42)), 5)?;
+    expect(
+        &mut session,
+        b"(def add40 ((fn (x) (fn (y) (+ x y))) 40))",
+        Ok(native::Value::Function),
+        6,
+    )?;
+    expect(&mut session, b"(add40 2)", Ok(native::Value::Int(42)), 7)?;
+    Ok(())
+}
+
+fn expect(
+    session: &mut native::Session,
+    source: &[u8],
+    wanted: Result<native::Value, native::Error>,
+    revision: u64,
+) -> Result<(), &'static str> {
+    if session.evaluate(source) != wanted {
+        return Err("a form did not evaluate as it does on every other backend");
+    }
+    if session.revision() != revision {
+        return Err("a revision did not advance as it does on every other backend");
+    }
+    Ok(())
 }
 
 #[no_mangle]

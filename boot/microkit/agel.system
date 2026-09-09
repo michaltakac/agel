@@ -41,7 +41,9 @@
         <program_image path="agel-recovery.elf" />
         <map mr="recovery_output" vaddr="0x3_010_000" perms="rw" />
 
-        <protection_domain name="world" priority="50" id="1">
+        <!-- The native evaluator keeps its three transactional world banks on
+             this domain's stack, as it does on the research kernels. -->
+        <protection_domain name="world" priority="50" id="1" stack_size="0x80_000">
             <program_image path="agel-world.elf" />
             <map mr="world_output" vaddr="0x3_000_000" perms="rw" />
         </protection_domain>

@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.37: stored native functions carry their captured scalars, so a closure
+The current repository is **v0.2.38: the native evaluator runs inside the seL4 world protection
+domain too, so the language has evaluated the same forms unprivileged on all four backends; stored native functions carry their captured scalars, so a closure
 made inside a lexical call can be defined and a lambda escaping a stored function is kept rather than
 refused; native actor slots can be given back, with generation-checked
 handles so a reaped agent's handle is refused rather than reaching its successor; a driver domain that dies and is replaced costs nothing lasting,

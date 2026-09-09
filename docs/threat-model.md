@@ -885,6 +885,29 @@ Not claimed: captures are copied at creation, so a closure sees the values
 its lexical context had then, not later assignments, which is what lexical
 capture of immutable locals means here; nothing about authority changed.
 
+## v0.2.38
+
+- **A backend that ran only the contract:** the seL4 system answered the 81
+  corpus steps and contained a faulting world, and that was all; the
+  evaluator, the thing that runs untrusted programs, had never run there.
+  The world domain now runs the same native evaluator source the research
+  kernels compile into their evaluator domains, over the forms their
+  isolation self-test checks, and CI requires the same answers.
+- **Language state on an seL4 stack:** the evaluator's three transactional
+  world banks live on the world domain's stack, so the domain is given
+  512 KiB by the system description, the one place authority and resources
+  are written. A world that overran it would fault to its parent, the
+  recovery domain, as the deliberate fault already does.
+- **A shared source, not a shared binary:** the evaluator is compiled twice
+  from one file, once into each backend; nothing links the seL4 build to the
+  research kernel's, and the seL4 domain reaches the console only through
+  the serial domain's page.
+
+Not claimed: the seL4 world runs a fixed corpus, not an interactive
+workshop, and has no disk, no workspace and no recovery record. The
+evaluator's bounds are the same as everywhere else and are not enforced by
+seL4; they are the program's own.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

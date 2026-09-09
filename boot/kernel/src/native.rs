@@ -359,6 +359,12 @@ pub struct Session {
     result_length: u16,
 }
 
+impl Default for Session {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Session {
     #[cfg(any(feature = "isolation-selftest", test))]
     pub fn scene_count(&self) -> usize {

@@ -136,6 +136,10 @@ promise.
   made inside a lexical call can be persisted by `def`, and a lambda escaping
   a stored function is stored rather than refused. Function-valued captures
   are still refused. No image or workspace format change.
+  `v0.2.38` runs the native evaluator inside the seL4 world protection domain,
+  over the forms the research kernels' isolation self-test checks, with the
+  world domain given a 512 KiB stack. The contract and the transcript are
+  unchanged.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -66,7 +66,8 @@ diff -u bootstrap/kernel-contract.trace "$transcript_file"
 
 grep -q 'world: 81 invocations answered by the broker' "$output_file"
 grep -q 'world: contract invariants hold across the boundary' "$output_file"
+grep -q 'world: native Agel evaluated factorial with transactional rollback in an unprivileged protection domain' "$output_file"
 grep -q 'recovery: contained it without replying; the world is not resumed' "$output_file"
 
 printf '%s\n' \
-  "Agel on seL4: 81 contract steps from an unprivileged protection domain, fault contained by its parent [ok]"
+  "Agel on seL4: 81 contract steps and the native evaluator from an unprivileged protection domain, fault contained by its parent [ok]"

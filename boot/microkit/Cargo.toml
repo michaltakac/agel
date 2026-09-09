@@ -9,6 +9,12 @@ description = "The Agel kernel contract as a Microkit system on an unmodified se
 [dependencies]
 agel-kernel-abi = { path = "../../crates/agel-kernel-abi" }
 
+[features]
+# Named so the evaluator source, shared with the research kernel, can keep
+# its feature gates; nothing in this crate enables any of them.
+isolation-selftest = []
+native-selftest = []
+
 [lib]
 name = "agel_microkit"
 path = "src/lib.rs"

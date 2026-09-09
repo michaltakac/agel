@@ -234,6 +234,15 @@ different kinds of boundary, not one implementation behind two. That is exactly 
 mailboxes and policy belong in isolated servers, not in a kernel whose value is
 that nobody changed it.
 
+Since v0.2.38 the world domain also runs the native Agel evaluator, the same
+source the research kernels compile into their evaluator domains, over the
+same forms their isolation self-test checks: factorial, a definition, a
+transaction rolled back by a division by zero, and a closure with a captured
+value. It runs on the world domain's own stack and holds no authority; its
+answers leave through the serial domain like everything else. The contract
+is untouched by this, which is the point: the evaluator is a program above
+the contract, not a kernel object.
+
 The whole invocation fits in the four message registers AArch64 seL4 passes in
 hardware registers, because the 52-bit message label carries the operation code
 and the capability slot:

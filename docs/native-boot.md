@@ -214,7 +214,8 @@ through the v0.1.5 console domain, and since v0.2.27 reads its serial input
 through that same domain. Since v0.2.28 `./scripts/run-qemu.sh aarch64` and
 `riscv64` boot the same interactive workshop on those machines, and since
 v0.2.33 with a disk: a virtio block device behind QEMU's virtio-mmio transport,
-driven from an unprivileged domain. seL4 still runs only the frozen contract. v0.1.7 adds alternating, checksummed native source-image
+driven from an unprivileged domain. Since v0.2.38 the seL4 world domain also
+runs the native evaluator, over the same forms the research kernels check. v0.1.7 adds alternating, checksummed native source-image
 slots and boot-time replay; since v0.2.26 the ATA driver is an unprivileged,
 restartable domain granted exactly the disk's ports, while the slot policy and
 codec stay in the supervisor and the images are not signed. There is no general allocator, hardware watchdog or full agent

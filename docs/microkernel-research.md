@@ -697,6 +697,10 @@ either a Microkit board built against a proved configuration or dropping to the
 raw seL4 SDK, and that is the next assurance step rather than something this
 phase quietly claims.
 
+Since v0.2.38 the seL4 world domain also runs the native evaluator over the
+forms the research kernels' isolation self-test checks, so the language
+itself has run unprivileged on four backends.
+
 ### Phase 3 — split privileged services — **started (v0.1.5)**
 
 - Serial/input and timers first, then storage/image, networking and model/tool
