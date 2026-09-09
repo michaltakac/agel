@@ -16,7 +16,7 @@ are the same for everyone who builds this system. CI checks them.
 | Microkit loader | `c4518e30a3b548ce92516b78e2631371648fc8f9bf04ce2192589b317e865f0e` |
 | Microkit monitor | `10ab4477e52ea63c2bbc23e82c2df0f6717d1101ef6f17e42cbda74c54a43e47` |
 | `libmicrokit.a` | `cc1cdd51dcb2a2007cb1d5d9b27e1f067503f038fc513bcd1d155cbd03ef4910` |
-| System description | `6ce7a7b7843e28ef1a2adf747eeb425707712ecd70a30fd80a6c6b0dc4a76715` |
+| System description | `e698bf9690675ce67dd799811e87b08755ca566e87503c0ddee4bf062a45470d` |
 
 ## This build
 
@@ -26,12 +26,12 @@ requires the same toolchain.
 
 | Artifact | SHA-256 |
 |---|---|
-| Rust | `rustc 1.89.0 (29483883e 2025-08-04)` |
-| Bootable image | `9f3fb4b99ad0e3d770a01ef865cd616114dba30da7917f2ef08d1c97c2e7dd90` |
-| Protection domain `serial` | `009849b86e1e4fbe4bd8a75b44ae3b12dbc03cd06110ce22241a79246d2b9554` |
-| Protection domain `broker` | `58794bda04b57f3963febf5353d2d7a2bf4e66417ee79ca9443c01a73e85173f` |
-| Protection domain `recovery` | `e503e0eff58a05a2cef3a076e5b317c8280fcade2a8c58218db03e51133b4ecb` |
-| Protection domain `world` | `2ef1e24cd815d007ea8da263a17c77823b70574bde633e1458a8f115e1239a1a` |
+| Rust | `rustc 1.98.1 (48a229cea 2026-09-01)` |
+| Bootable image | `b5c53ffb45edf15381a4130b836defdaae7ccf01940f36bd46081776d2e5780c` |
+| Protection domain `serial` | `473c75700d6ee9617fd850d749fd611e520ed57b50b8d044669fe6cc4806dc1d` |
+| Protection domain `broker` | `d0c0a04b2cd34fa4223fe17bcc5655c753dbe73367baf633cbdbbfd21ac324e4` |
+| Protection domain `recovery` | `91d01cb500487d689f7681b495cfbe68e8ddb8ef7c629d657bce57ef75001562` |
+| Protection domain `world` | `fc6ecff4c9778c439504625d282aef5ae9ad19b7fc4fcff8d9468e450f409490` |
 
 Protection domains are built for `aarch64-unknown-none-softfloat`. The seL4
 kernel and `libmicrokit.a` are the published release binaries: nothing in
