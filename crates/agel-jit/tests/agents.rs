@@ -196,6 +196,9 @@ fn long_message_loops_are_turn_bounded_without_growing_the_call_stack() {
         &Value::Int(1000)
     );
     assert!(receipt.peak_call_depth <= 16);
+    assert!(receipt.collections > 0);
+    assert!(receipt.reclaimed_slots > 0);
+    assert!(receipt.peak_arena_slots < 20_000);
 }
 
 #[test]

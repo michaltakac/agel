@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         NativeOptions {
             tail_calls: false,
             cache_builtins: false,
+            collection_interval: 0,
         },
     )?;
     let optimized = Native::compile(&ir)?;

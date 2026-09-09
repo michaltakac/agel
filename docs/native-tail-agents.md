@@ -1,5 +1,9 @@
 # Tail calls and compiled Agel agents — v0.2.17
 
+Update: [v0.2.18](tail-collection.md) reclaims dead arena storage at outermost
+tail boundaries. The no-reclamation description below is historical; nested
+calls and live captures still limit when and how much can be collected.
+
 This milestone moves tail-position analysis and an entire small mailbox scheduler
 into Agel code. The compiler frontend still compiles itself, and bootstrap-stage
 IR agreement remains tested. It is **not complete language or OS self-hosting**.

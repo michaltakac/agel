@@ -50,6 +50,8 @@ promise.
   `v0.2.17` adds Agel-authored tail-call annotations with native trampolining,
   primitive-handle reuse, and an isolated Agel-written compiled scheduler with
   explicit peer permissions and revision-checked atomic batch commits.
+  `v0.2.18` adds metered compacting collection at outermost tail boundaries,
+  preserving cumulative quotas while reclaiming dead invocation-arena storage.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

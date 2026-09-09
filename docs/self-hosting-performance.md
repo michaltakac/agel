@@ -1,5 +1,9 @@
 # Self-hosting without permanent interpreter overhead
 
+Current follow-up: [v0.2.18](tail-collection.md) bounds dead-storage retention in
+eligible tail loops using metered compacting collection. Its benchmark measures
+retained arena slots separately from cumulative quotas and wall time.
+
 Current follow-up: [v0.2.17](native-tail-agents.md) implements tail calls and an
 Agel-authored compiled scheduler. The historical research/milestone notes below
 describe earlier tiers; the new paired benchmark compares the same compiler IR

@@ -55,6 +55,7 @@ fn optimization_switches_preserve_values_and_reduce_allocations() {
         NativeOptions {
             tail_calls: false,
             cache_builtins: false,
+            collection_interval: 0,
         },
     )
     .unwrap();
@@ -63,6 +64,7 @@ fn optimization_switches_preserve_values_and_reduce_allocations() {
         NativeOptions {
             tail_calls: false,
             cache_builtins: true,
+            collection_interval: 0,
         },
     )
     .unwrap();

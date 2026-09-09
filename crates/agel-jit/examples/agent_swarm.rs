@@ -5,6 +5,8 @@ use agel_jit::{
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let ping = std::env::args().any(|arg| arg == "--ping");
+    let turns = if ping { 1000 } else { 3 };
     let mut world = World::default();
     let mut options = EvaluationOptions::default();
     options.budget.fuel = 10_000_000;
@@ -18,7 +20,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let compiler = Native::compile(&compiler_ir)?;
     let source = world
         .evaluate_with(
-            include_str!("../../../examples/jit-agent-swarm.agel"),
+            if ping {
+                include_str!("../../../examples/jit-agent-ping.agel")
+            } else {
+                include_str!("../../../examples/jit-agent-swarm.agel")
+            },
             &options,
         )?
         .values
@@ -44,7 +50,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(swarm.state(), &initial);
     assert_eq!(swarm.revision(), 0);
     println!("PASS: exhausted execution preserves state, queued messages and revision");
-    let receipt = swarm.transact(0, &Value::Int(3), Limits::default())?;
+    let receipt = swarm.transact(
+        0,
+        &Value::Int(turns),
+        Limits {
+            fuel: if ping {
+                10_000_000
+            } else {
+                Limits::default().fuel
+            },
+            ..Limits::default()
+        },
+    )?;
     println!(
         "Committed Agel scheduler + agent behaviors, revision {}: {}",
         receipt.revision,
@@ -54,6 +71,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "{} tail calls; peak depth {}; {} fuel",
         receipt.tail_calls, receipt.peak_call_depth, receipt.fuel_used
     );
+    println!(
+        "{} collections; {} reclaimed slots; peak retained arena slots {}",
+        receipt.collections, receipt.reclaimed_slots, receipt.peak_arena_slots
+    );
+    if ping {
+        assert!(receipt.collections > 0);
+    }
     assert_eq!(
         swarm
             .transact(0, &Value::Int(1), Limits::default())

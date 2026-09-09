@@ -1,0 +1,8 @@
+; A continuing compiled actor; --ping runs 1,000 turns and leaves one pending.
+(import agel/native-agents)
+(def swarm-sources
+  (dict 'ping '(fn (heap message)
+                (dict 'state (+ heap 1) 'outbox (list (list 'ping message))))))
+(def swarm-world
+  (native-send (native-spawn (native-empty 1) 'ping 'ping 0 '(ping)) 'ping 1))
+(native-system-source swarm-sources)

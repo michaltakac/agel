@@ -24,6 +24,9 @@ pub struct Receipt {
     pub allocated_values: usize,
     pub tail_calls: u64,
     pub peak_call_depth: usize,
+    pub collections: usize,
+    pub reclaimed_slots: usize,
+    pub peak_arena_slots: usize,
 }
 
 pub struct NativeState {
@@ -74,6 +77,9 @@ impl NativeState {
             allocated_values: result.allocated_values,
             tail_calls: result.tail_calls,
             peak_call_depth: result.peak_call_depth,
+            collections: result.collections,
+            reclaimed_slots: result.reclaimed_slots,
+            peak_arena_slots: result.peak_arena_slots,
         })
     }
 }

@@ -9,6 +9,8 @@ use cranelift_module::{default_libcall_names, Linkage, Module};
 
 use crate::ExecutableMemory;
 
+mod collection;
+
 const PRIMITIVES: &[&str] = &[
     "+", "-", "*", "/", "=", "<", "list", "cons", "car", "cdr", "dict", "get", "assoc", "dissoc",
     "keys", "count", "has-key?", "type-of", "apply", "signal",
@@ -70,6 +72,9 @@ pub struct Outcome {
     pub allocated_edges: usize,
     pub tail_calls: u64,
     pub peak_call_depth: usize,
+    pub collections: usize,
+    pub reclaimed_slots: usize,
+    pub peak_arena_slots: usize,
 }
 
 /// Diagnostic switches for paired performance/conformance comparisons.
@@ -77,12 +82,15 @@ pub struct Outcome {
 pub struct NativeOptions {
     pub tail_calls: bool,
     pub cache_builtins: bool,
+    /// Zero disables collection; nonzero intervals are clamped to at least 256.
+    pub collection_interval: usize,
 }
 impl Default for NativeOptions {
     fn default() -> Self {
         Self {
             tail_calls: true,
             cache_builtins: true,
+            collection_interval: 4096,
         }
     }
 }
@@ -386,7 +394,11 @@ impl Native {
             fuel: limits.fuel,
             values: vec![],
             frames: vec![],
-            exported: 0,
+            allocations: 0,
+            collections: 0,
+            reclaimed_slots: 0,
+            peak_arena_slots: 0,
+            next_collection: self.options.collection_interval.max(256),
             edges: 0,
             text: 0,
             depth: 0,
@@ -409,10 +421,13 @@ impl Native {
         Ok(Outcome {
             value,
             fuel_used: limits.fuel - run.fuel,
-            allocated_values: run.values.len() + run.frames.len() + run.exported,
+            allocated_values: run.allocations,
             allocated_edges: run.edges,
             tail_calls: run.tail_calls,
             peak_call_depth: run.peak_depth,
+            collections: run.collections,
+            reclaimed_slots: run.reclaimed_slots,
+            peak_arena_slots: run.peak_arena_slots,
         })
     }
 }
@@ -535,7 +550,11 @@ struct Run<'a> {
     fuel: u64,
     values: Vec<Datum>,
     frames: Vec<Frame>,
-    exported: usize,
+    allocations: usize,
+    collections: usize,
+    reclaimed_slots: usize,
+    peak_arena_slots: usize,
+    next_collection: usize,
     edges: usize,
     text: usize,
     depth: usize,
@@ -553,13 +572,7 @@ impl Run<'_> {
         Ok(())
     }
     fn reserve(&mut self, edges: usize, text: usize) -> Result<(), Fault> {
-        if self
-            .values
-            .len()
-            .saturating_add(self.frames.len())
-            .saturating_add(self.exported)
-            >= self.limits.values
-        {
+        if self.allocations >= self.limits.values {
             return Err(Fault::Heap);
         }
         let next_edges = self.edges.checked_add(edges).ok_or(Fault::Heap)?;
@@ -570,6 +583,7 @@ impl Run<'_> {
         self.spend(edges.saturating_add(text).saturating_add(1))?;
         self.edges = next_edges;
         self.text = next_text;
+        self.allocations += 1;
         Ok(())
     }
     fn alloc(&mut self, value: Datum) -> Result<Handle, Fault> {
@@ -582,12 +596,18 @@ impl Run<'_> {
         };
         self.reserve(edges, text)?;
         self.values.push(value);
+        self.peak_arena_slots = self
+            .peak_arena_slots
+            .max(self.values.len() + self.frames.len());
         Ok(self.values.len())
     }
     fn frame(&mut self, parent: Option<usize>, slots: Vec<Handle>) -> Result<usize, Fault> {
         self.reserve(slots.len() + usize::from(parent.is_some()), 0)?;
         let id = self.frames.len();
         self.frames.push(Frame { parent, slots });
+        self.peak_arena_slots = self
+            .peak_arena_slots
+            .max(self.values.len() + self.frames.len());
         Ok(id)
     }
     fn datum(&self, id: Handle) -> Result<&Datum, Fault> {
@@ -684,7 +704,6 @@ impl Run<'_> {
         // Output is a tree, while the arena can share subgraphs. Charge every
         // exported occurrence before expanding it, not just each unique handle.
         self.reserve(edges, text)?;
-        self.exported += 1;
         Ok(match self.datum(id)?.clone() {
             Datum::Nil => Value::Nil,
             Datum::Bool(b) => Value::Bool(b),
@@ -750,6 +769,12 @@ impl Run<'_> {
                         }
                         env = self.frame(Some(environment), args)?;
                         function = next;
+                        if self.depth == 1
+                            && self.native.options.collection_interval != 0
+                            && self.values.len() + self.frames.len() >= self.next_collection
+                        {
+                            env = self.collect_tail(env)?;
+                        }
                         continue 'entry;
                     }
                     Datum::Builtin(id) if PRIMITIVES[id] == "apply" => {
