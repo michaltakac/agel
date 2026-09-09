@@ -25,13 +25,17 @@ The linker keeps `.text.entry` first so helper-function reordering cannot move
 the address called by the BIOS stage. The complete raw image is 2,048 sectors
 (1 MiB). Sectors 0 through 255 are the replaceable boot seed; the build rejects
 an oversized kernel. Sectors 256 through 287 are the two v0.1.7 workspace slots,
-and rebuilding deliberately preserves them.
+sector 288 is the v0.2.29 recovery record, and rebuilding deliberately
+preserves all of them.
 
 ## Recovery boundary
 
-The monitor has stable A and candidate B states. `promote` is denied until
-`verify` records isolated health evidence. Promotion retains A; `fault` models a
-watchdog rollback. The normal serial shell supports:
+The policy model has stable A and candidate B states. `promote` is denied
+until `verify` records isolated health evidence. Promotion retains A; `fault`
+models a watchdog rollback. On x86-64 since v0.2.29 the same commands act on a
+disk-backed record binding those states to workspace generations, with a boot
+budget that rolls a failing candidate back automatically; see
+[`native-workshop.md`](native-workshop.md). The normal serial shell supports:
 
 ```text
 help status verify promote fault agents shutdown

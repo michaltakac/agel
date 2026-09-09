@@ -8,6 +8,7 @@ use crate::arch;
 use crate::console;
 use crate::kprint;
 use crate::native_session::{replay as replay_workspace, request as evaluator_request};
+use crate::recovery::{BootPlan, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};
@@ -24,7 +25,7 @@ const MAX_SCENE_COMMANDS: usize = 80;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-bind/hit/owner | :cell :run :show :delete :cells :workspace :save :reload | :revision :rollback :defs :limits :shutdown";
+const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-bind/hit/owner | :cell :run :show :delete :cells :workspace :save :reload :recovery | :revision :rollback :defs :limits :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 22;
 
@@ -701,8 +702,41 @@ impl StatusLine {
 fn restore_from_disk(
     evaluator: &mut arch::Domain,
     storage: &mut ServiceDomain,
+    recovery: Option<&mut LiveRecovery>,
 ) -> Result<(Workspace, u64, u64), &'static str> {
     let candidates = crate::workspace::load(storage)?;
+    let newest = candidates
+        .iter()
+        .flatten()
+        .map(|loaded| loaded.generation)
+        .max()
+        .unwrap_or(0);
+    if let Some(recovery) = recovery {
+        if let BootPlan::Rollback {
+            trusted,
+            candidate,
+            attempts,
+        } = recovery.plan_boot(storage, newest)?
+        {
+            kprint!(
+                "watchdog fault: candidate generation {} failed {} boots; rolling back to generation {}\n",
+                candidate,
+                attempts,
+                trusted
+            );
+            if let Some(loaded) = candidates
+                .iter()
+                .flatten()
+                .find(|loaded| loaded.generation == trusted)
+            {
+                if let Ok(revision) = replay_workspace(evaluator, &loaded.workspace) {
+                    recovery.note_rollback();
+                    return Ok((loaded.workspace, loaded.generation, revision));
+                }
+            }
+            kprint!("trusted generation unavailable; trying the newest generation instead\n");
+        }
+    }
     let mut highest_generation = 0;
     for loaded in candidates.into_iter().flatten() {
         highest_generation = highest_generation.max(loaded.generation);
@@ -748,6 +782,7 @@ fn execute_workshop(
     compositor: &mut arch::Domain,
     evaluator: &mut arch::Domain,
     storage: &mut ServiceDomain,
+    recovery: &mut Option<LiveRecovery>,
     current: &mut Scene,
     previous: &mut Scene,
     scene_revision: &mut u8,
@@ -847,12 +882,26 @@ fn execute_workshop(
         return status;
     }
     if line == b":save" {
-        return match crate::native_session::save(evaluator, Some(storage), workspace, *generation) {
+        let protect = recovery
+            .as_ref()
+            .map_or(0, |recovery| recovery.record().trusted);
+        return match crate::native_session::save(
+            evaluator,
+            Some(storage),
+            workspace,
+            *generation,
+            protect,
+        ) {
             Ok((next, revision)) => {
                 *generation = next;
                 *committed_workspace = *workspace;
                 *evaluator_revision = revision;
                 *dirty = false;
+                if let Some(recovery) = recovery.as_mut() {
+                    if recovery.on_saved(storage, next).is_err() {
+                        console::write("recovery record not updated\n");
+                    }
+                }
                 let mut status = StatusLine::new(b"SAVED GENERATION ");
                 status.number_u64(next);
                 status
@@ -860,8 +909,31 @@ fn execute_workshop(
             Err(reason) => StatusLine::new(reason.as_bytes()),
         };
     }
+    if line == b":recovery" {
+        let Some(recovery) = recovery.as_ref() else {
+            return StatusLine::new(b"RECOVERY RECORD UNAVAILABLE");
+        };
+        let record = recovery.record();
+        let mut status = StatusLine::new(b"TRUSTED GEN ");
+        status.number_u64(record.trusted);
+        if record.candidate != 0 {
+            status.push(b" CANDIDATE GEN ");
+            status.number_u64(record.candidate);
+            status.push(b" BOOTS ");
+            status.number_u64(u64::from(record.attempts));
+            status.push(if record.verified {
+                b" VERIFIED"
+            } else {
+                b" UNVERIFIED"
+            });
+        }
+        if recovery.rolled_back() {
+            status.push(b" ROLLED BACK");
+        }
+        return status;
+    }
     if line == b":reload" {
-        return match restore_from_disk(evaluator, storage) {
+        return match restore_from_disk(evaluator, storage, None) {
             Ok((restored, restored_generation, revision)) => {
                 *workspace = restored;
                 *committed_workspace = restored;
@@ -917,7 +989,8 @@ fn execute_workshop(
         _ if line.starts_with(b":") => return StatusLine::new(b"UNKNOWN COMMAND - :HELP"),
         _ => shared::COMMAND_EVALUATE,
     };
-    evaluator_status(
+    let before = *evaluator_revision;
+    let status = evaluator_status(
         evaluator,
         evaluator_revision,
         command,
@@ -926,7 +999,20 @@ fn execute_workshop(
         } else {
             b""
         },
-    )
+    );
+    // A form evaluated after boot is the health oracle every generation gets
+    // for free: the desktop reached an interactive, working state.
+    if command == shared::COMMAND_EVALUATE && *evaluator_revision > before {
+        if let Some(recovery) = recovery.as_mut() {
+            if let Ok(Some(verified)) = recovery.healthy(storage, *generation) {
+                kprint!(
+                    "candidate generation {} verified by a healthy boot\n",
+                    verified
+                );
+            }
+        }
+    }
+    status
 }
 
 fn evaluator_status(
@@ -1128,8 +1214,16 @@ fn interactive(
         .create_storage_world(storage_entry, 50)
         .map(|domain| ServiceDomain::new(domain, ServiceKind::Storage, storage_entry, 50))
         .unwrap_or_else(|reason| failed(reason));
+    let mut recovery = match LiveRecovery::load(&mut storage) {
+        Ok(recovery) => Some(recovery),
+        Err(reason) => {
+            kprint!("recovery record unavailable: {}\n", reason);
+            None
+        }
+    };
     let (mut workspace, mut generation, mut evaluator_revision) =
-        restore_from_disk(&mut evaluator, &mut storage).unwrap_or_else(|reason| failed(reason));
+        restore_from_disk(&mut evaluator, &mut storage, recovery.as_mut())
+            .unwrap_or_else(|reason| failed(reason));
     let mut committed_workspace = workspace;
     let mut dirty = false;
     let mut scene_revision = 0_u8;
@@ -1231,6 +1325,7 @@ fn interactive(
                     compositor,
                     &mut evaluator,
                     &mut storage,
+                    &mut recovery,
                     &mut current,
                     &mut previous,
                     &mut scene_revision,

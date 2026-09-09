@@ -102,17 +102,18 @@ pub fn save(
     storage: Option<&mut ServiceDomain>,
     workspace: &Workspace,
     generation: u64,
+    protect: u64,
 ) -> Result<(u64, u64), &'static str> {
     let Some(storage) = storage else {
         return Err("no storage device on this machine");
     };
     #[cfg(not(target_arch = "x86_64"))]
     {
-        let _ = (evaluator, storage, workspace, generation);
+        let _ = (evaluator, storage, workspace, generation, protect);
         Err("no storage device on this machine")
     }
     #[cfg(target_arch = "x86_64")]
-    save_to_disk(evaluator, storage, workspace, generation)
+    save_to_disk(evaluator, storage, workspace, generation, protect)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -121,6 +122,7 @@ fn save_to_disk(
     storage: &mut ServiceDomain,
     workspace: &Workspace,
     generation: u64,
+    protect: u64,
 ) -> Result<(u64, u64), &'static str> {
     request(evaluator, shared::COMMAND_EVALUATOR_REBUILD, b"")?;
     for ordinal in 0..workspace.count() {
@@ -130,7 +132,7 @@ fn save_to_disk(
             return Err("source candidate rejected; live world retained");
         }
     }
-    let next = match crate::workspace::save(storage, workspace, generation) {
+    let next = match crate::workspace::save(storage, workspace, generation, protect) {
         Ok(next) => next,
         Err(reason) => {
             let _ = request(evaluator, shared::COMMAND_EVALUATOR_DISCARD, b"");

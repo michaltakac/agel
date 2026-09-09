@@ -94,6 +94,12 @@ promise.
   same source as x86-64, with storage optional and reported absent, and drives
   all three with the same harness in CI. No language, format or contract
   change.
+  `v0.2.29` makes the x86-64 recovery plane durable: a record at sector 288
+  binds trusted and candidate workspace generations, boots of an unverified
+  candidate are budgeted and a candidate that fails three is rolled back
+  automatically, and `:verify` runs a `health` cell in an isolated world. The
+  workspace slot format is unchanged; the record is new and reads as empty when
+  absent.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

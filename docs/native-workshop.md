@@ -107,20 +107,21 @@ definition without rebooting the VM.
 :workspace         show generation, cell count, and dirty state
 :save              validate, commit, and switch to the workspace image
 :reload            discard staged changes and replay the disk image
-:recovery-status   inspect the independent boot recovery state
-:verify            admit recovery candidate B
-:promote           select a verified recovery candidate
-:fault             simulate watchdog rollback to A
+:recovery-status   show the trusted and candidate generations on disk
+:verify            run the `health` cell in an isolated world; admit the candidate
+:promote           make the verified candidate the trusted generation
+:fault             roll back to the trusted generation now
 :shutdown          leave QEMU when the debug-exit device is present
 ```
 
 The serial workshop's `:verify`/`:promote`/`:fault` address the **boot recovery
-monitor**: they select which A/B recovery image is trusted. The graphical
+plane**: on x86-64 they act on the disk-backed record described below, and on
+the diskless machines on the in-memory A/B policy model. The graphical
 workshop reuses the word `:promote` for a different, less privileged decision:
 adopting a previewed **evaluator candidate world** after `:preview` (see
 [`native-workbench.md`](native-workbench.md)). The two surfaces are compiled
 from different features and never expose both meanings at once; the graphical
-build has no route to the recovery monitor. The graphical workshop's `:cell`,
+build reads the recovery record with `:recovery` and never changes it by hand. The graphical workshop's `:cell`,
 `:preview`, `:discard`, `:source` and `:workbench` commands are documented in
 [`native-graphics.md`](native-graphics.md) and the workbench guide.
 
@@ -182,6 +183,51 @@ the graphical command surface and persistent source-cell workshop share the
 real native evaluator. Project v0.2.8 adds the downward-bootstrap actor seed;
 its exact transaction and containment semantics are in
 [`native-agents.md`](native-agents.md).
+
+## v0.2.29 disk-backed recovery
+
+Sector 288 of the x86-64 disk holds a recovery record: the **trusted**
+generation, the **candidate** generation, how many boots the candidate has
+been given, and whether it has been verified. The record is supervisor policy
+carried by the storage driver domain; no language world can reach it.
+
+- `:save` publishes a generation as the candidate with a fresh budget. The
+  previous slot is retained, so the trusted generation stays on disk as long as
+  it is not the slot the next save reuses; the save chooses the slot that does
+  not hold the trusted generation.
+- Every boot of an unverified candidate is charged before any of it runs. The
+  first form that evaluates successfully after such a boot marks the candidate
+  verified and prints `candidate generation N verified by a healthy boot`.
+- A candidate that fails three boots without reaching that point is not booted
+  a fourth time: the supervisor prints
+  `watchdog fault: candidate generation N failed 3 boots; rolling back to
+  generation T` and replays the trusted generation instead. A boot that
+  crashes, hangs in replay or is powered off before the first evaluation
+  counts as a failure; nothing is needed from the candidate for the rollback
+  to happen.
+- `:verify` is explicit evidence: if the staged workspace has a cell named
+  `health`, it is evaluated in an isolated candidate world that is then
+  discarded, and only a clean evaluation admits the candidate. Without a
+  `health` cell the operator's word is the evidence.
+- `:promote` is denied until the candidate is verified. It makes the
+  candidate the trusted generation and reports which earlier generation is
+  retained for rollback.
+- `:fault` rolls back to the trusted generation immediately and exhausts the
+  candidate's budget, so later boots keep choosing the trusted generation
+  until an operator verifies the candidate or saves a new one.
+- `:recovery-status` reports the record and whether this boot is running the
+  trusted generation after a rollback.
+
+`./scripts/test-native-persistence.sh` proves the whole cycle on a temporary
+disk: a failing then passing `health` cell, promotion, a new candidate, three
+boots that exit before evaluating anything, the automatic rollback on the
+fourth, an explicit fault, revival by `:verify`, and promotion with the
+previous generation retained. A record that is absent or fails its CRC reads
+as empty, which boots the newest generation exactly as before v0.2.29.
+
+The record is not signed and the disk is trusted to hold what was written; a
+malicious disk can present any record it likes. There is still one disk, two
+slots and one record, so a rollback point survives exactly one further save.
 
 ## v0.1.6 isolation boundary
 

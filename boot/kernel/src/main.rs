@@ -22,15 +22,25 @@ mod console;
 #[cfg(feature = "isolation-selftest")]
 mod world;
 
-#[cfg(not(any(
-    feature = "selftest",
-    feature = "native-selftest",
-    feature = "native-graphics"
-)))]
+// The x86-64 workshop replaces the policy model with the disk-backed
+// `recovery` plane; every other build still exercises the model.
+#[cfg(all(
+    not(any(
+        feature = "selftest",
+        feature = "native-selftest",
+        feature = "native-graphics"
+    )),
+    not(all(target_arch = "x86_64", feature = "isolated-repl"))
+))]
 mod monitor;
 
 #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
 mod native_session;
+#[cfg(all(
+    target_arch = "x86_64",
+    any(feature = "isolated-repl", feature = "native-graphics")
+))]
+mod recovery;
 
 #[cfg(feature = "isolation-selftest")]
 mod contract;

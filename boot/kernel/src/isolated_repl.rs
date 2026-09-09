@@ -15,11 +15,14 @@
 //! authority-bearing state.
 
 use crate::arch;
+#[cfg(not(target_arch = "x86_64"))]
 use crate::monitor::RecoveryMonitor;
 use crate::native_session::{
     replay as replay_workspace, request as evaluator_request_raw, reset as reset_evaluator,
     ReplayFailure,
 };
+#[cfg(target_arch = "x86_64")]
+use crate::recovery::{BootPlan, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind, ServiceWriter};
 use crate::workspace::{Workspace, MAX_CELL_NAME};
 use crate::world::{shared, PAYLOAD_BYTES};
@@ -58,7 +61,21 @@ pub fn run() -> ! {
         Ok(domain) => domain,
         Err(reason) => fatal(reason),
     };
+    #[cfg(not(target_arch = "x86_64"))]
     let mut monitor = RecoveryMonitor::new();
+    #[cfg(target_arch = "x86_64")]
+    let mut recovery = match storage.as_mut().map(LiveRecovery::load) {
+        Some(Ok(recovery)) => Some(recovery),
+        Some(Err(reason)) => {
+            driver_text_error(
+                &mut driver,
+                b"recovery record unavailable: ",
+                reason.as_bytes(),
+            );
+            None
+        }
+        None => None,
+    };
     let mut revision = 0;
     let mut line = [0_u8; PAYLOAD_BYTES];
     let mut workspace = Workspace::new();
@@ -72,7 +89,13 @@ pub fn run() -> ! {
         b"Evaluator: unprivileged domain; output: restartable console domain; storage: unprivileged disk driver domain; source workspace: dual-slot disk image. Type :help.",
     );
 
-    match load_replay_candidates(&mut evaluator, &mut driver, storage.as_mut()) {
+    match load_replay_candidates(
+        &mut evaluator,
+        &mut driver,
+        storage.as_mut(),
+        #[cfg(target_arch = "x86_64")]
+        recovery.as_mut(),
+    ) {
         Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {
             workspace = loaded.workspace;
             committed_workspace = loaded.workspace;
@@ -167,6 +190,13 @@ pub fn run() -> ! {
                 storage.as_mut(),
                 &workspace,
                 generation,
+                {
+                    #[cfg(target_arch = "x86_64")]
+                    let protect = recovery.as_ref().map_or(0, |r| r.record().trusted);
+                    #[cfg(not(target_arch = "x86_64"))]
+                    let protect = 0;
+                    protect
+                },
             ) {
                     Ok((next_generation, candidate_revision)) => {
                         generation = next_generation;
@@ -174,6 +204,16 @@ pub fn run() -> ! {
                         dirty = false;
                         revision = candidate_revision;
                         report_saved(&mut driver, workspace.count(), generation);
+                        #[cfg(target_arch = "x86_64")]
+                        if let (Some(recovery), Some(storage)) = (recovery.as_mut(), storage.as_mut()) {
+                            if let Err(reason) = recovery.on_saved(storage, generation) {
+                                driver_text_error(
+                                    &mut driver,
+                                    b"recovery record not updated: ",
+                                    reason.as_bytes(),
+                                );
+                            }
+                        }
                     }
                     Err(reason) => {
                         driver_text_error(
@@ -183,7 +223,13 @@ pub fn run() -> ! {
                         );
                     }
             },
-            b":reload" => match load_replay_candidates(&mut evaluator, &mut driver, storage.as_mut()) {
+            b":reload" => match load_replay_candidates(
+                &mut evaluator,
+                &mut driver,
+                storage.as_mut(),
+                #[cfg(target_arch = "x86_64")]
+                None,
+            ) {
                 Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {
                     workspace = loaded.workspace;
                     committed_workspace = loaded.workspace;
@@ -218,10 +264,59 @@ pub fn run() -> ! {
                     reason.as_bytes(),
                 ),
             },
+            #[cfg(not(target_arch = "x86_64"))]
             b":recovery-status" => monitor.status(),
+            #[cfg(not(target_arch = "x86_64"))]
             b":verify" => monitor.verify(),
+            #[cfg(not(target_arch = "x86_64"))]
             b":promote" => monitor.promote(),
+            #[cfg(not(target_arch = "x86_64"))]
             b":fault" => monitor.fault(),
+            #[cfg(target_arch = "x86_64")]
+            b":recovery-status" => recovery_status(&mut driver, recovery.as_ref()),
+            #[cfg(target_arch = "x86_64")]
+            b":verify" => recovery_verify(
+                &mut driver,
+                &mut evaluator,
+                &workspace,
+                storage.as_mut(),
+                recovery.as_mut(),
+            ),
+            #[cfg(target_arch = "x86_64")]
+            b":promote" => recovery_promote(&mut driver, storage.as_mut(), recovery.as_mut()),
+            #[cfg(target_arch = "x86_64")]
+            b":fault" => {
+                let target = match (storage.as_mut(), recovery.as_mut()) {
+                    (Some(storage), Some(recovery)) => recovery.fault(storage),
+                    _ => Err("denied: recovery record unavailable"),
+                };
+                match target {
+                    Ok(trusted) => {
+                        match load_generation(&mut evaluator, storage.as_mut(), trusted) {
+                            Ok(Some((loaded, restored_revision))) => {
+                                workspace = loaded.workspace;
+                                committed_workspace = loaded.workspace;
+                                generation = loaded.generation;
+                                revision = restored_revision;
+                                dirty = false;
+                                let mut out = ServiceWriter::new(&mut driver);
+                                let _ = writeln!(out, "watchdog fault: rolled back to generation {trusted}");
+                                out.flush();
+                            }
+                            Ok(None) => driver_line(
+                                &mut driver,
+                                b"watchdog fault: trusted generation is not on disk; live world retained",
+                            ),
+                            Err(reason) => driver_text_error(
+                                &mut driver,
+                                b"watchdog fault: rollback failed: ",
+                                reason.as_bytes(),
+                            ),
+                        }
+                    }
+                    Err(reason) => driver_line(&mut driver, reason.as_bytes()),
+                }
+            }
             b":shutdown" => arch::exit(true),
             b"" => {}
             _ => {
@@ -273,12 +368,32 @@ pub fn run() -> ! {
                         ),
                     }
                 } else {
+                    #[cfg(target_arch = "x86_64")]
+                    let before = revision;
                     revision = evaluator_request(
                         &mut evaluator,
                         &mut driver,
                         shared::COMMAND_EVALUATE,
                         source,
                     );
+                    // A form evaluated after boot is the health oracle every
+                    // generation gets for free: the system reached an
+                    // interactive, working state.
+                    #[cfg(target_arch = "x86_64")]
+                    if revision > before {
+                        if let (Some(recovery), Some(storage)) =
+                            (recovery.as_mut(), storage.as_mut())
+                        {
+                            if let Ok(Some(verified)) = recovery.healthy(storage, generation) {
+                                let mut out = ServiceWriter::new(&mut driver);
+                                let _ = writeln!(
+                                    out,
+                                    "candidate generation {verified} verified by a healthy boot"
+                                );
+                                out.flush();
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -300,6 +415,7 @@ fn load_replay_candidates(
     evaluator: &mut arch::Domain,
     driver: &mut ServiceDomain,
     storage: Option<&mut ServiceDomain>,
+    #[cfg(target_arch = "x86_64")] recovery: Option<&mut LiveRecovery>,
 ) -> Result<DiskWorkspace, &'static str> {
     let Some(storage) = storage else {
         return Err("no storage device on this machine");
@@ -310,7 +426,29 @@ fn load_replay_candidates(
         Err("no storage device on this machine")
     }
     #[cfg(target_arch = "x86_64")]
-    load_from_disk(evaluator, driver, storage)
+    load_from_disk(evaluator, driver, storage, recovery)
+}
+
+/// Replay exactly one generation from disk, if it is there and valid.
+#[cfg(target_arch = "x86_64")]
+fn load_generation(
+    evaluator: &mut arch::Domain,
+    storage: Option<&mut ServiceDomain>,
+    generation: u64,
+) -> Result<Option<(crate::workspace::LoadedWorkspace, u64)>, &'static str> {
+    let storage = storage.ok_or("no storage device on this machine")?;
+    let candidates = crate::workspace::load(storage)?;
+    let Some(loaded) = candidates
+        .into_iter()
+        .flatten()
+        .find(|loaded| loaded.generation == generation)
+    else {
+        return Ok(None);
+    };
+    match replay_workspace(evaluator, &loaded.workspace) {
+        Ok(revision) => Ok(Some((loaded, revision))),
+        Err(_) => Err("trusted generation failed to replay"),
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -318,7 +456,51 @@ fn load_from_disk(
     evaluator: &mut arch::Domain,
     driver: &mut ServiceDomain,
     storage: &mut ServiceDomain,
+    recovery: Option<&mut LiveRecovery>,
 ) -> Result<DiskWorkspace, &'static str> {
+    let candidates = crate::workspace::load(storage)?;
+    let newest = candidates
+        .iter()
+        .flatten()
+        .map(|loaded| loaded.generation)
+        .max()
+        .unwrap_or(0);
+    if let Some(recovery) = recovery {
+        if let BootPlan::Rollback {
+            trusted,
+            candidate,
+            attempts,
+        } = recovery.plan_boot(storage, newest)?
+        {
+            {
+                let mut out = ServiceWriter::new(driver);
+                let _ = writeln!(
+                    out,
+                    "watchdog fault: candidate generation {candidate} failed {attempts} boots; rolling back to generation {trusted}"
+                );
+                out.flush();
+            }
+            if let Some(loaded) = candidates
+                .into_iter()
+                .flatten()
+                .find(|loaded| loaded.generation == trusted)
+            {
+                match replay_workspace(evaluator, &loaded.workspace) {
+                    Ok(revision) => {
+                        recovery.note_rollback();
+                        return Ok(DiskWorkspace::Restored(loaded, revision));
+                    }
+                    Err(failure) => {
+                        report_replay_failure(driver, &loaded.workspace, failure, evaluator);
+                    }
+                }
+            }
+            driver_line(
+                driver,
+                b"trusted generation unavailable; trying the newest generation instead",
+            );
+        }
+    }
     let candidates = crate::workspace::load(storage)?;
     let mut found = false;
     let mut highest_generation = 0;
@@ -451,6 +633,129 @@ fn report_workspace(driver: &mut ServiceDomain, count: usize, generation: u64, d
         if dirty { "staged changes" } else { "clean" }
     );
     out.flush();
+}
+
+#[cfg(target_arch = "x86_64")]
+fn recovery_status(driver: &mut ServiceDomain, recovery: Option<&LiveRecovery>) {
+    let Some(recovery) = recovery else {
+        driver_line(driver, b"recovery: record unavailable");
+        return;
+    };
+    let record = recovery.record();
+    let mut out = ServiceWriter::new(driver);
+    if record.trusted == 0 && record.candidate == 0 {
+        let _ = writeln!(out, "recovery: no generation trusted or proposed");
+    } else {
+        let _ = write!(out, "recovery: trusted generation {}", record.trusted);
+        if record.candidate == 0 {
+            let _ = write!(out, "; no candidate");
+        } else {
+            let _ = write!(
+                out,
+                "; candidate generation {} ({}, boots {})",
+                record.candidate,
+                if record.verified {
+                    "verified"
+                } else {
+                    "unverified"
+                },
+                record.attempts
+            );
+        }
+        if recovery.rolled_back() {
+            let _ = write!(out, "; running trusted generation after watchdog rollback");
+        }
+        let _ = writeln!(out);
+    }
+    out.flush();
+}
+
+/// Explicit health evidence: a source cell named `health` must evaluate
+/// without error in an isolated candidate world that is then discarded.
+#[cfg(target_arch = "x86_64")]
+fn recovery_verify(
+    driver: &mut ServiceDomain,
+    evaluator: &mut arch::Domain,
+    workspace: &Workspace,
+    storage: Option<&mut ServiceDomain>,
+    recovery: Option<&mut LiveRecovery>,
+) {
+    let (Some(storage), Some(recovery)) = (storage, recovery) else {
+        driver_line(driver, b"denied: recovery record unavailable");
+        return;
+    };
+    if recovery.record().candidate == 0 {
+        driver_line(driver, b"denied: no candidate generation to verify");
+        return;
+    }
+    if let Some(health) = workspace.find(b"health") {
+        let reply = evaluator_request_raw(
+            evaluator,
+            shared::COMMAND_EVALUATOR_PREVIEW,
+            health.source(),
+        );
+        let _ = evaluator_request_raw(evaluator, shared::COMMAND_EVALUATOR_DISCARD, b"");
+        match reply {
+            Ok(reply) if !reply.error => {}
+            Ok(reply) => {
+                let mut out = ServiceWriter::new(driver);
+                let _ = write!(
+                    out,
+                    "candidate generation {}: health cell rejected: ",
+                    recovery.record().candidate
+                );
+                out.flush();
+                let _ = driver.write_console(driver.handle(), &reply.bytes[..reply.length]);
+                driver_line(driver, b"");
+                return;
+            }
+            Err(reason) => {
+                driver_text_error(driver, b"health cell could not run: ", reason.as_bytes());
+                return;
+            }
+        }
+    }
+    match recovery.verify(storage) {
+        Ok(candidate) => {
+            let mut out = ServiceWriter::new(driver);
+            let _ = writeln!(
+                out,
+                "candidate generation {candidate}: isolated health evidence accepted"
+            );
+            out.flush();
+        }
+        Err(reason) => driver_line(driver, reason.as_bytes()),
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+fn recovery_promote(
+    driver: &mut ServiceDomain,
+    storage: Option<&mut ServiceDomain>,
+    recovery: Option<&mut LiveRecovery>,
+) {
+    let (Some(storage), Some(recovery)) = (storage, recovery) else {
+        driver_line(driver, b"denied: recovery record unavailable");
+        return;
+    };
+    match recovery.promote(storage) {
+        Ok((selected, previous)) => {
+            let mut out = ServiceWriter::new(driver);
+            if previous == 0 {
+                let _ = writeln!(
+                    out,
+                    "selected generation {selected}; no earlier generation to retain"
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "selected generation {selected}; generation {previous} retained for rollback"
+                );
+            }
+            out.flush();
+        }
+        Err(reason) => driver_line(driver, reason.as_bytes()),
+    }
 }
 
 fn report_saved(driver: &mut ServiceDomain, count: usize, generation: u64) {

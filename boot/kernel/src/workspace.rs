@@ -24,6 +24,14 @@ const SLOT_SECTORS: u32 = 16;
 const PAYLOAD_SECTORS: usize = SLOT_SECTORS as usize - 1;
 #[cfg(target_arch = "x86_64")]
 const PAYLOAD_BYTES: usize = PAYLOAD_SECTORS * 512;
+/// The recovery record follows the two workspace slots. It names which
+/// generation is trusted and which is a candidate still earning that trust.
+#[cfg(target_arch = "x86_64")]
+pub const RECOVERY_SECTOR: u32 = 288;
+#[cfg(target_arch = "x86_64")]
+const RECOVERY_MAGIC: &[u8; 8] = b"AGELRC1\0";
+#[cfg(target_arch = "x86_64")]
+const RECOVERY_VERSION: u16 = 1;
 #[cfg(target_arch = "x86_64")]
 const MAGIC: &[u8; 8] = b"AGELWS1\0";
 #[cfg(target_arch = "x86_64")]
@@ -244,16 +252,100 @@ pub fn load(storage: &mut ServiceDomain) -> Result<[Option<LoadedWorkspace>; 2],
     }
 }
 
+/// The recovery plane's durable state: which generation is trusted, which is
+/// a candidate, how many boots the candidate has been given, and whether one
+/// of them reached a healthy state.
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecoveryRecord {
+    pub trusted: u64,
+    pub candidate: u64,
+    pub attempts: u32,
+    pub verified: bool,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl RecoveryRecord {
+    pub const EMPTY: Self = Self {
+        trusted: 0,
+        candidate: 0,
+        attempts: 0,
+        verified: false,
+    };
+}
+
+/// Read the recovery record. An absent or corrupt record is the empty
+/// record, so a fresh or damaged disk starts with nothing trusted; a device
+/// failure is reported rather than treated as an empty record.
+#[cfg(target_arch = "x86_64")]
+pub fn load_record(storage: &mut ServiceDomain) -> Result<RecoveryRecord, &'static str> {
+    let mut sector = [0_u8; 512];
+    read_sector(storage, RECOVERY_SECTOR, &mut sector)?;
+    if sector[..8] != RECOVERY_MAGIC[..]
+        || u16::from_be_bytes([sector[8], sector[9]]) != RECOVERY_VERSION
+    {
+        return Ok(RecoveryRecord::EMPTY);
+    }
+    let expected = u32::from_be_bytes(
+        sector[40..44]
+            .try_into()
+            .map_err(|_| "recovery record checksum is malformed")?,
+    );
+    if checksum_parts(&sector[..40], &[]) != expected {
+        return Ok(RecoveryRecord::EMPTY);
+    }
+    Ok(RecoveryRecord {
+        trusted: u64::from_be_bytes(sector[16..24].try_into().map_err(|_| "malformed")?),
+        candidate: u64::from_be_bytes(sector[24..32].try_into().map_err(|_| "malformed")?),
+        attempts: u32::from_be_bytes(sector[32..36].try_into().map_err(|_| "malformed")?),
+        verified: sector[36] == 1,
+    })
+}
+
+/// Write and flush the recovery record, then read it back.
+#[cfg(target_arch = "x86_64")]
+pub fn save_record(
+    storage: &mut ServiceDomain,
+    record: &RecoveryRecord,
+) -> Result<(), &'static str> {
+    let mut sector = [0_u8; 512];
+    sector[..8].copy_from_slice(RECOVERY_MAGIC);
+    sector[8..10].copy_from_slice(&RECOVERY_VERSION.to_be_bytes());
+    sector[16..24].copy_from_slice(&record.trusted.to_be_bytes());
+    sector[24..32].copy_from_slice(&record.candidate.to_be_bytes());
+    sector[32..36].copy_from_slice(&record.attempts.to_be_bytes());
+    sector[36] = u8::from(record.verified);
+    let checksum = checksum_parts(&sector[..40], &[]);
+    sector[40..44].copy_from_slice(&checksum.to_be_bytes());
+    write_sector(storage, RECOVERY_SECTOR, &sector)?;
+    flush(storage)?;
+    if load_record(storage)? != *record {
+        return Err("recovery record verification failed");
+    }
+    Ok(())
+}
+
+/// Save a new generation. The slot is chosen by parity unless that slot holds
+/// `protect` (the trusted generation), in which case the other slot is used:
+/// a save may supersede an unpromoted candidate but never the rollback point.
 #[cfg(target_arch = "x86_64")]
 pub fn save(
     storage: &mut ServiceDomain,
     workspace: &Workspace,
     generation: u64,
+    protect: u64,
 ) -> Result<u64, &'static str> {
     let next = generation
         .checked_add(1)
         .ok_or("workspace generation exhausted")?;
-    let slot = if next & 1 == 0 { SLOT_A } else { SLOT_B };
+    let mut slot = if next & 1 == 0 { SLOT_A } else { SLOT_B };
+    if protect != 0 {
+        if let Ok(Some(occupant)) = load_slot(storage, slot) {
+            if occupant.generation == protect {
+                slot = if slot == SLOT_A { SLOT_B } else { SLOT_A };
+            }
+        }
+    }
     let mut payload = [0_u8; PAYLOAD_BYTES];
     let length = workspace.encode(&mut payload)?;
 

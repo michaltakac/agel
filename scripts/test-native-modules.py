@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory(prefix="agel-modules-", dir="/tmp") as director
     shutil.copyfile(sys.argv[1], image)
     with image.open("r+b") as disk:
         disk.seek(256 * 512)
-        disk.write(bytes(32 * 512))
+        disk.write(bytes(33 * 512))
     machine = console.Machine(str(image), directory)
     try:
         assert "WORKBENCH READY" in machine.submit(":workbench")

@@ -264,13 +264,22 @@ Each rung must be runnable and differentially testable against the rung below:
    serial workshop builds and runs on AArch64 and RISC-V as well as x86-64,
    sharing one source, with storage optional and reported absent rather than
    faked; the same prompt-synchronized harness drives all three under QEMU.
-44. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
-   promotion, and watchdog-triggered rollback managed by the recovery monitor.
-45. **POSIX personality:** a Rust C library and the filesystem and process
+44. **Disk-backed recovery (started at v0.2.29):** on x86-64 the recovery
+   plane is a record on disk binding a trusted and a candidate workspace
+   generation; boots of an unverified candidate are charged before it runs, a
+   candidate that fails three boots is rolled back automatically, a `health`
+   cell evaluated in an isolated world is the explicit oracle, and promotion
+   is an operator decision that names what is retained for rollback. The
+   record is unsigned and the diskless machines keep the in-memory policy
+   model; kernel images are not yet A/B selected.
+45. **Live system:** boot-selector-backed A/B kernel images, signed
+   promotion, and watchdog-triggered rollback of the image itself, managed by
+   the recovery monitor.
+46. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-46. **Local inference:** model inference in its own domain, over quantized
+47. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

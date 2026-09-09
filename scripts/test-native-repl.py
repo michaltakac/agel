@@ -13,6 +13,7 @@ import zlib
 
 # The x86-64 debug-exit device maps the guest's clean value 0x10 to host status
 # 33; the other two machines leave cleanly with status 0 and the success token.
+LAST_HARNESS: "Harness | None" = None
 EXPECTED_EXIT = {"x86_64": 33, "aarch64": 0, "riscv64": 0}
 
 
@@ -80,6 +81,8 @@ class Harness:
     def __init__(
         self, image: str, *, persistent: bool = False, architecture: str = "x86_64"
     ) -> None:
+        global LAST_HARNESS
+        LAST_HARNESS = self
         self.output: queue.Queue[bytes | None] = queue.Queue()
         self.transcript = bytearray()
         self.deadline = time.monotonic() + 90.0
@@ -227,7 +230,7 @@ def persistence_test(image: str) -> None:
         second.expect_until(b"AGEL_NATIVE_READY")
         second.expect_until(b"workspace generation 1 restored: 1 cells replayed")
         second.expect_until(b"agel-native[1]> ")
-        second.send("persisted-answer", "42", 2)
+        send_healthy(second, "persisted-answer", "42", 1, 2)
         second.send(":show boot", "(def persisted-answer 42)", 2)
         second.send(
             ":workspace", "workspace generation 1, 1 cells, clean", 2
@@ -306,7 +309,9 @@ def persistence_test(image: str) -> None:
         fourth.expect_until(b"AGEL_NATIVE_READY")
         fourth.expect_until(b"workspace generation 1 restored: 1 cells replayed")
         fourth.expect_until(b"agel-native[1]> ")
-        fourth.send("persisted-answer", "42", 2)
+        # Generation 2 is gone from disk, so generation 1 is the candidate
+        # again and this boot verifies it.
+        send_healthy(fourth, "persisted-answer", "42", 1, 2)
         shutdown(fourth)
     finally:
         fourth.close()
@@ -328,6 +333,138 @@ def persistence_test(image: str) -> None:
         shutdown(fifth)
     finally:
         fifth.close()
+
+    # The recovery plane. Generation 1 is the verified candidate and nothing is
+    # trusted yet. A staged health cell that fails blocks explicit verification,
+    # one that passes admits it, promotion makes generation 1 the rollback
+    # point, and the next save becomes the candidate the boot budget judges.
+    sixth = Harness(image, persistent=True)
+    try:
+        sixth.expect_until(b"AGEL_NATIVE_READY")
+        sixth.expect_until(b"workspace generation 1 restored: 1 cells replayed")
+        sixth.expect_until(b"agel-native[1]> ")
+        sixth.send(
+            ":recovery-status",
+            "recovery: trusted generation 0; candidate generation 1 (verified, boots 0)",
+            1,
+        )
+        edit_cell(sixth, "health", "(/ persisted-answer 0)", 1)
+        sixth.send(
+            ":verify",
+            "candidate generation 1: health cell rejected: error: division by zero",
+            1,
+        )
+        edit_cell(sixth, "health", "(+ persisted-answer 0)", 1)
+        sixth.send(":verify", "candidate generation 1: isolated health evidence accepted", 1)
+        sixth.send(":promote", "selected generation 1; no earlier generation to retain", 1)
+        sixth.send(":promote", "denied: no candidate generation", 1)
+        sixth.send(":verify", "denied: no candidate generation to verify", 1)
+        sixth.send(":recovery-status", "recovery: trusted generation 1; no candidate", 1)
+        sixth.send(":delete health", "cell deleted from staged workspace; :save to commit", 1)
+        edit_cell(sixth, "extra", "(def extra 7)", 1)
+        sixth.send(
+            ":save",
+            "workspace generation 2 committed: 2 cells; evaluator rebuilt from cells; previous slot retained",
+            2,
+        )
+        sixth.send(
+            ":recovery-status",
+            "recovery: trusted generation 1; candidate generation 2 (unverified, boots 0)",
+            2,
+        )
+        sixth.send(":promote", "denied: verify candidate before promotion", 2)
+        shutdown(sixth)
+    finally:
+        sixth.close()
+
+    # Three boots that never evaluate a form exhaust the candidate's budget.
+    for attempt in (1, 2, 3):
+        boot = Harness(image, persistent=True)
+        try:
+            boot.expect_until(b"AGEL_NATIVE_READY")
+            boot.expect_until(b"workspace generation 2 restored: 2 cells replayed")
+            boot.expect_until(b"agel-native[2]> ")
+            boot.send(
+                ":recovery-status",
+                f"recovery: trusted generation 1; candidate generation 2 (unverified, boots {attempt})",
+                2,
+            )
+            shutdown(boot)
+        finally:
+            boot.close()
+
+    # The fourth boot rolls back to the trusted generation on its own. A
+    # healthy trusted generation says nothing about the candidate, and an
+    # explicit fault keeps the exhausted candidate from booting again.
+    rolled = Harness(image, persistent=True)
+    try:
+        rolled.expect_until(b"AGEL_NATIVE_READY")
+        rolled.expect_until(
+            b"watchdog fault: candidate generation 2 failed 3 boots; rolling back to generation 1"
+        )
+        rolled.expect_until(b"workspace generation 1 restored: 1 cells replayed")
+        rolled.expect_until(b"agel-native[1]> ")
+        rolled.send("persisted-answer", "42", 2)
+        rolled.send(
+            ":recovery-status",
+            "recovery: trusted generation 1; candidate generation 2 (unverified, boots 3); running trusted generation after watchdog rollback",
+            2,
+        )
+        rolled.send(":fault", "watchdog fault: rolled back to generation 1", 3)
+        shutdown(rolled)
+    finally:
+        rolled.close()
+
+    # Only explicit evidence revives an exhausted candidate: verify it from
+    # the trusted generation, and the next boot replays it as verified.
+    revived = Harness(image, persistent=True)
+    try:
+        revived.expect_until(b"AGEL_NATIVE_READY")
+        revived.expect_until(b"watchdog fault: candidate generation 2 failed 3 boots")
+        revived.expect_until(b"agel-native[1]> ")
+        revived.send(":verify", "candidate generation 2: isolated health evidence accepted", 1)
+        shutdown(revived)
+    finally:
+        revived.close()
+    verified = Harness(image, persistent=True)
+    try:
+        verified.expect_until(b"AGEL_NATIVE_READY")
+        verified.expect_until(b"workspace generation 2 restored: 2 cells replayed")
+        verified.expect_until(b"agel-native[2]> ")
+        verified.send("extra", "7", 3)
+        verified.send(
+            ":recovery-status",
+            "recovery: trusted generation 1; candidate generation 2 (verified, boots 0)",
+            3,
+        )
+        verified.send(":promote", "selected generation 2; generation 1 retained for rollback", 3)
+        verified.send(":recovery-status", "recovery: trusted generation 2; no candidate", 3)
+        shutdown(verified)
+    finally:
+        verified.close()
+
+
+def send_healthy(
+    harness: Harness, line: str, expected: str, generation: int, revision: int
+) -> None:
+    """The first form evaluated after a boot verifies an unverified candidate."""
+    harness.send_bytes(line)
+    assert harness.process.stdin is not None
+    harness.process.stdin.write(b"\n")
+    harness.process.stdin.flush()
+    harness.expect_exact(
+        f"\r\n{expected}\r\ncandidate generation {generation} verified by a healthy boot"
+        f"\r\nagel-native[{revision}]> ".encode("ascii")
+    )
+
+
+def edit_cell(harness: Harness, name: str, source: str, revision: int) -> None:
+    harness.send_bytes(f":edit {name}")
+    assert harness.process.stdin is not None
+    harness.process.stdin.write(b"\n")
+    harness.process.stdin.flush()
+    harness.expect_exact(f"\r\nedit[{name}]> ".encode("ascii"))
+    harness.send(source, "cell staged; :run NAME to evaluate, :save to persist", revision)
 
 
 def shutdown(harness: Harness) -> None:
@@ -368,6 +505,8 @@ def main() -> int:
             persistence_test(arguments[0])
         except Exception as error:
             print(f"native persistence test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
             return 1
         print(
             "Agel native workspace: edit -> reboot -> semantic, corruption, and torn-write fallback [ok]"
@@ -438,16 +577,26 @@ def main() -> int:
         harness.send("(drop-message broken)", "0", 27)
         harness.send("(restart-agent broken)", "#<native-agent:2>", 28)
         harness.send("(agent-faulted? broken)", "#f", 29)
-        harness.send(":verify", "candidate B: isolated health evidence accepted", 29)
-        harness.send(":promote", "selected slot B; slot A retained for rollback", 29)
-        harness.send(":verify", "candidate B: isolated health evidence accepted", 29)
-        harness.send(
-            ":promote",
-            "denied: candidate B is already active; slot A remains rollback",
-            29,
-        )
-        harness.send(":fault", "watchdog fault: rolled back to slot A", 29)
-        harness.send(":recovery-status", "active slot: A (stable)", 29)
+        if architecture == "x86_64":
+            # The disk-backed recovery plane with nothing on disk to select.
+            harness.send(":verify", "denied: no candidate generation to verify", 29)
+            harness.send(":promote", "denied: no candidate generation", 29)
+            harness.send(":fault", "denied: no trusted generation to roll back to", 29)
+            harness.send(
+                ":recovery-status", "recovery: no generation trusted or proposed", 29
+            )
+        else:
+            # The executable policy model on machines without a disk.
+            harness.send(":verify", "candidate B: isolated health evidence accepted", 29)
+            harness.send(":promote", "selected slot B; slot A retained for rollback", 29)
+            harness.send(":verify", "candidate B: isolated health evidence accepted", 29)
+            harness.send(
+                ":promote",
+                "denied: candidate B is already active; slot A remains rollback",
+                29,
+            )
+            harness.send(":fault", "watchdog fault: rolled back to slot A", 29)
+            harness.send(":recovery-status", "active slot: A (stable)", 29)
         harness.send("(let ((x 20) (y 22)) (+ x y))", "42", 30)
         harness.send("(let ((x 40)) (let ((x 1) (y x)) (+ x y)))", "41", 31)
         harness.send("(- (* 2 3 7) (+) (*) -1)", "42", 32)

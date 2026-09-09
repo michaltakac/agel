@@ -639,6 +639,37 @@ never reclaims a replaced domain's frames.
 The AArch64 and RISC-V workshops have no storage, no graphics and no
 keyboard; the recovery monitor on every machine is still in-memory policy.
 
+## v0.2.29
+
+- **Recovery state that forgets at reset:** the A/B monitor kept its trusted
+  and candidate state in two booleans that every boot reset, so nothing a
+  reboot did could ever roll anything back. The x86-64 record now lives at
+  sector 288, is CRC-checked, and reads as empty rather than as anything else
+  when it is absent or damaged.
+- **A candidate that judges itself:** the boot counter is charged and flushed
+  before the candidate's first cell is replayed, so a generation that crashes,
+  hangs in replay or is powered off before it reaches the prompt cannot avoid
+  the charge; after three such boots the supervisor replays the trusted
+  generation without the candidate's cooperation.
+- **Health evidence from the world under test:** `:verify` evaluates the
+  `health` cell in an isolated candidate world that is discarded afterwards,
+  through the same shared-page protocol as every other evaluation; a health
+  cell that faults or exhausts its budget is contained like any other form and
+  the candidate stays unverified.
+- **A healthy trusted generation vouching for the candidate:** after a
+  rollback the running generation is the trusted one, and its successful
+  evaluations mark nothing; only the candidate generation itself can be
+  verified by a healthy boot.
+- **A rollback point overwritten by the next save:** the save path chooses the
+  slot that does not hold the trusted generation, so promotion is what decides
+  which generation the next save may not overwrite.
+
+Not claimed: the record is unsigned and the disk is trusted to return what was
+written, so a malicious disk chooses the boot plan. There is one record and two
+slots, so exactly one earlier generation is ever retained. The kernel image
+itself is not A/B selected, the diskless machines keep the in-memory policy
+model, and the graphical workshop only reads the record.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a
