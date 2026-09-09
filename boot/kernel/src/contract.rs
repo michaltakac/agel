@@ -1,17 +1,20 @@
 //! The research kernel's implementation of the Agel kernel contract.
 //!
-//! The object semantics are the shared reference model from `agel-kernel-abi`.
-//! That is deliberate, and it is the point rather than a shortcut: the research
-//! backend's job in Phase 1 is not to be a second independent implementation —
-//! seL4 will be that — but to put the *already specified* semantics behind a
-//! real hardware privilege boundary and prove the boundary holds.
+//! The object semantics are the independent implementation from
+//! `agel-kernel-abi`: the one written from the contract document and the
+//! corpus without reading the reference model, and the one the seL4 broker
+//! answers with. Until v0.2.31 the research kernels linked the reference
+//! model instead, so their transcripts proved the boundary held and nothing
+//! about the semantics; now every backend answers with the same second
+//! implementation, and the isolation self-test keeps the reference model in
+//! the supervisor as the oracle it checks each answer against.
 //!
-//! So what this module adds to the model is exactly the part a hosted model
-//! cannot have: the object table lives in supervisor-only memory, the caller
-//! holds slot numbers rather than references, and the only path from ring 3 to
-//! any of it is a trap gate.
+//! What this module adds is the part a hosted implementation cannot have: the
+//! object table lives in supervisor-only memory, the caller holds slot numbers
+//! rather than references, and the only path from ring 3 to any of it is a
+//! trap gate.
 
-use agel_kernel_abi::model::ModelKernel;
+use agel_kernel_abi::independent::IndependentKernel;
 use agel_kernel_abi::{Kernel, Operation, Request, Response};
 
 /// Well-known slot through which a world hands control back to its supervisor.
@@ -28,14 +31,14 @@ pub const SUPERVISOR_ENDPOINT: u32 = agel_kernel_abi::CONFORMANCE_SLOTS - 1;
 /// bit, so the world can invoke its capabilities and cannot read, forge, or
 /// corrupt them.
 pub struct DomainObjects {
-    model: ModelKernel,
+    objects: IndependentKernel,
 }
 
 impl DomainObjects {
     /// A domain holding the conformance capability space.
     pub fn new() -> Self {
         Self {
-            model: ModelKernel::new(),
+            objects: IndependentKernel::new(),
         }
     }
 
@@ -47,7 +50,7 @@ impl DomainObjects {
 
     /// Answer one contract invocation.
     pub fn invoke(&mut self, request: &Request) -> Response {
-        self.model.invoke(request)
+        self.objects.invoke(request)
     }
 }
 

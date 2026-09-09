@@ -106,6 +106,10 @@ promise.
   loads the trusted slot after three, and the running kernel verifies,
   promotes or gives up the candidate. The disk layout grows; earlier images
   boot slot A exactly as before.
+  `v0.2.31` puts the independent kernel-contract implementation behind the
+  trap gate on all three research kernels and keeps the reference model in
+  the supervisor as the live oracle of their isolation self-test. No
+  contract, format or language change; the frozen transcript is unchanged.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

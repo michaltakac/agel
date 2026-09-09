@@ -116,6 +116,8 @@ run_architecture() {
   # world that executes something it is not allowed to, and a world that never
   # yields. The exact fault names differ, and the report says which.
   grep -q "isolation\[$architecture\]: unprivileged corpus matches the reference model" "$output_file"
+  grep -q "isolation\[$architecture\]: the world answered with the independent implementation behind a trap gate; the supervisor checked all 81 steps against the reference model" \
+    "$output_file"
   grep -q "isolation\[$architecture\]: native Agel evaluated factorial with transactional rollback in an unprivileged domain" "$output_file"
   grep -q "isolation\[$architecture\]: contained a world writing to kernel memory: page-fault" "$output_file"
   grep -q "isolation\[$architecture\]: contained a world executing an undefined instruction" "$output_file"

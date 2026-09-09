@@ -699,6 +699,27 @@ on x86-64, where the BIOS stage is. The stage does not verify the loaded
 sectors, and a kernel that reaches the console and then misbehaves is judged
 only by whether it evaluates a form.
 
+## v0.2.31
+
+- **Diverse boundary, single semantics:** on x86-64, AArch64 and RISC-V the
+  object table behind the trap gate was the reference model, so three
+  byte-identical transcripts said nothing a hosted run of the model had not
+  already said. The research kernels now link the independent implementation,
+  the same one the seL4 broker runs, and the reference model moves to the
+  supervisor side of the isolation self-test, where it checks every one of
+  the world's 81 answers as they are produced. A divergence between the two
+  implementations now fails the boot of every native backend, not only the
+  hosted suite.
+- **An implementation that only agrees with itself:** every service domain
+  (console, storage, input, evaluator) invokes the contract through the same
+  independent object table, so the driver restarts, stale-handle refusals
+  and shared-page protocol the suites already prove ran on it.
+
+Not claimed: two implementations agreeing is still not a proof of either, and
+both are unverified Rust. The reference model is now the oracle rather than
+the thing behind the boundary; nothing checks the oracle except the frozen
+transcript and the hosted comparison.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

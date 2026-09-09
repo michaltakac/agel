@@ -279,6 +279,11 @@ fn run_conformance(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
         "isolation[{}]: unprivileged corpus matches the reference model\n",
         arch::NAME
     );
+    kprint!(
+        "isolation[{}]: the world answered with the independent implementation behind a trap gate; the supervisor checked all {} steps against the reference model\n",
+        arch::NAME,
+        conformance::CORPUS.len()
+    );
 }
 
 /// Make a fresh world misbehave in every way this architecture can, and require

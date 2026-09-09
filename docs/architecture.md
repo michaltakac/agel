@@ -247,6 +247,10 @@ Each rung must be runnable and differentially testable against the rung below:
    without reading the reference model, reproducing the frozen transcript and
    agreeing with the model on all 81 steps; the seL4 broker runs it, so the
    seL4 transcript is now the agreement of two implementations.
+   Since v0.2.31 the research kernels answer the contract with the
+   independent implementation too, and their isolation self-test keeps the
+   reference model in the supervisor to check all 81 answers live, so the
+   frozen transcript is two implementations agreeing on every backend.
 41. **Storage driver domain (complete at v0.2.26):** the primary ATA driver
    runs unprivileged in its own restartable domain, granted exactly the disk's
    ports through the task-state-segment bitmap, exchanging one sector at a time

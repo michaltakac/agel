@@ -4,7 +4,10 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.30: the x86-64 kernel image itself is A/B selected by the
+The current repository is **v0.2.31: every native backend answers the kernel contract with the
+independently written second implementation, and the three research kernels check all 81 of an
+unprivileged world's answers against the reference model live, so the frozen transcript is two
+implementations agreeing behind a hardware boundary on four backends; the x86-64 kernel image itself is A/B selected by the
 512-byte BIOS stage, which charges every boot of a candidate kernel before it runs and loads the
 trusted slot after three boots that never reach a healthy state, with promotion an explicit
 decision and staging a host tool; the recovery plane is on disk, binding trusted and

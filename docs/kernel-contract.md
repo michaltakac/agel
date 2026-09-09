@@ -164,14 +164,15 @@ yet evidence of anything.
 ## Backend notes: the research kernel
 
 The research backend implements the contract's object semantics by linking the
-shared reference model, and adds the part a hosted model cannot have: the object
-table lives in supervisor-only memory, the caller holds slot numbers rather than
-references, and the only path to any of it from an unprivileged world is a trap
-gate. That is the honest division of labour for this phase — the research
-backend's job is to put already-specified semantics behind a hardware privilege
-boundary. The independent second implementation exists since v0.2.25
-(`agel_kernel_abi::independent`) and is what the seL4 broker runs; see the seL4
-notes below.
+independent implementation (`agel_kernel_abi::independent`, since v0.2.31;
+the reference model before that), and adds the part a hosted implementation
+cannot have: the object table lives in supervisor-only memory, the caller holds
+slot numbers rather than references, and the only path to any of it from an
+unprivileged world is a trap gate. The isolation self-test keeps the reference
+model in the supervisor and checks every one of the world's 81 answers against
+it, so on each machine the frozen transcript is two implementations agreeing
+live across a hardware privilege boundary. The seL4 broker answers with the
+same independent implementation; see the seL4 notes below.
 
 It builds for three architectures from one source. The shared driver, the
 capability space, the shared handshake page, the tick budget, and the rule that
@@ -209,7 +210,9 @@ for byte; `conformance::compare` requires them to agree on all 81 steps; and
 the hosted test suite checks that a widening variant of the independent
 implementation is still caught at `derive/mint-cannot-widen`.
 `./scripts/test-kernel-contract.sh` diffs both hosted transcripts against the
-freeze.
+freeze, and `./scripts/test-isolation.sh` requires the same agreement live on
+three machines, with the independent implementation behind the trap gate and
+the reference model in the supervisor.
 
 Where the corpus does not pin a choice, the independent implementation
 documents the one it made at the point it is made: reserved argument words are
