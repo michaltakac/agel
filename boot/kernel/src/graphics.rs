@@ -8,7 +8,7 @@ use crate::arch;
 use crate::console;
 use crate::kprint;
 use crate::native_session::{replay as replay_workspace, request as evaluator_request};
-use crate::recovery::{BootPlan, LiveRecovery};
+use crate::recovery::{slot_name, BootPlan, KernelRecovery, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};
@@ -25,7 +25,7 @@ const MAX_SCENE_COMMANDS: usize = 80;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-bind/hit/owner | :cell :run :show :delete :cells :workspace :save :reload :recovery | :revision :rollback :defs :limits :shutdown";
+const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :workspace :save :reload :recovery :kernel | :revision :rollback :defs :limits :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 22;
 
@@ -699,6 +699,42 @@ impl StatusLine {
     }
 }
 
+/// The kernel's own A/B state on the serial log at boot.
+fn report_kernel_slot(kernel: &KernelRecovery) {
+    let Some(booted) = kernel.booted() else {
+        kprint!("kernel: boot stage has no slot selector; slot A loaded\n");
+        return;
+    };
+    let selector = kernel.selector();
+    if kernel.rolled_back() {
+        kprint!(
+            "watchdog fault: candidate kernel slot {} failed {} boots; booted trusted slot {}\n",
+            slot_name(selector.candidate),
+            selector.attempts,
+            slot_name(selector.trusted)
+        );
+    }
+    kprint!(
+        "kernel: running slot {}; trusted slot {}",
+        slot_name(booted),
+        slot_name(selector.trusted)
+    );
+    if selector.candidate == crate::workspace::NO_CANDIDATE {
+        kprint!("; no candidate\n");
+    } else {
+        kprint!(
+            "; candidate slot {} ({}, boots {})\n",
+            slot_name(selector.candidate),
+            if selector.verified {
+                "verified"
+            } else {
+                "unverified"
+            },
+            selector.attempts
+        );
+    }
+}
+
 fn restore_from_disk(
     evaluator: &mut arch::Domain,
     storage: &mut ServiceDomain,
@@ -783,6 +819,7 @@ fn execute_workshop(
     evaluator: &mut arch::Domain,
     storage: &mut ServiceDomain,
     recovery: &mut Option<LiveRecovery>,
+    kernel: &mut Option<KernelRecovery>,
     current: &mut Scene,
     previous: &mut Scene,
     scene_revision: &mut u8,
@@ -932,6 +969,34 @@ fn execute_workshop(
         }
         return status;
     }
+    if line == b":kernel" {
+        let Some(kernel) = kernel.as_ref() else {
+            return StatusLine::new(b"KERNEL SELECTOR UNAVAILABLE");
+        };
+        let Some(booted) = kernel.booted() else {
+            return StatusLine::new(b"KERNEL SLOT A NO SELECTOR IN BOOT STAGE");
+        };
+        let selector = kernel.selector();
+        let mut status = StatusLine::new(b"KERNEL SLOT ");
+        status.push(slot_name(booted).as_bytes());
+        status.push(b" TRUSTED ");
+        status.push(slot_name(selector.trusted).as_bytes());
+        if selector.candidate != crate::workspace::NO_CANDIDATE {
+            status.push(b" CANDIDATE ");
+            status.push(slot_name(selector.candidate).as_bytes());
+            status.push(b" BOOTS ");
+            status.number_u64(u64::from(selector.attempts));
+            status.push(if selector.verified {
+                b" VERIFIED"
+            } else {
+                b" UNVERIFIED"
+            });
+        }
+        if kernel.rolled_back() {
+            status.push(b" ROLLED BACK");
+        }
+        return status;
+    }
     if line == b":reload" {
         return match restore_from_disk(evaluator, storage, None) {
             Ok((restored, restored_generation, revision)) => {
@@ -1008,6 +1073,14 @@ fn execute_workshop(
                 kprint!(
                     "candidate generation {} verified by a healthy boot\n",
                     verified
+                );
+            }
+        }
+        if let Some(kernel) = kernel.as_mut() {
+            if let Ok(Some(slot)) = kernel.healthy(storage) {
+                kprint!(
+                    "kernel slot {} verified by a healthy boot\n",
+                    slot_name(slot)
                 );
             }
         }
@@ -1221,6 +1294,16 @@ fn interactive(
             None
         }
     };
+    let mut kernel = match KernelRecovery::load(&mut storage) {
+        Ok(kernel) => {
+            report_kernel_slot(&kernel);
+            Some(kernel)
+        }
+        Err(reason) => {
+            kprint!("kernel selector unavailable: {}\n", reason);
+            None
+        }
+    };
     let (mut workspace, mut generation, mut evaluator_revision) =
         restore_from_disk(&mut evaluator, &mut storage, recovery.as_mut())
             .unwrap_or_else(|reason| failed(reason));
@@ -1326,6 +1409,7 @@ fn interactive(
                     &mut evaluator,
                     &mut storage,
                     &mut recovery,
+                    &mut kernel,
                     &mut current,
                     &mut previous,
                     &mut scene_revision,

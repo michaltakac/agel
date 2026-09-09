@@ -4,7 +4,10 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.29: the x86-64 recovery plane is on disk, binding trusted and
+The current repository is **v0.2.30: the x86-64 kernel image itself is A/B selected by the
+512-byte BIOS stage, which charges every boot of a candidate kernel before it runs and loads the
+trusted slot after three boots that never reach a healthy state, with promotion an explicit
+decision and staging a host tool; the recovery plane is on disk, binding trusted and
 candidate workspace generations, charging every boot of an unverified candidate before it runs,
 rolling a candidate that fails three boots back automatically, and taking a `health` cell evaluated
 in an isolated world as explicit evidence; the interactive workshop runs on all three research
@@ -527,6 +530,7 @@ kernel-contract transcript, and the isolation suite with:
 ./scripts/test-native-repl.sh aarch64    # the same session on the other machines
 ./scripts/test-native-repl.sh riscv64
 ./scripts/test-native-persistence.sh     # save, reboot, reject, recover
+./scripts/test-kernel-rollback.sh        # A/B kernel slots: hung candidate rolled back by the boot stage
 ./scripts/test-kernel-contract.sh
 ./scripts/test-isolation.sh              # x86-64, AArch64 and RISC-V
 ./scripts/test-isolation.sh aarch64      # or one of them

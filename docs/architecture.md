@@ -272,14 +272,21 @@ Each rung must be runnable and differentially testable against the rung below:
    is an operator decision that names what is retained for rollback. The
    record is unsigned and the diskless machines keep the in-memory policy
    model; kernel images are not yet A/B selected.
-45. **Live system:** boot-selector-backed A/B kernel images, signed
-   promotion, and watchdog-triggered rollback of the image itself, managed by
-   the recovery monitor.
-46. **POSIX personality:** a Rust C library and the filesystem and process
+45. **A/B kernel images (started at v0.2.30):** on x86-64 the BIOS stage
+   selects between two kernel slots from a nine-byte selector on disk,
+   charges each boot of an unverified candidate before the candidate runs,
+   and loads the trusted slot after three boots that never reached a healthy
+   state; the running kernel verifies itself by reaching one, and promotion
+   names the slot retained for rollback. Staging is a host tool and nothing
+   on the disk is signed.
+46. **Live system:** signed kernel images and workspace generations, so that
+   the boot stage and the recovery plane refuse what the operator's key did
+   not sign, and the same selection on the machines without a BIOS stage.
+47. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-47. **Local inference:** model inference in its own domain, over quantized
+48. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

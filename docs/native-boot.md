@@ -11,8 +11,11 @@ program headers, so those images state where they want to live and start there.
 x86-64 keeps the BIOS seed because that is where the project's native work
 began, and because a reproducible 128 KiB boot seed is a useful thing to have.
 
-1. The 512-byte BIOS stage loads 254 kernel sectors in two conservative
-   127-sector requests beginning at physical `0x10000`.
+1. The 512-byte BIOS stage reads the kernel slot selector at sector 289,
+   charges an unverified candidate one boot and writes the selector back, and
+   loads 254 kernel sectors from the chosen slot in two conservative
+   127-sector requests beginning at physical `0x10000`. It leaves the chosen
+   slot at `0x6fec` behind a marker at `0x6fe8` for the kernel.
 2. It creates identity-mapped four-level page tables for the first GiB.
 3. It enables A20, PAE, long mode, protected mode, and paging.
 4. It jumps through a 64-bit GDT entry and calls the fixed kernel entry at
@@ -24,9 +27,40 @@ began, and because a reproducible 128 KiB boot seed is a useful thing to have.
 The linker keeps `.text.entry` first so helper-function reordering cannot move
 the address called by the BIOS stage. The complete raw image is 2,048 sectors
 (1 MiB). Sectors 0 through 255 are the replaceable boot seed; the build rejects
-an oversized kernel. Sectors 256 through 287 are the two v0.1.7 workspace slots,
-sector 288 is the v0.2.29 recovery record, and rebuilding deliberately
-preserves all of them.
+an oversized kernel and is kernel slot A. Sectors 256 through 287 are the two
+v0.1.7 workspace slots, sector 288 is the v0.2.29 recovery record, sector 289
+is the v0.2.30 kernel slot selector, and sectors 290 through 543 are kernel
+slot B. Rebuilding installs the new kernel as slot A, clears the selector so
+that kernel is what boots, and preserves everything else.
+
+## Kernel slots
+
+The selector is nine bytes the 16-bit stage parses without a checksum: magic
+`AGKS`, version, trusted slot, candidate slot (`0xff` for none), boot attempts
+and a verified flag. The stage loads the trusted slot unless a candidate is
+present and either verified or still within its budget of three boots; a boot
+of an unverified candidate is counted and flushed to disk before the
+candidate's first instruction runs, so a kernel that halts, faults or never
+reaches the serial console cannot avoid the charge.
+
+```sh
+./scripts/stage-kernel.py target/boot/agel-v1.img some-kernel.bin   # candidate into the untrusted slot
+./scripts/stage-kernel.py target/boot/agel-v1.img --status
+```
+
+The running kernel reads the selector through the storage driver domain. Its
+first successful evaluation marks a booted candidate verified and prints
+`kernel slot B verified by a healthy boot`; `:kernel-status` reports the
+slots, `:kernel-promote` makes a verified candidate the trusted slot and names
+the slot retained for rollback, and `:kernel-fault` gives the candidate up so
+the next boot loads the trusted slot. When the stage has fallen back, the boot
+log begins with `watchdog fault: candidate kernel slot A failed 3 boots;
+booted trusted slot B`. `./scripts/test-kernel-rollback.sh` proves all of it,
+including three boots of a kernel that halts at its entry point.
+
+Staging is a host tool because the guest has no compiler for its own kernel.
+The selector and both slots are unsigned; a disk that lies chooses the
+kernel.
 
 ## Recovery boundary
 

@@ -42,6 +42,7 @@ jobs:
       - run: ./scripts/test-native-repl.sh aarch64
       - run: ./scripts/test-native-repl.sh riscv64
       - run: ./scripts/test-native-persistence.sh
+      - run: ./scripts/test-kernel-rollback.sh
       - run: ./scripts/test-graphics.sh
       - run: ./scripts/test-live-desktop.sh
       - run: ./scripts/test-graphical-workshop.sh

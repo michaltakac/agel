@@ -111,6 +111,9 @@ definition without rebooting the VM.
 :verify            run the `health` cell in an isolated world; admit the candidate
 :promote           make the verified candidate the trusted generation
 :fault             roll back to the trusted generation now
+:kernel-status     show which kernel slot booted, which is trusted, which is proposed
+:kernel-promote    make a kernel slot verified by a healthy boot the trusted one
+:kernel-fault      give the candidate kernel up; the next boot loads the trusted slot
 :shutdown          leave QEMU when the debug-exit device is present
 ```
 
@@ -228,6 +231,18 @@ as empty, which boots the newest generation exactly as before v0.2.29.
 The record is not signed and the disk is trusted to hold what was written; a
 malicious disk can present any record it likes. There is still one disk, two
 slots and one record, so a rollback point survives exactly one further save.
+
+## v0.2.30 kernel slots
+
+The kernel image has the same shape one level down. Sector 289 is a selector
+the BIOS stage reads before loading anything, and sectors 290 through 543 are
+a second kernel slot. `scripts/stage-kernel.py IMAGE KERNEL.bin` writes a
+candidate into whichever slot is not trusted and proposes it; the stage
+charges every boot of an unverified candidate before it runs and loads the
+trusted slot after three. The first successful evaluation after a candidate
+boot verifies it, `:kernel-promote` makes it trusted, and `:kernel-fault`
+gives it up. `:recovery` and `:kernel` show both records on the desktop.
+Details and the disk layout are in [`native-boot.md`](native-boot.md).
 
 ## v0.1.6 isolation boundary
 

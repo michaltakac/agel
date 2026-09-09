@@ -12,7 +12,10 @@
 //! bytes the storage driver domain carried.
 
 use crate::service::ServiceDomain;
-use crate::workspace::{load_record, save_record, RecoveryRecord};
+use crate::workspace::{
+    load_record, load_selector, save_record, save_selector, KernelSelector, RecoveryRecord,
+    NO_CANDIDATE,
+};
 
 /// Boots a candidate may take without reaching a healthy state before the
 /// trusted generation is booted instead.
@@ -170,5 +173,112 @@ impl LiveRecovery {
         save_record(storage, &self.record)?;
         self.rolled_back = true;
         Ok(self.record.trusted)
+    }
+}
+
+/// Where the BIOS stage leaves the slot it loaded: a marker so a stage that
+/// predates the selector is recognized, then the slot number.
+const SELECTOR_MARKER: *const u32 = 0x6fe8 as *const u32;
+const SELECTOR_SLOT: *const u8 = 0x6fec as *const u8;
+const SELECTOR_MAGIC: u32 = 0xa6e1_5107;
+
+pub fn slot_name(slot: u8) -> &'static str {
+    if slot == 0 {
+        "A"
+    } else {
+        "B"
+    }
+}
+
+/// The kernel image's own A/B state. The boot stage charges an unverified
+/// candidate's attempts and skips it after `ATTEMPT_BUDGET`; the running
+/// kernel can only report what happened, verify itself by reaching a healthy
+/// state, promote a verified candidate, or give the candidate up.
+pub struct KernelRecovery {
+    selector: KernelSelector,
+    /// The slot the boot stage loaded, or `None` when the stage is older than
+    /// the selector and loaded slot A without consulting it.
+    booted: Option<u8>,
+}
+
+impl KernelRecovery {
+    pub fn load(storage: &mut ServiceDomain) -> Result<Self, &'static str> {
+        // SAFETY: both addresses are inside the BIOS scratch area below the
+        // kernel image and the frame pool; the boot stage wrote them before
+        // entering long mode and nothing in the kernel maps or reuses them.
+        let booted = unsafe {
+            if SELECTOR_MARKER.read_volatile() == SELECTOR_MAGIC {
+                Some(SELECTOR_SLOT.read_volatile() & 1)
+            } else {
+                None
+            }
+        };
+        Ok(Self {
+            selector: load_selector(storage)?,
+            booted,
+        })
+    }
+
+    pub fn selector(&self) -> KernelSelector {
+        self.selector
+    }
+
+    pub fn booted(&self) -> Option<u8> {
+        self.booted
+    }
+
+    /// The stage loaded the trusted slot because the candidate exhausted its
+    /// budget without a healthy boot.
+    pub fn rolled_back(&self) -> bool {
+        self.booted == Some(self.selector.trusted)
+            && self.selector.candidate != NO_CANDIDATE
+            && !self.selector.verified
+            && u32::from(self.selector.attempts) >= ATTEMPT_BUDGET
+    }
+
+    /// The running kernel reached a healthy state. Only a boot of the
+    /// candidate slot itself is evidence for the candidate.
+    pub fn healthy(&mut self, storage: &mut ServiceDomain) -> Result<Option<u8>, &'static str> {
+        if self.selector.candidate == NO_CANDIDATE
+            || self.selector.verified
+            || self.booted != Some(self.selector.candidate)
+        {
+            return Ok(None);
+        }
+        self.selector.verified = true;
+        self.selector.attempts = 0;
+        save_selector(storage, &self.selector)?;
+        Ok(Some(self.selector.candidate))
+    }
+
+    /// Make the verified candidate slot the one the stage loads by default.
+    #[cfg(feature = "isolated-repl")]
+    pub fn promote(&mut self, storage: &mut ServiceDomain) -> Result<(u8, u8), &'static str> {
+        if self.selector.candidate == NO_CANDIDATE {
+            return Err("denied: no candidate kernel slot");
+        }
+        if !self.selector.verified {
+            return Err("denied: the candidate kernel has not completed a healthy boot");
+        }
+        let previous = self.selector.trusted;
+        self.selector.trusted = self.selector.candidate;
+        self.selector.candidate = NO_CANDIDATE;
+        self.selector.attempts = 0;
+        self.selector.verified = false;
+        save_selector(storage, &self.selector)?;
+        Ok((self.selector.trusted, previous))
+    }
+
+    /// Exhaust the candidate's budget so the next boot loads the trusted slot.
+    /// The candidate stays recorded, so it cannot be booted again by accident.
+    #[cfg(feature = "isolated-repl")]
+    pub fn fault(&mut self, storage: &mut ServiceDomain) -> Result<u8, &'static str> {
+        if self.selector.candidate == NO_CANDIDATE {
+            return Err("denied: no candidate kernel slot to give up");
+        }
+        self.selector.attempts = ATTEMPT_BUDGET as u8;
+        self.selector.verified = false;
+        save_selector(storage, &self.selector)?;
+        Ok(self.selector.trusted)
     }
 }

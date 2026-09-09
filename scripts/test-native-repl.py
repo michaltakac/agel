@@ -444,6 +444,146 @@ def persistence_test(image: str) -> None:
         verified.close()
 
 
+def kernel_rollback_test(image: str, kernel_path: str) -> None:
+    import importlib.util
+    import os
+
+    location = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stage-kernel.py")
+    spec = importlib.util.spec_from_file_location("stage_kernel", location)
+    assert spec is not None and spec.loader is not None
+    stage_kernel = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stage_kernel)
+    with open(kernel_path, "rb") as file:
+        good_kernel = file.read()
+    # A candidate that halts at its entry point with interrupts off: the boot
+    # stage jumps to it and nothing ever reaches the serial console.
+    broken_kernel = b"\xf4\xeb\xfd"
+
+    def selector() -> dict[str, int]:
+        return stage_kernel.read_selector(image)
+
+    # No selector on disk: slot A, nothing proposed, nothing to promote.
+    first = Harness(image, persistent=True)
+    try:
+        first.expect_until(b"AGEL_NATIVE_READY")
+        first.expect_until(b"kernel: running slot A; trusted slot A; no candidate")
+        first.expect_until(b"agel-native[0]> ")
+        first.send(":kernel-promote", "denied: no candidate kernel slot", 0)
+        first.send(":kernel-fault", "denied: no candidate kernel slot to give up", 0)
+        shutdown(first)
+    finally:
+        first.close()
+
+    # The same kernel staged as candidate B: charged one boot by the stage,
+    # verified by its first successful evaluation, then promoted.
+    assert stage_kernel.stage(image, good_kernel) == 1
+    second = Harness(image, persistent=True)
+    try:
+        second.expect_until(b"AGEL_NATIVE_READY")
+        second.expect_until(
+            b"kernel: running slot B; trusted slot A; candidate slot B (unverified, boots 1)"
+        )
+        second.expect_until(b"agel-native[0]> ")
+        second.send(
+            ":kernel-promote",
+            "denied: the candidate kernel has not completed a healthy boot",
+            0,
+        )
+        send_kernel_healthy(second, "(+ 1 1)", "2", "B", 1)
+        second.send(
+            ":kernel-status",
+            "kernel: running slot B; trusted slot A; candidate slot B (verified, boots 0)",
+            1,
+        )
+        second.send(":kernel-promote", "selected kernel slot B; slot A retained for rollback", 1)
+        second.send(":kernel-status", "kernel: running slot B; trusted slot B; no candidate", 1)
+        shutdown(second)
+    finally:
+        second.close()
+    assert selector() == {"trusted": 1, "candidate": 0xFF, "attempts": 0, "verified": 0}
+
+    # The stage now loads slot B by default.
+    third = Harness(image, persistent=True)
+    try:
+        third.expect_until(b"AGEL_NATIVE_READY")
+        third.expect_until(b"kernel: running slot B; trusted slot B; no candidate")
+        third.expect_until(b"agel-native[0]> ")
+        shutdown(third)
+    finally:
+        third.close()
+
+    # A kernel that never comes up, staged as candidate A. Three boots reach
+    # nothing; each is charged by the boot stage before the candidate runs.
+    assert stage_kernel.stage(image, broken_kernel) == 0
+    for attempt in (1, 2, 3):
+        hung = Harness(image, persistent=True)
+        try:
+            try:
+                hung.expect_until(b"AGEL_NATIVE_READY", timeout=4.0)
+            except TimeoutError:
+                pass
+            else:
+                raise RuntimeError("the halted candidate kernel reached the console")
+        finally:
+            hung.close()
+        assert selector() == {"trusted": 1, "candidate": 0, "attempts": attempt, "verified": 0}, (
+            attempt,
+            selector(),
+        )
+
+    # The fourth boot is the trusted slot, and it says why.
+    rolled = Harness(image, persistent=True)
+    try:
+        rolled.expect_until(b"AGEL_NATIVE_READY")
+        rolled.expect_until(
+            b"watchdog fault: candidate kernel slot A failed 3 boots; booted trusted slot B"
+        )
+        rolled.expect_until(
+            b"kernel: running slot B; trusted slot B; candidate slot A (unverified, boots 3); running trusted slot after watchdog rollback"
+        )
+        rolled.expect_until(b"agel-native[0]> ")
+        # A healthy trusted kernel is no evidence for the candidate.
+        rolled.send("(+ 2 2)", "4", 1)
+        rolled.send(
+            ":kernel-fault",
+            "watchdog fault: candidate kernel slot A given up; next boot loads trusted slot B",
+            1,
+        )
+        shutdown(rolled)
+    finally:
+        rolled.close()
+    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0}
+
+    # A fresh candidate in slot A gets a fresh budget and verifies itself.
+    assert stage_kernel.stage(image, good_kernel) == 0
+    revived = Harness(image, persistent=True)
+    try:
+        revived.expect_until(b"AGEL_NATIVE_READY")
+        revived.expect_until(
+            b"kernel: running slot A; trusted slot B; candidate slot A (unverified, boots 1)"
+        )
+        revived.expect_until(b"agel-native[0]> ")
+        send_kernel_healthy(revived, "(+ 1 2)", "3", "A", 1)
+        shutdown(revived)
+    finally:
+        revived.close()
+    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 0, "verified": 1}
+
+
+def send_kernel_healthy(
+    harness: Harness, line: str, expected: str, slot: str, revision: int
+) -> None:
+    """The first form evaluated after a boot verifies a candidate kernel slot."""
+    harness.send_bytes(line)
+    assert harness.process.stdin is not None
+    harness.process.stdin.write(b"\n")
+    harness.process.stdin.flush()
+    harness.expect_exact(
+        f"\r\n{expected}\r\nkernel slot {slot} verified by a healthy boot"
+        f"\r\nagel-native[{revision}]> ".encode("ascii")
+    )
+
+
 def send_healthy(
     harness: Harness, line: str, expected: str, generation: int, revision: int
 ) -> None:
@@ -491,8 +631,24 @@ def main() -> int:
     if architecture not in EXPECTED_EXIT:
         print(f"unknown architecture {architecture}", file=sys.stderr)
         return 2
+    if len(arguments) == 3 and arguments[1] == "--kernel-rollback":
+        if architecture != "x86_64":
+            print("kernel slots need the BIOS stage; only x86-64 has one", file=sys.stderr)
+            return 2
+        try:
+            kernel_rollback_test(arguments[0], arguments[2])
+        except Exception as error:
+            print(f"kernel rollback test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print("Agel kernel slots: stage -> budgeted boots -> verify, promote, rollback [ok]")
+        return 0
     if len(arguments) not in (1, 2):
-        print("usage: test-native-repl.py IMAGE [--persistence] [--arch ARCH]", file=sys.stderr)
+        print(
+            "usage: test-native-repl.py IMAGE [--persistence | --kernel-rollback KERNEL] [--arch ARCH]",
+            file=sys.stderr,
+        )
         return 2
     if len(arguments) == 2:
         if arguments[1] != "--persistence":

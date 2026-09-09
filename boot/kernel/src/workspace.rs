@@ -32,6 +32,18 @@ pub const RECOVERY_SECTOR: u32 = 288;
 const RECOVERY_MAGIC: &[u8; 8] = b"AGELRC1\0";
 #[cfg(target_arch = "x86_64")]
 const RECOVERY_VERSION: u16 = 1;
+/// The kernel slot selector follows the recovery record. The BIOS stage reads
+/// and updates it before any kernel runs, so it is nine plain bytes that
+/// 16-bit code can parse without a checksum: magic, version, trusted slot,
+/// candidate slot (`NO_CANDIDATE` for none), boot attempts, verified flag.
+#[cfg(target_arch = "x86_64")]
+pub const KERNEL_SELECTOR_SECTOR: u32 = 289;
+#[cfg(target_arch = "x86_64")]
+const KERNEL_SELECTOR_MAGIC: &[u8; 4] = b"AGKS";
+#[cfg(target_arch = "x86_64")]
+const KERNEL_SELECTOR_VERSION: u8 = 1;
+#[cfg(target_arch = "x86_64")]
+pub const NO_CANDIDATE: u8 = 0xff;
 #[cfg(target_arch = "x86_64")]
 const MAGIC: &[u8; 8] = b"AGELWS1\0";
 #[cfg(target_arch = "x86_64")]
@@ -321,6 +333,72 @@ pub fn save_record(
     flush(storage)?;
     if load_record(storage)? != *record {
         return Err("recovery record verification failed");
+    }
+    Ok(())
+}
+
+/// Which kernel slot the boot stage loads: `trusted` unless a `candidate` is
+/// present and either verified or still within its boot budget.
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KernelSelector {
+    pub trusted: u8,
+    pub candidate: u8,
+    pub attempts: u8,
+    pub verified: bool,
+}
+
+#[cfg(target_arch = "x86_64")]
+impl KernelSelector {
+    /// No selector on disk: slot A is trusted and nothing is proposed, which
+    /// is also what a boot stage that finds no selector does.
+    pub const DEFAULT: Self = Self {
+        trusted: 0,
+        candidate: NO_CANDIDATE,
+        attempts: 0,
+        verified: false,
+    };
+}
+
+/// Read the kernel slot selector. Anything the boot stage would not act on
+/// (absent, wrong version, a slot number that is not A or B) reads as the
+/// default, which is what the boot stage did with it.
+#[cfg(target_arch = "x86_64")]
+pub fn load_selector(storage: &mut ServiceDomain) -> Result<KernelSelector, &'static str> {
+    let mut sector = [0_u8; 512];
+    read_sector(storage, KERNEL_SELECTOR_SECTOR, &mut sector)?;
+    if sector[..4] != KERNEL_SELECTOR_MAGIC[..] || sector[4] != KERNEL_SELECTOR_VERSION {
+        return Ok(KernelSelector::DEFAULT);
+    }
+    let (trusted, candidate) = (sector[5], sector[6]);
+    if trusted > 1 || (candidate > 1 && candidate != NO_CANDIDATE) {
+        return Ok(KernelSelector::DEFAULT);
+    }
+    Ok(KernelSelector {
+        trusted,
+        candidate,
+        attempts: sector[7],
+        verified: sector[8] != 0,
+    })
+}
+
+/// Write and flush the selector, then read it back.
+#[cfg(target_arch = "x86_64")]
+pub fn save_selector(
+    storage: &mut ServiceDomain,
+    selector: &KernelSelector,
+) -> Result<(), &'static str> {
+    let mut sector = [0_u8; 512];
+    sector[..4].copy_from_slice(KERNEL_SELECTOR_MAGIC);
+    sector[4] = KERNEL_SELECTOR_VERSION;
+    sector[5] = selector.trusted;
+    sector[6] = selector.candidate;
+    sector[7] = selector.attempts;
+    sector[8] = u8::from(selector.verified);
+    write_sector(storage, KERNEL_SELECTOR_SECTOR, &sector)?;
+    flush(storage)?;
+    if load_selector(storage)? != *selector {
+        return Err("kernel selector verification failed");
     }
     Ok(())
 }

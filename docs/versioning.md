@@ -100,6 +100,12 @@ promise.
   automatically, and `:verify` runs a `health` cell in an isolated world. The
   workspace slot format is unchanged; the record is new and reads as empty when
   absent.
+  `v0.2.30` makes the x86-64 kernel image A/B: sector 289 is a selector the
+  BIOS stage reads, slot B at sectors 290-543 holds a candidate kernel staged
+  by `scripts/stage-kernel.py`, the stage charges each candidate boot and
+  loads the trusted slot after three, and the running kernel verifies,
+  promotes or gives up the candidate. The disk layout grows; earlier images
+  boot slot A exactly as before.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

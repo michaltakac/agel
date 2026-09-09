@@ -22,7 +22,7 @@ use crate::native_session::{
     ReplayFailure,
 };
 #[cfg(target_arch = "x86_64")]
-use crate::recovery::{BootPlan, LiveRecovery};
+use crate::recovery::{slot_name, BootPlan, KernelRecovery, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind, ServiceWriter};
 use crate::workspace::{Workspace, MAX_CELL_NAME};
 use crate::world::{shared, PAYLOAD_BYTES};
@@ -76,6 +76,19 @@ pub fn run() -> ! {
         }
         None => None,
     };
+    #[cfg(target_arch = "x86_64")]
+    let mut kernel = match storage.as_mut().map(KernelRecovery::load) {
+        Some(Ok(kernel)) => Some(kernel),
+        Some(Err(reason)) => {
+            driver_text_error(
+                &mut driver,
+                b"kernel selector unavailable: ",
+                reason.as_bytes(),
+            );
+            None
+        }
+        None => None,
+    };
     let mut revision = 0;
     let mut line = [0_u8; PAYLOAD_BYTES];
     let mut workspace = Workspace::new();
@@ -88,6 +101,8 @@ pub fn run() -> ! {
         &mut driver,
         b"Evaluator: unprivileged domain; output: restartable console domain; storage: unprivileged disk driver domain; source workspace: dual-slot disk image. Type :help.",
     );
+    #[cfg(target_arch = "x86_64")]
+    kernel_status(&mut driver, kernel.as_ref(), true);
 
     match load_replay_candidates(
         &mut evaluator,
@@ -147,7 +162,7 @@ pub fn run() -> ! {
         match source {
             b":help" => driver_line(
                 &mut driver,
-                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :shutdown",
+                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :shutdown",
             ),
             b":revision" => {
                 let mut out = ServiceWriter::new(&mut driver);
@@ -273,6 +288,42 @@ pub fn run() -> ! {
             #[cfg(not(target_arch = "x86_64"))]
             b":fault" => monitor.fault(),
             #[cfg(target_arch = "x86_64")]
+            b":kernel-status" => kernel_status(&mut driver, kernel.as_ref(), false),
+            #[cfg(target_arch = "x86_64")]
+            b":kernel-promote" => match (storage.as_mut(), kernel.as_mut()) {
+                (Some(storage), Some(kernel)) => match kernel.promote(storage) {
+                    Ok((selected, previous)) => {
+                        let mut out = ServiceWriter::new(&mut driver);
+                        let _ = writeln!(
+                            out,
+                            "selected kernel slot {}; slot {} retained for rollback",
+                            slot_name(selected),
+                            slot_name(previous)
+                        );
+                        out.flush();
+                    }
+                    Err(reason) => driver_line(&mut driver, reason.as_bytes()),
+                },
+                _ => driver_line(&mut driver, b"denied: kernel selector unavailable"),
+            },
+            #[cfg(target_arch = "x86_64")]
+            b":kernel-fault" => match (storage.as_mut(), kernel.as_mut()) {
+                (Some(storage), Some(kernel)) => match kernel.fault(storage) {
+                    Ok(trusted) => {
+                        let mut out = ServiceWriter::new(&mut driver);
+                        let _ = writeln!(
+                            out,
+                            "watchdog fault: candidate kernel slot {} given up; next boot loads trusted slot {}",
+                            slot_name(kernel.selector().candidate),
+                            slot_name(trusted)
+                        );
+                        out.flush();
+                    }
+                    Err(reason) => driver_line(&mut driver, reason.as_bytes()),
+                },
+                _ => driver_line(&mut driver, b"denied: kernel selector unavailable"),
+            },
+            #[cfg(target_arch = "x86_64")]
             b":recovery-status" => recovery_status(&mut driver, recovery.as_ref()),
             #[cfg(target_arch = "x86_64")]
             b":verify" => recovery_verify(
@@ -389,6 +440,18 @@ pub fn run() -> ! {
                                 let _ = writeln!(
                                     out,
                                     "candidate generation {verified} verified by a healthy boot"
+                                );
+                                out.flush();
+                            }
+                        }
+                        if let (Some(kernel), Some(storage)) = (kernel.as_mut(), storage.as_mut())
+                        {
+                            if let Ok(Some(slot)) = kernel.healthy(storage) {
+                                let mut out = ServiceWriter::new(&mut driver);
+                                let _ = writeln!(
+                                    out,
+                                    "kernel slot {} verified by a healthy boot",
+                                    slot_name(slot)
                                 );
                                 out.flush();
                             }
@@ -632,6 +695,59 @@ fn report_workspace(driver: &mut ServiceDomain, count: usize, generation: u64, d
         "workspace generation {generation}, {count} cells, {}",
         if dirty { "staged changes" } else { "clean" }
     );
+    out.flush();
+}
+
+/// One line for the kernel's own A/B state, printed at boot and on demand.
+#[cfg(target_arch = "x86_64")]
+fn kernel_status(driver: &mut ServiceDomain, kernel: Option<&KernelRecovery>, booting: bool) {
+    let Some(kernel) = kernel else {
+        driver_line(driver, b"kernel: selector unavailable");
+        return;
+    };
+    let Some(booted) = kernel.booted() else {
+        driver_line(
+            driver,
+            b"kernel: boot stage has no slot selector; slot A loaded",
+        );
+        return;
+    };
+    let selector = kernel.selector();
+    let mut out = ServiceWriter::new(driver);
+    if booting && kernel.rolled_back() {
+        let _ = writeln!(
+            out,
+            "watchdog fault: candidate kernel slot {} failed {} boots; booted trusted slot {}",
+            slot_name(selector.candidate),
+            selector.attempts,
+            slot_name(selector.trusted)
+        );
+    }
+    let _ = write!(
+        out,
+        "kernel: running slot {}; trusted slot {}",
+        slot_name(booted),
+        slot_name(selector.trusted)
+    );
+    if selector.candidate == crate::workspace::NO_CANDIDATE {
+        let _ = write!(out, "; no candidate");
+    } else {
+        let _ = write!(
+            out,
+            "; candidate slot {} ({}, boots {})",
+            slot_name(selector.candidate),
+            if selector.verified {
+                "verified"
+            } else {
+                "unverified"
+            },
+            selector.attempts
+        );
+    }
+    if kernel.rolled_back() {
+        let _ = write!(out, "; running trusted slot after watchdog rollback");
+    }
+    let _ = writeln!(out);
     out.flush();
 }
 

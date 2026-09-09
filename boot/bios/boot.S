@@ -41,18 +41,57 @@ _start:
     movl $0xa6e10fb0, 0x6ff0
 graphics_done:
 
-    # Load the kernel in two conservative 127-sector BIOS transfers. One DAP
-    # request is deliberately kept below the common firmware limit; together
-    # they leave 127 KiB for the isolated evaluator without making the seed
-    # depend on a filesystem.
+    # Kernel slot selection. Sector 289 is the selector: "AGKS", version,
+    # trusted slot, candidate slot (0xff none), boot attempts, verified flag.
+    # An unverified candidate is charged one attempt here, before any of it
+    # runs, and after three it is skipped for the trusted slot. The chosen
+    # slot is left at 0x6fec behind a marker at 0x6fe8 for the kernel.
     movw $disk_packet, %si
     movb boot_drive, %dl
     movb $0x42, %ah
     int $0x13
     jc disk_error
+    xorw %bx, %bx
+    cmpl $0x534b4741, 0x6000
+    jne select_done
+    movb 0x6005, %bl
+    movb 0x6006, %al
+    cmpb $0xff, %al
+    je select_done
+    cmpb $0, 0x6008
+    jne select_candidate
+    cmpb $3, 0x6007
+    jae select_done
+    incb 0x6007
+    movw $0x4300, %ax
+    int $0x13
+    jc disk_error
+    movb 0x6006, %al
+select_candidate:
+    movb %al, %bl
+select_done:
+    movb %bl, 0x6fec
+    movl $0xa6e15107, 0x6fe8
+
+    # Load the kernel in two conservative 127-sector BIOS transfers from the
+    # chosen slot: slot A begins at sector 1, slot B at sector 290. One DAP
+    # request is deliberately kept below the common firmware limit; together
+    # they leave 127 KiB for the isolated evaluator without making the seed
+    # depend on a filesystem.
+    movw $1, %ax
+    testb %bl, %bl
+    jz base_done
+    movw $290, %ax
+base_done:
+    movw %ax, disk_packet + 8
+    movw $127, disk_packet + 2
+    movw $0, disk_packet + 4
+    movw $0x1000, disk_packet + 6
+    movb $0x42, %ah
+    int $0x13
+    jc disk_error
     movw $0x1fe0, disk_packet + 6
-    movl $128, disk_packet + 8
-    movb boot_drive, %dl
+    addw $127, disk_packet + 8
     movb $0x42, %ah
     int $0x13
     jc disk_error
@@ -136,10 +175,10 @@ gdt_pointer:
 .align 4
 disk_packet:
     .byte 0x10, 0
-    .word 127
+    .word 1
+    .word 0x6000
     .word 0
-    .word 0x1000
-    .quad 1
+    .quad 289
 
 .org 510
 .word 0xaa55

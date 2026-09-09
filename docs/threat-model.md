@@ -670,6 +670,35 @@ slots, so exactly one earlier generation is ever retained. The kernel image
 itself is not A/B selected, the diskless machines keep the in-memory policy
 model, and the graphical workshop only reads the record.
 
+## v0.2.30
+
+- **A kernel that cannot be rolled back:** a workspace generation could be
+  rolled back by the kernel, but a kernel image that faults at its entry or
+  halts before the serial console had no one above it to notice. The BIOS
+  stage is now that layer: it charges an unverified candidate's boot and
+  flushes the selector before jumping to it, so nothing the candidate does or
+  fails to do can avoid the charge, and after three it loads the trusted slot.
+- **A candidate that vouches for itself:** verification is the running
+  kernel's first successful evaluation, recorded only when the slot that
+  booted is the candidate; a healthy boot of the trusted slot after a
+  rollback marks nothing.
+- **A rebuild that quietly boots the old kernel:** `build-boot.sh` writes the
+  kernel to slot A and clears the selector, so a developer who rebuilds is
+  running what they built rather than a promoted slot B from an earlier
+  session.
+- **Logic in 16-bit real mode:** the selector is nine plain bytes and the
+  stage's decision is a handful of compares; a malformed selector (unknown
+  version, a slot that is not A or B) is treated as absent by the stage and
+  read as the default by the kernel, so they cannot disagree about which
+  slot ran.
+
+Not claimed: the selector and both kernel slots are unsigned, so a disk that
+lies chooses the kernel; there is no cryptographic root before the BIOS stage.
+Staging is a host tool; the guest cannot build a kernel. Slot B exists only
+on x86-64, where the BIOS stage is. The stage does not verify the loaded
+sectors, and a kernel that reaches the console and then misbehaves is judged
+only by whether it evaluates a form.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a
