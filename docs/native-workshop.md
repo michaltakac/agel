@@ -49,9 +49,13 @@ persisted definition stores as one explicit `begin` sequence. Bindings from
 parameters and `let` share the eight bounded local slots that `:limits`
 reports. Named functions resolve globals at call time, enabling top-level
 recursion. Immediate lambdas capture bounded scalar lexical parameters, so
-`(((fn (x) (fn (y) (+ x y))) 40) 2)` evaluates to `42`. A lambda created inside
-a lexical call cannot yet be persisted by `def`; this is rejected rather than
-silently losing its captures. Function-valued captures are also deferred.
+`(((fn (x) (fn (y) (+ x y))) 40) 2)` evaluates to `42`. Since v0.2.37 a
+lambda created inside a lexical call can be persisted by `def`, and a lambda
+that escapes a stored function becomes a stored function itself: the closure
+carries its captured scalars, up to the eight local slots, and
+`(def add40 ((fn (x) (fn (y) (+ x y))) 40))` then `(add40 2)` is `42`. A
+parameter shadows a capture of the same name. Function-valued captures are
+still refused rather than silently dropped.
 The scene and agent primitives are specified in [`native-scenes.md`](native-scenes.md),
 [`native-agents.md`](native-agents.md) and [`native-workbench.md`](native-workbench.md).
 

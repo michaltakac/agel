@@ -225,6 +225,9 @@ struct Function {
     parameters: [Name; MAX_PARAMS],
     body_length: u16,
     body: [u8; MAX_BODY],
+    /// Scalars captured from the lexical context the function was made in,
+    /// bound before the body runs; a parameter of the same name shadows one.
+    captures: [CapturedLocal; MAX_LOCALS],
 }
 
 impl Function {
@@ -233,13 +236,20 @@ impl Function {
         parameters: [Name::EMPTY; MAX_PARAMS],
         body_length: 0,
         body: [0; MAX_BODY],
+        captures: [CapturedLocal::EMPTY; MAX_LOCALS],
     };
 }
 
+// An explicit tag with `Empty` as zero: with a niche available inside
+// `Function` (a captured local's `used` flag), Rust would otherwise encode
+// `Empty` as a non-zero byte there, and an empty binding, hence the empty
+// world, would no longer be all-zero bytes. The three world banks are
+// zero-filled at boot because of exactly that property; see `Scalar`.
+#[repr(u8)]
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy)]
 enum StoredValue {
-    Empty,
+    Empty = 0,
     Scalar(Scalar),
     Function(Function),
 }
@@ -806,10 +816,13 @@ fn parse_integer(bytes: &[u8]) -> Option<i64> {
     Some(value)
 }
 
+// Explicitly tagged for the same reason as `StoredValue`: the empty local
+// slot must stay all-zero bytes.
+#[repr(u8)]
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy)]
 enum RuntimeValue {
-    Scalar(Scalar),
+    Scalar(Scalar) = 0,
     Function(Function),
     Lambda {
         node: u16,
@@ -1328,12 +1341,7 @@ fn evaluate_def(
     let stored = match value {
         RuntimeValue::Scalar(scalar) => StoredValue::Scalar(scalar),
         RuntimeValue::Lambda { node, captures } => {
-            if captures.iter().any(|capture| capture.used) {
-                return Err(Error(
-                    "persisted native closures cannot capture lexical state yet",
-                ));
-            }
-            StoredValue::Function(capture_function(document, source, node)?)
+            StoredValue::Function(capture_function(document, source, node, &captures)?)
         }
         RuntimeValue::Function(function) => StoredValue::Function(function),
         RuntimeValue::Builtin(_) => return Err(Error("native builtins cannot be rebound")),
@@ -1451,11 +1459,18 @@ fn validate_lambda(document: &Document, source: &[u8], fn_node: u16) -> Result<(
     Ok(())
 }
 
-fn capture_function(document: &Document, source: &[u8], fn_node: u16) -> Result<Function, Error> {
+#[inline(never)]
+fn capture_function(
+    document: &Document,
+    source: &[u8],
+    fn_node: u16,
+    captures: &[CapturedLocal; MAX_LOCALS],
+) -> Result<Function, Error> {
     validate_lambda(document, source, fn_node)?;
     let parameters = child_after(document, fn_node)?;
     let body_node = child_after(document, parameters)?;
     let mut function = Function::EMPTY;
+    function.captures = *captures;
     if document.nodes[body_node as usize].next == NONE {
         let body_source = node_bytes(document, source, body_node);
         if body_source.len() > MAX_BODY {
@@ -1513,6 +1528,7 @@ fn apply_stored_function(
             value,
         };
     }
+    bind_captures(&mut locals, &function.captures)?;
     let source = &function.body[..function.body_length as usize];
     let document = Parser::parse(source)?;
     let result = evaluate_node(
@@ -1524,8 +1540,13 @@ fn apply_stored_function(
         depth + 1,
         fuel,
     )?;
-    if matches!(result, RuntimeValue::Lambda { .. }) {
-        return Err(Error("ephemeral value escaped a stored function"));
+    // A lambda leaving a stored function keeps its captures by becoming a
+    // stored function itself; its syntax lives in this function's body, so
+    // it is captured here, while that body is still in scope.
+    if let RuntimeValue::Lambda { node, captures } = result {
+        return Ok(RuntimeValue::Function(capture_function(
+            &document, source, node, &captures,
+        )?));
     }
     Ok(result)
 }
@@ -1566,6 +1587,18 @@ fn apply_lambda(
     if position != arguments.len() {
         return Err(Error("native lambda arity mismatch"));
     }
+    bind_captures(&mut locals, captures)?;
+    evaluate_sequence(document, source, body, world, &locals, depth, fuel)
+}
+
+/// Bind captured scalars after the parameters, so a parameter shadows a
+/// capture of the same name. Shared by lambdas applied in place and stored
+/// functions, and kept out of line so the image carries it once.
+#[inline(never)]
+fn bind_captures(
+    locals: &mut [Local; MAX_LOCALS],
+    captures: &[CapturedLocal; MAX_LOCALS],
+) -> Result<(), Error> {
     for captured in captures.iter().filter(|local| local.used) {
         if locals
             .iter()
@@ -1583,7 +1616,7 @@ fn apply_lambda(
             value: RuntimeValue::Scalar(captured.value),
         };
     }
-    evaluate_sequence(document, source, body, world, &locals, depth, fuel)
+    Ok(())
 }
 
 fn apply_builtin(
@@ -3115,6 +3148,45 @@ mod tests {
         assert!(session.evaluate(b"(run 33)").is_err());
         assert!(session.evaluate(b"(run -1)").is_err());
         assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(8));
+    }
+
+    #[test]
+    fn stored_functions_keep_their_captures() {
+        let mut session = Session::new();
+        assert_eq!(
+            eval(&mut session, "(def add40 ((fn (x) (fn (y) (+ x y))) 40))"),
+            Value::Function
+        );
+        assert_eq!(eval(&mut session, "(add40 2)"), Value::Int(42));
+        // A parameter shadows a capture of the same name.
+        assert_eq!(
+            eval(&mut session, "(def shadow ((fn (x) (fn (x) (+ x 1))) 40))"),
+            Value::Function
+        );
+        assert_eq!(eval(&mut session, "(shadow 1)"), Value::Int(2));
+        // A lambda escaping a stored function is stored with its captures.
+        eval(&mut session, "(def make-adder (fn (n) (fn (m) (+ n m))))");
+        assert_eq!(eval(&mut session, "((make-adder 5) 6)"), Value::Int(11));
+        assert_eq!(
+            eval(&mut session, "(def add5 (make-adder 5))"),
+            Value::Function
+        );
+        assert_eq!(eval(&mut session, "(add5 7)"), Value::Int(12));
+        // Captures are values fixed when the closure was made.
+        eval(&mut session, "(def base 1)");
+        eval(
+            &mut session,
+            "(def from-base (let ((b base)) (fn (m) (+ b m))))",
+        );
+        eval(&mut session, "(def base 100)");
+        assert_eq!(eval(&mut session, "(from-base 1)"), Value::Int(2));
+        // Function-valued captures are still refused, not dropped.
+        assert_eq!(
+            session.evaluate(b"(def compose ((fn (f) (fn (x) (f x))) add40))"),
+            Err(Error(
+                "native closures currently capture scalar values only"
+            ))
+        );
     }
 
     #[test]

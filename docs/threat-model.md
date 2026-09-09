@@ -858,6 +858,33 @@ slot, at which point a handle from 256 occupants ago would be accepted; the
 bound is stated rather than hidden, and the hosted runtime has no such wrap.
 Actors still share the evaluator's globals and one protection domain.
 
+## v0.2.37
+
+- **A closure the evaluator refused to keep:** `def` of a lambda made inside
+  a lexical call, and a lambda escaping a stored function, were refused
+  because a stored function had nowhere to put captured values and silently
+  dropping them would have changed meaning. A stored function now carries up
+  to eight captured scalars, bound before its body runs, with a parameter of
+  the same name shadowing a capture.
+- **A capture that is not a value:** capturing a function is still refused
+  with the same message as before, because a function is source plus
+  captures and storing one inside another has no bound yet.
+- **A bigger world:** each stored function grows by the eight captures, so a
+  world is about 39 KB and the three transactional banks plus checkpoints
+  stay well inside the evaluator domain's 512 KiB stack; `:limits` is
+  unchanged.
+
+- **An image that grew 45 KB from one boolean:** the empty world must be
+  all-zero bytes so the banks are zero-filled rather than carried in the
+  image, and a niche inside the new capture field let the compiler encode an
+  enum tag as a non-zero byte there. Explicit zero tags on the two enums
+  restore the property, and the budget check in the build script is what
+  caught it.
+
+Not claimed: captures are copied at creation, so a closure sees the values
+its lexical context had then, not later assignments, which is what lexical
+capture of immutable locals means here; nothing about authority changed.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

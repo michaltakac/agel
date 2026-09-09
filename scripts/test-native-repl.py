@@ -1025,6 +1025,12 @@ def main() -> int:
         harness.send("(def revived (spawn fragile 3))", "#<native-agent:2.1>", 47)
         harness.send("(agent-state revived)", "3", 48)
         harness.send("(agent-count)", "2", 49)
+        # Stored functions keep their captures: a closure made in a lexical
+        # call can be defined, and one escaping a stored function is kept.
+        harness.send("(def add40 ((fn (x) (fn (y) (+ x y))) 40))", "#<native-function>", 50)
+        harness.send("(add40 2)", "42", 51)
+        harness.send("(def make-adder (fn (n) (fn (m) (+ n m))))", "#<native-function>", 52)
+        harness.send("((make-adder 5) 6)", "11", 53)
 
         assert harness.process.stdin is not None
         for byte in b":shutdown":

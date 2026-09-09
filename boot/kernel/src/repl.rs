@@ -183,9 +183,12 @@ pub fn native_selftest() -> ! {
         && expect_int(&mut session, b"(((fn (x) (fn (y) (+ x y))) 40) 2)", 42)
         && session.evaluate(b"(def + 9)").is_err()
         && session.evaluate(b"(fn (x x) x)").is_err()
+        // Since v0.2.37 a closure made inside a lexical call can be defined:
+        // the stored function carries its captured scalar.
         && session
             .evaluate(b"((fn (x) (def add-x (fn (y) (+ x y)))) 40)")
-            .is_err()
+            .is_ok()
+        && expect_int(&mut session, b"(add-x 2)", 42)
         && session.evaluate(b"(def f (fn (x) 1))").is_ok()
         && expect_int(&mut session, b"(f (begin (def f (fn (x) 2)) 0))", 1)
         && session.evaluate(b"(def square (fn (x) (* x x)))").is_ok()

@@ -132,6 +132,10 @@ promise.
   stale one is refused, and a reused slot prints as `#<native-agent:N.G>`.
   Agent handles widen from one byte to two inside the evaluator; images and
   the workspace format are unchanged.
+  `v0.2.37` lets stored native functions carry captured scalars: a closure
+  made inside a lexical call can be persisted by `def`, and a lambda escaping
+  a stored function is stored rather than refused. Function-valued captures
+  are still refused. No image or workspace format change.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
