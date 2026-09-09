@@ -69,6 +69,11 @@ promise.
   policy broker, the Common Lisp reference and `agel/meta` cover maps and text,
   and the freestanding evaluator gains `let`, variadic arithmetic and
   multi-form functions. No kernel-contract, image-format or wire change.
+  `v0.2.23` gives the freestanding evaluator strings, symbols, lists and maps
+  as values in a bounded heap with commit-boundary copying collection, the
+  hosted list/map/text builtins, structural equality and data-carrying native
+  agent messages. Quoted data now persists in native globals. The shared-page
+  protocol, source-cell format and kernel contract are unchanged.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

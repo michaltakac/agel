@@ -363,8 +363,8 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
                     evaluator_u64(page, &mut response_length, u64::from(id));
                     evaluator_push(page, &mut response_length, b'>');
                 },
-                Ok(crate::native::Value::Code { .. }) => unsafe {
-                    evaluator_text(page, &mut response_length, b"#<native-code>")
+                Ok(crate::native::Value::Data) => unsafe {
+                    evaluator_text(page, &mut response_length, session.result())
                 },
                 Ok(crate::native::Value::Function) => unsafe {
                     evaluator_text(page, &mut response_length, b"#<native-function>")

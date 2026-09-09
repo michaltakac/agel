@@ -113,7 +113,7 @@ Use `:reload` to reconstruct the last saved source workspace.
   shapes occlude rather than forwarding clicks through themselves.
 - `(scene-owner identity)` returns that shape's agent.
 - `(agent-become agent behavior)` replaces behavior at an operator boundary,
-  retaining scalar state, queued messages and turn count. Behaviors cannot call
+  retaining state, queued messages and turn count. Behaviors cannot call
   it from inside an agent turn. It does not supply general state migration.
 
 Identity is explicit, not a framebuffer address or drawing-array index. The

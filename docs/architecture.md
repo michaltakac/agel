@@ -225,13 +225,21 @@ Each rung must be runnable and differentially testable against the rung below:
    inference is conservative over first-class builtins. The Common Lisp
    reference and `agel/meta` cover maps and text, and the freestanding
    evaluator gains `let`, variadic arithmetic and multi-form functions.
-38. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+38. **Native data (complete at v0.2.23):** the freestanding evaluator gains
+   strings, symbols, lists and insertion-ordered maps as first-class values in
+   a bounded heap inside the transactional world, with the hosted seed's list,
+   map and text builtins, structural equality, quoted data that persists in
+   globals and travels in agent messages, and a copying collector at every
+   commit boundary. This is the first precondition for running the Agel-written
+   reader and compiler inside the OS; their working sets still exceed the
+   fixed native bounds.
+39. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-39. **POSIX personality:** a Rust C library and the filesystem and process
+40. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-40. **Local inference:** model inference in its own domain, over quantized
+41. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

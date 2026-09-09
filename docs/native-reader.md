@@ -54,8 +54,10 @@ copying; the seed charges fuel and enforces its collection-length limit. These
 are runtime mechanisms, not calls to Rust's reader or integer parser. Existing
 `count` semantics and the frozen kernel ABI are unchanged. Since v0.2.22 the
 Common Lisp reference and the Agel-written `agel/meta` evaluator implement the
-same five primitives and are checked against the seed on a shared corpus; the
-freestanding evaluator still has no string values at all.
+same five primitives and are checked against the seed on a shared corpus, and
+since v0.2.23 the freestanding evaluator implements them over its bounded text
+arena as well. The reader and compiler themselves still exceed the native
+world's fixed bounds, so the toolchain does not yet run in the guest.
 
 ## Limits and performance
 

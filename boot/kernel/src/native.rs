@@ -18,6 +18,10 @@ const MAX_AGENTS: usize = 8;
 const MAX_MAILBOX: usize = 8;
 const MAX_RUN_TURNS: usize = 32;
 const MAX_SCENE_RECTS: usize = 12;
+const MAX_CELLS: usize = 384;
+const MAX_TEXT: usize = 2048;
+/// Rendered result bytes retained for the frontends; one shared-page payload.
+const RESULT_BYTES: usize = 256;
 const NONE: u16 = u16::MAX;
 
 /// Every fixed native resource bound, named and reported from the constants the
@@ -38,27 +42,135 @@ pub const LIMITS: &[(&str, u64)] = &[
     ("mailbox", MAX_MAILBOX as u64),
     ("run-turns", MAX_RUN_TURNS as u64),
     ("scene-rects", MAX_SCENE_RECTS as u64),
+    ("cells", MAX_CELLS as u64),
+    ("text", MAX_TEXT as u64),
 ];
 
+/// A result as the frontends see it. Data values (strings, symbols, lists,
+/// maps) live in the world heap and are reported through the session's
+/// rendered result text rather than as a handle that could outlive a commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Value {
     Int(i64),
     Bool(bool),
     Nil,
     Agent(u8),
-    Code { start: u16, end: u16 },
+    Data,
     Function,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Error(pub &'static str);
 
+/// Every value an agent state, mailbox slot, binding or heap cell may hold.
+/// Heap handles are indices into the owning world's bounded heap, so copying a
+/// world copies the values with it and rollback restores them together.
+/// `Nil` is declared first so that an empty cell, slot, binding and heap is
+/// all-zero bytes. The image then zero-fills the three world banks at boot
+/// instead of carrying three non-zero copies of them in its read-only data,
+/// which is what keeps the kernel inside the 254-sector BIOS load.
 #[derive(Clone, Copy)]
 enum Scalar {
+    Nil,
     Int(i64),
     Bool(bool),
-    Nil,
     Agent(u8),
+    Text {
+        start: u16,
+        len: u16,
+    },
+    Symbol {
+        start: u16,
+        len: u16,
+    },
+    List(u16),
+    /// Alternating key/value chain of cells; `NONE` is the empty map.
+    Map(u16),
+}
+
+#[derive(Clone, Copy)]
+struct Cell {
+    car: Scalar,
+    cdr: Scalar,
+}
+
+impl Cell {
+    const EMPTY: Self = Self {
+        car: Scalar::Nil,
+        cdr: Scalar::Nil,
+    };
+}
+
+/// The fixed-memory data heap: a cons-cell arena and an immutable text arena.
+/// Allocation only appends; a copying collection at each commit boundary keeps
+/// exactly the reachable cells and bytes.
+#[derive(Clone, Copy)]
+struct Heap {
+    cells: [Cell; MAX_CELLS],
+    cell_count: u16,
+    text: [u8; MAX_TEXT],
+    text_len: u16,
+}
+
+impl Heap {
+    const EMPTY: Self = Self {
+        cells: [Cell::EMPTY; MAX_CELLS],
+        cell_count: 0,
+        text: [0; MAX_TEXT],
+        text_len: 0,
+    };
+
+    fn cons(&mut self, car: Scalar, cdr: Scalar) -> Result<u16, Error> {
+        if self.cell_count as usize == MAX_CELLS {
+            return Err(Error("native heap cells exhausted"));
+        }
+        let index = self.cell_count;
+        self.cells[index as usize] = Cell { car, cdr };
+        self.cell_count += 1;
+        Ok(index)
+    }
+
+    fn cell(&self, index: u16) -> Cell {
+        self.cells[index as usize]
+    }
+
+    fn bytes(&self, start: u16, len: u16) -> &[u8] {
+        &self.text[start as usize..start as usize + len as usize]
+    }
+
+    fn reserve_text(&mut self, len: usize) -> Result<u16, Error> {
+        if len > MAX_TEXT - self.text_len as usize {
+            return Err(Error("native text arena exhausted"));
+        }
+        let start = self.text_len;
+        self.text_len += len as u16;
+        Ok(start)
+    }
+
+    fn alloc_text(&mut self, bytes: &[u8]) -> Result<(u16, u16), Error> {
+        let start = self.reserve_text(bytes.len())?;
+        self.text[start as usize..start as usize + bytes.len()].copy_from_slice(bytes);
+        Ok((start, bytes.len() as u16))
+    }
+
+    /// Symbols are interned by content so repeated quoting does not consume
+    /// the arena; any existing equal byte run is a valid home for a symbol.
+    fn intern(&mut self, bytes: &[u8]) -> Result<Scalar, Error> {
+        let len = self.text_len as usize;
+        if !bytes.is_empty() && bytes.len() <= len {
+            if let Some(start) = self.text[..len]
+                .windows(bytes.len())
+                .position(|window| window == bytes)
+            {
+                return Ok(Scalar::Symbol {
+                    start: start as u16,
+                    len: bytes.len() as u16,
+                });
+            }
+        }
+        let (start, len) = self.alloc_text(bytes)?;
+        Ok(Scalar::Symbol { start, len })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -159,6 +271,7 @@ impl Agent {
 
 #[derive(Clone, Copy)]
 struct World {
+    heap: Heap,
     bindings: [Binding; MAX_BINDINGS],
     agents: [Agent; MAX_AGENTS],
     scheduler_cursor: u8,
@@ -171,6 +284,7 @@ struct World {
 
 impl World {
     const EMPTY: Self = Self {
+        heap: Heap::EMPTY,
         bindings: [Binding::EMPTY; MAX_BINDINGS],
         agents: [Agent::EMPTY; MAX_AGENTS],
         scheduler_cursor: 0,
@@ -212,6 +326,8 @@ pub struct Session {
     has_previous: bool,
     revision: u64,
     candidate_revision: Option<u64>,
+    result: [u8; RESULT_BYTES],
+    result_length: u16,
 }
 
 impl Session {
@@ -244,7 +360,17 @@ impl Session {
             has_previous: false,
             revision: 0,
             candidate_revision: None,
+            result: [0; RESULT_BYTES],
+            result_length: 0,
         }
+    }
+
+    /// The last successful evaluation's value, rendered in Agel syntax. Data
+    /// values are rendered before the commit-time collection so that a result
+    /// need not be a heap root to be reported.
+    #[cfg(not(feature = "native-selftest"))]
+    pub fn result(&self) -> &[u8] {
+        &self.result[..self.result_length as usize]
     }
 
     pub fn evaluate(&mut self, source: &[u8]) -> Result<Value, Error> {
@@ -256,7 +382,10 @@ impl Session {
         self.scratch = self.active;
         let result = evaluate_source(&mut self.scratch, source);
         match result {
-            Ok(value) => {
+            Ok((value, scalar)) => {
+                self.result_length =
+                    render_result(scalar, &self.scratch.heap, &mut self.result) as u16;
+                collect(&mut self.scratch)?;
                 mem::swap(&mut self.previous, &mut self.active);
                 mem::swap(&mut self.active, &mut self.scratch);
                 self.has_previous = true;
@@ -273,6 +402,7 @@ impl Session {
         self.candidate_revision = None;
         self.scratch = self.active;
         evaluate_source(&mut self.scratch, source)?;
+        collect(&mut self.scratch)?;
         if self
             .scratch
             .agents
@@ -322,6 +452,7 @@ impl Session {
         }
         self.candidate_revision = None;
         evaluate_source(&mut self.scratch, source)?;
+        collect(&mut self.scratch)?;
         if self.scratch.agents.iter().any(|agent| agent.faulted) {
             return Err(Error("source candidate agent turn failed"));
         }
@@ -403,6 +534,9 @@ enum NodeKind {
     Bool(bool),
     Nil,
     Quote,
+    /// A string literal; `start..end` spans the quotes and escapes are decoded
+    /// when the literal is evaluated into the heap.
+    Text,
 }
 
 #[derive(Clone, Copy)]
@@ -485,6 +619,7 @@ impl<'a> Parser<'a> {
         match self.source.get(self.position).copied() {
             Some(b'(') => self.list(depth + 1),
             Some(b')') => Err(Error("unexpected closing parenthesis")),
+            Some(b'"') => self.text(),
             Some(b'\'') => {
                 self.position += 1;
                 let child = self.expression(depth + 1)?;
@@ -535,10 +670,41 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn text(&mut self) -> Result<u16, Error> {
+        let start = self.position;
+        self.position += 1;
+        loop {
+            match self.source.get(self.position).copied() {
+                None => return Err(Error("unterminated string")),
+                Some(b'"') => {
+                    self.position += 1;
+                    break;
+                }
+                Some(b'\\') => {
+                    if !matches!(
+                        self.source.get(self.position + 1).copied(),
+                        Some(b'n' | b'r' | b't' | b'\\' | b'"')
+                    ) {
+                        return Err(Error("invalid string escape"));
+                    }
+                    self.position += 2;
+                }
+                Some(_) => self.position += 1,
+            }
+        }
+        self.document.allocate(Node {
+            kind: NodeKind::Text,
+            first: NONE,
+            next: NONE,
+            start: start as u16,
+            end: self.position as u16,
+        })
+    }
+
     fn atom(&mut self) -> Result<u16, Error> {
         let start = self.position;
         while let Some(byte) = self.source.get(self.position).copied() {
-            if byte.is_ascii_whitespace() || matches!(byte, b'(' | b')' | b';') {
+            if byte.is_ascii_whitespace() || matches!(byte, b'(' | b')' | b';' | b'"') {
                 break;
             }
             self.position += 1;
@@ -617,7 +783,6 @@ fn parse_integer(bytes: &[u8]) -> Option<i64> {
 #[derive(Clone, Copy)]
 enum RuntimeValue {
     Scalar(Scalar),
-    Code(u16),
     Function(Function),
     Lambda {
         node: u16,
@@ -642,6 +807,23 @@ enum Builtin {
     Equal,
     Less,
     Eval,
+    ListOf,
+    Cons,
+    Car,
+    Cdr,
+    Count,
+    Dict,
+    Get,
+    HasKey,
+    Assoc,
+    Dissoc,
+    Keys,
+    TypeOf,
+    TextBytes,
+    TextByte,
+    TextSlice,
+    TextConcat,
+    TextSymbol,
     Spawn,
     Send,
     Step,
@@ -705,7 +887,7 @@ fn capture_locals(locals: &[Local; MAX_LOCALS]) -> Result<[CapturedLocal; MAX_LO
     Ok(captures)
 }
 
-fn evaluate_source(world: &mut World, source: &[u8]) -> Result<Value, Error> {
+fn evaluate_source(world: &mut World, source: &[u8]) -> Result<(Value, Option<Scalar>), Error> {
     if source.len() > u16::MAX as usize {
         return Err(Error("native source is too long"));
     }
@@ -720,25 +902,228 @@ fn evaluate_source(world: &mut World, source: &[u8]) -> Result<Value, Error> {
         0,
         &mut fuel,
     )?;
-    public_value(runtime, &document)
+    Ok(public_value(runtime))
 }
 
-fn public_value(value: RuntimeValue, document: &Document) -> Result<Value, Error> {
+fn public_value(value: RuntimeValue) -> (Value, Option<Scalar>) {
     match value {
-        RuntimeValue::Scalar(Scalar::Int(value)) => Ok(Value::Int(value)),
-        RuntimeValue::Scalar(Scalar::Bool(value)) => Ok(Value::Bool(value)),
-        RuntimeValue::Scalar(Scalar::Nil) => Ok(Value::Nil),
-        RuntimeValue::Scalar(Scalar::Agent(id)) => Ok(Value::Agent(id)),
-        RuntimeValue::Code(node) => {
-            let node = document.nodes[node as usize];
-            Ok(Value::Code {
-                start: node.start,
-                end: node.end,
-            })
-        }
+        RuntimeValue::Scalar(Scalar::Int(value)) => (Value::Int(value), None),
+        RuntimeValue::Scalar(Scalar::Bool(value)) => (Value::Bool(value), None),
+        RuntimeValue::Scalar(Scalar::Nil) => (Value::Nil, None),
+        RuntimeValue::Scalar(Scalar::Agent(id)) => (Value::Agent(id), None),
+        RuntimeValue::Scalar(data) => (Value::Data, Some(data)),
         RuntimeValue::Function(_) | RuntimeValue::Lambda { .. } | RuntimeValue::Builtin(_) => {
-            Ok(Value::Function)
+            (Value::Function, None)
         }
+    }
+}
+
+/// Render a result into `out` in Agel syntax. `None` means the public
+/// `Value` already describes it (scalars and functions); the rendering still
+/// happens so every frontend prints one way. Overflow truncates at a character
+/// boundary with a marker; it never rejects the transaction.
+fn render_result(scalar: Option<Scalar>, heap: &Heap, out: &mut [u8]) -> usize {
+    let mut length = 0;
+    let complete = match scalar {
+        Some(value) => render(value, heap, out, &mut length, 0).is_ok(),
+        None => true,
+    };
+    if !complete {
+        while length > 0 && out[length - 1] & 0xC0 == 0x80 {
+            length -= 1;
+        }
+        length = length.saturating_sub(1).min(out.len() - 3);
+        out[length..length + 3].copy_from_slice(b"...");
+        length += 3;
+    }
+    length
+}
+
+struct Overflow;
+
+fn emit(out: &mut [u8], length: &mut usize, bytes: &[u8]) -> Result<(), Overflow> {
+    if bytes.len() > out.len() - *length {
+        return Err(Overflow);
+    }
+    out[*length..*length + bytes.len()].copy_from_slice(bytes);
+    *length += bytes.len();
+    Ok(())
+}
+
+fn emit_i64(out: &mut [u8], length: &mut usize, value: i64) -> Result<(), Overflow> {
+    let mut digits = [0_u8; 20];
+    let mut count = 0;
+    let mut magnitude = value.unsigned_abs();
+    loop {
+        digits[count] = b'0' + (magnitude % 10) as u8;
+        count += 1;
+        magnitude /= 10;
+        if magnitude == 0 {
+            break;
+        }
+    }
+    if value < 0 {
+        emit(out, length, b"-")?;
+    }
+    while count > 0 {
+        count -= 1;
+        emit(out, length, &digits[count..count + 1])?;
+    }
+    Ok(())
+}
+
+fn render(
+    value: Scalar,
+    heap: &Heap,
+    out: &mut [u8],
+    length: &mut usize,
+    depth: u8,
+) -> Result<(), Overflow> {
+    if depth >= MAX_DEPTH {
+        return emit(out, length, b"#<deep>");
+    }
+    match value {
+        Scalar::Int(value) => emit_i64(out, length, value),
+        Scalar::Bool(true) => emit(out, length, b"#t"),
+        Scalar::Bool(false) => emit(out, length, b"#f"),
+        Scalar::Nil => emit(out, length, b"nil"),
+        Scalar::Agent(id) => {
+            emit(out, length, b"#<native-agent:")?;
+            emit_i64(out, length, i64::from(id))?;
+            emit(out, length, b">")
+        }
+        Scalar::Symbol { start, len } => emit(out, length, heap.bytes(start, len)),
+        Scalar::Text { start, len } => {
+            emit(out, length, b"\"")?;
+            for byte in heap.bytes(start, len) {
+                let escaped: &[u8] = match byte {
+                    b'\\' => b"\\\\",
+                    b'"' => b"\\\"",
+                    b'\n' => b"\\n",
+                    b'\r' => b"\\r",
+                    b'\t' => b"\\t",
+                    other => core::slice::from_ref(other),
+                };
+                emit(out, length, escaped)?;
+            }
+            emit(out, length, b"\"")
+        }
+        Scalar::List(mut cell) => {
+            emit(out, length, b"(")?;
+            let mut first = true;
+            loop {
+                if !first {
+                    emit(out, length, b" ")?;
+                }
+                first = false;
+                let Cell { car, cdr } = heap.cell(cell);
+                render(car, heap, out, length, depth + 1)?;
+                match cdr {
+                    Scalar::List(next) => cell = next,
+                    _ => break,
+                }
+            }
+            emit(out, length, b")")
+        }
+        Scalar::Map(mut cell) => {
+            emit(out, length, b"{")?;
+            let mut first = true;
+            while cell != NONE {
+                if !first {
+                    emit(out, length, b" ")?;
+                }
+                first = false;
+                let Cell { car, cdr } = heap.cell(cell);
+                render(car, heap, out, length, depth + 1)?;
+                match cdr {
+                    Scalar::List(next) => cell = next,
+                    _ => break,
+                }
+            }
+            emit(out, length, b"}")
+        }
+    }
+}
+
+/// Copying collection of the world heap. Roots are every global binding, every
+/// agent state and every queued message. Handles are rewritten in place, so
+/// the world after collection is observationally identical with a compact heap.
+fn collect(world: &mut World) -> Result<(), Error> {
+    let mut collector = Collector {
+        source: &world.heap,
+        target: Heap::EMPTY,
+        forward: [NONE; MAX_CELLS],
+    };
+    for binding in world.bindings.iter_mut() {
+        if let StoredValue::Scalar(value) = &mut binding.value {
+            *value = collector.forward(*value)?;
+        }
+    }
+    for agent in world.agents.iter_mut().filter(|agent| agent.used) {
+        agent.state = collector.forward(agent.state)?;
+        for slot in 0..agent.mailbox_length as usize {
+            let index = (agent.mailbox_head as usize + slot) % MAX_MAILBOX;
+            agent.mailbox[index] = collector.forward(agent.mailbox[index])?;
+        }
+    }
+    // Cheney scan: cells copied so far may reference cells not yet copied.
+    let mut scan = 0;
+    while scan < collector.target.cell_count as usize {
+        let cell = collector.target.cells[scan];
+        let car = collector.forward(cell.car)?;
+        let cdr = collector.forward(cell.cdr)?;
+        collector.target.cells[scan] = Cell { car, cdr };
+        scan += 1;
+    }
+    world.heap = collector.target;
+    Ok(())
+}
+
+struct Collector<'a> {
+    source: &'a Heap,
+    target: Heap,
+    forward: [u16; MAX_CELLS],
+}
+
+impl Collector<'_> {
+    fn forward(&mut self, value: Scalar) -> Result<Scalar, Error> {
+        Ok(match value {
+            Scalar::List(cell) => Scalar::List(self.forward_cell(cell)?),
+            Scalar::Map(cell) if cell != NONE => Scalar::Map(self.forward_cell(cell)?),
+            Scalar::Text { start, len } => {
+                let (start, len) = self.forward_text(start, len)?;
+                Scalar::Text { start, len }
+            }
+            Scalar::Symbol { start, len } => {
+                let (start, len) = self.forward_text(start, len)?;
+                Scalar::Symbol { start, len }
+            }
+            other => other,
+        })
+    }
+
+    fn forward_cell(&mut self, cell: u16) -> Result<u16, Error> {
+        if self.forward[cell as usize] != NONE {
+            return Ok(self.forward[cell as usize]);
+        }
+        // Contents are forwarded by the scan loop; copy the raw cell now so
+        // the forwarding address exists before any cycle-free descendant.
+        let copied = self.source.cell(cell);
+        let index = self.target.cons(copied.car, copied.cdr)?;
+        self.forward[cell as usize] = index;
+        Ok(index)
+    }
+
+    fn forward_text(&mut self, start: u16, len: u16) -> Result<(u16, u16), Error> {
+        let bytes = self.source.bytes(start, len);
+        let copied = self.target.text_len as usize;
+        if let Some(existing) = self.target.text[..copied]
+            .windows(bytes.len())
+            .position(|window| window == bytes)
+        {
+            return Ok((existing as u16, len));
+        }
+        self.target.alloc_text(bytes)
     }
 }
 
@@ -763,7 +1148,18 @@ fn evaluate_node(
         NodeKind::Bool(value) => Ok(RuntimeValue::Scalar(Scalar::Bool(value))),
         NodeKind::Nil => Ok(RuntimeValue::Scalar(Scalar::Nil)),
         NodeKind::Symbol => resolve_symbol(document, source, node_index, world, locals),
-        NodeKind::Quote => Ok(RuntimeValue::Code(node.first)),
+        NodeKind::Quote => Ok(RuntimeValue::Scalar(quote_data(
+            document,
+            source,
+            node.first,
+            &mut world.heap,
+            depth,
+            fuel,
+        )?)),
+        NodeKind::Text => Ok(RuntimeValue::Scalar(decode_text(
+            node_bytes(document, source, node_index),
+            &mut world.heap,
+        )?)),
         NodeKind::List => evaluate_list(document, source, node_index, world, locals, depth, fuel),
         NodeKind::Empty => Err(Error("invalid native syntax node")),
     }
@@ -784,7 +1180,14 @@ fn evaluate_list(
     }
     if symbol_is(document, source, first, b"quote") {
         let value = exactly_one_argument(document, first)?;
-        return Ok(RuntimeValue::Code(value));
+        return Ok(RuntimeValue::Scalar(quote_data(
+            document,
+            source,
+            value,
+            &mut world.heap,
+            depth,
+            fuel,
+        )?));
     }
     if symbol_is(document, source, first, b"if") {
         let condition = child_after(document, first)?;
@@ -847,16 +1250,9 @@ fn evaluate_list(
         child = document.nodes[child as usize].next;
     }
     match callable {
-        RuntimeValue::Builtin(builtin) => apply_builtin(
-            builtin,
-            &arguments[..count],
-            document,
-            source,
-            world,
-            locals,
-            depth,
-            fuel,
-        ),
+        RuntimeValue::Builtin(builtin) => {
+            apply_builtin(builtin, &arguments[..count], world, locals, depth, fuel)
+        }
         RuntimeValue::Function(function) => {
             apply_stored_function(function, &arguments[..count], world, depth, fuel)
         }
@@ -892,40 +1288,7 @@ fn evaluate_def(
         return Err(Error("def expects a name and value"));
     }
     let name = node_bytes(document, source, name_node);
-    if matches!(
-        name,
-        b"quote"
-            | b"if"
-            | b"begin"
-            | b"def"
-            | b"let"
-            | b"fn"
-            | b"+"
-            | b"-"
-            | b"*"
-            | b"/"
-            | b"="
-            | b"<"
-            | b"eval"
-            | b"spawn"
-            | b"send"
-            | b"step"
-            | b"run"
-            | b"agent-state"
-            | b"agent-pending"
-            | b"agent-turns"
-            | b"agent-faulted?"
-            | b"restart-agent"
-            | b"drop-message"
-            | b"agent-count"
-            | b"scene-clear"
-            | b"scene-bind"
-            | b"scene-hit"
-            | b"scene-owner"
-            | b"agent-become"
-            | b"scene-rect"
-            | b"scene-count"
-    ) {
+    if is_special_form(name) || builtin_for_name(name).is_some() {
         return Err(Error("native core names cannot be redefined"));
     }
     let value = evaluate_node(document, source, value_node, world, locals, depth + 1, fuel)?;
@@ -940,7 +1303,6 @@ fn evaluate_def(
             StoredValue::Function(capture_function(document, source, node)?)
         }
         RuntimeValue::Function(function) => StoredValue::Function(function),
-        RuntimeValue::Code(_) => return Err(Error("quoted code is transaction-local in v0.1.1")),
         RuntimeValue::Builtin(_) => return Err(Error("native builtins cannot be rebound")),
     };
     world.define(name, stored)?;
@@ -1129,7 +1491,7 @@ fn apply_stored_function(
         depth + 1,
         fuel,
     )?;
-    if matches!(result, RuntimeValue::Code(_) | RuntimeValue::Lambda { .. }) {
+    if matches!(result, RuntimeValue::Lambda { .. }) {
         return Err(Error("ephemeral value escaped a stored function"));
     }
     Ok(result)
@@ -1191,12 +1553,9 @@ fn apply_lambda(
     evaluate_sequence(document, source, body, world, &locals, depth, fuel)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn apply_builtin(
     builtin: Builtin,
     arguments: &[RuntimeValue],
-    document: &Document,
-    source: &[u8],
     world: &mut World,
     locals: &[Local; MAX_LOCALS],
     depth: u8,
@@ -1357,22 +1716,49 @@ fn apply_builtin(
         _ => {}
     }
     if matches!(builtin, Builtin::Eval) {
-        if let [RuntimeValue::Code(node)] = arguments {
-            return evaluate_node(document, source, *node, world, locals, depth + 1, fuel);
+        // Quoted data is re-read from its rendering: the printer and reader
+        // are inverses for every datum that fits one payload, and this keeps
+        // a single evaluator over syntax nodes.
+        let [RuntimeValue::Scalar(datum)] = arguments else {
+            return Err(Error("eval expects one quoted form"));
+        };
+        let mut text = [0_u8; RESULT_BYTES];
+        let mut length = 0;
+        if render(*datum, &world.heap, &mut text, &mut length, 0).is_err() {
+            return Err(Error("quoted form exceeds the native eval payload"));
         }
-        return Err(Error("eval expects one quoted form"));
+        let inner = Parser::parse(&text[..length])?;
+        return evaluate_node(
+            &inner,
+            &text[..length],
+            inner.root,
+            world,
+            locals,
+            depth + 1,
+            fuel,
+        );
+    }
+    if matches!(builtin, Builtin::Equal) {
+        let [RuntimeValue::Scalar(left), RuntimeValue::Scalar(right)] = arguments else {
+            return Err(Error("= expects two values"));
+        };
+        return Ok(RuntimeValue::Scalar(Scalar::Bool(structurally_equal(
+            *left,
+            *right,
+            &world.heap,
+            0,
+        )?)));
+    }
+    if let Some(result) = data_builtin(builtin, arguments, world, fuel)? {
+        return Ok(RuntimeValue::Scalar(result));
     }
     let (values, count) = integer_arguments(arguments)?;
     let values = &values[..count];
-    if matches!(builtin, Builtin::Equal | Builtin::Less) {
+    if matches!(builtin, Builtin::Less) {
         let [left, right] = values else {
-            return Err(Error("= and < expect two integers"));
+            return Err(Error("< expects two integers"));
         };
-        return Ok(RuntimeValue::Scalar(Scalar::Bool(match builtin {
-            Builtin::Equal => left == right,
-            Builtin::Less => left < right,
-            _ => false,
-        })));
+        return Ok(RuntimeValue::Scalar(Scalar::Bool(left < right)));
     }
     // Variadic checked arithmetic with the hosted seed's identities and arities.
     let result = match builtin {
@@ -1628,43 +2014,547 @@ fn resolve_symbol(
     {
         return Ok(local.value);
     }
-    let builtin = match name {
-        b"scene-clear" => Some(Builtin::SceneClear),
-        b"scene-bind" => Some(Builtin::SceneBind),
-        b"scene-hit" => Some(Builtin::SceneHit),
-        b"scene-owner" => Some(Builtin::SceneOwner),
-        b"agent-become" => Some(Builtin::AgentBecome),
-        b"scene-rect" => Some(Builtin::SceneRect),
-        b"scene-count" => Some(Builtin::SceneCount),
-        b"+" => Some(Builtin::Add),
-        b"-" => Some(Builtin::Subtract),
-        b"*" => Some(Builtin::Multiply),
-        b"/" => Some(Builtin::Divide),
-        b"=" => Some(Builtin::Equal),
-        b"<" => Some(Builtin::Less),
-        b"eval" => Some(Builtin::Eval),
-        b"spawn" => Some(Builtin::Spawn),
-        b"send" => Some(Builtin::Send),
-        b"step" => Some(Builtin::Step),
-        b"run" => Some(Builtin::Run),
-        b"agent-state" => Some(Builtin::AgentState),
-        b"agent-pending" => Some(Builtin::AgentPending),
-        b"agent-turns" => Some(Builtin::AgentTurns),
-        b"agent-faulted?" => Some(Builtin::AgentFaulted),
-        b"restart-agent" => Some(Builtin::RestartAgent),
-        b"drop-message" => Some(Builtin::DropMessage),
-        b"agent-count" => Some(Builtin::AgentCount),
-        _ => None,
-    };
-    if let Some(builtin) = builtin {
+    if let Some(builtin) = builtin_for_name(name) {
         return Ok(RuntimeValue::Builtin(builtin));
     }
+
     let index = world.find(name).ok_or(Error("unbound native symbol"))?;
     Ok(match world.bindings[index].value {
         StoredValue::Scalar(scalar) => RuntimeValue::Scalar(scalar),
         StoredValue::Function(function) => RuntimeValue::Function(function),
         StoredValue::Empty => return Err(Error("unbound native symbol")),
     })
+}
+
+fn builtin_for_name(name: &[u8]) -> Option<Builtin> {
+    Some(match name {
+        b"scene-clear" => Builtin::SceneClear,
+        b"scene-bind" => Builtin::SceneBind,
+        b"scene-hit" => Builtin::SceneHit,
+        b"scene-owner" => Builtin::SceneOwner,
+        b"agent-become" => Builtin::AgentBecome,
+        b"scene-rect" => Builtin::SceneRect,
+        b"scene-count" => Builtin::SceneCount,
+        b"+" => Builtin::Add,
+        b"-" => Builtin::Subtract,
+        b"*" => Builtin::Multiply,
+        b"/" => Builtin::Divide,
+        b"=" => Builtin::Equal,
+        b"<" => Builtin::Less,
+        b"eval" => Builtin::Eval,
+        b"list" => Builtin::ListOf,
+        b"cons" => Builtin::Cons,
+        b"car" => Builtin::Car,
+        b"cdr" => Builtin::Cdr,
+        b"count" => Builtin::Count,
+        b"dict" => Builtin::Dict,
+        b"get" => Builtin::Get,
+        b"has-key?" => Builtin::HasKey,
+        b"assoc" => Builtin::Assoc,
+        b"dissoc" => Builtin::Dissoc,
+        b"keys" => Builtin::Keys,
+        b"type-of" => Builtin::TypeOf,
+        b"text-bytes" => Builtin::TextBytes,
+        b"text-byte" => Builtin::TextByte,
+        b"text-slice" => Builtin::TextSlice,
+        b"text-concat" => Builtin::TextConcat,
+        b"text-symbol" => Builtin::TextSymbol,
+        b"spawn" => Builtin::Spawn,
+        b"send" => Builtin::Send,
+        b"step" => Builtin::Step,
+        b"run" => Builtin::Run,
+        b"agent-state" => Builtin::AgentState,
+        b"agent-pending" => Builtin::AgentPending,
+        b"agent-turns" => Builtin::AgentTurns,
+        b"agent-faulted?" => Builtin::AgentFaulted,
+        b"restart-agent" => Builtin::RestartAgent,
+        b"drop-message" => Builtin::DropMessage,
+        b"agent-count" => Builtin::AgentCount,
+        _ => return None,
+    })
+}
+
+/// Build inert data from quoted syntax. Symbols intern, strings decode, lists
+/// become cell chains and the empty list is nil, matching the hosted seed.
+fn quote_data(
+    document: &Document,
+    source: &[u8],
+    node_index: u16,
+    heap: &mut Heap,
+    depth: u8,
+    fuel: &mut u16,
+) -> Result<Scalar, Error> {
+    if depth >= MAX_DEPTH {
+        return Err(Error("native call depth exceeded"));
+    }
+    *fuel = fuel
+        .checked_sub(1)
+        .ok_or(Error("native evaluator fuel exhausted"))?;
+    let node = document.nodes[node_index as usize];
+    Ok(match node.kind {
+        NodeKind::Int(value) => Scalar::Int(value),
+        NodeKind::Bool(value) => Scalar::Bool(value),
+        NodeKind::Nil => Scalar::Nil,
+        NodeKind::Symbol => heap.intern(node_bytes(document, source, node_index))?,
+        NodeKind::Text => decode_text(node_bytes(document, source, node_index), heap)?,
+        NodeKind::Quote => {
+            let inner = quote_data(document, source, node.first, heap, depth + 1, fuel)?;
+            let tail = heap.cons(inner, Scalar::Nil)?;
+            let quote = heap.intern(b"quote")?;
+            Scalar::List(heap.cons(quote, Scalar::List(tail))?)
+        }
+        NodeKind::List => {
+            let mut child = node.first;
+            let mut head = Scalar::Nil;
+            let mut last = NONE;
+            while child != NONE {
+                let item = quote_data(document, source, child, heap, depth + 1, fuel)?;
+                let cell = heap.cons(item, Scalar::Nil)?;
+                if last == NONE {
+                    head = Scalar::List(cell);
+                } else {
+                    heap.cells[last as usize].cdr = Scalar::List(cell);
+                }
+                last = cell;
+                child = document.nodes[child as usize].next;
+            }
+            head
+        }
+        NodeKind::Empty => return Err(Error("invalid native syntax node")),
+    })
+}
+
+fn decode_text(literal: &[u8], heap: &mut Heap) -> Result<Scalar, Error> {
+    let body = &literal[1..literal.len() - 1];
+    let mut decoded = [0_u8; RESULT_BYTES];
+    let mut length = 0;
+    let mut index = 0;
+    while index < body.len() {
+        let byte = if body[index] == b'\\' {
+            index += 1;
+            match body[index] {
+                b'n' => b'\n',
+                b'r' => b'\r',
+                b't' => b'\t',
+                other => other,
+            }
+        } else {
+            body[index]
+        };
+        if length == decoded.len() {
+            return Err(Error("string literal exceeds native text limit"));
+        }
+        decoded[length] = byte;
+        length += 1;
+        index += 1;
+    }
+    let (start, len) = heap.alloc_text(&decoded[..length])?;
+    Ok(Scalar::Text { start, len })
+}
+
+fn structurally_equal(left: Scalar, right: Scalar, heap: &Heap, depth: u8) -> Result<bool, Error> {
+    if depth >= MAX_DEPTH {
+        return Err(Error("native call depth exceeded"));
+    }
+    Ok(match (left, right) {
+        (Scalar::Int(a), Scalar::Int(b)) => a == b,
+        (Scalar::Bool(a), Scalar::Bool(b)) => a == b,
+        (Scalar::Nil, Scalar::Nil) => true,
+        (Scalar::Agent(a), Scalar::Agent(b)) => a == b,
+        (Scalar::Text { start: a, len: la }, Scalar::Text { start: b, len: lb })
+        | (Scalar::Symbol { start: a, len: la }, Scalar::Symbol { start: b, len: lb }) => {
+            heap.bytes(a, la) == heap.bytes(b, lb)
+        }
+        (Scalar::List(a), Scalar::List(b)) => chains_equal(a, b, heap, depth)?,
+        (Scalar::Map(a), Scalar::Map(b)) => {
+            (a == NONE && b == NONE) || (a != NONE && b != NONE && chains_equal(a, b, heap, depth)?)
+        }
+        _ => false,
+    })
+}
+
+fn chains_equal(mut a: u16, mut b: u16, heap: &Heap, depth: u8) -> Result<bool, Error> {
+    loop {
+        let (left, right) = (heap.cell(a), heap.cell(b));
+        if !structurally_equal(left.car, right.car, heap, depth + 1)? {
+            return Ok(false);
+        }
+        match (left.cdr, right.cdr) {
+            (Scalar::List(next_a), Scalar::List(next_b)) => {
+                a = next_a;
+                b = next_b;
+            }
+            (Scalar::List(_), _) | (_, Scalar::List(_)) => return Ok(false),
+            (tail_a, tail_b) => return structurally_equal(tail_a, tail_b, heap, depth + 1),
+        }
+    }
+}
+
+fn text_of(value: &RuntimeValue) -> Result<(u16, u16), Error> {
+    match value {
+        RuntimeValue::Scalar(Scalar::Text { start, len }) => Ok((*start, *len)),
+        _ => Err(Error("expected text")),
+    }
+}
+
+fn offset_of(value: &RuntimeValue) -> Result<usize, Error> {
+    match value {
+        RuntimeValue::Scalar(Scalar::Int(offset)) => {
+            usize::try_from(*offset).map_err(|_| Error("negative text offset"))
+        }
+        _ => Err(Error("expected byte offset")),
+    }
+}
+
+fn scalars(arguments: &[RuntimeValue]) -> Result<[Scalar; MAX_ARGUMENTS], Error> {
+    let mut values = [Scalar::Nil; MAX_ARGUMENTS];
+    for (index, value) in arguments.iter().enumerate() {
+        values[index] = match value {
+            RuntimeValue::Scalar(value) => *value,
+            _ => return Err(Error("expected a data value")),
+        };
+    }
+    Ok(values)
+}
+
+fn list_chain(value: Scalar) -> Result<u16, Error> {
+    match value {
+        Scalar::List(cell) => Ok(cell),
+        Scalar::Nil => Ok(NONE),
+        _ => Err(Error("expected a list")),
+    }
+}
+
+fn map_chain(value: Scalar) -> Result<u16, Error> {
+    match value {
+        Scalar::Map(cell) => Ok(cell),
+        _ => Err(Error("expected a map")),
+    }
+}
+
+/// Copy a key/value chain up to (excluding) `stop`, appending each copied cell
+/// after `last`; returns the new head and the last copied cell.
+fn copy_chain(
+    heap: &mut Heap,
+    mut cell: u16,
+    stop: u16,
+    fuel: &mut u16,
+) -> Result<(Scalar, u16), Error> {
+    let mut head = Scalar::Nil;
+    let mut last = NONE;
+    while cell != NONE && cell != stop {
+        *fuel = fuel
+            .checked_sub(1)
+            .ok_or(Error("native evaluator fuel exhausted"))?;
+        let copied = heap.cell(cell);
+        let index = heap.cons(copied.car, Scalar::Nil)?;
+        if last == NONE {
+            head = Scalar::List(index);
+        } else {
+            heap.cells[last as usize].cdr = Scalar::List(index);
+        }
+        last = index;
+        cell = list_chain(copied.cdr)?;
+    }
+    Ok((head, last))
+}
+
+fn map_find(heap: &Heap, mut cell: u16, key: Scalar) -> Result<Option<u16>, Error> {
+    while cell != NONE {
+        let entry = heap.cell(cell);
+        if structurally_equal(entry.car, key, heap, 0)? {
+            return Ok(Some(cell));
+        }
+        let value_cell = list_chain(entry.cdr)?;
+        cell = list_chain(heap.cell(value_cell).cdr)?;
+    }
+    Ok(None)
+}
+
+/// Persistent insertion: the existing key keeps its position with a new
+/// value; a new key is appended. Untouched cells are shared, never mutated.
+fn map_insert(
+    heap: &mut Heap,
+    map: u16,
+    key: Scalar,
+    value: Scalar,
+    fuel: &mut u16,
+) -> Result<u16, Error> {
+    match map_find(heap, map, key)? {
+        Some(found) => {
+            let (head, last) = copy_chain(heap, map, found, fuel)?;
+            let rest = list_chain(heap.cell(list_chain(heap.cell(found).cdr)?).cdr)?;
+            let tail = if rest == NONE {
+                Scalar::Nil
+            } else {
+                Scalar::List(rest)
+            };
+            let value_cell = heap.cons(value, tail)?;
+            let key_cell = heap.cons(key, Scalar::List(value_cell))?;
+            if last == NONE {
+                Ok(key_cell)
+            } else {
+                heap.cells[last as usize].cdr = Scalar::List(key_cell);
+                Ok(list_chain(head)?)
+            }
+        }
+        None => {
+            let (head, last) = copy_chain(heap, map, NONE, fuel)?;
+            let value_cell = heap.cons(value, Scalar::Nil)?;
+            let key_cell = heap.cons(key, Scalar::List(value_cell))?;
+            if last == NONE {
+                Ok(key_cell)
+            } else {
+                heap.cells[last as usize].cdr = Scalar::List(key_cell);
+                Ok(list_chain(head)?)
+            }
+        }
+    }
+}
+
+fn map_len(heap: &Heap, mut cell: u16) -> Result<i64, Error> {
+    let mut count = 0;
+    while cell != NONE {
+        count += 1;
+        let value_cell = list_chain(heap.cell(cell).cdr)?;
+        cell = list_chain(heap.cell(value_cell).cdr)?;
+    }
+    Ok(count)
+}
+
+fn utf8_boundary(bytes: &[u8], index: usize) -> bool {
+    index == bytes.len() || bytes[index] & 0xC0 != 0x80
+}
+
+/// List, map and text builtins. `Ok(None)` means the builtin is not one of
+/// them and the caller continues with arithmetic.
+fn data_builtin(
+    builtin: Builtin,
+    arguments: &[RuntimeValue],
+    world: &mut World,
+    fuel: &mut u16,
+) -> Result<Option<Scalar>, Error> {
+    let heap = &mut world.heap;
+    Ok(Some(match builtin {
+        Builtin::ListOf => {
+            let values = scalars(arguments)?;
+            let mut head = Scalar::Nil;
+            for value in values[..arguments.len()].iter().rev() {
+                head = Scalar::List(heap.cons(*value, head)?);
+            }
+            head
+        }
+        Builtin::Cons => {
+            let [RuntimeValue::Scalar(head), RuntimeValue::Scalar(tail)] = arguments else {
+                return Err(Error("cons expects a value and a list"));
+            };
+            let tail = match tail {
+                Scalar::Nil | Scalar::List(_) => *tail,
+                _ => return Err(Error("cons expects a list")),
+            };
+            Scalar::List(heap.cons(*head, tail)?)
+        }
+        Builtin::Car | Builtin::Cdr => {
+            let [RuntimeValue::Scalar(value)] = arguments else {
+                return Err(Error("car/cdr expect one list"));
+            };
+            match value {
+                Scalar::Nil => Scalar::Nil,
+                Scalar::List(cell) => {
+                    let cell = heap.cell(*cell);
+                    if matches!(builtin, Builtin::Car) {
+                        cell.car
+                    } else {
+                        cell.cdr
+                    }
+                }
+                _ => return Err(Error("car/cdr expect a list")),
+            }
+        }
+        Builtin::Count => {
+            let [RuntimeValue::Scalar(value)] = arguments else {
+                return Err(Error("count expects one collection"));
+            };
+            Scalar::Int(match value {
+                Scalar::Nil => 0,
+                Scalar::List(mut cell) => {
+                    let mut count = 1;
+                    while let Scalar::List(next) = heap.cell(cell).cdr {
+                        count += 1;
+                        cell = next;
+                    }
+                    count
+                }
+                Scalar::Map(cell) => map_len(heap, *cell)?,
+                Scalar::Text { start, len } => heap
+                    .bytes(*start, *len)
+                    .iter()
+                    .filter(|byte| **byte & 0xC0 != 0x80)
+                    .count() as i64,
+                _ => return Err(Error("count cannot inspect this value")),
+            })
+        }
+        Builtin::Dict => {
+            if arguments.len() % 2 != 0 {
+                return Err(Error("dict expects key/value pairs"));
+            }
+            let values = scalars(arguments)?;
+            let mut map = NONE;
+            for pair in values[..arguments.len()].chunks_exact(2) {
+                map = map_insert(heap, map, pair[0], pair[1], fuel)?;
+            }
+            Scalar::Map(map)
+        }
+        Builtin::Get | Builtin::HasKey => {
+            let [RuntimeValue::Scalar(map), RuntimeValue::Scalar(key)] = arguments else {
+                return Err(Error("get/has-key? expect a map and a key"));
+            };
+            let found = map_find(heap, map_chain(*map)?, *key)?;
+            if matches!(builtin, Builtin::HasKey) {
+                Scalar::Bool(found.is_some())
+            } else {
+                match found {
+                    Some(cell) => heap.cell(list_chain(heap.cell(cell).cdr)?).car,
+                    None => Scalar::Nil,
+                }
+            }
+        }
+        Builtin::Assoc => {
+            let [RuntimeValue::Scalar(map), RuntimeValue::Scalar(key), RuntimeValue::Scalar(value)] =
+                arguments
+            else {
+                return Err(Error("assoc expects a map, a key and a value"));
+            };
+            Scalar::Map(map_insert(heap, map_chain(*map)?, *key, *value, fuel)?)
+        }
+        Builtin::Dissoc => {
+            let [RuntimeValue::Scalar(map), RuntimeValue::Scalar(key)] = arguments else {
+                return Err(Error("dissoc expects a map and a key"));
+            };
+            let map = map_chain(*map)?;
+            match map_find(heap, map, *key)? {
+                None => Scalar::Map(map),
+                Some(found) => {
+                    let (head, last) = copy_chain(heap, map, found, fuel)?;
+                    let rest = list_chain(heap.cell(list_chain(heap.cell(found).cdr)?).cdr)?;
+                    if last == NONE {
+                        Scalar::Map(rest)
+                    } else {
+                        heap.cells[last as usize].cdr = if rest == NONE {
+                            Scalar::Nil
+                        } else {
+                            Scalar::List(rest)
+                        };
+                        Scalar::Map(list_chain(head)?)
+                    }
+                }
+            }
+        }
+        Builtin::Keys => {
+            let [RuntimeValue::Scalar(map)] = arguments else {
+                return Err(Error("keys expects one map"));
+            };
+            let mut cell = map_chain(*map)?;
+            let mut head = Scalar::Nil;
+            let mut last = NONE;
+            while cell != NONE {
+                let entry = heap.cell(cell);
+                let index = heap.cons(entry.car, Scalar::Nil)?;
+                if last == NONE {
+                    head = Scalar::List(index);
+                } else {
+                    heap.cells[last as usize].cdr = Scalar::List(index);
+                }
+                last = index;
+                let value_cell = list_chain(entry.cdr)?;
+                cell = list_chain(heap.cell(value_cell).cdr)?;
+            }
+            head
+        }
+        Builtin::TypeOf => {
+            let [value] = arguments else {
+                return Err(Error("type-of expects one value"));
+            };
+            let name: &[u8] = match value {
+                RuntimeValue::Scalar(Scalar::Int(_)) => b"int",
+                RuntimeValue::Scalar(Scalar::Bool(_)) => b"bool",
+                RuntimeValue::Scalar(Scalar::Nil) => b"nil",
+                RuntimeValue::Scalar(Scalar::Agent(_)) => b"agent",
+                RuntimeValue::Scalar(Scalar::Text { .. }) => b"string",
+                RuntimeValue::Scalar(Scalar::Symbol { .. }) => b"symbol",
+                RuntimeValue::Scalar(Scalar::List(_)) => b"list",
+                RuntimeValue::Scalar(Scalar::Map(_)) => b"map",
+                _ => b"callable",
+            };
+            heap.intern(name)?
+        }
+        Builtin::TextBytes => {
+            let [text] = arguments else {
+                return Err(Error("text-bytes expects one string"));
+            };
+            Scalar::Int(i64::from(text_of(text)?.1))
+        }
+        Builtin::TextByte => {
+            let [text, offset] = arguments else {
+                return Err(Error("text-byte expects a string and an offset"));
+            };
+            let (start, len) = text_of(text)?;
+            let offset = offset_of(offset)?;
+            if offset >= len as usize {
+                return Err(Error("text byte out of range"));
+            }
+            Scalar::Int(i64::from(heap.text[start as usize + offset]))
+        }
+        Builtin::TextSlice => {
+            let [text, from, to] = arguments else {
+                return Err(Error("text-slice expects a string and two offsets"));
+            };
+            let (start, len) = text_of(text)?;
+            let (from, to) = (offset_of(from)?, offset_of(to)?);
+            let bytes = heap.bytes(start, len);
+            if from > to
+                || to > bytes.len()
+                || !utf8_boundary(bytes, from)
+                || !utf8_boundary(bytes, to)
+            {
+                return Err(Error("invalid UTF-8 slice"));
+            }
+            Scalar::Text {
+                start: start + from as u16,
+                len: (to - from) as u16,
+            }
+        }
+        Builtin::TextConcat => {
+            let [left, right] = arguments else {
+                return Err(Error("text-concat expects two strings"));
+            };
+            let (a, la) = text_of(left)?;
+            let (b, lb) = text_of(right)?;
+            let total = la as usize + lb as usize;
+            *fuel = fuel
+                .checked_sub((total / 16) as u16 + 1)
+                .ok_or(Error("native evaluator fuel exhausted"))?;
+            let start = heap.reserve_text(total)?;
+            for offset in 0..la as usize {
+                heap.text[start as usize + offset] = heap.text[a as usize + offset];
+            }
+            for offset in 0..lb as usize {
+                heap.text[start as usize + la as usize + offset] = heap.text[b as usize + offset];
+            }
+            Scalar::Text {
+                start,
+                len: total as u16,
+            }
+        }
+        Builtin::TextSymbol => {
+            let [text] = arguments else {
+                return Err(Error("text-symbol expects one string"));
+            };
+            let (start, len) = text_of(text)?;
+            Scalar::Symbol { start, len }
+        }
+        _ => return Ok(None),
+    }))
 }
 
 fn truthy(value: RuntimeValue) -> bool {
@@ -1835,6 +2725,179 @@ mod tests {
 
     fn eval(session: &mut Session, source: &str) -> Value {
         session.evaluate(source.as_bytes()).unwrap()
+    }
+
+    fn text(session: &mut Session, source: &str) -> String {
+        let value = session.evaluate(source.as_bytes()).unwrap();
+        let rendered = core::str::from_utf8(session.result()).unwrap().to_owned();
+        if value != Value::Data {
+            assert!(rendered.is_empty(), "{source}: {rendered}");
+        }
+        rendered
+    }
+
+    #[test]
+    fn data_values_match_the_hosted_seed_and_survive_commit_and_rollback() {
+        let mut session = Session::new();
+        for (source, expected) in [
+            ("'(1 2 (3 nil) #t)", "(1 2 (3 nil) #t)"),
+            ("'()", ""),
+            ("'answer", "answer"),
+            ("'(quote x)", "(quote x)"),
+            ("''x", "(quote x)"),
+            ("\"Ahoj \\\"svet\\\"\\n\"", "\"Ahoj \\\"svet\\\"\\n\""),
+            ("(list 1 (+ 20 22) 'x)", "(1 42 x)"),
+            ("(cons 0 '(1 2))", "(0 1 2)"),
+            ("(cons 0 nil)", "(0)"),
+            ("(car '(20 22))", ""),
+            ("(cdr '(0 42))", "(42)"),
+            ("(cdr '(42))", ""),
+            ("(car nil)", ""),
+            ("(count '(1 2 3))", ""),
+            ("(count \"Ahoj 👋\")", ""),
+            ("(dict 'a 1 'b 2)", "{a 1 b 2}"),
+            ("(dict)", "{}"),
+            ("(assoc (dict 'b 1 'a 2) 'b 3)", "{b 3 a 2}"),
+            ("(assoc (dict 'a 1) 'b 2)", "{a 1 b 2}"),
+            ("(dissoc (dict 'a 1 'b 2 'c 3) 'b)", "{a 1 c 3}"),
+            ("(dissoc (dict 'a 1) 'a)", "{}"),
+            ("(keys (dict 'a 1 'b 2 'a 3))", "(a b)"),
+            ("(get (dict 'a 1 (list 1 2) 42) (list 1 2))", ""),
+            ("(get (dict 'a 1) 'z)", ""),
+            ("(has-key? (dict 'x nil) 'x)", ""),
+            ("(type-of (dict))", "map"),
+            ("(type-of \"s\")", "string"),
+            ("(type-of 'x)", "symbol"),
+            ("(type-of car)", "callable"),
+            ("(= '(1 (2)) (list 1 (list 2)))", ""),
+            ("(= (dict 'a 1 'b 2) (dict 'b 2 'a 1))", ""),
+            ("(= \"a\" \"a\")", ""),
+            ("(= 'a \"a\")", ""),
+            ("(text-bytes \"Ahoj 👋\")", ""),
+            ("(text-byte \"A\" 0)", ""),
+            ("(text-slice \"Ahoj svet\" 0 4)", "\"Ahoj\""),
+            ("(text-concat \"Ag\" \"el\")", "\"Agel\""),
+            ("(text-symbol \"agel\")", "agel"),
+            ("(eval '(+ 20 22))", ""),
+            ("(eval (list '+ 20 22))", ""),
+            ("(eval (cons 'list '(1 2)))", "(1 2)"),
+        ] {
+            assert_eq!(text(&mut session, source), expected, "{source}");
+        }
+        assert_eq!(eval(&mut session, "(car '(20 22))"), Value::Int(20));
+        assert_eq!(eval(&mut session, "(count \"Ahoj 👋\")"), Value::Int(6));
+        assert_eq!(
+            eval(&mut session, "(text-bytes \"Ahoj 👋\")"),
+            Value::Int(9)
+        );
+        assert_eq!(
+            eval(&mut session, "(= (dict 'a 1 'b 2) (dict 'b 2 'a 1))"),
+            Value::Bool(false)
+        );
+        assert_eq!(eval(&mut session, "(= 'a \"a\")"), Value::Bool(false));
+        assert_eq!(
+            eval(&mut session, "(has-key? (dict 'x nil) 'x)"),
+            Value::Bool(true)
+        );
+
+        // Quoted graphs persist in globals and reconstruct after rollback.
+        eval(&mut session, "(def plan '(compile (core) \"v1\"))");
+        eval(&mut session, "(def table (assoc (dict 'plan plan) 'n 1))");
+        assert_eq!(
+            text(&mut session, "(get table 'plan)"),
+            "(compile (core) \"v1\")"
+        );
+        // The dissoc is the last commit before rollback, since every read also
+        // commits a revision and rollback only restores the preceding one.
+        eval(&mut session, "(def table (dissoc table 'plan))");
+        session.rollback().unwrap();
+        assert_eq!(
+            text(&mut session, "table"),
+            "{plan (compile (core) \"v1\") n 1}"
+        );
+        assert_eq!(
+            text(&mut session, "(car (cdr (get table 'plan)))"),
+            "(core)"
+        );
+
+        // Agents exchange data, and a faulted turn keeps the list message.
+        eval(
+            &mut session,
+            "(def collect (fn (self state message) (cons message state)))",
+        );
+        eval(&mut session, "(def log (spawn collect nil))");
+        eval(&mut session, "(send log '(open \"a\"))");
+        eval(&mut session, "(send log (dict 'close 1))");
+        eval(&mut session, "(run 2)");
+        assert_eq!(
+            text(&mut session, "(agent-state log)"),
+            "({close 1} (open \"a\"))"
+        );
+        eval(
+            &mut session,
+            "(def strict (fn (self state message) (if (= message 'stop) (/ 1 0) message)))",
+        );
+        eval(&mut session, "(def s (spawn strict nil))");
+        eval(&mut session, "(send s 'stop)");
+        eval(&mut session, "(step)");
+        assert_eq!(eval(&mut session, "(agent-faulted? s)"), Value::Bool(true));
+        assert_eq!(text(&mut session, "(drop-message s)"), "stop");
+
+        for bad in [
+            "(cons 1 2)",
+            "(car 1)",
+            "(dict 'a)",
+            "(get 1 'a)",
+            "(assoc nil 'a 1)",
+            "(text-byte \"A\" 1)",
+            "(text-byte \"A\" -1)",
+            "(text-slice \"👋\" 0 1)",
+            "(text-concat \"a\" 1)",
+            "(text-symbol 'agel)",
+            "\"unterminated",
+            "\"bad \\q escape\"",
+            "(def list 1)",
+            "(eval 42 1)",
+        ] {
+            assert!(session.evaluate(bad.as_bytes()).is_err(), "accepted {bad}");
+        }
+    }
+
+    #[test]
+    fn heap_is_collected_at_commit_and_exhaustion_is_transactional() {
+        let mut session = Session::new();
+        eval(&mut session, "(def keep '(a b c))");
+        // Far more garbage than the heap holds, across many transactions.
+        for _ in 0..40 {
+            eval(&mut session, "(list 1 2 3 4 5 6 7 8)");
+            eval(
+                &mut session,
+                "(text-concat \"0123456789abcdef\" \"0123456789abcdef\")",
+            );
+        }
+        assert!(
+            session.active.heap.cell_count < 16,
+            "cells {}",
+            session.active.heap.cell_count
+        );
+        assert!(
+            session.active.heap.text_len < 64,
+            "text {}",
+            session.active.heap.text_len
+        );
+        assert_eq!(text(&mut session, "keep"), "(a b c)");
+        // A transaction that would overrun the heap is rejected whole, leaving
+        // the committed world and its revision untouched.
+        eval(
+            &mut session,
+            "(def deep (fn (n acc) (if (= n 0) acc (deep (- n 1) (cons n acc)))))",
+        );
+        let revision = session.revision();
+        let cells_before = session.active.heap.cell_count;
+        assert!(session.evaluate(b"(def big (deep 500 nil))").is_err());
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.active.heap.cell_count, cells_before);
+        assert_eq!(text(&mut session, "keep"), "(a b c)");
     }
 
     #[test]

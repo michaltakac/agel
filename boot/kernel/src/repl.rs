@@ -78,7 +78,7 @@ pub fn native_repl() -> ! {
             b":shutdown" => arch::exit(true),
             b"" => {}
             _ => match session.evaluate(source) {
-                Ok(value) => write_value(value, source),
+                Ok(value) => write_value(value, session.result()),
                 Err(error) => write_error(error),
             },
         }
@@ -144,7 +144,7 @@ fn needs_more_input(source: &[u8]) -> bool {
 }
 
 #[cfg(not(feature = "native-selftest"))]
-fn write_value(value: native::Value, source: &[u8]) {
+fn write_value(value: native::Value, rendered: &[u8]) {
     match value {
         native::Value::Int(value) => console::write_i64(value),
         native::Value::Bool(true) => console::write("#t"),
@@ -155,10 +155,7 @@ fn write_value(value: native::Value, source: &[u8]) {
             console::write_u64(u64::from(id));
             console::write(">");
         }
-        native::Value::Code { start, end } => {
-            console::write("'");
-            console::write_bytes(&source[start as usize..end as usize]);
-        }
+        native::Value::Data => console::write_bytes(rendered),
         native::Value::Function => console::write("#<native-function>"),
     }
     console::write("\n");

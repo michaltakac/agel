@@ -1,5 +1,9 @@
 # Self-hosting without permanent interpreter overhead
 
+Current follow-up: v0.2.23 puts strings, lists and maps into the freestanding
+evaluator's transactional world with a copying collector at commit. The native
+reader and compiler still need more cells and text than the fixed bounds allow.
+
 Current follow-up: v0.2.22 makes the verification gate, portable images and
 effect policy live paths in the CLI, extends the three-evaluator corpus to maps
 and text, and gives the freestanding evaluator `let`, variadic arithmetic and

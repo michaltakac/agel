@@ -4,7 +4,10 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.22: a live upgrade pipeline in the CLI (proposal files
+The current repository is **v0.2.23: strings, symbols, lists and maps as first-class values
+inside the freestanding evaluator, in a bounded heap with a copying collector at every commit,
+so quoted data persists in native globals and travels in native agent messages; plus
+a live upgrade pipeline in the CLI (proposal files
 verified in a zero-authority canary, then promoted atomically or recorded into a portable
 image), conservative effect inference over first-class builtins, a typed default-deny
 effect policy consulted by every model process launch, a policy-mediated copy-on-write
@@ -174,7 +177,7 @@ It provides:
   domain, with errors rolling back the evaluator transaction;
 - graphical named source-cell staging, replay-validated dual-slot save, reload,
   and automatic reconstruction after reboot;
-- fixed-memory native agents with scalar state and messages, bounded FIFO
+- fixed-memory native agents with data-carrying state and messages, bounded FIFO
   mailboxes, deterministic round-robin turns, transactional sends/state, live
   inspection, and contained fault/drop/restart recovery;
 - semantic hit-testing that returns inspectable intents without executing them;
@@ -319,6 +322,9 @@ layout composition, including Slovak/Option symbols and paste. For example:
 (agent-state counter)
 (let ((x 20) (y 22)) (+ x y))
 (def norm (fn (a b) (def last a) (- (* a a) (* b b) 1)))
+(def plan '(compile (core) "v1"))
+(car (cdr plan))
+(keys (assoc (dict 'plan plan) 'n 1))
 (accent cyan)
 (workspace 2)
 (title "LIVE AGEL")

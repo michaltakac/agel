@@ -340,7 +340,8 @@ def main() -> int:
         harness.send(
             ":limits",
             "source=256 nodes=128 globals=24 name=24 params=4 locals=8 "
-            "args=8 body=192 depth=24 fuel=2000 agents=8 mailbox=8 run-turns=32 scene-rects=12",
+            "args=8 body=192 depth=24 fuel=2000 agents=8 mailbox=8 run-turns=32 scene-rects=12 "
+            "cells=384 text=2048",
             10,
         )
         harness.send(
@@ -400,6 +401,15 @@ def main() -> int:
             "error: / expects at least two integers (transaction rolled back)",
             35,
         )
+        harness.send("(list 1 (+ 20 22) 'x)", "(1 42 x)", 36)
+        harness.send("(cons 0 '(1 2))", "(0 1 2)", 37)
+        harness.send("(get (dict 'a 1 'b 2) 'b)", "2", 38)
+        harness.send("(keys (assoc (dict 'a 1) 'b 2))", "(a b)", 39)
+        harness.send('(text-concat "Ag" "el")', '"Agel"', 40)
+        harness.send('(count "Ahoj svet")', "9", 41)
+        harness.send("(= '(1 (2)) (list 1 (list 2)))", "#t", 42)
+        harness.send("(def plan '(compile (core) \"v1\"))", "(compile (core) \"v1\")", 43)
+        harness.send("(eval (cons '+ '(20 22)))", "42", 44)
 
         assert harness.process.stdin is not None
         for byte in b":shutdown":

@@ -19,12 +19,25 @@ form. Implemented special forms and functions are:
 ```text
 quote  if  begin  let  def  fn
 +  -  *  /  =  <  eval
+list  cons  car  cdr  count
+dict  get  has-key?  assoc  dissoc  keys  type-of
+text-bytes  text-byte  text-slice  text-concat  text-symbol
 spawn  send  step  run
 agent-state  agent-pending  agent-turns  agent-faulted?
 restart-agent  drop-message  agent-count
 scene-clear  scene-rect  scene-count  scene-bind  scene-hit  scene-owner
 agent-become
 ```
+
+Since v0.2.23 atoms also include strings with the hosted escapes, and quoted
+symbols, lists and maps are ordinary values: `'(compile (core) "v1")` is data
+that can be bound with `def`, stored as agent state, sent as a message, taken
+apart with `car`/`cdr`, compared structurally with `=`, and persisted through
+source cells like everything else. `eval` re-reads a datum from its rendering,
+so `(eval (cons '+ '(20 22)))` is `42`. The list, map and text builtins follow
+the hosted seed: insertion-ordered persistent maps whose `assoc`/`dissoc`
+share untouched entries, byte-oriented UTF-8 text mechanisms, `count` in
+characters, and structural equality that is order-sensitive for maps.
 
 Since v0.2.22 arithmetic follows the hosted seed: `+` and `*` fold any number
 of integers from their identities, `-` negates one argument or folds several,
@@ -39,11 +52,23 @@ recursion. Immediate lambdas capture bounded scalar lexical parameters, so
 `(((fn (x) (fn (y) (+ x y))) 40) 2)` evaluates to `42`. A lambda created inside
 a lexical call cannot yet be persisted by `def`; this is rejected rather than
 silently losing its captures. Function-valued captures are also deferred.
-Quoted syntax is valid for the current transaction and can be passed to `eval`,
-but the native world does not persist quoted graphs in globals. Strings, lists
-and maps are still absent from the freestanding evaluator; the scene and agent
-primitives are specified in [`native-scenes.md`](native-scenes.md),
+The scene and agent primitives are specified in [`native-scenes.md`](native-scenes.md),
 [`native-agents.md`](native-agents.md) and [`native-workbench.md`](native-workbench.md).
+
+## The native heap
+
+Data lives in a bounded heap inside the transactional world: 384 cons cells
+and a 2,048-byte immutable text arena, both reported by `:limits`. Allocation
+only appends, so a form that would overrun either bound is rejected whole and
+the committed world is untouched. At every commit boundary (an evaluated form,
+a validated preview, a staged source cell) a copying collector keeps exactly
+the cells and bytes reachable from global bindings, agent states and queued
+messages, rewriting the handles in place; garbage from earlier revisions never
+accumulates. The rollback bank keeps its own heap, so `:rollback` restores data
+and bindings together. Results are rendered into the 256-byte reply before
+collection, which is why a result need not itself be a root. Symbols are
+interned by content within the arena. There is still no allocator: the heap is
+part of the fixed world banks that live on the evaluator domain's private stack.
 
 ## Transaction protocol
 
@@ -104,7 +129,8 @@ build has no route to the recovery monitor. The graphical workshop's `:cell`,
 The native seed permits 128 syntax nodes, 24 global definitions, 24-byte names,
 four function parameters, eight arguments/local slots, 192-byte stored bodies,
 24 reader/call levels, 2,000 evaluation steps per submitted form, eight native
-agents, eight messages per mailbox, and 32 turns per `run`. The serial
+agents, eight messages per mailbox, 32 turns per `run`, 384 heap cells and
+2,048 bytes of text. The serial
 input buffer is 256 bytes. These are explicit resource policy, not accidental
 allocation failures. `:limits` renders the table directly from the constants the
 evaluator enforces, so the console, this document, and the implementation cannot

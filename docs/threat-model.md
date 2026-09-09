@@ -497,6 +497,32 @@ adapters' policy is still enforced by the trusted Rust host, and the CLI's
 proposal files are read from the operator's filesystem with the operator's
 authority. Nothing here is a syscall boundary.
 
+## v0.2.23
+
+- **A heap that outgrows its rollback bank:** data values live inside the
+  copied world banks, never in a separate arena, so a failed form, a rejected
+  candidate and `:rollback` all discard or restore the heap together with the
+  bindings that reference it.
+- **Garbage that survives revisions:** a copying collector runs at every
+  commit boundary with the bindings, agent states and queued messages as the
+  only roots; a handle that is not reachable from them does not exist in the
+  next revision. Collection failure (a live set that cannot fit the target
+  arena) rejects the transaction rather than committing a partial heap.
+- **A result handle that dangles:** results are rendered into the reply
+  payload before collection and reported as text, so no frontend ever holds a
+  heap handle across a commit.
+- **Unbounded allocation inside one form:** cell and text arenas are fixed;
+  exhaustion is a transactional error, and `eval` re-reads a datum only if its
+  rendering fits one 256-byte payload.
+- **A kernel that no longer fits its boot seed:** adding the heap pushed the
+  image past the 254-sector BIOS load until the empty world became all-zero
+  bytes; the build still rejects an oversized kernel, and each test script's
+  build step is the first thing to read when native suites fail together.
+
+Native data is still not shared with the hosted runtime's values, agent
+messages are still not typed protocols, and the self-hosted toolchain still
+does not fit the native bounds.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

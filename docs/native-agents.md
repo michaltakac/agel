@@ -14,8 +14,10 @@ restart-agent  drop-message  agent-count
 ```
 
 `(spawn behavior initial-state)` requires a stored three-argument function. On
-each turn Agel invokes `(behavior self state message)` and commits its scalar
-result as the next state. `send` appends a scalar message to a FIFO mailbox.
+each turn Agel invokes `(behavior self state message)` and commits its result
+as the next state. `send` appends a message to a FIFO mailbox. Since v0.2.23
+states and messages may be any data value, including quoted lists, strings
+and maps, so a native protocol can be `'(open "a")` rather than an integer code.
 `step` schedules at most one ready agent and `run` schedules at most the supplied
 number of turns. Selection is deterministic round-robin, including sends an
 agent performs from inside its own behavior.
@@ -52,7 +54,7 @@ are values (`#<native-agent:N>`), not ambient pointers or kernel capabilities.
 
 ## Hard bounds and durability
 
-The seed admits eight agents, eight queued scalar messages per agent, and at
+The seed admits eight agents, eight queued messages per agent, and at
 most 32 scheduler turns per `run`. All work shares the submitted form's 2,000
 evaluation-step budget. `:limits` reports these constants from the running
 implementation.
@@ -76,8 +78,8 @@ mailboxes or capability-like identities while making native agent programs
 durable and editable from the graphical workshop.
 
 This is the downward-bootstrap seed, not parity with the hosted runtime yet.
-Native messages and states are scalar, and protocols, supervision trees, model
-requests, persistent collections, and richer trace data remain hosted Agel
+Native messages and states carry data since v0.2.23, but typed protocols,
+supervision trees, model requests and richer trace data remain hosted Agel
 libraries to be ported downward. In particular, a native turn never invokes an
 AI model implicitly: model requests will remain explicit, metered effects when
 that adapter crosses the boundary.
