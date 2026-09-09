@@ -1013,6 +1013,18 @@ def main() -> int:
         harness.send("(= '(1 (2)) (list 1 (list 2)))", "#t", 42)
         harness.send("(def plan '(compile (core) \"v1\"))", "(compile (core) \"v1\")", 43)
         harness.send("(eval (cons '+ '(20 22)))", "42", 44)
+        # Actor slots are reclaimed: a reaped agent's slot is the next one
+        # spawned into, at a new generation, and its old handle is refused.
+        harness.send("(reap-agent broken)", "#t", 45)
+        harness.send("(agent-count)", "1", 46)
+        harness.send(
+            "(send broken 1)",
+            "error: stale native agent (transaction rolled back)",
+            46,
+        )
+        harness.send("(def revived (spawn fragile 3))", "#<native-agent:2.1>", 47)
+        harness.send("(agent-state revived)", "3", 48)
+        harness.send("(agent-count)", "2", 49)
 
         assert harness.process.stdin is not None
         for byte in b":shutdown":

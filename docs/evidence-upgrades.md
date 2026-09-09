@@ -81,4 +81,7 @@ explicitly reissue current authority.
 The v0.0.5 content digest is cryptographic but its payload is still an explicitly
 versioned representation of the Rust seed's state. v0.0.7 replaces this with the
 portable canonical image encoding required for cross-version persistence and
-diverse-bootstrap comparison. It is not yet a detached signature.
+diverse-bootstrap comparison. That encoding exists since v0.2.22, and since
+v0.2.24 portable images and promotion evidence carry detached Ed25519
+signatures from the project's own verifier; see
+[`portable-images.md`](portable-images.md).

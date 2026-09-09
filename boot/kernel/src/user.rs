@@ -359,8 +359,13 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
                     evaluator_text(page, &mut response_length, b"nil")
                 },
                 Ok(crate::native::Value::Agent(id)) => unsafe {
+                    let (number, generation) = crate::native::agent_label(id);
                     evaluator_text(page, &mut response_length, b"#<native-agent:");
-                    evaluator_u64(page, &mut response_length, u64::from(id));
+                    evaluator_u64(page, &mut response_length, u64::from(number));
+                    if generation != 0 {
+                        evaluator_push(page, &mut response_length, b'.');
+                        evaluator_u64(page, &mut response_length, u64::from(generation));
+                    }
                     evaluator_push(page, &mut response_length, b'>');
                 },
                 Ok(crate::native::Value::Data) => unsafe {

@@ -54,9 +54,24 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     Nil,
-    Agent(u8),
+    /// An agent handle: slot number in the low byte, the slot's generation
+    /// in the high byte. See [`agent_label`].
+    Agent(u16),
     Data,
     Function,
+}
+
+/// Split an agent handle into the number the operator sees (slot + 1) and
+/// the generation of the slot it was issued against. A handle from before a
+/// slot was reaped carries an older generation and is refused; printers show
+/// the generation only when it is not the first, so `#<native-agent:2>`
+/// stays `#<native-agent:2>` until slot 2 has been reaped and reused.
+pub fn agent_label(id: u16) -> (u8, u8) {
+    ((id & 0xff) as u8, (id >> 8) as u8)
+}
+
+fn agent_handle(index: usize, generation: u8) -> u16 {
+    (index as u16 + 1) | (u16::from(generation) << 8)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,7 +89,7 @@ enum Scalar {
     Nil,
     Int(i64),
     Bool(bool),
-    Agent(u8),
+    Agent(u16),
     Text {
         start: u16,
         len: u16,
@@ -248,6 +263,9 @@ impl Binding {
 struct Agent {
     used: bool,
     faulted: bool,
+    /// Bumped each time the slot is reaped, so a handle to the previous
+    /// occupant is refused rather than reaching the next one.
+    generation: u8,
     behavior: Function,
     state: Scalar,
     mailbox: [Scalar; MAX_MAILBOX],
@@ -260,6 +278,7 @@ impl Agent {
     const EMPTY: Self = Self {
         used: false,
         faulted: false,
+        generation: 0,
         behavior: Function::EMPTY,
         state: Scalar::Nil,
         mailbox: [Scalar::Nil; MAX_MAILBOX],
@@ -279,7 +298,7 @@ struct World {
     scene: [[u32; 7]; MAX_SCENE_RECTS],
     scene_count: u8,
     scene_ids: [i64; MAX_SCENE_RECTS],
-    scene_owners: [u8; MAX_SCENE_RECTS],
+    scene_owners: [u16; MAX_SCENE_RECTS],
 }
 
 impl World {
@@ -460,8 +479,16 @@ impl Session {
         Ok(())
     }
 
+    /// The behavior source of the agent currently in slot `number` (as the
+    /// operator sees it, from 1), whatever generation that occupant is: the
+    /// inspector names slots, not handles.
     #[cfg(any(feature = "isolation-selftest", test))]
-    pub fn agent_source(&self, id: u8) -> Result<&[u8], Error> {
+    pub fn agent_source(&self, number: u8) -> Result<&[u8], Error> {
+        let index = usize::from(number)
+            .checked_sub(1)
+            .filter(|index| *index < MAX_AGENTS)
+            .ok_or(Error("invalid native agent"))?;
+        let id = agent_handle(index, self.active.agents[index].generation);
         let agent = &self.active.agents[agent_index(&self.active, id)?];
         Ok(&agent.behavior.body[..agent.behavior.body_length as usize])
     }
@@ -834,6 +861,7 @@ enum Builtin {
     AgentFaulted,
     RestartAgent,
     DropMessage,
+    ReapAgent,
     AgentCount,
 }
 
@@ -988,8 +1016,13 @@ fn render(
         Scalar::Bool(false) => emit(out, length, b"#f"),
         Scalar::Nil => emit(out, length, b"nil"),
         Scalar::Agent(id) => {
+            let (number, generation) = agent_label(id);
             emit(out, length, b"#<native-agent:")?;
-            emit_i64(out, length, i64::from(id))?;
+            emit_i64(out, length, i64::from(number))?;
+            if generation != 0 {
+                emit(out, length, b".")?;
+                emit_i64(out, length, i64::from(generation))?;
+            }
             emit(out, length, b">")
         }
         Scalar::Symbol { start, len } => emit(out, length, heap.bytes(start, len)),
@@ -1706,6 +1739,7 @@ fn apply_builtin(
         Builtin::AgentFaulted => return inspect_agent(arguments, world, AgentField::Faulted),
         Builtin::RestartAgent => return restart_agent(arguments, world),
         Builtin::DropMessage => return drop_message(arguments, world),
+        Builtin::ReapAgent => return reap_agent(arguments, world),
         Builtin::AgentCount => {
             if !arguments.is_empty() {
                 return Err(Error("agent-count expects no arguments"));
@@ -1806,13 +1840,41 @@ fn spawn_agent(arguments: &[RuntimeValue], world: &mut World) -> Result<RuntimeV
         .iter()
         .position(|agent| !agent.used)
         .ok_or(Error("native agent table is full"))?;
+    let generation = world.agents[index].generation;
     world.agents[index] = Agent {
         used: true,
+        generation,
         behavior: *behavior,
         state: *state,
         ..Agent::EMPTY
     };
-    Ok(RuntimeValue::Scalar(Scalar::Agent((index + 1) as u8)))
+    Ok(RuntimeValue::Scalar(Scalar::Agent(agent_handle(
+        index, generation,
+    ))))
+}
+
+/// Free an agent's slot. The slot's generation moves on, so every handle to
+/// the reaped agent is refused from now on, and scene rectangles it owned
+/// become unowned. A reaped slot is the one `spawn` fills next.
+fn reap_agent(arguments: &[RuntimeValue], world: &mut World) -> Result<RuntimeValue, Error> {
+    if world.scheduler_active {
+        return Err(Error("native agent recovery requires the operator"));
+    }
+    let [RuntimeValue::Scalar(Scalar::Agent(id))] = arguments else {
+        return Err(Error("reap-agent expects one agent"));
+    };
+    let index = agent_index(world, *id)?;
+    let generation = world.agents[index].generation.wrapping_add(1);
+    world.agents[index] = Agent {
+        generation,
+        ..Agent::EMPTY
+    };
+    for owner in world.scene_owners.iter_mut() {
+        if *owner == *id {
+            *owner = 0;
+        }
+    }
+    Ok(RuntimeValue::Scalar(Scalar::Bool(true)))
 }
 
 fn send_agent(arguments: &[RuntimeValue], world: &mut World) -> Result<RuntimeValue, Error> {
@@ -1872,7 +1934,7 @@ fn schedule_one(world: &mut World, depth: u8, fuel: &mut u16) -> Result<Schedule
     world.agents[index].mailbox_length -= 1;
     world.scheduler_active = true;
     let arguments = [
-        RuntimeValue::Scalar(Scalar::Agent((index + 1) as u8)),
+        RuntimeValue::Scalar(Scalar::Agent(agent_handle(index, actor.generation))),
         RuntimeValue::Scalar(actor.state),
         RuntimeValue::Scalar(message),
     ];
@@ -1979,11 +2041,21 @@ fn drop_message(arguments: &[RuntimeValue], world: &mut World) -> Result<Runtime
     Ok(RuntimeValue::Scalar(message))
 }
 
-fn agent_index(world: &World, id: u8) -> Result<usize, Error> {
-    let index = usize::from(id)
+fn agent_index(world: &World, id: u16) -> Result<usize, Error> {
+    let (number, generation) = agent_label(id);
+    let index = usize::from(number)
         .checked_sub(1)
         .ok_or(Error("invalid native agent"))?;
-    if index >= MAX_AGENTS || !world.agents[index].used {
+    if index >= MAX_AGENTS {
+        return Err(Error("invalid native agent"));
+    }
+    let agent = &world.agents[index];
+    if agent.generation != generation {
+        // The slot has been reaped since this handle was issued, whether or
+        // not something else lives there now.
+        return Err(Error("stale native agent"));
+    }
+    if !agent.used {
         return Err(Error("invalid native agent"));
     }
     Ok(index)
@@ -2069,6 +2141,7 @@ fn builtin_for_name(name: &[u8]) -> Option<Builtin> {
         b"agent-faulted?" => Builtin::AgentFaulted,
         b"restart-agent" => Builtin::RestartAgent,
         b"drop-message" => Builtin::DropMessage,
+        b"reap-agent" => Builtin::ReapAgent,
         b"agent-count" => Builtin::AgentCount,
         _ => return None,
     })
@@ -3042,6 +3115,47 @@ mod tests {
         assert!(session.evaluate(b"(run 33)").is_err());
         assert!(session.evaluate(b"(run -1)").is_err());
         assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(8));
+    }
+
+    #[test]
+    fn reaped_slots_are_reused_and_old_handles_refused() {
+        let mut session = Session::new();
+        eval(&mut session, "(def tick (fn (self state message) message))");
+        eval(&mut session, "(def a (spawn tick 0))");
+        for _ in 1..MAX_AGENTS {
+            eval(&mut session, "(spawn tick 0)");
+        }
+        assert!(session.evaluate(b"(spawn tick 0)").is_err());
+        assert_eq!(eval(&mut session, "(agent-count)"), Value::Int(8));
+        eval(&mut session, "(scene-rect 1 1 4 4 0 0)");
+        eval(&mut session, "(scene-bind 7 a)");
+        assert_eq!(eval(&mut session, "(scene-owner 7)"), Value::Agent(1));
+        assert_eq!(eval(&mut session, "(reap-agent a)"), Value::Bool(true));
+        assert_eq!(eval(&mut session, "(agent-count)"), Value::Int(7));
+        assert_eq!(
+            session.evaluate(b"(send a 1)"),
+            Err(Error("stale native agent"))
+        );
+        assert_eq!(
+            session.evaluate(b"(reap-agent a)"),
+            Err(Error("stale native agent"))
+        );
+        assert_eq!(eval(&mut session, "(scene-owner 7)"), Value::Agent(0));
+        // The freed slot is the next one spawned into, at a new generation.
+        assert_eq!(
+            eval(&mut session, "(def b (spawn tick 5))"),
+            Value::Agent(1 | (1 << 8))
+        );
+        assert_eq!(eval(&mut session, "(agent-count)"), Value::Int(8));
+        assert_eq!(
+            session.evaluate(b"(agent-state a)"),
+            Err(Error("stale native agent"))
+        );
+        assert_eq!(eval(&mut session, "(agent-state b)"), Value::Int(5));
+        // Reaping is transactional like everything else: a failing form
+        // that reaps leaves the agent in place.
+        assert!(session.evaluate(b"(begin (reap-agent b) (/ 1 0))").is_err());
+        assert_eq!(eval(&mut session, "(agent-state b)"), Value::Int(5));
     }
 
     #[test]

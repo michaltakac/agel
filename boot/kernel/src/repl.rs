@@ -151,8 +151,13 @@ fn write_value(value: native::Value, rendered: &[u8]) {
         native::Value::Bool(false) => console::write("#f"),
         native::Value::Nil => console::write("nil"),
         native::Value::Agent(id) => {
+            let (number, generation) = native::agent_label(id);
             console::write("#<native-agent:");
-            console::write_u64(u64::from(id));
+            console::write_u64(u64::from(number));
+            if generation != 0 {
+                console::write(".");
+                console::write_u64(u64::from(generation));
+            }
             console::write(">");
         }
         native::Value::Data => console::write_bytes(rendered),

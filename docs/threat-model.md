@@ -837,6 +837,27 @@ misfiled. Reclamation is compiled only where restart is, in the self-test
 builds; the interactive workshops never replace a domain and carry none of
 it, which the x86-64 image budget required.
 
+## v0.2.36
+
+- **A slot that is never given back:** the native actor table has eight
+  slots and, until now, no way to free one; a session that spawned nine
+  agents in its life was out of agents. `reap-agent` frees a slot, and the
+  freed slot is the next one spawned into.
+- **A handle that reaches the successor:** the reason slots were not reused
+  before is the obvious one. A handle is now the slot number and the slot's
+  generation; reaping moves the generation on, so every handle issued to the
+  reaped agent is refused as `stale native agent`, distinct from the
+  `invalid native agent` of a slot that never held one, exactly as a driver
+  restart refuses `stale-generation`. The behavior a scheduler turn passes as
+  `self` carries the current generation too.
+- **A rectangle owned by the dead:** scene rectangles bound to a reaped
+  agent become unowned rather than pointing at whoever takes the slot.
+
+Not claimed: a generation is one byte and wraps after 256 reaps of the same
+slot, at which point a handle from 256 occupants ago would be accepted; the
+bound is stated rather than hidden, and the hosted runtime has no such wrap.
+Actors still share the evaluator's globals and one protection domain.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

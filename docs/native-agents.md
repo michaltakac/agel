@@ -10,7 +10,7 @@ The native surface is intentionally small:
 ```text
 spawn  send  step  run
 agent-state  agent-pending  agent-turns  agent-faulted?
-restart-agent  drop-message  agent-count
+restart-agent  drop-message  reap-agent  agent-count
 ```
 
 `(spawn behavior initial-state)` requires a stored three-argument function. On
@@ -68,8 +68,17 @@ one. Recovery operations are rejected inside behavior execution.
 Actors currently share the evaluator's global definitions and one protection
 domain. Their handles do not establish security isolation between mutually
 untrusted behaviors. Behaviors are copied at spawn time, while their global
-references resolve at call time. Native actor slots are retained for the
-session; reclaiming slots and stronger per-actor authority are future work.
+references resolve at call time.
+
+Since v0.2.36 a slot can be given back: `(reap-agent a)` frees the agent's
+slot, releases any scene rectangle it owned, and moves the slot's generation
+on. A handle carries the generation it was issued against, so every handle to
+the reaped agent answers `stale native agent` from then on, whether or not
+something else lives in the slot; a handle to a slot that was never used
+answers `invalid native agent`, and the two are kept distinct on purpose. The
+freed slot is the next one `spawn` fills, and its new occupant prints as
+`#<native-agent:2.1>`: slot 2, generation 1. Reaping is transactional like
+every other form. Stronger per-actor authority remains future work.
 
 Workspace images continue to store source, not live memory or authority. Save
 behavior definitions in cells; after reboot, replay reconstructs those

@@ -186,7 +186,7 @@ pub fn run() -> ! {
         match source {
             b":help" => driver_line(
                 &mut driver,
-                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :cut-power N :shutdown",
+                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart/reap | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :cut-power N :shutdown",
             ),
             b":revision" => {
                 let mut out = ServiceWriter::new(&mut driver);

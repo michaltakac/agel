@@ -127,6 +127,11 @@ promise.
   was built from, a replaced driver domain gives them back, and its
   replacement is built from them, asserted on all three machines. No format
   change.
+  `v0.2.36` lets native actor slots be reclaimed: `reap-agent` frees a slot
+  and moves its generation on, agent handles carry their generation and a
+  stale one is refused, and a reused slot prints as `#<native-agent:N.G>`.
+  Agent handles widen from one byte to two inside the evaluator; images and
+  the workspace format are unchanged.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
