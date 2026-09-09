@@ -3,7 +3,7 @@ use agel_core::{
     Snapshot, Value, World,
 };
 use agel_image::{Image, ImageSession, ImageStore};
-use agel_integrity::Digest;
+use agel_integrity::{encode_hex, Digest, SigningKey, VerifyingKey};
 use agel_model::{
     ClaudeCodeProvider, CodexProvider, CommandLimits, ProviderError, ProviderRegistry,
 };
@@ -27,6 +27,9 @@ struct CliConfig {
     max_output_bytes: usize,
     stdlib: bool,
     image: Option<PathBuf>,
+    signing_key: Option<PathBuf>,
+    trust_key: Option<PathBuf>,
+    keygen: Option<PathBuf>,
 }
 
 impl CliConfig {
@@ -44,6 +47,9 @@ impl CliConfig {
             max_output_bytes: 1_048_576,
             stdlib: true,
             image: None,
+            signing_key: None,
+            trust_key: None,
+            keygen: None,
         };
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
@@ -53,6 +59,15 @@ impl CliConfig {
                 "--enable-codex" => config.codex = true,
                 "--no-stdlib" => config.stdlib = false,
                 "--image" => config.image = Some(required_value(&mut arguments, &argument)?.into()),
+                "--signing-key" => {
+                    config.signing_key = Some(required_value(&mut arguments, &argument)?.into())
+                }
+                "--trust-key" => {
+                    config.trust_key = Some(required_value(&mut arguments, &argument)?.into())
+                }
+                "--keygen" => {
+                    config.keygen = Some(required_value(&mut arguments, &argument)?.into())
+                }
                 "--claude-bin" => {
                     config.claude_bin = required_value(&mut arguments, &argument)?.into()
                 }
@@ -109,6 +124,9 @@ fn required_value(
 /// refused there: an image is an append-only log of committed inputs, and
 /// rewinding the live world without rewinding the log would make the file
 /// disagree with the world it claims to reconstruct.
+// One runtime exists per process, so the size difference between a volatile
+// world and an image session with its signing key is irrelevant.
+#[allow(clippy::large_enum_variant)]
 enum Runtime {
     Volatile {
         world: World,
@@ -118,7 +136,99 @@ enum Runtime {
         session: ImageSession,
         store: ImageStore,
         saved: Option<Digest>,
+        signing: Option<SigningKey>,
     },
+}
+
+/// Keys the operator supplied. A signing key implies trust in its own public
+/// half; an explicit trust key must match it, so a world is never appended
+/// with a signature the next start would refuse.
+#[derive(Clone, Debug, Default)]
+struct Keys {
+    signing: Option<SigningKey>,
+    trusted: Option<VerifyingKey>,
+}
+
+impl Keys {
+    fn load(signing: Option<&Path>, trust: Option<&Path>) -> Result<Self, String> {
+        let signing = match signing {
+            Some(path) => {
+                let text = std::fs::read_to_string(path).map_err(|error| {
+                    format!("cannot read signing key {}: {error}", path.display())
+                })?;
+                Some(SigningKey::from_hex(&text).map_err(|error| {
+                    format!(
+                        "signing key {} is not a 32-byte hex seed: {error}",
+                        path.display()
+                    )
+                })?)
+            }
+            None => None,
+        };
+        let trusted = match trust {
+            Some(path) => {
+                let text = std::fs::read_to_string(path).map_err(|error| {
+                    format!("cannot read trust key {}: {error}", path.display())
+                })?;
+                Some(VerifyingKey::from_hex(&text).map_err(|error| {
+                    format!(
+                        "trust key {} is not an Ed25519 public key: {error}",
+                        path.display()
+                    )
+                })?)
+            }
+            None => None,
+        };
+        match (&signing, trusted) {
+            (Some(signing), Some(trusted)) if signing.verifying_key() != trusted => {
+                return Err(
+                    "--trust-key does not match the public half of --signing-key; \
+                            commits would be signed with a key the next start refuses"
+                        .into(),
+                );
+            }
+            (None, Some(_)) => {
+                return Err(
+                    "--trust-key without --signing-key would make every commit unpersistable; \
+                     supply the matching --signing-key"
+                        .into(),
+                );
+            }
+            _ => {}
+        }
+        let trusted = trusted.or_else(|| signing.as_ref().map(SigningKey::verifying_key));
+        Ok(Self { signing, trusted })
+    }
+}
+
+/// Write a fresh 32-byte seed from the operating system's random source as a
+/// hex file readable only by its owner, and return the public key.
+fn generate_key(path: &Path) -> Result<VerifyingKey, String> {
+    let mut seed = [0_u8; 32];
+    {
+        use std::io::Read as _;
+        let mut source = std::fs::File::open("/dev/urandom")
+            .map_err(|error| format!("cannot open /dev/urandom: {error}"))?;
+        source
+            .read_exact(&mut seed)
+            .map_err(|error| format!("cannot read /dev/urandom: {error}"))?;
+    }
+    if seed == [0; 32] {
+        return Err("random source produced an all-zero seed".into());
+    }
+    let key = SigningKey::from_seed(seed);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
+    writeln!(file, "{}", encode_hex(&seed)).map_err(|error| error.to_string())?;
+    Ok(key.verifying_key())
 }
 
 impl Runtime {
@@ -129,11 +239,13 @@ impl Runtime {
         }
     }
 
-    fn open_image(path: &Path) -> Result<(Self, bool), String> {
+    fn open_image(path: &Path, keys: &Keys) -> Result<(Self, bool), String> {
         let store = ImageStore::new(path);
-        let existing = store
-            .load()
-            .map_err(|error| format!("cannot load image {}: {error}", path.display()))?;
+        let existing = match &keys.trusted {
+            Some(trusted) => store.load_verified(trusted),
+            None => store.load(),
+        }
+        .map_err(|error| format!("cannot load image {}: {error}", path.display()))?;
         let (session, saved) = match existing {
             Some(image) => {
                 let session = image
@@ -149,6 +261,7 @@ impl Runtime {
                 session,
                 store,
                 saved,
+                signing: keys.signing.clone(),
             },
             restored,
         ))
@@ -172,6 +285,13 @@ impl Runtime {
         match self {
             Self::Volatile { .. } => None,
             Self::Image { session, .. } => Some(session.image()),
+        }
+    }
+
+    fn signer(&self) -> Option<VerifyingKey> {
+        match self {
+            Self::Image { signing, .. } => signing.as_ref().map(SigningKey::verifying_key),
+            Self::Volatile { .. } => None,
         }
     }
 
@@ -279,13 +399,16 @@ impl Runtime {
             session,
             store,
             saved,
+            signing,
         } = self
         else {
             return Ok(());
         };
-        let root = store
-            .save(session.image(), *saved)
-            .map_err(|error| format!("image not saved to {}: {error}", store.path().display()))?;
+        let root = match signing {
+            Some(key) => store.save_signed(session.image(), *saved, key),
+            None => store.save(session.image(), *saved),
+        }
+        .map_err(|error| format!("image not saved to {}: {error}", store.path().display()))?;
         *saved = Some(root);
         Ok(())
     }
@@ -343,8 +466,16 @@ fn main() -> io::Result<()> {
         print_usage();
         return Ok(());
     };
+    if let Some(path) = &config.keygen {
+        let public = generate_key(path).map_err(io::Error::other)?;
+        println!("wrote signing seed to {}", path.display());
+        println!("public key {public}");
+        return Ok(());
+    }
+    let keys = Keys::load(config.signing_key.as_deref(), config.trust_key.as_deref())
+        .map_err(io::Error::other)?;
     let (mut runtime, restored) = match &config.image {
-        Some(path) => Runtime::open_image(path).map_err(io::Error::other)?,
+        Some(path) => Runtime::open_image(path, &keys).map_err(io::Error::other)?,
         None => (Runtime::volatile(), false),
     };
     let mut providers = ProviderRegistry::default();
@@ -406,12 +537,15 @@ fn main() -> io::Result<()> {
             path.display(),
             image.len(),
             image.digest(),
-            if restored {
-                " (reconstructed by replay)"
-            } else {
-                " (new)"
+            match (restored, &keys.trusted) {
+                (true, Some(_)) => " (signature verified, reconstructed by replay)",
+                (true, None) => " (unsigned, reconstructed by replay)",
+                (false, _) => " (new)",
             }
         );
+        if let Some(signer) = runtime.signer() {
+            println!("Commits are signed by {signer}");
+        }
     }
     if config.stdlib && !restored {
         println!(
@@ -552,11 +686,14 @@ fn main() -> io::Result<()> {
                 }
                 ":image" => match (&config.image, runtime.image()) {
                     (Some(path), Some(image)) => println!(
-                        "{}: {} committed inputs, root {}, budget fuel {}",
+                        "{}: {} committed inputs, root {}, budget fuel {}, signer {}",
                         path.display(),
                         image.len(),
                         image.digest(),
-                        image.budget().fuel
+                        image.budget().fuel,
+                        runtime
+                            .signer()
+                            .map_or("none (unsigned)".to_owned(), |key| key.to_hex())
                     ),
                     _ => {
                         println!("no portable image; start with --image PATH to persist this world")
@@ -765,6 +902,11 @@ fn print_help() {
 fn print_usage() {
     println!("Usage: agel-cli [OPTIONS]");
     println!("  --image PATH                 persist every committed input to a portable image");
+    println!(
+        "  --signing-key FILE           sign every image root with this hex seed and verify loads"
+    );
+    println!("  --trust-key FILE             public key loads must verify against (must match --signing-key)");
+    println!("  --keygen FILE                write a fresh signing seed to FILE, print its public key, exit");
     println!("  --enable-claude              enable restricted Claude Code dispatch");
     println!("  --enable-codex               enable read-only Codex dispatch");
     println!("  --no-stdlib                  start with only the postcard-sized core");
@@ -856,7 +998,7 @@ mod tests {
         let path = temporary_path("persist");
         let _ = std::fs::remove_file(&path);
         {
-            let (mut runtime, restored) = Runtime::open_image(&path).unwrap();
+            let (mut runtime, restored) = Runtime::open_image(&path, &Keys::default()).unwrap();
             assert!(!restored);
             runtime.grant("model/infer", "claude").unwrap();
             runtime.evaluate("(def answer (+ 20 22))").unwrap();
@@ -870,7 +1012,7 @@ mod tests {
             assert!(runtime.restore_snapshot(&snapshot).is_err());
             assert_eq!(runtime.image().unwrap().len(), 6);
         }
-        let (runtime, restored) = Runtime::open_image(&path).unwrap();
+        let (runtime, restored) = Runtime::open_image(&path, &Keys::default()).unwrap();
         assert!(restored);
         assert_eq!(runtime.world().binding("answer"), Some(&Value::Int(42)));
         // The provider was never re-invoked: the recorded completion replays.
@@ -962,6 +1104,48 @@ mod tests {
     }
 
     #[test]
+    fn signed_images_verify_on_restart_and_refuse_other_keys() {
+        let path = temporary_path("signed");
+        let _ = std::fs::remove_file(&path);
+        let seed_path = path.parent().unwrap().join("seed.hex");
+        let _ = std::fs::remove_file(&seed_path);
+        let public = generate_key(&seed_path).unwrap();
+        let seed = std::fs::read_to_string(&seed_path).unwrap();
+        assert_eq!(seed.trim().len(), 64);
+        let keys = Keys::load(Some(&seed_path), None).unwrap();
+        assert_eq!(keys.trusted, Some(public));
+        {
+            let (mut runtime, restored) = Runtime::open_image(&path, &keys).unwrap();
+            assert!(!restored);
+            runtime.evaluate("(def signed 42)").unwrap();
+            assert_eq!(runtime.signer(), Some(public));
+        }
+        let (runtime, restored) = Runtime::open_image(&path, &keys).unwrap();
+        assert!(restored);
+        assert_eq!(runtime.world().binding("signed"), Some(&Value::Int(42)));
+        // An unsigned reader refuses the signed store rather than downgrading.
+        assert!(Runtime::open_image(&path, &Keys::default()).is_err());
+        // A different key refuses it too.
+        let other_path = path.parent().unwrap().join("other.hex");
+        let _ = std::fs::remove_file(&other_path);
+        generate_key(&other_path).unwrap();
+        let other = Keys::load(Some(&other_path), None).unwrap();
+        assert!(Runtime::open_image(&path, &other).is_err());
+        // Mismatched trust and signing keys are refused at startup.
+        let trust_path = path.parent().unwrap().join("trust.hex");
+        std::fs::write(&trust_path, other.trusted.unwrap().to_hex()).unwrap();
+        assert!(Keys::load(Some(&seed_path), Some(&trust_path)).is_err());
+        assert!(Keys::load(None, Some(&trust_path)).is_err());
+        std::fs::write(&trust_path, public.to_hex()).unwrap();
+        assert!(Keys::load(Some(&seed_path), Some(&trust_path)).is_ok());
+        assert!(
+            generate_key(&seed_path).is_err(),
+            "must not overwrite a seed"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn promotion_in_image_mode_is_recorded_as_a_committed_input() {
         let path = temporary_path("promotion");
         let _ = std::fs::remove_file(&path);
@@ -972,13 +1156,13 @@ mod tests {
         )
         .unwrap();
         {
-            let (mut runtime, _) = Runtime::open_image(&path).unwrap();
+            let (mut runtime, _) = Runtime::open_image(&path, &Keys::default()).unwrap();
             let proposal = read_proposal(runtime.world(), &proposal_path, &[]).unwrap();
             let evidence = Verifier::verify(runtime.world(), &proposal).unwrap();
             promote(&mut runtime, &proposal, &evidence).unwrap();
             assert_eq!(runtime.image().unwrap().len(), 1);
         }
-        let (runtime, restored) = Runtime::open_image(&path).unwrap();
+        let (runtime, restored) = Runtime::open_image(&path, &Keys::default()).unwrap();
         assert!(restored);
         assert!(runtime.world().binding("square").is_some());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

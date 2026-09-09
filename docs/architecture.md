@@ -233,13 +233,20 @@ Each rung must be runnable and differentially testable against the rung below:
    commit boundary. This is the first precondition for running the Agel-written
    reader and compiler inside the OS; their working sets still exceed the
    fixed native bounds.
-39. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+39. **Signed roots and evidence (complete at v0.2.24):** a dependency-free
+   Ed25519 and SHA-512 implementation in `agel-integrity`, checked against the
+   RFC 8032 vectors; signed portable-image envelopes with verified loads,
+   trusted-signer fallback and no unsigned downgrade; A/B promotion evidence
+   signed over canonical bytes and a supervisor that refuses unsigned
+   promotion once a key is trusted; and operator key generation in the CLI.
+   Native disk slots, the seL4 manifest and kernel images remain unsigned.
+40. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-40. **POSIX personality:** a Rust C library and the filesystem and process
+41. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-41. **Local inference:** model inference in its own domain, over quantized
+42. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

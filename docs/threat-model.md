@@ -523,6 +523,32 @@ Native data is still not shared with the hosted runtime's values, agent
 messages are still not typed protocols, and the self-hosted toolchain still
 does not fit the native bounds.
 
+## v0.2.24
+
+- **A chain anyone can recompute:** portable images were tamper-evident, not
+  authenticated. A signed envelope now binds the root to an Ed25519 key, and
+  `load_verified` accepts only the trusted signer; a mis-signed, foreign-signed,
+  unsigned or torn primary falls back to a trusted previous generation or
+  fails, never to `None`.
+- **A reader downgraded past a signature:** the unsigned loader refuses a signed
+  primary instead of falling back to an older unsigned generation, so a
+  store that has been signed cannot serve stale state to a reader that was
+  not told which key to trust.
+- **Evidence nobody signed:** an A/B supervisor configured with a trusted key
+  refuses unsigned promotion and verifies signed evidence over canonical
+  bytes with domain separation, so evidence for another artifact or another
+  supervisor cannot be replayed here.
+- **Malleable signatures:** verification rejects `s >= L` and uses the strict
+  equation, so each signature has one accepted encoding.
+- **A key file readable by everyone:** `--keygen` writes the seed with mode
+  0600 and refuses to overwrite an existing file; a mismatched `--trust-key`
+  is refused at startup rather than producing commits the next start rejects.
+
+The implementation is dependency-free and RFC-vector-tested but not
+constant-time: signing keys must not be used where an adversary can time the
+signer. Nothing here signs native disk slots, the seL4 manifest or kernel
+images; those remain hash-checked or unsigned, as their documents say.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

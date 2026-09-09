@@ -2,8 +2,11 @@
 
 use agel_core::{EvaluationOptions, Value};
 use agel_image::Image;
-use agel_integrity::Digest;
+use agel_integrity::{Digest, Signature, SigningKey, VerifyingKey};
 use std::fmt;
+
+/// Domain separation for evidence signatures.
+pub const EVIDENCE_SIGNATURE_DOMAIN: &[u8] = b"agel/promotion-evidence/v1\0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HealthCheck {
@@ -39,6 +42,55 @@ impl PromotionEvidence {
     pub fn checks_passed(&self) -> usize {
         self.checks_passed
     }
+
+    /// The canonical bytes a signature commits to.
+    pub fn message(&self) -> Vec<u8> {
+        let mut message = EVIDENCE_SIGNATURE_DOMAIN.to_vec();
+        message.extend_from_slice(self.active_digest.as_bytes());
+        message.extend_from_slice(self.candidate_digest.as_bytes());
+        message.extend_from_slice(&(self.checks_passed as u64).to_be_bytes());
+        message
+    }
+
+    /// Sign this evidence. The signer is whoever ran the health checks; a
+    /// supervisor configured with a trusted key accepts only their evidence.
+    pub fn sign(&self, key: &SigningKey) -> SignedEvidence {
+        SignedEvidence {
+            evidence: self.clone(),
+            signer: key.verifying_key(),
+            signature: key.sign(&self.message()),
+        }
+    }
+}
+
+/// Promotion evidence bound to the key that produced it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignedEvidence {
+    evidence: PromotionEvidence,
+    signer: VerifyingKey,
+    signature: Signature,
+}
+
+impl SignedEvidence {
+    pub fn evidence(&self) -> &PromotionEvidence {
+        &self.evidence
+    }
+
+    pub fn signer(&self) -> VerifyingKey {
+        self.signer
+    }
+
+    pub fn signature(&self) -> Signature {
+        self.signature
+    }
+
+    /// Check the signature against the signer it names. This does not decide
+    /// whether that signer is trusted; the supervisor does.
+    pub fn verify(&self) -> Result<(), SupervisorError> {
+        self.signer
+            .verify(&self.evidence.message(), &self.signature)
+            .map_err(|_| SupervisorError::InvalidSignature)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +120,7 @@ pub struct AbSupervisor {
     active: Image,
     previous: Option<(Slot, Image)>,
     staged: Option<Staged>,
+    trusted: Option<VerifyingKey>,
 }
 
 impl AbSupervisor {
@@ -77,7 +130,32 @@ impl AbSupervisor {
             active,
             previous: None,
             staged: None,
+            trusted: None,
         }
+    }
+
+    /// Require promotion evidence to be signed by `key`. Once set, unsigned
+    /// promotion is refused; the key is the supervisor's policy, not the
+    /// candidate's, so a candidate image cannot change it.
+    pub fn trust(mut self, key: VerifyingKey) -> Self {
+        self.trusted = Some(key);
+        self
+    }
+
+    pub fn trusted_signer(&self) -> Option<VerifyingKey> {
+        self.trusted
+    }
+
+    /// Promote with signed evidence. The signer must be the trusted key and
+    /// the signature must cover exactly this evidence; then the ordinary
+    /// evidence binding applies.
+    pub fn promote_signed(&mut self, signed: &SignedEvidence) -> Result<Slot, SupervisorError> {
+        let trusted = self.trusted.ok_or(SupervisorError::NoTrustedSigner)?;
+        if signed.signer != trusted {
+            return Err(SupervisorError::UntrustedSigner);
+        }
+        signed.verify()?;
+        self.promote_checked(&signed.evidence)
     }
 
     pub fn active_slot(&self) -> Slot {
@@ -146,7 +224,16 @@ impl AbSupervisor {
         Ok(evidence)
     }
 
+    /// Promote with unsigned evidence. Refused when a trusted signer is
+    /// configured, so configuring one cannot be bypassed by the older API.
     pub fn promote(&mut self, evidence: &PromotionEvidence) -> Result<Slot, SupervisorError> {
+        if self.trusted.is_some() {
+            return Err(SupervisorError::SignatureRequired);
+        }
+        self.promote_checked(evidence)
+    }
+
+    fn promote_checked(&mut self, evidence: &PromotionEvidence) -> Result<Slot, SupervisorError> {
         let staged = self.staged.as_ref().ok_or(SupervisorError::NothingStaged)?;
         if &staged.evidence != evidence
             || evidence.active_digest != self.active.digest()
@@ -199,6 +286,10 @@ pub enum SupervisorError {
     NothingStaged,
     EvidenceMismatch,
     NoPreviousImage,
+    SignatureRequired,
+    NoTrustedSigner,
+    UntrustedSigner,
+    InvalidSignature,
 }
 
 impl fmt::Display for SupervisorError {
@@ -228,6 +319,10 @@ impl fmt::Display for SupervisorError {
                 f.write_str("promotion evidence does not match current slots")
             }
             Self::NoPreviousImage => f.write_str("no previous image is available"),
+            Self::SignatureRequired => f.write_str("this supervisor promotes only signed evidence"),
+            Self::NoTrustedSigner => f.write_str("no trusted evidence signer is configured"),
+            Self::UntrustedSigner => f.write_str("evidence is signed by an untrusted key"),
+            Self::InvalidSignature => f.write_str("evidence signature does not verify"),
         }
     }
 }
@@ -239,6 +334,7 @@ mod tests {
     use super::*;
     use agel_core::Budget;
     use agel_image::ImageSession;
+    use agel_integrity::SigningKey;
 
     fn active_and_candidate() -> (Image, Image) {
         let mut active = ImageSession::new(8, Budget::default());
@@ -273,6 +369,53 @@ mod tests {
         );
         assert_eq!(supervisor.rollback().unwrap(), Slot::A);
         assert_eq!(supervisor.active().digest(), active.digest());
+    }
+
+    #[test]
+    fn trusted_supervisor_promotes_only_evidence_it_can_verify() {
+        let (active, candidate) = active_and_candidate();
+        let verifier = SigningKey::from_seed([3; 32]);
+        let impostor = SigningKey::from_seed([4; 32]);
+        let mut supervisor = AbSupervisor::new(active).trust(verifier.verifying_key());
+        let checks = [HealthCheck::new("(transform 40)", Value::Int(42))];
+        let evidence = supervisor.stage(candidate.clone(), &checks).unwrap();
+        assert_eq!(
+            supervisor.promote(&evidence),
+            Err(SupervisorError::SignatureRequired)
+        );
+        assert_eq!(
+            supervisor.promote_signed(&evidence.sign(&impostor)),
+            Err(SupervisorError::UntrustedSigner)
+        );
+        let mut tampered = evidence.sign(&verifier);
+        tampered.evidence.checks_passed = 99;
+        assert_eq!(
+            supervisor.promote_signed(&tampered),
+            Err(SupervisorError::InvalidSignature)
+        );
+        let mut swapped = evidence.sign(&verifier);
+        swapped.signature = evidence.sign(&impostor).signature;
+        assert_eq!(
+            supervisor.promote_signed(&swapped),
+            Err(SupervisorError::InvalidSignature)
+        );
+        assert_eq!(
+            supervisor
+                .promote_signed(&evidence.sign(&verifier))
+                .unwrap(),
+            Slot::B
+        );
+        // Evidence for the old active image no longer binds, even when signed.
+        supervisor.stage(candidate, &checks).unwrap();
+        assert_eq!(
+            supervisor.promote_signed(&evidence.sign(&verifier)),
+            Err(SupervisorError::EvidenceMismatch)
+        );
+        let mut untrusted = AbSupervisor::new(supervisor.active().clone());
+        assert_eq!(
+            untrusted.promote_signed(&evidence.sign(&verifier)),
+            Err(SupervisorError::NoTrustedSigner)
+        );
     }
 
     #[test]

@@ -4,7 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.23: strings, symbols, lists and maps as first-class values
+The current repository is **v0.2.24: Ed25519-signed portable images and promotion evidence
+from a dependency-free, RFC-vector-tested implementation, with verified loads that never
+downgrade to an unsigned generation; strings, symbols, lists and maps as first-class values
 inside the freestanding evaluator, in a bounded heap with a copying collector at every commit,
 so quoted data persists in native globals and travels in native agent messages; plus
 a live upgrade pipeline in the CLI (proposal files
@@ -51,6 +53,8 @@ Try the live upgrade pipeline and a portable world:
 cargo run -q -p agel-cli -- --image target/agel-world.image
 ```
 
+Add `--keygen keys/agel.hex` once, then `--signing-key keys/agel.hex` to sign
+every image root and verify every load against that key.
 Inside the REPL, `:propose examples/upgrade-proposal.agel` reads a proposal
 file, infers its effects, runs its `;test` lines in a zero-authority canary and
 prints evidence; `:promote` commits it atomically or `:discard` drops it. Every
@@ -134,6 +138,9 @@ It provides:
 - one constrained process boundary used by both real model adapters; and
 - an in-memory copy-on-write workspace for disposable agent changes;
 - canonical event-sourced images with a tamper-evident SHA-256 chain;
+- Ed25519-signed image roots and promotion evidence, verified against a
+  trusted key on load, from an RFC-vector-tested implementation with no
+  third-party code;
 - exact offline reconstruction with fresh capability authority; and
 - atomic image replacement, stale-writer detection, and previous-image recovery;
 - an atomic standard library written in Agel, not privileged Rust;
@@ -372,7 +379,7 @@ REPL commands:
 - `:effects` prints host-effect authorization and outcome records.
 - `:providers`, `:requests`, and `:dispatch` control explicit model invocation.
 - `:snapshot NAME`, `:restore NAME`, and `:snapshots` provide live time travel.
-- `:image` shows the portable image root and entry count when `--image` is set.
+- `:image` shows the portable image root, entry count and signer when `--image` is set.
 - `:propose FILE [EFFECT ...]`, `:proposal`, `:promote`, and `:discard` run the
   evidence-carrying upgrade gate on a proposal file.
 - `:quit` exits.

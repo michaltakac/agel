@@ -50,6 +50,35 @@ The sequence protects one local writer from process or machine interruption.
 The root check detects a stale caller but is not a cross-process lock; deployments
 with concurrent writers must serialize commits above this API.
 
+## Signed images (v0.2.24)
+
+`Image::encode_signed` wraps the unchanged v1 image in an envelope:
+`"AGELSIG\0"`, a `u16` envelope version, the signer's 32-byte Ed25519 public
+key, and a 64-byte signature over `"agel/image-root/v1\0" || root`. The v1
+format itself is untouched, so the image bytes inside are exactly what an
+unsigned store would write. `ImageStore::save_signed` uses the same
+temporary-file, previous-sidecar and directory-sync sequence as `save`, so a
+signed generation is atomic and the previous generation remains recoverable.
+The optimistic root check accepts a current file in either form, which is how
+a store is upgraded to signed in place.
+
+`ImageStore::load_verified(&trusted)` accepts only an envelope whose signer is
+exactly the trusted key and whose signature verifies against the root inside.
+A torn, corrupt, unsigned, foreign-signed or mis-signed primary falls back to
+the previous generation under the same rule; if no trusted generation exists
+the result is an error, never a silent `None`. The unsigned `load` refuses a
+signed primary outright rather than falling back to an older unsigned
+generation, so a reader that has not been told which key to trust cannot be
+served stale state by a store that has since been signed.
+
+Ed25519 and SHA-512 are implemented in `agel-integrity` with no dependencies
+and checked against the RFC 8032 vectors; verification uses the strict
+equation and rejects `s >= L`. The arithmetic is not constant-time, so signing
+keys belong on the operator's machine, not on a host an adversary can time.
+Signatures authenticate the root against a key; they do not encrypt anything
+and do not prevent an adversary who holds the seed from signing whatever they
+like.
+
 ## The CLI as an image writer (v0.2.22)
 
 `cargo run -p agel-cli -- --image PATH` runs the ordinary REPL over an
@@ -61,6 +90,11 @@ completion is appended and the file is atomically replaced; a failed save is
 reported and retried against the same expected root on the next commit, so a
 concurrent writer is detected rather than overwritten. `:image` shows the path,
 entry count and root.
+
+With `--signing-key FILE` (a hex seed written by `--keygen FILE`, readable
+only by its owner) every save is a signed envelope and every load is verified
+against that key's public half; `--trust-key FILE` may name the public key
+explicitly and must match the signing key. `:image` reports the signer.
 
 `:rollback` and `:restore` are refused in image mode. An image is an
 append-only log of committed inputs; rewinding the live world without rewinding

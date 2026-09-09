@@ -74,6 +74,10 @@ promise.
   hosted list/map/text builtins, structural equality and data-carrying native
   agent messages. Quoted data now persists in native globals. The shared-page
   protocol, source-cell format and kernel contract are unchanged.
+  `v0.2.24` adds a dependency-free Ed25519/SHA-512 implementation, signed
+  portable-image envelopes with verified loads, signed A/B promotion evidence,
+  and operator key generation in the CLI. The v1 image bytes inside an
+  envelope are unchanged; the kernel contract is unchanged.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

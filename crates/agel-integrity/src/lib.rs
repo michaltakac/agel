@@ -1,5 +1,10 @@
 //! Minimal dependency-free integrity primitives used at Agel trust boundaries.
 
+pub mod ed25519;
+
+pub use ed25519::{
+    decode_hex, encode_hex, sha512, Signature, SignatureError, SigningKey, VerifyingKey,
+};
 use std::fmt;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -23,6 +28,11 @@ impl Digest {
             write!(output, "{byte:02x}").expect("writing to a string cannot fail");
         }
         output
+    }
+
+    pub fn from_hex(text: &str) -> Option<Self> {
+        let bytes = decode_hex(text.trim()).ok()?;
+        bytes.as_slice().try_into().ok().map(Self)
     }
 }
 

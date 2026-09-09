@@ -58,6 +58,13 @@ binds active root, candidate root, and passed-check count; only matching evidenc
 can atomically select the candidate. The old image remains available for
 rollback.
 
+Since v0.2.24 the supervisor can be configured with a trusted verifier key:
+`AbSupervisor::trust(key)`. It then refuses unsigned promotion, and
+`promote_signed` accepts only `PromotionEvidence::sign`ed by exactly that key,
+over the canonical bytes `"agel/promotion-evidence/v1\0" || active root ||
+candidate root || checks`. A candidate image cannot change which key the
+supervisor trusts, because that policy lives outside every image.
+
 ```sh
 cargo run -q -p agel-supervisor --example ab_upgrade
 ```

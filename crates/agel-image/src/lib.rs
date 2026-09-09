@@ -8,13 +8,20 @@ use agel_core::{
     AuthorityError, Budget, Capability, Commit, EvaluationOptions, ModelCompletion,
     ModelCompletionError, ModelDispatchError, ModelOutcome, ModelRequest, TransactionError, World,
 };
-use agel_integrity::{sha256, Digest};
+use agel_integrity::{sha256, Digest, Signature, SigningKey, VerifyingKey};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 const MAGIC: &[u8; 8] = b"AGELIMG\0";
+/// Envelope magic for a signed image: the signer's public key and a detached
+/// signature over the image root, followed by the unchanged v1 image bytes.
+const SIGNED_MAGIC: &[u8; 8] = b"AGELSIG\0";
+const SIGNED_VERSION: u16 = 1;
+/// Domain separation for root signatures, so an image-root signature can never
+/// be mistaken for a signature over any other Agel artifact.
+pub const ROOT_SIGNATURE_DOMAIN: &[u8] = b"agel/image-root/v1\0";
 const FORMAT_VERSION: u16 = 1;
 const DOMAIN: &[u8] = b"agel/image-chain/v1\0";
 const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
@@ -150,6 +157,57 @@ impl Image {
             entries,
             root,
         })
+    }
+
+    /// The bytes a root signature commits to: the domain tag and the root.
+    pub fn root_message(&self) -> Vec<u8> {
+        let mut message = ROOT_SIGNATURE_DOMAIN.to_vec();
+        message.extend_from_slice(self.root.as_bytes());
+        message
+    }
+
+    pub fn sign_root(&self, key: &SigningKey) -> Signature {
+        key.sign(&self.root_message())
+    }
+
+    pub fn verify_root(
+        &self,
+        signer: &VerifyingKey,
+        signature: &Signature,
+    ) -> Result<(), ImageError> {
+        signer
+            .verify(&self.root_message(), signature)
+            .map_err(|error| ImageError::Signature(error.to_string()))
+    }
+
+    /// Encode as a signed envelope: magic, version, signer, signature, image.
+    pub fn encode_signed(&self, key: &SigningKey) -> Vec<u8> {
+        let mut bytes = SIGNED_MAGIC.to_vec();
+        put_u16(&mut bytes, SIGNED_VERSION);
+        bytes.extend_from_slice(&key.verifying_key().to_bytes());
+        bytes.extend_from_slice(&self.sign_root(key).to_bytes());
+        bytes.extend_from_slice(&self.encode());
+        bytes
+    }
+
+    /// Decode a signed envelope, returning the image with its signer and the
+    /// signature. The signature is **not** verified here: callers decide which
+    /// signer they trust with [`Image::verify_root`] or
+    /// [`ImageStore::load_verified`].
+    pub fn decode_signed(bytes: &[u8]) -> Result<(Self, VerifyingKey, Signature), ImageError> {
+        if bytes.len() < 8 + 2 + 32 + 64 || &bytes[..8] != SIGNED_MAGIC {
+            return Err(ImageError::Invalid("not a signed Agel image".into()));
+        }
+        let version = u16::from_be_bytes([bytes[8], bytes[9]]);
+        if version != SIGNED_VERSION {
+            return Err(ImageError::UnsupportedVersion(version));
+        }
+        let signer: [u8; 32] = bytes[10..42].try_into().expect("32 bytes");
+        let signer = VerifyingKey::from_bytes(signer)
+            .map_err(|error| ImageError::Signature(error.to_string()))?;
+        let signature: [u8; 64] = bytes[42..106].try_into().expect("64 bytes");
+        let image = Self::decode(&bytes[106..])?;
+        Ok((image, signer, Signature::from_bytes(signature)))
     }
 
     pub fn rebuild(&self) -> Result<ImageSession, ImageError> {
@@ -346,6 +404,9 @@ impl ImageStore {
                     Err(error) => Err(error),
                 }
             }
+            // A signed primary is a policy refusal, never a reason to fall
+            // back to an older unsigned generation.
+            Err(error @ ImageError::Signature(_)) => Err(error),
             Err(primary_error) => match read_image(&sidecar(&self.path, "previous")) {
                 Ok(image) => Ok(Some(image)),
                 Err(_) => Err(primary_error),
@@ -354,7 +415,63 @@ impl ImageStore {
     }
 
     pub fn save(&self, image: &Image, expected: Option<Digest>) -> Result<Digest, ImageError> {
-        let actual = self.load()?.map(|current| current.digest());
+        self.write(image, expected, image.encode())
+    }
+
+    /// Save as a signed envelope. The root check accepts a current file in
+    /// either form, so a store can be upgraded to signed in place.
+    pub fn save_signed(
+        &self,
+        image: &Image,
+        expected: Option<Digest>,
+        key: &SigningKey,
+    ) -> Result<Digest, ImageError> {
+        self.write(image, expected, image.encode_signed(key))
+    }
+
+    /// Load only an image signed by `trusted`. The primary file is tried
+    /// first; a torn, corrupt, unsigned, foreign-signed or mis-signed primary
+    /// falls back to the previous generation under the same rule. `Ok(None)`
+    /// means no image exists at all; an image that exists but cannot be
+    /// trusted is an error, never silently `None`.
+    pub fn load_verified(&self, trusted: &VerifyingKey) -> Result<Option<Image>, ImageError> {
+        let verified = |path: &Path| -> Result<Image, ImageError> {
+            let (image, signer, signature) = Image::decode_signed(&read_bytes(path)?)?;
+            if signer != *trusted {
+                return Err(ImageError::Signature(format!(
+                    "image signed by {signer}, not the trusted key"
+                )));
+            }
+            image.verify_root(&signer, &signature)?;
+            Ok(image)
+        };
+        match verified(&self.path) {
+            Ok(image) => Ok(Some(image)),
+            Err(ImageError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                match verified(&sidecar(&self.path, "previous")) {
+                    Ok(image) => Ok(Some(image)),
+                    Err(ImageError::Io(previous))
+                        if previous.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        Ok(None)
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(primary_error) => match verified(&sidecar(&self.path, "previous")) {
+                Ok(image) => Ok(Some(image)),
+                Err(_) => Err(primary_error),
+            },
+        }
+    }
+
+    fn write(
+        &self,
+        image: &Image,
+        expected: Option<Digest>,
+        encoded: Vec<u8>,
+    ) -> Result<Digest, ImageError> {
+        let actual = self.current_root()?;
         if actual != expected {
             return Err(ImageError::Conflict { expected, actual });
         }
@@ -362,7 +479,6 @@ impl ImageStore {
         fs::create_dir_all(parent).map_err(ImageError::Io)?;
         let temporary = sidecar(&self.path, "new");
         let previous = sidecar(&self.path, "previous");
-        let encoded = image.encode();
         {
             let mut file = OpenOptions::new()
                 .create(true)
@@ -385,7 +501,40 @@ impl ImageStore {
     }
 }
 
-fn read_image(path: &Path) -> Result<Image, ImageError> {
+impl ImageStore {
+    /// The root of whatever is currently stored, signed or not, for the
+    /// optimistic-concurrency check. Verification is a separate decision.
+    fn current_root(&self) -> Result<Option<Digest>, ImageError> {
+        let any = |path: &Path| -> Result<Image, ImageError> {
+            let bytes = read_bytes(path)?;
+            if bytes.starts_with(SIGNED_MAGIC) {
+                Image::decode_signed(&bytes).map(|(image, _, _)| image)
+            } else {
+                Image::decode(&bytes)
+            }
+        };
+        match any(&self.path) {
+            Ok(image) => Ok(Some(image.digest())),
+            Err(ImageError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                match any(&sidecar(&self.path, "previous")) {
+                    Ok(image) => Ok(Some(image.digest())),
+                    Err(ImageError::Io(previous))
+                        if previous.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        Ok(None)
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(primary_error) => match any(&sidecar(&self.path, "previous")) {
+                Ok(image) => Ok(Some(image.digest())),
+                Err(_) => Err(primary_error),
+            },
+        }
+    }
+}
+
+fn read_bytes(path: &Path) -> Result<Vec<u8>, ImageError> {
     let mut file = File::open(path).map_err(ImageError::Io)?;
     let length = file.metadata().map_err(ImageError::Io)?.len();
     if length > MAX_IMAGE_BYTES as u64 {
@@ -393,6 +542,19 @@ fn read_image(path: &Path) -> Result<Image, ImageError> {
     }
     let mut bytes = Vec::with_capacity(length as usize);
     file.read_to_end(&mut bytes).map_err(ImageError::Io)?;
+    Ok(bytes)
+}
+
+/// Read an unsigned image. A signed envelope is refused outright rather than
+/// letting the unsigned loader fall back to an older unsigned generation and
+/// silently serve stale state.
+fn read_image(path: &Path) -> Result<Image, ImageError> {
+    let bytes = read_bytes(path)?;
+    if bytes.starts_with(SIGNED_MAGIC) {
+        return Err(ImageError::Signature(
+            "image is signed; load it with a trusted key".into(),
+        ));
+    }
     Image::decode(&bytes)
 }
 
@@ -425,6 +587,7 @@ pub enum ImageError {
         actual: Option<Digest>,
     },
     Io(std::io::Error),
+    Signature(String),
     Authority(AuthorityError),
     Transaction(TransactionError),
     Dispatch(ModelDispatchError),
@@ -447,6 +610,7 @@ impl fmt::Display for ImageError {
                 )
             }
             Self::Io(error) => error.fmt(f),
+            Self::Signature(message) => write!(f, "image signature rejected: {message}"),
             Self::Authority(error) => error.fmt(f),
             Self::Transaction(error) => error.fmt(f),
             Self::Dispatch(error) => error.fmt(f),
@@ -735,6 +899,73 @@ mod tests {
             Image::decode(&bytes),
             Err(ImageError::Integrity(_))
         ));
+    }
+
+    #[test]
+    fn signed_store_verifies_signer_and_falls_back_to_signed_previous() {
+        let path = temp_image();
+        let store = ImageStore::new(&path);
+        let key = SigningKey::from_seed([1; 32]);
+        let other = SigningKey::from_seed([2; 32]);
+        let mut first = ImageSession::new(8, Budget::default());
+        first.evaluate("(def generation 1)").unwrap();
+        // An unsigned image cannot be loaded as verified.
+        let root = store.save(first.image(), None).unwrap();
+        assert!(matches!(
+            store.load_verified(&key.verifying_key()),
+            Err(ImageError::Invalid(_))
+        ));
+        // Upgrading in place keeps the optimistic root check.
+        let root = store.save_signed(first.image(), Some(root), &key).unwrap();
+        let loaded = store.load_verified(&key.verifying_key()).unwrap().unwrap();
+        assert_eq!(loaded.digest(), root);
+        assert!(matches!(
+            store.load_verified(&other.verifying_key()),
+            Err(ImageError::Signature(_))
+        ));
+        // A plain reader refuses the envelope rather than downgrading to the
+        // older unsigned generation still present in the previous sidecar.
+        assert!(matches!(store.load(), Err(ImageError::Signature(_))));
+        // Second generation; a tampered primary falls back to the signed first.
+        let mut second = first.image().rebuild().unwrap();
+        second.evaluate("(def generation 2)").unwrap();
+        store.save_signed(second.image(), Some(root), &key).unwrap();
+        let mut bytes = fs::read(&path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x40;
+        fs::write(&path, &bytes).unwrap();
+        let recovered = store
+            .load_verified(&key.verifying_key())
+            .unwrap()
+            .unwrap()
+            .rebuild()
+            .unwrap();
+        assert_eq!(
+            recovered.world().binding("generation"),
+            Some(&agel_core::Value::Int(1))
+        );
+        // A primary signed by another key is refused even though it parses.
+        fs::write(&path, second.image().encode_signed(&other)).unwrap();
+        assert_eq!(
+            store
+                .load_verified(&key.verifying_key())
+                .unwrap()
+                .unwrap()
+                .digest(),
+            root
+        );
+        // With no trusted generation at all the error is reported, not None.
+        let _ = fs::remove_file(sidecar(&path, "previous"));
+        assert!(matches!(
+            store.load_verified(&key.verifying_key()),
+            Err(ImageError::Signature(_))
+        ));
+        // A forged signature over a modified root fails verification.
+        let (image, signer, _) = Image::decode_signed(&second.image().encode_signed(&key)).unwrap();
+        let forged = first.image().sign_root(&key);
+        assert!(image.verify_root(&signer, &forged).is_err());
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(sidecar(&path, "new"));
     }
 
     #[test]

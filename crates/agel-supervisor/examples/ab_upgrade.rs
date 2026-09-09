@@ -1,5 +1,6 @@
 use agel_core::{Budget, Value};
 use agel_image::ImageSession;
+use agel_integrity::SigningKey;
 use agel_supervisor::{AbSupervisor, HealthCheck};
 
 fn main() {
@@ -12,7 +13,9 @@ fn main() {
         .evaluate("(def scheduler (fn (load) (+ 2 load)))")
         .unwrap();
 
-    let mut supervisor = AbSupervisor::new(stable.image().clone());
+    // The verifier's key is supervisor policy; the candidate cannot change it.
+    let verifier = SigningKey::from_seed([42; 32]);
+    let mut supervisor = AbSupervisor::new(stable.image().clone()).trust(verifier.verifying_key());
     let evidence = supervisor
         .stage(
             proposed.image().clone(),
@@ -32,7 +35,16 @@ fn main() {
         evidence.candidate_digest(),
         evidence.checks_passed()
     );
-    println!("promoted slot {:?}", supervisor.promote(&evidence).unwrap());
+    println!(
+        "unsigned promotion: {}",
+        supervisor.promote(&evidence).unwrap_err()
+    );
+    let signed = evidence.sign(&verifier);
+    println!("evidence signed by {}", signed.signer());
+    println!(
+        "promoted slot {:?}",
+        supervisor.promote_signed(&signed).unwrap()
+    );
     println!(
         "watchdog rollback -> slot {:?}",
         supervisor.rollback().unwrap()
