@@ -708,7 +708,9 @@ phase quietly claims.
   driver into an unprivileged, restartable domain granted only the disk's nine
   ports; the supervisor keeps slot policy and the codec. v0.2.27 moves serial
   input into the console driver and keyboard/pointer input into an 8042
-  driver domain granted only its two ports. Timers are
+  driver domain granted only its two ports. v0.2.33 gives the `virt`
+  machines a virtio block driver domain granted one register page and one
+  DMA frame, so storage is split on all three. Timers are
   not split — preemption is the supervisor's own mechanism for
   containing a world, so moving it out is a later question rather than an
   obvious next step. Networking and model/tool brokering are untouched.
@@ -734,17 +736,29 @@ is a capability rather than a convention, and CI asserts that on all three.
 ### Phase 4 — durable worlds and effects — **started (v0.1.7)**
 
 - Canonical signed images and event logs. → native canonical source cells and
-  dual-slot recovery exist; signatures and the hosted event log do not yet.
+  dual-slot recovery exist on all three research machines; candidate kernel
+  images are signed and verified by the running kernel since v0.2.32;
+  workspace generations, the recovery record and the hosted event log are
+  not signed yet.
 - Prepare/commit/idempotency protocols with effect servers.
 - Crash injection at every persistence transition. → the native integration
   test corrupts the newest committed payload and requires previous-slot replay;
   interruption at every individual write remains future work.
 
-### Phase 5 — live replacement
+### Phase 5 — live replacement — **started (v0.2.29)**
 
-- Generation-aware service discovery and endpoint switching.
-- Replay/canary promotion under resource limits.
-- Watchdog-driven rollback to an independently retained image.
+- Generation-aware service discovery and endpoint switching. → driver
+  domains restart at a new generation and refuse stale handles; nothing
+  discovers a service by name yet.
+- Replay/canary promotion under resource limits. → a candidate workspace
+  generation is verified by a `health` cell evaluated in an isolated world
+  that is then discarded, and promotion is an explicit operator decision;
+  there is no canary under a budget yet.
+- Watchdog-driven rollback to an independently retained image. → done for
+  workspace generations on all three machines (v0.2.29, v0.2.33) and for the
+  kernel image itself on x86-64 (v0.2.30), where the BIOS stage charges each
+  boot of a candidate before it runs and falls back after three. Staged
+  kernels must be signed by the key the running kernel trusts (v0.2.32).
 
 ### Phase 6 — deployment and hardware
 

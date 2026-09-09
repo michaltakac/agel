@@ -403,10 +403,10 @@ code, and seL4 currently hosts only the frozen kernel contract.
   than preventing the prompt.
 
 CRC-32 is accidental-corruption detection, not authenticity. The storage path
-and editor remain supervisor Rust, the disk is ambient to that supervisor, and
-only x86-64 has the interactive durable workspace. Signed images, a storage
-driver domain, power-cut injection at every sector transition, and the native
-agent runtime remain outside this claim.
+and editor remain supervisor Rust; the disk itself is behind a driver domain
+since v0.2.26 on x86-64 and v0.2.33 elsewhere. Signed workspace images,
+power-cut injection at every sector transition, and the native agent runtime
+remain outside this claim.
 
 ## v0.2.0–v0.2.4 agentic desktop and graphics
 
@@ -747,6 +747,39 @@ stage. The checked-in key pair is a development key that anyone with the
 repository holds; it demonstrates the mechanism, and an operator who relies on
 it must build with their own public key. Workspace generations and the
 recovery record are still unsigned.
+
+## v0.2.33
+
+- **A recovery plane that existed on one machine:** the disk-backed record,
+  the boot budget and the health oracle were x86-64 claims; AArch64 and
+  RISC-V kept two in-memory booleans. Both now have a disk, and the whole
+  persistence suite, watchdog rollback included, runs on each.
+- **A device that reads and writes memory:** virtio is DMA. The driver domain
+  is granted exactly one frame for that, tells the device that frame's
+  physical address and nothing else, and every descriptor it builds points
+  inside it; the device can read or scribble that one page and the domain's
+  shared page is not it. The supervisor never hands a domain a physical
+  address it did not allocate for that domain.
+- **Registers on a shared page:** AArch64's transports are 0x200 bytes apart,
+  so the granted page holds up to eight transports. The other seven are empty
+  slots on this machine; a driver that touched one would find no device. The
+  grant is a page because the translation unit is a page, and the document
+  says so rather than pretending the grant is narrower.
+- **A wait on a device:** the driver polls the used ring with a bounded count
+  and reports a timeout status, so a device that never answers costs one
+  request's budget, not the machine.
+- **A stack that was too small:** the supervisor stack on the `virt`
+  machines was 64 KiB; the workshop's bounded workspaces overflowed it into
+  the image below, which the first storage-backed boot found as a supervisor
+  trap in `memset`. It is 512 KiB now, like x86-64, and the failure is
+  recorded here because a silent overflow into a writable section would not
+  have trapped.
+
+Not claimed: the driver assumes QEMU's coherent memory; on hardware with a
+non-coherent DMA path the DMA frame would need cache maintenance the driver
+does not do. Only modern (version 2) transports are driven. Nothing on the
+virtio disk is signed, and the kernel image on these machines is an ELF QEMU
+loads, with no slot selection.
 
 ## Surfaces the scope adds
 

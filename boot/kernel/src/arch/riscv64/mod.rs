@@ -15,6 +15,8 @@ mod memory;
 
 pub use domain::Domain;
 
+use crate::memory::DeviceGrant;
+
 #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 use crate::world::Provocation;
 
@@ -32,6 +34,14 @@ pub const CONSOLE_DEVICE_PHYSICAL: u64 = 0x1000_0000;
 
 /// Where the driver domain sees the console device in its own address space.
 pub const CONSOLE_DEVICE_VADDR: u64 = domain::DEVICE_BASE;
+/// Where the storage driver domain sees its device page and its DMA page.
+pub const STORAGE_DEVICE_VADDR: u64 = domain::STORAGE_DEVICE_BASE;
+pub const STORAGE_DMA_VADDR: u64 = domain::DMA_BASE;
+
+/// The `virt` machine's virtio-mmio transports: 8 slots of one page each.
+const VIRTIO_MMIO_BASE: u64 = 0x1000_1000;
+const VIRTIO_MMIO_SLOTS: u64 = 8;
+const VIRTIO_MMIO_STRIDE: u64 = 0x1000;
 
 /// A supervisor-only address a world may try to write: the kernel's own text.
 pub const KERNEL_PROBE_ADDRESS: u64 = 0x8020_0000;
@@ -134,6 +144,11 @@ pub const PROVOCATIONS: &[Provocation] = &[
         description: "touching a device it was not granted",
     },
     Provocation {
+        command: crate::world::shared::COMMAND_FAULT_STORAGE_DEVICE,
+        expected: Some("page-fault"),
+        description: "touching the disk it was not granted",
+    },
+    Provocation {
         command: crate::world::shared::COMMAND_SPIN,
         expected: None,
         description: "that never yields",
@@ -187,7 +202,7 @@ impl Machine {
             self.identity,
             entry,
             ticks,
-            None,
+            DeviceGrant::Nothing,
             crate::world::STACK_PAGES,
         )
         .map_err(|error| error.name())
@@ -204,7 +219,7 @@ impl Machine {
             self.identity,
             entry,
             ticks,
-            None,
+            DeviceGrant::Nothing,
             crate::world::EVALUATOR_STACK_PAGES,
         )
         .map_err(|error| error.name())
@@ -218,10 +233,41 @@ impl Machine {
             self.identity,
             entry,
             ticks,
-            Some(CONSOLE_DEVICE_PHYSICAL),
+            DeviceGrant::Console(CONSOLE_DEVICE_PHYSICAL),
             crate::world::STACK_PAGES,
         )
         .map_err(|error| error.name())
+    }
+
+    /// Build a protection domain granted the virtio block device and one
+    /// frame to exchange requests with it through, and nothing else. Fails,
+    /// rather than pretending, when the machine has no such device.
+    pub fn create_storage_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
+        let device = find_virtio_block()
+            .ok_or("no virtio block device (modern MMIO transport) on this machine")?;
+        let page = device & !(crate::memory::PAGE - 1);
+        let dma = self.pool.allocate().map_err(|error| error.name())?;
+        let mut domain = Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            DeviceGrant::Storage { device: page, dma },
+            crate::world::STACK_PAGES,
+        )
+        .map_err(|error| error.name())?;
+        // The driver learns where its registers and its DMA frame are from
+        // the shared page: the register window's offset inside the granted
+        // page, and the frame's physical address, which is what the device
+        // must be told.
+        domain.core().write_shared(
+            crate::world::shared::DEVICE_MMIO,
+            STORAGE_DEVICE_VADDR + (device - page),
+        );
+        domain
+            .core()
+            .write_shared(crate::world::shared::DEVICE_DMA, dma);
+        Ok(domain)
     }
 
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
@@ -229,6 +275,30 @@ impl Machine {
     pub fn frames_remaining(&self) -> u64 {
         self.pool.remaining()
     }
+}
+
+/// Find a virtio block device behind a modern (version 2) virtio-mmio
+/// transport. QEMU's `virt` machine exposes legacy transports unless started
+/// with `-global virtio-mmio.force-legacy=false`; the driver speaks only the
+/// modern layout, so a legacy device is reported as absent rather than driven
+/// wrongly.
+fn find_virtio_block() -> Option<u64> {
+    for slot in 0..VIRTIO_MMIO_SLOTS {
+        let base = VIRTIO_MMIO_BASE + slot * VIRTIO_MMIO_STRIDE;
+        // Safety: the device window maps the whole virtio-mmio range for the
+        // supervisor, and these three registers are read-only identification.
+        let (magic, version, device) = unsafe {
+            (
+                (base as *const u32).read_volatile(),
+                ((base + 4) as *const u32).read_volatile(),
+                ((base + 8) as *const u32).read_volatile(),
+            )
+        };
+        if magic == 0x7472_6976 && version == 2 && device == 2 {
+            return Some(base);
+        }
+    }
+    None
 }
 
 /// The image entry point.

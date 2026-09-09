@@ -12,12 +12,16 @@
 //! bytes the storage driver domain carried.
 
 use crate::service::ServiceDomain;
+use crate::workspace::{load_record, save_record, RecoveryRecord};
+#[cfg(target_arch = "x86_64")]
 use crate::workspace::{
-    load_record, load_selector, read_slot_sector, save_record, save_selector, KernelSelector,
-    RecoveryRecord, KERNEL_SLOT_SECTORS, NO_CANDIDATE,
+    load_selector, read_slot_sector, save_selector, KernelSelector, KERNEL_SLOT_SECTORS,
+    NO_CANDIDATE,
 };
+#[cfg(target_arch = "x86_64")]
 use agel_integrity::{Sha512, Signature, VerifyingKey};
 
+#[cfg(target_arch = "x86_64")]
 include!(concat!(env!("OUT_DIR"), "/kernel-signing-key.rs"));
 
 /// Boots a candidate may take without reaching a healthy state before the
@@ -179,12 +183,16 @@ impl LiveRecovery {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 /// Where the BIOS stage leaves the slot it loaded: a marker so a stage that
 /// predates the selector is recognized, then the slot number.
 const SELECTOR_MARKER: *const u32 = 0x6fe8 as *const u32;
+#[cfg(target_arch = "x86_64")]
 const SELECTOR_SLOT: *const u8 = 0x6fec as *const u8;
+#[cfg(target_arch = "x86_64")]
 const SELECTOR_MAGIC: u32 = 0xa6e1_5107;
 
+#[cfg(target_arch = "x86_64")]
 pub fn slot_name(slot: u8) -> &'static str {
     if slot == 0 {
         "A"
@@ -193,6 +201,7 @@ pub fn slot_name(slot: u8) -> &'static str {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 /// The kernel image's own A/B state. The boot stage charges an unverified
 /// candidate's attempts and skips it after `ATTEMPT_BUDGET`; the running
 /// kernel can only report what happened, verify itself by reaching a healthy
@@ -204,6 +213,7 @@ pub struct KernelRecovery {
     booted: Option<u8>,
 }
 
+#[cfg(target_arch = "x86_64")]
 impl KernelRecovery {
     pub fn load(storage: &mut ServiceDomain) -> Result<Self, &'static str> {
         // SAFETY: both addresses are inside the BIOS scratch area below the
@@ -312,6 +322,7 @@ impl KernelRecovery {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 /// What checking a staged candidate decided.
 pub enum Admission {
     /// No candidate, or one already admitted.
@@ -320,6 +331,7 @@ pub enum Admission {
     Refused(u8, &'static str),
 }
 
+#[cfg(target_arch = "x86_64")]
 /// Hash the candidate slot sector by sector and verify the staged signature
 /// over that digest against the key this kernel was built with.
 fn verify_slot(

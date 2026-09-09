@@ -38,6 +38,20 @@ pub enum Access {
     UserDevice,
 }
 
+/// What a domain on a machine with memory-mapped devices is granted beyond
+/// its stack and shared page. x86-64 grants I/O ports instead.
+#[derive(Clone, Copy)]
+#[cfg_attr(target_arch = "x86_64", allow(dead_code))]
+pub enum DeviceGrant {
+    /// Nothing: an ordinary world.
+    Nothing,
+    /// One page of device registers at the console window.
+    Console(u64),
+    /// One page of device registers at the storage window plus one ordinary
+    /// frame at the DMA window, whose physical address the device is told.
+    Storage { device: u64, dma: u64 },
+}
+
 /// Why a memory request could not be satisfied.
 ///
 /// Every one is a fixed policy bound being reached, never an unexpected

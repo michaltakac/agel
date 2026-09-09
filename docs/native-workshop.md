@@ -119,7 +119,7 @@ definition without rebooting the VM.
 
 The serial workshop's `:verify`/`:promote`/`:fault` address the **boot recovery
 plane**: on x86-64 they act on the disk-backed record described below, and on
-the diskless machines on the in-memory A/B policy model. The graphical
+every machine, since v0.2.33, on the record the storage driver carries. The graphical
 workshop reuses the word `:promote` for a different, less privileged decision:
 adopting a previewed **evaluator candidate world** after `:preview` (see
 [`native-workbench.md`](native-workbench.md)). The two surfaces are compiled
@@ -263,7 +263,12 @@ the port; the recovery commands remain supervisor code.
 Since v0.2.28 the same interactive workshop runs on AArch64 and RISC-V:
 `./scripts/run-qemu.sh aarch64` or `riscv64` boots it on QEMU's `virt`
 machine, with the evaluator in an EL0 or U-mode domain and every byte in and
-out crossing the console driver domain. Those machines have no disk, so the
-named-cell editor works in memory and `:save`/`:reload` answer "no storage
-device on this machine" rather than pretending to persist. This is a protected language workshop,
-not yet the full hosted agent runtime or a durable self-hosted environment.
+out crossing the console driver domain. Since v0.2.33 those machines have a
+disk too: a virtio block device driven from an unprivileged domain granted one
+page of its registers and one DMA frame, so the dual-slot workspace, the
+recovery record, `:save`, `:reload`, `:verify`, `:promote` and `:fault` are the
+same on all three. `./scripts/run-qemu.sh aarch64` keeps its workshop in
+`target/boot/agel-aarch64.img`. Started without a disk, the workshop says
+"storage: no virtio block device" and keeps the editor in memory. This is a
+protected language workshop, not yet the full hosted agent runtime or a
+durable self-hosted environment.

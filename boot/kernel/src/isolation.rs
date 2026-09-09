@@ -63,7 +63,6 @@ pub fn run() -> ! {
     run_native_evaluator(&mut machine, &mut console);
     run_containment(&mut machine);
     run_driver_restart(&mut machine, &mut console);
-    #[cfg(target_arch = "x86_64")]
     run_storage_driver(&mut machine);
 
     // The recovery plane must still work after everything above. A supervisor
@@ -338,9 +337,9 @@ fn run_containment(machine: &mut arch::Machine) {
 }
 
 /// The disk leaves the supervisor too: a driver domain granted exactly the
-/// ATA ports reads the boot sector, is lost, is replaced at a new generation,
-/// and refuses the handle from before.
-#[cfg(target_arch = "x86_64")]
+/// ATA ports on x86-64, or one virtio-mmio page and one DMA frame elsewhere,
+/// reads the boot sector, is lost, is replaced at a new generation, and
+/// refuses the handle from before.
 fn run_storage_driver(machine: &mut arch::Machine) {
     let entry = crate::user::agel_storage_main as *const () as usize as u64;
     if !arch::user_text_range().contains(&entry) {

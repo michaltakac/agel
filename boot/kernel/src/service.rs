@@ -32,8 +32,8 @@ use core::fmt;
 pub enum ServiceKind {
     /// The console: COM1 on x86-64, the UART page elsewhere.
     Console,
-    /// The primary ATA disk, x86-64 only.
-    #[cfg(target_arch = "x86_64")]
+    /// The disk: the primary ATA controller on x86-64, a virtio block device
+    /// behind a virtio-mmio transport elsewhere.
     Storage,
     /// The 8042 keyboard controller, x86-64 graphics only.
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
@@ -71,7 +71,6 @@ pub enum ServiceError {
     Faulted,
     /// The service ran and its device reported a problem, identified by the
     /// driver's status code. The driver carries codes, never text.
-    #[cfg(target_arch = "x86_64")]
     Device(u64),
 }
 
@@ -82,7 +81,6 @@ impl ServiceError {
         match self {
             Self::Stale => Status::StaleGeneration,
             Self::Stopped | Self::Faulted => Status::FaultedDomain,
-            #[cfg(target_arch = "x86_64")]
             Self::Device(_) => Status::ResourceExhausted,
         }
     }
@@ -94,7 +92,6 @@ impl ServiceError {
             Self::Stale => "stale-generation",
             Self::Stopped => "faulted-domain",
             Self::Faulted => "faulted-domain",
-            #[cfg(target_arch = "x86_64")]
             Self::Device(_) => "device-error",
         }
     }
@@ -177,7 +174,6 @@ impl ServiceDomain {
     }
 
     /// Ask the storage driver to read sector `lba` into `sector`.
-    #[cfg(target_arch = "x86_64")]
     pub fn read_sector(
         &mut self,
         handle: ServiceHandle,
@@ -192,10 +188,7 @@ impl ServiceDomain {
     }
 
     /// Ask the storage driver to write `sector` to sector `lba`.
-    #[cfg(all(
-        target_arch = "x86_64",
-        any(feature = "isolated-repl", feature = "native-graphics")
-    ))]
+    #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
     pub fn write_sector(
         &mut self,
         handle: ServiceHandle,
@@ -210,10 +203,7 @@ impl ServiceDomain {
     }
 
     /// Ask the storage driver to flush the disk's write cache.
-    #[cfg(all(
-        target_arch = "x86_64",
-        any(feature = "isolated-repl", feature = "native-graphics")
-    ))]
+    #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
     pub fn flush(&mut self, handle: ServiceHandle) -> Result<(), ServiceError> {
         self.block_request(handle, shared::COMMAND_FLUSH_DISK, 0)
     }
@@ -228,7 +218,6 @@ impl ServiceDomain {
         Ok(())
     }
 
-    #[cfg(target_arch = "x86_64")]
     fn block_request(
         &mut self,
         handle: ServiceHandle,
@@ -315,7 +304,6 @@ impl ServiceDomain {
     pub fn restart(&mut self, machine: &mut arch::Machine) -> Result<(), &'static str> {
         let replacement = match self.kind {
             ServiceKind::Console => machine.create_console_world(self.entry, self.ticks)?,
-            #[cfg(target_arch = "x86_64")]
             ServiceKind::Storage => machine.create_storage_world(self.entry, self.ticks)?,
             #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
             ServiceKind::Input => machine.create_input_world(self.entry, self.ticks)?,

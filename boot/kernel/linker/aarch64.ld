@@ -49,7 +49,9 @@ SECTIONS
      guess about where RAM is free. */
   . = ALIGN(4K);
   __stack_bottom = .;
-  . += 0x10000;
+  /* 512 KiB, like x86-64: the workshop keeps two bounded source workspaces
+     and a sector image on this stack rather than in an allocator. */
+  . += 0x80000;
   __stack_top = .;
 
   /DISCARD/ : { *(.eh_frame*) *(.comment*) }

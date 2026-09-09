@@ -56,6 +56,15 @@ pub mod shared {
     pub const STATUS: usize = 7;
     /// First of four result words.
     pub const VALUES: usize = 8;
+    /// Where a storage driver domain on a machine with memory-mapped devices
+    /// finds its register window (a virtual address in its own space) and the
+    /// physical address of its DMA page. Written once by the supervisor when
+    /// the domain is built; the driver treats both as configuration, not as
+    /// authority, since it can reach nothing else either way.
+    #[cfg(not(target_arch = "x86_64"))]
+    pub const DEVICE_MMIO: usize = 12;
+    #[cfg(not(target_arch = "x86_64"))]
+    pub const DEVICE_DMA: usize = 13;
 
     // The original contract operations stay sparse so their tiny dispatcher
     // remains easy to inspect. Evaluator domains additionally receive the
@@ -95,16 +104,12 @@ pub mod shared {
     #[cfg(target_arch = "x86_64")]
     pub const COMMAND_FAULT_INPUT_DEVICE: u64 = 0x6400;
     /// Read the sector named by the first argument word into the block area.
-    #[cfg(target_arch = "x86_64")]
     pub const COMMAND_READ_SECTOR: u64 = 0xa000;
     /// Write the block area to the sector named by the first argument word.
-    #[cfg(target_arch = "x86_64")]
     pub const COMMAND_WRITE_SECTOR: u64 = 0xa100;
     /// Flush the disk's write cache.
-    #[cfg(target_arch = "x86_64")]
     pub const COMMAND_FLUSH_DISK: u64 = 0xa200;
     /// Touch the disk controller without having been granted it.
-    #[cfg(target_arch = "x86_64")]
     pub const COMMAND_FAULT_STORAGE_DEVICE: u64 = 0xa300;
     /// Evaluate the source bytes in the shared payload using the native Agel
     /// session owned by this domain.
@@ -363,11 +368,9 @@ pub const PAYLOAD_BYTES: usize = 256;
 /// Byte offset in the shared page of the one-sector block area a storage
 /// driver domain reads from and writes to. It sits well past the text payload
 /// so the two can never overlap.
-#[cfg(target_arch = "x86_64")]
 pub const BLOCK_OFFSET: usize = 1024;
 
 /// Bytes in the block area: exactly one disk sector.
-#[cfg(target_arch = "x86_64")]
 pub const BLOCK_BYTES: usize = 512;
 
 impl DomainCore {
@@ -395,10 +398,7 @@ impl DomainCore {
     }
 
     /// Write one byte of the block area.
-    #[cfg(all(
-        target_arch = "x86_64",
-        any(feature = "isolated-repl", feature = "native-graphics")
-    ))]
+    #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
     pub fn write_block(&mut self, offset: usize, byte: u8) {
         let offset = BLOCK_OFFSET + (offset % BLOCK_BYTES);
         // Safety: as in `write_payload`; the block area is inside the page.
@@ -410,7 +410,6 @@ impl DomainCore {
     }
 
     /// Read one untrusted byte of the block area.
-    #[cfg(target_arch = "x86_64")]
     pub fn read_block(&self, offset: usize) -> u8 {
         let offset = BLOCK_OFFSET + (offset % BLOCK_BYTES);
         // Safety: as in `read_payload`.

@@ -5,33 +5,24 @@
 //! invalidates the older slot, writes its payload, and publishes its header
 //! last; boot accepts only a bounded, checksummed, canonically decoded image.
 
-#[cfg(target_arch = "x86_64")]
 use crate::service::{ServiceDomain, ServiceError};
-#[cfg(target_arch = "x86_64")]
 use crate::user::storage_status;
 
 pub const MAX_CELLS: usize = 16;
 pub const MAX_CELL_NAME: usize = 24;
 pub const MAX_CELL_SOURCE: usize = crate::world::PAYLOAD_BYTES;
 
-#[cfg(target_arch = "x86_64")]
 const SLOT_A: u32 = 256;
-#[cfg(target_arch = "x86_64")]
 const SLOT_B: u32 = 272;
-#[cfg(target_arch = "x86_64")]
 const SLOT_SECTORS: u32 = 16;
-#[cfg(target_arch = "x86_64")]
 const PAYLOAD_SECTORS: usize = SLOT_SECTORS as usize - 1;
-#[cfg(target_arch = "x86_64")]
 const PAYLOAD_BYTES: usize = PAYLOAD_SECTORS * 512;
 /// The recovery record follows the two workspace slots. It names which
 /// generation is trusted and which is a candidate still earning that trust.
-#[cfg(target_arch = "x86_64")]
 pub const RECOVERY_SECTOR: u32 = 288;
-#[cfg(target_arch = "x86_64")]
 const RECOVERY_MAGIC: &[u8; 8] = b"AGELRC1\0";
-#[cfg(target_arch = "x86_64")]
 const RECOVERY_VERSION: u16 = 1;
+#[cfg(target_arch = "x86_64")]
 /// The kernel slot selector follows the recovery record. The BIOS stage reads
 /// and updates it before any kernel runs, so its first ten bytes are plain
 /// values 16-bit code can parse without a checksum: magic, version, trusted
@@ -39,22 +30,19 @@ const RECOVERY_VERSION: u16 = 1;
 /// flag, admitted flag. Bytes 12-15 hold the candidate's signed length and
 /// bytes 64-127 its Ed25519 signature over the SHA-512 of those bytes; the
 /// stage never reads them, the running kernel checks them before admitting.
-#[cfg(target_arch = "x86_64")]
 pub const KERNEL_SELECTOR_SECTOR: u32 = 289;
 #[cfg(target_arch = "x86_64")]
 const KERNEL_SELECTOR_MAGIC: &[u8; 4] = b"AGKS";
 #[cfg(target_arch = "x86_64")]
 const KERNEL_SELECTOR_VERSION: u8 = 2;
-/// First sector of each kernel slot and the sectors a slot holds.
 #[cfg(target_arch = "x86_64")]
+/// First sector of each kernel slot and the sectors a slot holds.
 pub const KERNEL_SLOT_BASE: [u32; 2] = [1, 290];
 #[cfg(target_arch = "x86_64")]
 pub const KERNEL_SLOT_SECTORS: u32 = 254;
 #[cfg(target_arch = "x86_64")]
 pub const NO_CANDIDATE: u8 = 0xff;
-#[cfg(target_arch = "x86_64")]
 const MAGIC: &[u8; 8] = b"AGELWS1\0";
-#[cfg(target_arch = "x86_64")]
 const FORMAT_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -150,7 +138,6 @@ impl Workspace {
         Ok(())
     }
 
-    #[cfg(target_arch = "x86_64")]
     fn encode(&self, bytes: &mut [u8; PAYLOAD_BYTES]) -> Result<usize, &'static str> {
         bytes.fill(0);
         let mut cursor = 0;
@@ -165,7 +152,6 @@ impl Workspace {
         Ok(cursor)
     }
 
-    #[cfg(target_arch = "x86_64")]
     fn decode(bytes: &[u8]) -> Result<Self, &'static str> {
         let mut cursor = 0;
         let count = take_u16(bytes, &mut cursor)? as usize;
@@ -198,7 +184,6 @@ impl Workspace {
 
 // Constructed only by the x86-64 disk path; the workshop's result type names
 // it on every machine.
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 #[derive(Clone, Copy)]
 pub struct LoadedWorkspace {
     pub workspace: Workspace,
@@ -207,7 +192,6 @@ pub struct LoadedWorkspace {
 
 /// Translate a storage service failure into the workspace's own vocabulary.
 /// The driver carries codes; the supervisor decides what they mean.
-#[cfg(target_arch = "x86_64")]
 fn storage_message(error: ServiceError) -> &'static str {
     match error {
         ServiceError::Stale => "storage driver handle is stale",
@@ -223,7 +207,6 @@ fn storage_message(error: ServiceError) -> &'static str {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 fn read_sector(
     storage: &mut ServiceDomain,
     lba: u32,
@@ -235,7 +218,6 @@ fn read_sector(
         .map_err(storage_message)
 }
 
-#[cfg(target_arch = "x86_64")]
 fn write_sector(
     storage: &mut ServiceDomain,
     lba: u32,
@@ -247,7 +229,6 @@ fn write_sector(
         .map_err(storage_message)
 }
 
-#[cfg(target_arch = "x86_64")]
 fn flush(storage: &mut ServiceDomain) -> Result<(), &'static str> {
     let handle = storage.handle();
     storage.flush(handle).map_err(storage_message)
@@ -255,7 +236,6 @@ fn flush(storage: &mut ServiceDomain) -> Result<(), &'static str> {
 
 /// Read both slots independently and return valid candidates newest-first.
 /// A localized read failure cannot hide a valid twin slot.
-#[cfg(target_arch = "x86_64")]
 pub fn load(storage: &mut ServiceDomain) -> Result<[Option<LoadedWorkspace>; 2], &'static str> {
     let a = load_slot(storage, SLOT_A);
     let b = load_slot(storage, SLOT_B);
@@ -275,7 +255,6 @@ pub fn load(storage: &mut ServiceDomain) -> Result<[Option<LoadedWorkspace>; 2],
 /// The recovery plane's durable state: which generation is trusted, which is
 /// a candidate, how many boots the candidate has been given, and whether one
 /// of them reached a healthy state.
-#[cfg(target_arch = "x86_64")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecoveryRecord {
     pub trusted: u64,
@@ -284,7 +263,6 @@ pub struct RecoveryRecord {
     pub verified: bool,
 }
 
-#[cfg(target_arch = "x86_64")]
 impl RecoveryRecord {
     pub const EMPTY: Self = Self {
         trusted: 0,
@@ -297,7 +275,6 @@ impl RecoveryRecord {
 /// Read the recovery record. An absent or corrupt record is the empty
 /// record, so a fresh or damaged disk starts with nothing trusted; a device
 /// failure is reported rather than treated as an empty record.
-#[cfg(target_arch = "x86_64")]
 pub fn load_record(storage: &mut ServiceDomain) -> Result<RecoveryRecord, &'static str> {
     let mut sector = [0_u8; 512];
     read_sector(storage, RECOVERY_SECTOR, &mut sector)?;
@@ -323,7 +300,6 @@ pub fn load_record(storage: &mut ServiceDomain) -> Result<RecoveryRecord, &'stat
 }
 
 /// Write and flush the recovery record, then read it back.
-#[cfg(target_arch = "x86_64")]
 pub fn save_record(
     storage: &mut ServiceDomain,
     record: &RecoveryRecord,
@@ -345,9 +321,9 @@ pub fn save_record(
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 /// Which kernel slot the boot stage loads: `trusted` unless a `candidate` is
 /// present and either verified or still within its boot budget.
-#[cfg(target_arch = "x86_64")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KernelSelector {
     pub trusted: u8,
@@ -387,10 +363,10 @@ impl KernelSelector {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 /// Read the kernel slot selector. Anything the boot stage would not act on
 /// (absent, wrong version, a slot number that is not A or B) reads as the
 /// default, which is what the boot stage did with it.
-#[cfg(target_arch = "x86_64")]
 pub fn load_selector(storage: &mut ServiceDomain) -> Result<KernelSelector, &'static str> {
     let mut sector = [0_u8; 512];
     read_sector(storage, KERNEL_SELECTOR_SECTOR, &mut sector)?;
@@ -414,8 +390,8 @@ pub fn load_selector(storage: &mut ServiceDomain) -> Result<KernelSelector, &'st
     })
 }
 
-/// One sector of a kernel slot, for hashing a candidate before admission.
 #[cfg(target_arch = "x86_64")]
+/// One sector of a kernel slot, for hashing a candidate before admission.
 pub fn read_slot_sector(
     storage: &mut ServiceDomain,
     slot: u8,
@@ -432,8 +408,8 @@ pub fn read_slot_sector(
     )
 }
 
-/// Write and flush the selector, then read it back.
 #[cfg(target_arch = "x86_64")]
+/// Write and flush the selector, then read it back.
 pub fn save_selector(
     storage: &mut ServiceDomain,
     selector: &KernelSelector,
@@ -459,7 +435,6 @@ pub fn save_selector(
 /// Save a new generation. The slot is chosen by parity unless that slot holds
 /// `protect` (the trusted generation), in which case the other slot is used:
 /// a save may supersede an unpromoted candidate but never the rollback point.
-#[cfg(target_arch = "x86_64")]
 pub fn save(
     storage: &mut ServiceDomain,
     workspace: &Workspace,
@@ -520,7 +495,6 @@ pub fn save(
     Ok(next)
 }
 
-#[cfg(target_arch = "x86_64")]
 fn load_slot(
     storage: &mut ServiceDomain,
     slot: u32,
@@ -586,13 +560,11 @@ fn validate_name(name: &[u8]) -> Result<(), &'static str> {
     Ok(())
 }
 
-#[cfg(target_arch = "x86_64")]
 fn checksum_parts(first: &[u8], second: &[u8]) -> u32 {
     let crc = checksum_update(0xffff_ffff_u32, first);
     !checksum_update(crc, second)
 }
 
-#[cfg(target_arch = "x86_64")]
 fn checksum_update(mut crc: u32, bytes: &[u8]) -> u32 {
     for byte in bytes {
         crc ^= u32::from(*byte);
@@ -604,17 +576,14 @@ fn checksum_update(mut crc: u32, bytes: &[u8]) -> u32 {
     crc
 }
 
-#[cfg(target_arch = "x86_64")]
 fn put_u8(bytes: &mut [u8], cursor: &mut usize, value: u8) -> Result<(), &'static str> {
     put_bytes(bytes, cursor, &[value])
 }
 
-#[cfg(target_arch = "x86_64")]
 fn put_u16(bytes: &mut [u8], cursor: &mut usize, value: u16) -> Result<(), &'static str> {
     put_bytes(bytes, cursor, &value.to_be_bytes())
 }
 
-#[cfg(target_arch = "x86_64")]
 fn put_bytes(bytes: &mut [u8], cursor: &mut usize, value: &[u8]) -> Result<(), &'static str> {
     let end = cursor
         .checked_add(value.len())
@@ -627,18 +596,15 @@ fn put_bytes(bytes: &mut [u8], cursor: &mut usize, value: &[u8]) -> Result<(), &
     Ok(())
 }
 
-#[cfg(target_arch = "x86_64")]
 fn take_u8(bytes: &[u8], cursor: &mut usize) -> Result<u8, &'static str> {
     Ok(take_bytes(bytes, cursor, 1)?[0])
 }
 
-#[cfg(target_arch = "x86_64")]
 fn take_u16(bytes: &[u8], cursor: &mut usize) -> Result<u16, &'static str> {
     let value = take_bytes(bytes, cursor, 2)?;
     Ok(u16::from_be_bytes([value[0], value[1]]))
 }
 
-#[cfg(target_arch = "x86_64")]
 fn take_bytes<'a>(
     bytes: &'a [u8],
     cursor: &mut usize,

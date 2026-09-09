@@ -15,14 +15,13 @@
 //! authority-bearing state.
 
 use crate::arch;
-#[cfg(not(target_arch = "x86_64"))]
-use crate::monitor::RecoveryMonitor;
 use crate::native_session::{
     replay as replay_workspace, request as evaluator_request_raw, reset as reset_evaluator,
     ReplayFailure,
 };
 #[cfg(target_arch = "x86_64")]
-use crate::recovery::{slot_name, Admission, BootPlan, KernelRecovery, LiveRecovery};
+use crate::recovery::{slot_name, Admission, KernelRecovery};
+use crate::recovery::{BootPlan, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind, ServiceWriter};
 use crate::workspace::{Workspace, MAX_CELL_NAME};
 use crate::world::{shared, PAYLOAD_BYTES};
@@ -40,9 +39,8 @@ pub fn run() -> ! {
         Ok(domain) => ServiceDomain::new(domain, ServiceKind::Console, worker_entry, 8),
         Err(reason) => fatal(reason),
     };
-    // Only x86-64 has a disk. The other machines run the same workshop with an
-    // in-memory workspace and say so rather than pretending to persist.
-    #[cfg(target_arch = "x86_64")]
+    // A machine without a disk runs the same workshop with an in-memory
+    // workspace and says so rather than pretending to persist.
     let mut storage = {
         let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
         match machine.create_storage_world(storage_entry, 50) {
@@ -52,18 +50,16 @@ pub fn run() -> ! {
                 storage_entry,
                 50,
             )),
-            Err(reason) => fatal(reason),
+            Err(reason) => {
+                driver_text_error(&mut driver, b"storage: ", reason.as_bytes());
+                None
+            }
         }
     };
-    #[cfg(not(target_arch = "x86_64"))]
-    let mut storage: Option<ServiceDomain> = None;
     let mut evaluator = match machine.create_evaluator_world(evaluator_entry, 20) {
         Ok(domain) => domain,
         Err(reason) => fatal(reason),
     };
-    #[cfg(not(target_arch = "x86_64"))]
-    let mut monitor = RecoveryMonitor::new();
-    #[cfg(target_arch = "x86_64")]
     let mut recovery = match storage.as_mut().map(LiveRecovery::load) {
         Some(Ok(recovery)) => Some(recovery),
         Some(Err(reason)) => {
@@ -137,7 +133,6 @@ pub fn run() -> ! {
         &mut evaluator,
         &mut driver,
         storage.as_mut(),
-        #[cfg(target_arch = "x86_64")]
         recovery.as_mut(),
     ) {
         Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {
@@ -234,13 +229,7 @@ pub fn run() -> ! {
                 storage.as_mut(),
                 &workspace,
                 generation,
-                {
-                    #[cfg(target_arch = "x86_64")]
-                    let protect = recovery.as_ref().map_or(0, |r| r.record().trusted);
-                    #[cfg(not(target_arch = "x86_64"))]
-                    let protect = 0;
-                    protect
-                },
+                recovery.as_ref().map_or(0, |r| r.record().trusted),
             ) {
                     Ok((next_generation, candidate_revision)) => {
                         generation = next_generation;
@@ -248,7 +237,6 @@ pub fn run() -> ! {
                         dirty = false;
                         revision = candidate_revision;
                         report_saved(&mut driver, workspace.count(), generation);
-                        #[cfg(target_arch = "x86_64")]
                         if let (Some(recovery), Some(storage)) = (recovery.as_mut(), storage.as_mut()) {
                             if let Err(reason) = recovery.on_saved(storage, generation) {
                                 driver_text_error(
@@ -271,7 +259,6 @@ pub fn run() -> ! {
                 &mut evaluator,
                 &mut driver,
                 storage.as_mut(),
-                #[cfg(target_arch = "x86_64")]
                 None,
             ) {
                 Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {
@@ -308,14 +295,6 @@ pub fn run() -> ! {
                     reason.as_bytes(),
                 ),
             },
-            #[cfg(not(target_arch = "x86_64"))]
-            b":recovery-status" => monitor.status(),
-            #[cfg(not(target_arch = "x86_64"))]
-            b":verify" => monitor.verify(),
-            #[cfg(not(target_arch = "x86_64"))]
-            b":promote" => monitor.promote(),
-            #[cfg(not(target_arch = "x86_64"))]
-            b":fault" => monitor.fault(),
             #[cfg(target_arch = "x86_64")]
             b":kernel-status" => kernel_status(&mut driver, kernel.as_ref(), false),
             #[cfg(target_arch = "x86_64")]
@@ -352,9 +331,7 @@ pub fn run() -> ! {
                 },
                 _ => driver_line(&mut driver, b"denied: kernel selector unavailable"),
             },
-            #[cfg(target_arch = "x86_64")]
             b":recovery-status" => recovery_status(&mut driver, recovery.as_ref()),
-            #[cfg(target_arch = "x86_64")]
             b":verify" => recovery_verify(
                 &mut driver,
                 &mut evaluator,
@@ -362,9 +339,7 @@ pub fn run() -> ! {
                 storage.as_mut(),
                 recovery.as_mut(),
             ),
-            #[cfg(target_arch = "x86_64")]
             b":promote" => recovery_promote(&mut driver, storage.as_mut(), recovery.as_mut()),
-            #[cfg(target_arch = "x86_64")]
             b":fault" => {
                 let target = match (storage.as_mut(), recovery.as_mut()) {
                     (Some(storage), Some(recovery)) => recovery.fault(storage),
@@ -448,7 +423,6 @@ pub fn run() -> ! {
                         ),
                     }
                 } else {
-                    #[cfg(target_arch = "x86_64")]
                     let before = revision;
                     revision = evaluator_request(
                         &mut evaluator,
@@ -459,7 +433,6 @@ pub fn run() -> ! {
                     // A form evaluated after boot is the health oracle every
                     // generation gets for free: the system reached an
                     // interactive, working state.
-                    #[cfg(target_arch = "x86_64")]
                     if revision > before {
                         if let (Some(recovery), Some(storage)) =
                             (recovery.as_mut(), storage.as_mut())
@@ -473,6 +446,7 @@ pub fn run() -> ! {
                                 out.flush();
                             }
                         }
+                        #[cfg(target_arch = "x86_64")]
                         if let (Some(kernel), Some(storage)) = (kernel.as_mut(), storage.as_mut())
                         {
                             if let Ok(Some(slot)) = kernel.healthy(storage) {
@@ -495,8 +469,6 @@ pub fn run() -> ! {
 // Boxing would introduce an allocator into the native supervisor. The large
 // variant is a deliberately bounded source workspace on its 512 KiB stack.
 #[allow(clippy::large_enum_variant)]
-// Only x86-64 has a disk to construct these from; see `load_replay_candidates`.
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 enum DiskWorkspace {
     Empty,
     Restored(crate::workspace::LoadedWorkspace, u64),
@@ -507,22 +479,15 @@ fn load_replay_candidates(
     evaluator: &mut arch::Domain,
     driver: &mut ServiceDomain,
     storage: Option<&mut ServiceDomain>,
-    #[cfg(target_arch = "x86_64")] recovery: Option<&mut LiveRecovery>,
+    recovery: Option<&mut LiveRecovery>,
 ) -> Result<DiskWorkspace, &'static str> {
     let Some(storage) = storage else {
         return Err("no storage device on this machine");
     };
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        let _ = (evaluator, driver, storage);
-        Err("no storage device on this machine")
-    }
-    #[cfg(target_arch = "x86_64")]
     load_from_disk(evaluator, driver, storage, recovery)
 }
 
 /// Replay exactly one generation from disk, if it is there and valid.
-#[cfg(target_arch = "x86_64")]
 fn load_generation(
     evaluator: &mut arch::Domain,
     storage: Option<&mut ServiceDomain>,
@@ -543,7 +508,6 @@ fn load_generation(
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 fn load_from_disk(
     evaluator: &mut arch::Domain,
     driver: &mut ServiceDomain,
@@ -786,7 +750,6 @@ fn kernel_status(driver: &mut ServiceDomain, kernel: Option<&KernelRecovery>, bo
     out.flush();
 }
 
-#[cfg(target_arch = "x86_64")]
 fn recovery_status(driver: &mut ServiceDomain, recovery: Option<&LiveRecovery>) {
     let Some(recovery) = recovery else {
         driver_line(driver, b"recovery: record unavailable");
@@ -823,7 +786,6 @@ fn recovery_status(driver: &mut ServiceDomain, recovery: Option<&LiveRecovery>) 
 
 /// Explicit health evidence: a source cell named `health` must evaluate
 /// without error in an isolated candidate world that is then discarded.
-#[cfg(target_arch = "x86_64")]
 fn recovery_verify(
     driver: &mut ServiceDomain,
     evaluator: &mut arch::Domain,
@@ -879,7 +841,6 @@ fn recovery_verify(
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 fn recovery_promote(
     driver: &mut ServiceDomain,
     storage: Option<&mut ServiceDomain>,
@@ -927,7 +888,6 @@ fn report_restored(driver: &mut ServiceDomain, count: usize, generation: u64) {
     out.flush();
 }
 
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
 fn report_replay_failure(
     driver: &mut ServiceDomain,
     workspace: &Workspace,

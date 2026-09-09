@@ -19,20 +19,41 @@ run_x86_64() {
     -drive format=raw,file="$image",snapshot=on
 }
 
+# The diskless machines get a virtio block device for the storage driver
+# test, with the 0xaa55 boot signature the test reads back from sector 0.
+virtio_disk() {
+  disk=$(mktemp "${TMPDIR:-/tmp}/agel-virtio.XXXXXX")
+  dd if=/dev/zero of="$disk" bs=512 count=2048 2>/dev/null
+  printf '\125\252' | dd of="$disk" bs=1 seek=510 conv=notrunc 2>/dev/null
+  printf '%s\n' "$disk"
+}
+
 run_aarch64() {
   image=$(./scripts/build-kernel.sh aarch64 | tail -n 1)
+  disk=$(virtio_disk)
   # There is no debug-exit device on `virt`; the kernel leaves through PSCI, so
   # a clean exit is status 0 and the success token carries the verdict.
   qemu-system-aarch64 \
     -machine virt -cpu cortex-a72 -m 128M -display none -monitor none -serial stdio -no-reboot \
+    -global virtio-mmio.force-legacy=false \
+    -drive if=none,format=raw,file="$disk",id=disk0,snapshot=on -device virtio-blk-device,drive=disk0 \
     -kernel "$image"
+  status=$?
+  rm -f "$disk"
+  return $status
 }
 
 run_riscv64() {
   image=$(./scripts/build-kernel.sh riscv64 | tail -n 1)
+  disk=$(virtio_disk)
   qemu-system-riscv64 \
     -machine virt -m 128M -display none -monitor none -serial stdio -no-reboot -bios default \
+    -global virtio-mmio.force-legacy=false \
+    -drive if=none,format=raw,file="$disk",id=disk0,snapshot=on -device virtio-blk-device,drive=disk0 \
     -kernel "$image"
+  status=$?
+  rm -f "$disk"
+  return $status
 }
 
 # The x86-64 debug-exit device maps the guest's clean value 0x10 to host status
@@ -142,24 +163,25 @@ run_architecture() {
     exit 1
   fi
 
+  # Phase 3, continued: the disk is a driver domain too, granted exactly the
+  # ATA ports on x86-64 and one virtio-mmio page plus one DMA frame elsewhere;
+  # it reads, is lost, is replaced, and refuses its old handle.
+  grep -q "isolation\[$architecture\]: contained a world touching the disk it was not granted" \
+    "$output_file"
+  grep -q "isolation\[$architecture\]: storage driver read the boot sector from an unprivileged domain, generation 1" \
+    "$output_file"
+  grep -q "isolation\[$architecture\]: the storage driver faulted" "$output_file"
+  grep -q "isolation\[$architecture\]: replaced the storage driver; a handle from generation 1 was refused: stale-generation" \
+    "$output_file"
+  grep -q "isolation\[$architecture\]: the replacement storage driver, generation 2, read the boot sector again" \
+    "$output_file"
   if test "$architecture" = x86_64; then
-    # Phase 3, continued: the disk is a driver domain too, granted exactly the
-    # ATA ports; it reads, is lost, is replaced, and refuses its old handle.
-    grep -q "isolation\[$architecture\]: contained a world touching the disk it was not granted" \
-      "$output_file"
     grep -q "isolation\[$architecture\]: contained a world touching the keyboard controller it was not granted" \
-      "$output_file"
-    grep -q "isolation\[$architecture\]: storage driver read the boot sector from an unprivileged domain, generation 1" \
-      "$output_file"
-    grep -q "isolation\[$architecture\]: the storage driver faulted" "$output_file"
-    grep -q "isolation\[$architecture\]: replaced the storage driver; a handle from generation 1 was refused: stale-generation" \
-      "$output_file"
-    grep -q "isolation\[$architecture\]: the replacement storage driver, generation 2, read the boot sector again" \
       "$output_file"
   fi
 
   contained=$(grep -c "isolation\[$architecture\]: contained a world" "$output_file")
-  if test "$contained" -lt 3; then
+  if test "$contained" -lt 4; then
     printf '%s\n' "$architecture: only $contained containments reported" >&2
     exit 1
   fi

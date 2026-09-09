@@ -578,6 +578,13 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
                 // that was never granted the disk.
                 let _ = unsafe { port_in8(0x1f7) };
             }
+            #[cfg(not(target_arch = "x86_64"))]
+            if command == shared::COMMAND_FAULT_STORAGE_DEVICE {
+                // The same register read the storage driver performs, in a
+                // world that was never granted the device window.
+                let _ =
+                    unsafe { (crate::arch::STORAGE_DEVICE_VADDR as *const u32).read_volatile() };
+            }
             #[cfg(target_arch = "x86_64")]
             if command == shared::COMMAND_FAULT_INPUT_DEVICE {
                 // The same status read the input driver performs, in a world
@@ -747,10 +754,12 @@ unsafe fn port_out16(port: u16, value: u16) {
 /// Outcomes the storage driver reports in the status word. The supervisor
 /// turns them into the workspace's error messages; the driver never carries
 /// text.
-#[cfg(target_arch = "x86_64")]
 pub mod storage_status {
     pub const OK: u64 = 0;
     pub const ABSENT: u64 = 1;
+    /// The ATA controller never became ready; a virtio device has no
+    /// equivalent state, so only x86-64 reports it.
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
     pub const BUSY: u64 = 2;
     pub const DEVICE_ERROR: u64 = 3;
     pub const DATA_TIMEOUT: u64 = 4;
@@ -943,6 +952,336 @@ pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
             storage_status::UNKNOWN_COMMAND
         } else {
             storage_status::UNKNOWN_COMMAND
+        };
+        unsafe { page.add(shared::STATUS).write_volatile(status) };
+        unsafe { yield_to_supervisor() };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The storage driver on machines with memory-mapped devices: a virtio block
+// device behind a modern virtio-mmio transport, driven by polling.
+// ---------------------------------------------------------------------------
+
+#[cfg(not(target_arch = "x86_64"))]
+mod virtio {
+    pub const MAGIC: u64 = 0x000;
+    pub const VERSION: u64 = 0x004;
+    pub const DEVICE_ID: u64 = 0x008;
+    pub const DEVICE_FEATURES: u64 = 0x010;
+    pub const DEVICE_FEATURES_SEL: u64 = 0x014;
+    pub const DRIVER_FEATURES: u64 = 0x020;
+    pub const DRIVER_FEATURES_SEL: u64 = 0x024;
+    pub const QUEUE_SEL: u64 = 0x030;
+    pub const QUEUE_NUM_MAX: u64 = 0x034;
+    pub const QUEUE_NUM: u64 = 0x038;
+    pub const QUEUE_READY: u64 = 0x044;
+    pub const QUEUE_NOTIFY: u64 = 0x050;
+    pub const INTERRUPT_STATUS: u64 = 0x060;
+    pub const INTERRUPT_ACK: u64 = 0x064;
+    pub const STATUS: u64 = 0x070;
+    pub const QUEUE_DESC_LOW: u64 = 0x080;
+    pub const QUEUE_DESC_HIGH: u64 = 0x084;
+    pub const QUEUE_DRIVER_LOW: u64 = 0x090;
+    pub const QUEUE_DRIVER_HIGH: u64 = 0x094;
+    pub const QUEUE_DEVICE_LOW: u64 = 0x0a0;
+    pub const QUEUE_DEVICE_HIGH: u64 = 0x0a4;
+    /// Device configuration: the capacity in 512-byte sectors.
+    pub const CONFIG_CAPACITY: u64 = 0x100;
+
+    pub const STATUS_ACKNOWLEDGE: u32 = 1;
+    pub const STATUS_DRIVER: u32 = 2;
+    pub const STATUS_DRIVER_OK: u32 = 4;
+    pub const STATUS_FEATURES_OK: u32 = 8;
+
+    /// Feature bit 32: the modern (non-legacy) device semantics.
+    pub const F_VERSION_1: u32 = 1 << 0;
+    /// Feature bit 9: the device honours flush requests.
+    pub const BLK_F_FLUSH: u32 = 1 << 9;
+
+    pub const DESC_NEXT: u16 = 1;
+    pub const DESC_WRITE: u16 = 2;
+
+    pub const T_IN: u32 = 0;
+    pub const T_OUT: u32 = 1;
+    pub const T_FLUSH: u32 = 4;
+
+    /// Queue depth: one request in flight needs three descriptors.
+    pub const QUEUE_SIZE: u64 = 4;
+
+    /// Layout of the one DMA page the driver was granted, in bytes from its
+    /// start. Descriptors need 16-byte alignment, the rings 2 and 4.
+    pub const DESC: u64 = 0x000;
+    pub const AVAIL: u64 = 0x100;
+    pub const USED: u64 = 0x200;
+    pub const HEADER: u64 = 0x300;
+    pub const DATA: u64 = 0x400;
+    pub const STATUS_BYTE: u64 = 0x600;
+
+    pub const POLL_LIMIT: usize = 10_000_000;
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline(always)]
+unsafe fn mmio_read(base: u64, offset: u64) -> u32 {
+    unsafe { ((base + offset) as *const u32).read_volatile() }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline(always)]
+unsafe fn mmio_write(base: u64, offset: u64, value: u32) {
+    unsafe { ((base + offset) as *mut u32).write_volatile(value) }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+#[inline(always)]
+fn fence() {
+    core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
+}
+
+/// Bring the block device up: acknowledge it, negotiate the modern feature
+/// bit (and flush, if offered), and give it the one queue in the DMA page.
+/// Returns whether flush was negotiated.
+#[cfg(not(target_arch = "x86_64"))]
+#[link_section = ".user_text"]
+unsafe fn virtio_initialize(mmio: u64, dma_physical: u64) -> Result<bool, u64> {
+    unsafe {
+        if mmio_read(mmio, virtio::MAGIC) != 0x7472_6976
+            || mmio_read(mmio, virtio::VERSION) != 2
+            || mmio_read(mmio, virtio::DEVICE_ID) != 2
+        {
+            return Err(storage_status::ABSENT);
+        }
+        mmio_write(mmio, virtio::STATUS, 0);
+        mmio_write(mmio, virtio::STATUS, virtio::STATUS_ACKNOWLEDGE);
+        mmio_write(
+            mmio,
+            virtio::STATUS,
+            virtio::STATUS_ACKNOWLEDGE | virtio::STATUS_DRIVER,
+        );
+        mmio_write(mmio, virtio::DEVICE_FEATURES_SEL, 0);
+        let low = mmio_read(mmio, virtio::DEVICE_FEATURES);
+        mmio_write(mmio, virtio::DEVICE_FEATURES_SEL, 1);
+        let high = mmio_read(mmio, virtio::DEVICE_FEATURES);
+        if high & virtio::F_VERSION_1 == 0 {
+            return Err(storage_status::ABSENT);
+        }
+        let flush = low & virtio::BLK_F_FLUSH != 0;
+        mmio_write(mmio, virtio::DRIVER_FEATURES_SEL, 0);
+        mmio_write(
+            mmio,
+            virtio::DRIVER_FEATURES,
+            if flush { virtio::BLK_F_FLUSH } else { 0 },
+        );
+        mmio_write(mmio, virtio::DRIVER_FEATURES_SEL, 1);
+        mmio_write(mmio, virtio::DRIVER_FEATURES, virtio::F_VERSION_1);
+        let negotiated =
+            virtio::STATUS_ACKNOWLEDGE | virtio::STATUS_DRIVER | virtio::STATUS_FEATURES_OK;
+        mmio_write(mmio, virtio::STATUS, negotiated);
+        if mmio_read(mmio, virtio::STATUS) & virtio::STATUS_FEATURES_OK == 0 {
+            return Err(storage_status::DEVICE_ERROR);
+        }
+        mmio_write(mmio, virtio::QUEUE_SEL, 0);
+        if u64::from(mmio_read(mmio, virtio::QUEUE_NUM_MAX)) < virtio::QUEUE_SIZE {
+            return Err(storage_status::DEVICE_ERROR);
+        }
+        mmio_write(mmio, virtio::QUEUE_NUM, virtio::QUEUE_SIZE as u32);
+        let desc = dma_physical + virtio::DESC;
+        let avail = dma_physical + virtio::AVAIL;
+        let used = dma_physical + virtio::USED;
+        mmio_write(mmio, virtio::QUEUE_DESC_LOW, desc as u32);
+        mmio_write(mmio, virtio::QUEUE_DESC_HIGH, (desc >> 32) as u32);
+        mmio_write(mmio, virtio::QUEUE_DRIVER_LOW, avail as u32);
+        mmio_write(mmio, virtio::QUEUE_DRIVER_HIGH, (avail >> 32) as u32);
+        mmio_write(mmio, virtio::QUEUE_DEVICE_LOW, used as u32);
+        mmio_write(mmio, virtio::QUEUE_DEVICE_HIGH, (used >> 32) as u32);
+        mmio_write(mmio, virtio::QUEUE_READY, 1);
+        mmio_write(mmio, virtio::STATUS, negotiated | virtio::STATUS_DRIVER_OK);
+        Ok(flush)
+    }
+}
+
+/// Write one descriptor into the DMA page.
+#[cfg(not(target_arch = "x86_64"))]
+#[link_section = ".user_text"]
+unsafe fn descriptor(dma: u64, index: u64, address: u64, length: u32, flags: u16, next: u16) {
+    let entry = (dma + virtio::DESC + index * 16) as *mut u8;
+    unsafe {
+        (entry as *mut u64).write_volatile(address);
+        (entry.add(8) as *mut u32).write_volatile(length);
+        (entry.add(12) as *mut u16).write_volatile(flags);
+        (entry.add(14) as *mut u16).write_volatile(next);
+    }
+}
+
+/// Submit one request already laid out in the DMA page and wait for the
+/// device to retire it. `last_used` is the driver's copy of the used index.
+#[cfg(not(target_arch = "x86_64"))]
+#[link_section = ".user_text"]
+unsafe fn virtio_submit(mmio: u64, dma: u64, last_used: &mut u16) -> u64 {
+    unsafe {
+        let avail = (dma + virtio::AVAIL) as *mut u16;
+        let index = avail.add(1).read_volatile();
+        avail
+            .add(2 + usize::from(index % virtio::QUEUE_SIZE as u16))
+            .write_volatile(0);
+        fence();
+        avail.add(1).write_volatile(index.wrapping_add(1));
+        fence();
+        mmio_write(mmio, virtio::QUEUE_NOTIFY, 0);
+        let used = (dma + virtio::USED) as *const u16;
+        let mut polls = 0;
+        loop {
+            fence();
+            if used.add(1).read_volatile() != *last_used {
+                break;
+            }
+            polls += 1;
+            if polls > virtio::POLL_LIMIT {
+                return storage_status::DATA_TIMEOUT;
+            }
+            pause();
+        }
+        *last_used = last_used.wrapping_add(1);
+        let pending = mmio_read(mmio, virtio::INTERRUPT_STATUS);
+        if pending != 0 {
+            mmio_write(mmio, virtio::INTERRUPT_ACK, pending);
+        }
+        match ((dma + virtio::STATUS_BYTE) as *const u8).read_volatile() {
+            0 => storage_status::OK,
+            _ => storage_status::DEVICE_ERROR,
+        }
+    }
+}
+
+/// The storage driver: the one domain granted the virtio block device.
+///
+/// It moves single sectors between the disk and the block area of its shared
+/// page on the supervisor's request, through a request laid out in the one
+/// DMA frame it was granted. It holds no policy: which sectors are workspace
+/// slots, what a header means, and when to publish a generation are the
+/// supervisor's decisions, made on bytes this domain merely carried.
+///
+/// # Safety
+/// Entered by the architecture's return-from-exception instruction with a
+/// private stack, a valid shared page, the device page and the DMA page
+/// mapped.
+#[cfg(not(target_arch = "x86_64"))]
+#[no_mangle]
+#[link_section = ".user_text"]
+pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
+    let page = shared_page as *mut u64;
+    let block = (shared_page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+    let mmio = unsafe { page.add(shared::DEVICE_MMIO).read_volatile() };
+    let dma_physical = unsafe { page.add(shared::DEVICE_DMA).read_volatile() };
+    let dma = crate::arch::STORAGE_DMA_VADDR;
+    let device = unsafe { virtio_initialize(mmio, dma_physical) };
+    let capacity = unsafe {
+        u64::from(mmio_read(mmio, virtio::CONFIG_CAPACITY))
+            | (u64::from(mmio_read(mmio, virtio::CONFIG_CAPACITY + 4)) << 32)
+    };
+    let mut last_used: u16 = 0;
+    loop {
+        let command = unsafe { page.add(shared::COMMAND).read_volatile() };
+        let lba = unsafe { page.add(shared::ARGUMENTS).read_volatile() };
+        let status = match device {
+            Err(reason) => reason,
+            Ok(flush_supported) => {
+                let transfer = command == shared::COMMAND_READ_SECTOR
+                    || command == shared::COMMAND_WRITE_SECTOR;
+                if transfer && lba >= capacity {
+                    storage_status::OUT_OF_RANGE
+                } else if transfer {
+                    let reading = command == shared::COMMAND_READ_SECTOR;
+                    unsafe {
+                        let header = (dma + virtio::HEADER) as *mut u8;
+                        (header as *mut u32).write_volatile(if reading {
+                            virtio::T_IN
+                        } else {
+                            virtio::T_OUT
+                        });
+                        (header.add(4) as *mut u32).write_volatile(0);
+                        (header.add(8) as *mut u64).write_volatile(lba);
+                        let data = (dma + virtio::DATA) as *mut u8;
+                        if !reading {
+                            for offset in 0..crate::world::BLOCK_BYTES {
+                                data.add(offset)
+                                    .write_volatile(block.add(offset).read_volatile());
+                            }
+                        }
+                        descriptor(
+                            dma,
+                            0,
+                            dma_physical + virtio::HEADER,
+                            16,
+                            virtio::DESC_NEXT,
+                            1,
+                        );
+                        descriptor(
+                            dma,
+                            1,
+                            dma_physical + virtio::DATA,
+                            crate::world::BLOCK_BYTES as u32,
+                            virtio::DESC_NEXT | if reading { virtio::DESC_WRITE } else { 0 },
+                            2,
+                        );
+                        descriptor(
+                            dma,
+                            2,
+                            dma_physical + virtio::STATUS_BYTE,
+                            1,
+                            virtio::DESC_WRITE,
+                            0,
+                        );
+                        let status = virtio_submit(mmio, dma, &mut last_used);
+                        if reading && status == storage_status::OK {
+                            for offset in 0..crate::world::BLOCK_BYTES {
+                                block
+                                    .add(offset)
+                                    .write_volatile(data.add(offset).read_volatile());
+                            }
+                        }
+                        status
+                    }
+                } else if command == shared::COMMAND_FLUSH_DISK {
+                    if flush_supported {
+                        unsafe {
+                            let header = (dma + virtio::HEADER) as *mut u8;
+                            (header as *mut u32).write_volatile(virtio::T_FLUSH);
+                            (header.add(4) as *mut u32).write_volatile(0);
+                            (header.add(8) as *mut u64).write_volatile(0);
+                            descriptor(
+                                dma,
+                                0,
+                                dma_physical + virtio::HEADER,
+                                16,
+                                virtio::DESC_NEXT,
+                                2,
+                            );
+                            descriptor(
+                                dma,
+                                2,
+                                dma_physical + virtio::STATUS_BYTE,
+                                1,
+                                virtio::DESC_WRITE,
+                                0,
+                            );
+                            virtio_submit(mmio, dma, &mut last_used)
+                        }
+                    } else {
+                        storage_status::OK
+                    }
+                } else if command == shared::COMMAND_FAULT_WRITE {
+                    // For the restart test: a driver that misbehaves is
+                    // contained like any other world.
+                    unsafe {
+                        (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead)
+                    };
+                    storage_status::UNKNOWN_COMMAND
+                } else {
+                    storage_status::UNKNOWN_COMMAND
+                }
+            }
         };
         unsafe { page.add(shared::STATUS).write_volatile(status) };
         unsafe { yield_to_supervisor() };

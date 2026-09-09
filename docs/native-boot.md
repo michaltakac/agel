@@ -119,6 +119,7 @@ of what differs.
 | | x86-64 | AArch64 | RISC-V |
 |---|---|---|---|
 | Platform | BIOS seed, raw 1 MiB disk | QEMU `virt`, ELF | QEMU `virt`, ELF over OpenSBI |
+| Disk | primary ATA, nine I/O ports | virtio-blk, one MMIO page + one DMA frame | virtio-blk, one MMIO page + one DMA frame |
 | Supervisor level | ring 0 | EL1 | S-mode |
 | Unprivileged level | ring 3 | EL0 | U-mode |
 | Trap gate | `int 0x80` | `svc #0` | `ecall` |
@@ -134,6 +135,24 @@ RISC-V is the one backend that is not alone on its machine: OpenSBI runs in
 machine mode beneath it, owns the timer, and constrains what S-mode may touch
 through physical memory protection. That is a useful reminder of what the whole
 exercise is about, with the kernel on the receiving end of the arrangement.
+
+## Storage on the machines without a BIOS
+
+The `virt` machines have no ATA controller. Since v0.2.33 their storage driver
+domain drives a virtio block device: the supervisor scans the machine's
+virtio-mmio transports for a block device behind a modern (version 2)
+transport, maps that one page of registers and one freshly allocated DMA frame
+into the driver domain, and tells the driver the frame's physical address
+through the shared page. The driver acknowledges the device, negotiates the
+modern feature bit and flush, places one four-entry queue in its DMA frame, and
+moves single sectors through it by polling the used ring, bounded like every
+other wait in a driver. It holds no policy and reaches nothing else; a world
+that was not granted the device page faults on it, and the isolation suite
+asserts that on both machines. QEMU exposes legacy transports unless started
+with `-global virtio-mmio.force-legacy=false`; the scripts pass it, and a
+legacy device is reported as absent rather than driven wrongly. The
+supervisor stack on these machines grew from 64 KiB to 512 KiB to hold the
+workshop's bounded workspaces, matching x86-64.
 
 ## Protection domains
 
@@ -190,8 +209,9 @@ Since v0.1.6, `./scripts/run-qemu.sh` boots an x86-64 interactive workshop whose
 evaluator lives on a private 512 KiB bounded domain stack and whose output goes
 through the v0.1.5 console domain, and since v0.2.27 reads its serial input
 through that same domain. Since v0.2.28 `./scripts/run-qemu.sh aarch64` and
-`riscv64` boot the same interactive workshop on those machines, without a
-disk. seL4 still runs only the frozen contract. v0.1.7 adds alternating, checksummed native source-image
+`riscv64` boot the same interactive workshop on those machines, and since
+v0.2.33 with a disk: a virtio block device behind QEMU's virtio-mmio transport,
+driven from an unprivileged domain. seL4 still runs only the frozen contract. v0.1.7 adds alternating, checksummed native source-image
 slots and boot-time replay; since v0.2.26 the ATA driver is an unprivileged,
 restartable domain granted exactly the disk's ports, while the slot policy and
 codec stay in the supervisor and the images are not signed. There is no allocator, hardware watchdog, full agent

@@ -6,7 +6,7 @@
 
 use super::cpu::{self, reg, TrapFrame};
 use super::memory::{AddressSpace, IdentityWindow, DOMAIN_BASE};
-use crate::memory::{Access, FramePool, MemoryError, PAGE};
+use crate::memory::{Access, DeviceGrant, FramePool, MemoryError, PAGE};
 use crate::world::{DomainCore, Fault, Stop};
 #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 use agel_kernel_abi::{Request, Response, Status};
@@ -17,6 +17,11 @@ const STACK_BASE: u64 = DOMAIN_BASE;
 const SHARED_BASE: u64 = DOMAIN_BASE + 0x0010_0000;
 /// Virtual address of the console device, mapped only into the driver domain.
 pub const DEVICE_BASE: u64 = DOMAIN_BASE + 0x0020_0000;
+/// Virtual address of the storage device registers, mapped only into the
+/// storage driver domain.
+pub const STORAGE_DEVICE_BASE: u64 = DOMAIN_BASE + 0x0028_0000;
+/// Virtual address of the storage driver's DMA page.
+pub const DMA_BASE: u64 = DOMAIN_BASE + 0x0030_0000;
 
 /// An unprivileged world.
 pub struct Domain {
@@ -33,7 +38,7 @@ impl Domain {
         identity: IdentityWindow,
         entry: u64,
         tick_budget: u32,
-        console: Option<u64>,
+        grant: DeviceGrant,
         stack_pages: u64,
     ) -> Result<Self, MemoryError> {
         let mut space = AddressSpace::new(pool, identity)?;
@@ -43,11 +48,18 @@ impl Domain {
         }
         let shared_physical = pool.allocate()?;
         space.map(pool, SHARED_BASE, shared_physical, Access::UserData)?;
-        // The console device is mapped into exactly one domain. Every other
-        // world has no translation for it at all, so reaching it is not a
-        // permission failure but an absence.
-        if let Some(device) = console {
-            space.map(pool, DEVICE_BASE, device, Access::UserDevice)?;
+        // A device is mapped into exactly one domain. Every other world has
+        // no translation for it at all, so reaching it is not a permission
+        // failure but an absence.
+        match grant {
+            DeviceGrant::Nothing => {}
+            DeviceGrant::Console(device) => {
+                space.map(pool, DEVICE_BASE, device, Access::UserDevice)?;
+            }
+            DeviceGrant::Storage { device, dma } => {
+                space.map(pool, STORAGE_DEVICE_BASE, device, Access::UserDevice)?;
+                space.map(pool, DMA_BASE, dma, Access::UserData)?;
+            }
         }
         // The stack grows down from the top of the last mapped stack page. The
         // page above is deliberately absent, so an overflowing world faults

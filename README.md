@@ -4,7 +4,10 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.32: a staged candidate kernel is loaded only after the running
+The current repository is **v0.2.33: the durable workspace and the recovery plane exist on all three
+research machines, with a virtio block device driven from an unprivileged domain on AArch64 and
+RISC-V, so the same edit, save, reboot, verify, promote and watchdog-rollback cycle is proved on
+each; a staged candidate kernel is loaded only after the running
 kernel has hashed the slot and verified an Ed25519 signature against the key it was built with, using
 the project's own verifier compiled into the freestanding kernel; every native backend answers the kernel contract with the
 independently written second implementation, and the three research kernels check all 81 of an
@@ -253,8 +256,9 @@ It provides:
   and RISC-V, with its transactional world on a private bounded stack and only
   a shared-page request/reply boundary to the supervisor;
 - the interactive serial workshop on all three of those machines, reached
-  through `./scripts/run-qemu.sh [aarch64|riscv64]`, with the two diskless
-  machines editing named cells in memory; and
+  through `./scripts/run-qemu.sh [aarch64|riscv64]`, each with a disk driven
+  from an unprivileged domain: ATA on x86-64, virtio-blk on the `virt`
+  machines; and
 - a native named-source-cell editor whose canonical workspace is committed to
   alternating CRC-checked disk slots, replayed after reboot, and recovered from
   the preceding generation when the newest image is torn, corrupt, or fails
@@ -534,7 +538,7 @@ kernel-contract transcript, and the isolation suite with:
 ./scripts/test-native-repl.sh
 ./scripts/test-native-repl.sh aarch64    # the same session on the other machines
 ./scripts/test-native-repl.sh riscv64
-./scripts/test-native-persistence.sh     # save, reboot, reject, recover
+./scripts/test-native-persistence.sh     # save, reboot, reject, recover (also: aarch64, riscv64)
 ./scripts/test-kernel-rollback.sh        # A/B kernel slots: hung candidate rolled back by the boot stage
 ./scripts/test-kernel-contract.sh
 ./scripts/test-isolation.sh              # x86-64, AArch64 and RISC-V

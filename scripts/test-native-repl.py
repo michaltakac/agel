@@ -6,6 +6,7 @@ from __future__ import annotations
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import zlib
@@ -17,7 +18,9 @@ LAST_HARNESS: "Harness | None" = None
 EXPECTED_EXIT = {"x86_64": 33, "aarch64": 0, "riscv64": 0}
 
 
-def qemu_command(architecture: str, image: str, persistent: bool) -> list[str]:
+def qemu_command(
+    architecture: str, image: str, persistent: bool, disk: str | None
+) -> list[str]:
     serial = [
         "-display",
         "none",
@@ -48,6 +51,22 @@ def qemu_command(architecture: str, image: str, persistent: bool) -> list[str]:
                 else f"format=raw,file={image},snapshot=on"
             ),
         ]
+    # The diskless machines get a virtio block device behind a modern
+    # virtio-mmio transport; QEMU's `virt` exposes legacy transports unless
+    # told otherwise, and the driver speaks only the modern layout.
+    virtio = (
+        [
+            "-global",
+            "virtio-mmio.force-legacy=false",
+            "-drive",
+            f"if=none,format=raw,file={disk},id=disk0"
+            + ("" if persistent else ",snapshot=on"),
+            "-device",
+            "virtio-blk-device,drive=disk0",
+        ]
+        if disk is not None
+        else []
+    )
     if architecture == "aarch64":
         return [
             "qemu-system-aarch64",
@@ -58,6 +77,7 @@ def qemu_command(architecture: str, image: str, persistent: bool) -> list[str]:
             "-m",
             "128M",
             *serial,
+            *virtio,
             "-kernel",
             image,
         ]
@@ -69,6 +89,7 @@ def qemu_command(architecture: str, image: str, persistent: bool) -> list[str]:
             "-m",
             "128M",
             *serial,
+            *virtio,
             "-bios",
             "default",
             "-kernel",
@@ -79,7 +100,12 @@ def qemu_command(architecture: str, image: str, persistent: bool) -> list[str]:
 
 class Harness:
     def __init__(
-        self, image: str, *, persistent: bool = False, architecture: str = "x86_64"
+        self,
+        image: str,
+        *,
+        persistent: bool = False,
+        architecture: str = "x86_64",
+        disk: str | None = None,
     ) -> None:
         global LAST_HARNESS
         LAST_HARNESS = self
@@ -88,7 +114,7 @@ class Harness:
         self.deadline = time.monotonic() + 90.0
         self.architecture = architecture
         self.process = subprocess.Popen(
-            qemu_command(architecture, image, persistent),
+            qemu_command(architecture, image, persistent, disk),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -169,8 +195,10 @@ class Harness:
         self.reader.join(timeout=2)
 
 
-def persistence_test(image: str) -> None:
-    first = Harness(image, persistent=True)
+def persistence_test(image: str, architecture: str, disk: str) -> None:
+    """`image` boots the machine; `disk` is what the workspace lives on. On
+    x86-64 they are the same file."""
+    first = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         first.expect_until(b"AGEL_NATIVE_READY")
         first.expect_until(b"workspace: no persisted image; starting empty")
@@ -225,7 +253,7 @@ def persistence_test(image: str) -> None:
     finally:
         first.close()
 
-    second = Harness(image, persistent=True)
+    second = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         second.expect_until(b"AGEL_NATIVE_READY")
         second.expect_until(b"workspace generation 1 restored: 1 cells replayed")
@@ -257,12 +285,12 @@ def persistence_test(image: str) -> None:
 
     # Make generation 2 checksummed and structurally valid but semantically
     # invalid. Boot must reject its replay and try generation 1.
-    with open(image, "r+b") as disk:
-        disk.seek(256 * 512)
-        header = bytearray(disk.read(512))
+    with open(disk, "r+b") as media:
+        media.seek(256 * 512)
+        header = bytearray(media.read(512))
         length = int.from_bytes(header[24:28], "big")
-        disk.seek(257 * 512)
-        payload = bytearray(disk.read(15 * 512))
+        media.seek(257 * 512)
+        payload = bytearray(media.read(15 * 512))
         old = b"(def persisted-answer 42)"
         new = b"(def persisted-answer zz)"
         position = payload[:length].find(old)
@@ -272,13 +300,13 @@ def persistence_test(image: str) -> None:
         header[28:32] = (
             zlib.crc32(header[:28] + payload[:length]) & 0xFFFFFFFF
         ).to_bytes(4, "big")
-        disk.seek(256 * 512)
-        disk.write(header)
-        disk.seek(257 * 512)
-        disk.write(payload)
-        disk.flush()
+        media.seek(256 * 512)
+        media.write(header)
+        media.seek(257 * 512)
+        media.write(payload)
+        media.flush()
 
-    third = Harness(image, persistent=True)
+    third = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         third.expect_until(b"AGEL_NATIVE_READY")
         third.expect_until(
@@ -295,16 +323,16 @@ def persistence_test(image: str) -> None:
 
     # Now damage generation 2's payload without updating its checksum. The
     # structural verifier must independently reach the same older generation.
-    with open(image, "r+b") as disk:
-        disk.seek(257 * 512)
-        original = disk.read(1)
+    with open(disk, "r+b") as media:
+        media.seek(257 * 512)
+        original = media.read(1)
         if len(original) != 1:
             raise RuntimeError("test image has no workspace payload sector")
-        disk.seek(257 * 512)
-        disk.write(bytes([original[0] ^ 0x80]))
-        disk.flush()
+        media.seek(257 * 512)
+        media.write(bytes([original[0] ^ 0x80]))
+        media.flush()
 
-    fourth = Harness(image, persistent=True)
+    fourth = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         fourth.expect_until(b"AGEL_NATIVE_READY")
         fourth.expect_until(b"workspace generation 1 restored: 1 cells replayed")
@@ -318,13 +346,13 @@ def persistence_test(image: str) -> None:
 
     # Model a power loss after target-slot invalidation and a partial payload
     # write. With no published header, boot must ignore the torn generation.
-    with open(image, "r+b") as disk:
-        disk.seek(256 * 512)
-        disk.write(bytes(512))
-        disk.write(b"partial-uncommitted-workspace")
-        disk.flush()
+    with open(disk, "r+b") as media:
+        media.seek(256 * 512)
+        media.write(bytes(512))
+        media.write(b"partial-uncommitted-workspace")
+        media.flush()
 
-    fifth = Harness(image, persistent=True)
+    fifth = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         fifth.expect_until(b"AGEL_NATIVE_READY")
         fifth.expect_until(b"workspace generation 1 restored: 1 cells replayed")
@@ -338,7 +366,7 @@ def persistence_test(image: str) -> None:
     # trusted yet. A staged health cell that fails blocks explicit verification,
     # one that passes admits it, promotion makes generation 1 the rollback
     # point, and the next save becomes the candidate the boot budget judges.
-    sixth = Harness(image, persistent=True)
+    sixth = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         sixth.expect_until(b"AGEL_NATIVE_READY")
         sixth.expect_until(b"workspace generation 1 restored: 1 cells replayed")
@@ -379,7 +407,7 @@ def persistence_test(image: str) -> None:
 
     # Three boots that never evaluate a form exhaust the candidate's budget.
     for attempt in (1, 2, 3):
-        boot = Harness(image, persistent=True)
+        boot = Harness(image, persistent=True, architecture=architecture, disk=disk)
         try:
             boot.expect_until(b"AGEL_NATIVE_READY")
             boot.expect_until(b"workspace generation 2 restored: 2 cells replayed")
@@ -396,7 +424,7 @@ def persistence_test(image: str) -> None:
     # The fourth boot rolls back to the trusted generation on its own. A
     # healthy trusted generation says nothing about the candidate, and an
     # explicit fault keeps the exhausted candidate from booting again.
-    rolled = Harness(image, persistent=True)
+    rolled = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         rolled.expect_until(b"AGEL_NATIVE_READY")
         rolled.expect_until(
@@ -417,7 +445,7 @@ def persistence_test(image: str) -> None:
 
     # Only explicit evidence revives an exhausted candidate: verify it from
     # the trusted generation, and the next boot replays it as verified.
-    revived = Harness(image, persistent=True)
+    revived = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         revived.expect_until(b"AGEL_NATIVE_READY")
         revived.expect_until(b"watchdog fault: candidate generation 2 failed 3 boots")
@@ -426,7 +454,7 @@ def persistence_test(image: str) -> None:
         shutdown(revived)
     finally:
         revived.close()
-    verified = Harness(image, persistent=True)
+    verified = Harness(image, persistent=True, architecture=architecture, disk=disk)
     try:
         verified.expect_until(b"AGEL_NATIVE_READY")
         verified.expect_until(b"workspace generation 2 restored: 2 cells replayed")
@@ -668,8 +696,9 @@ def shutdown(harness: Harness) -> None:
     harness.process.stdin.flush()
     harness.expect_exact(b"\r\n")
     exit_code = harness.process.wait(timeout=harness.remaining(8.0))
-    if exit_code != 33:
-        raise RuntimeError(f"QEMU exit status {exit_code}, expected 33")
+    expected = EXPECTED_EXIT[harness.architecture]
+    if exit_code != expected:
+        raise RuntimeError(f"QEMU exit status {exit_code}, expected {expected}")
 
 
 def main() -> int:
@@ -685,6 +714,17 @@ def main() -> int:
     if architecture not in EXPECTED_EXIT:
         print(f"unknown architecture {architecture}", file=sys.stderr)
         return 2
+    disk: str | None = None
+    if "--disk" in arguments:
+        index = arguments.index("--disk")
+        if index + 1 >= len(arguments):
+            print("--disk needs a value", file=sys.stderr)
+            return 2
+        disk = arguments[index + 1]
+        del arguments[index : index + 2]
+    if architecture == "x86_64":
+        # The BIOS image is the disk.
+        disk = arguments[0] if arguments else None
     if len(arguments) == 3 and arguments[1] == "--kernel-rollback":
         if architecture != "x86_64":
             print("kernel slots need the BIOS stage; only x86-64 has one", file=sys.stderr)
@@ -700,7 +740,7 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--persistence | --kernel-rollback KERNEL] [--arch ARCH]",
+            "usage: test-native-repl.py IMAGE [--persistence | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
@@ -708,11 +748,11 @@ def main() -> int:
         if arguments[1] != "--persistence":
             print("unknown test mode", file=sys.stderr)
             return 2
-        if architecture != "x86_64":
-            print("persistence needs a disk; only x86-64 has one", file=sys.stderr)
+        if disk is None:
+            print("persistence on this machine needs --disk", file=sys.stderr)
             return 2
         try:
-            persistence_test(arguments[0])
+            persistence_test(arguments[0], architecture, disk)
         except Exception as error:
             print(f"native persistence test failed: {error}", file=sys.stderr)
             if LAST_HARNESS is not None:
@@ -722,14 +762,19 @@ def main() -> int:
             "Agel native workspace: edit -> reboot -> semantic, corruption, and torn-write fallback [ok]"
         )
         return 0
-    harness = Harness(arguments[0], architecture=architecture)
+    scratch = None
+    if disk is None:
+        # A blank scratch disk, opened snapshot-on, so the diskless machines
+        # run the same session as x86-64 without keeping anything.
+        scratch = tempfile.NamedTemporaryFile(prefix="agel-scratch-", suffix=".img")
+        scratch.write(bytes(2048 * 512))
+        scratch.flush()
+        disk = scratch.name
+    harness = Harness(arguments[0], architecture=architecture, disk=disk)
     failure: Exception | None = None
     try:
         harness.expect_until(b"AGEL_NATIVE_READY")
-        if architecture == "x86_64":
-            harness.expect_until(b"workspace: no persisted image; starting empty")
-        else:
-            harness.expect_until(b"workspace storage unavailable: no storage device on this machine")
+        harness.expect_until(b"workspace: no persisted image; starting empty")
         harness.expect_until(b"agel-native[0]> ")
         harness.send("(+ 20 22)", "42", 1)
         harness.send("(def native-answer 40)", "40", 2)
@@ -787,26 +832,12 @@ def main() -> int:
         harness.send("(drop-message broken)", "0", 27)
         harness.send("(restart-agent broken)", "#<native-agent:2>", 28)
         harness.send("(agent-faulted? broken)", "#f", 29)
-        if architecture == "x86_64":
-            # The disk-backed recovery plane with nothing on disk to select.
-            harness.send(":verify", "denied: no candidate generation to verify", 29)
-            harness.send(":promote", "denied: no candidate generation", 29)
-            harness.send(":fault", "denied: no trusted generation to roll back to", 29)
-            harness.send(
-                ":recovery-status", "recovery: no generation trusted or proposed", 29
-            )
-        else:
-            # The executable policy model on machines without a disk.
-            harness.send(":verify", "candidate B: isolated health evidence accepted", 29)
-            harness.send(":promote", "selected slot B; slot A retained for rollback", 29)
-            harness.send(":verify", "candidate B: isolated health evidence accepted", 29)
-            harness.send(
-                ":promote",
-                "denied: candidate B is already active; slot A remains rollback",
-                29,
-            )
-            harness.send(":fault", "watchdog fault: rolled back to slot A", 29)
-            harness.send(":recovery-status", "active slot: A (stable)", 29)
+        # The disk-backed recovery plane with nothing on disk to select, on
+        # every machine.
+        harness.send(":verify", "denied: no candidate generation to verify", 29)
+        harness.send(":promote", "denied: no candidate generation", 29)
+        harness.send(":fault", "denied: no trusted generation to roll back to", 29)
+        harness.send(":recovery-status", "recovery: no generation trusted or proposed", 29)
         harness.send("(let ((x 20) (y 22)) (+ x y))", "42", 30)
         harness.send("(let ((x 40)) (let ((x 1) (y x)) (+ x y)))", "41", 31)
         harness.send("(- (* 2 3 7) (+) (*) -1)", "42", 32)
@@ -848,6 +879,8 @@ def main() -> int:
         failure = error
     finally:
         harness.close()
+        if scratch is not None:
+            scratch.close()
     if failure is not None:
         print(f"native REPL test failed: {failure}", file=sys.stderr)
         print(harness.transcript.decode("utf-8", errors="replace"), file=sys.stderr)

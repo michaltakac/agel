@@ -268,14 +268,18 @@ Each rung must be runnable and differentially testable against the rung below:
    serial workshop builds and runs on AArch64 and RISC-V as well as x86-64,
    sharing one source, with storage optional and reported absent rather than
    faked; the same prompt-synchronized harness drives all three under QEMU.
+   Since v0.2.33 each has a disk: a virtio block device driven from an
+   unprivileged domain granted one register page and one DMA frame, so the
+   dual-slot workspace and the disk-backed recovery plane are proved on all
+   three.
 44. **Disk-backed recovery (started at v0.2.29):** on x86-64 the recovery
    plane is a record on disk binding a trusted and a candidate workspace
    generation; boots of an unverified candidate are charged before it runs, a
    candidate that fails three boots is rolled back automatically, a `health`
    cell evaluated in an isolated world is the explicit oracle, and promotion
    is an operator decision that names what is retained for rollback. The
-   record is unsigned and the diskless machines keep the in-memory policy
-   model; kernel images are not yet A/B selected.
+   record is unsigned. Since v0.2.33 the same plane runs on the `virt`
+   machines over their virtio disks.
 45. **A/B kernel images (started at v0.2.30):** on x86-64 the BIOS stage
    selects between two kernel slots from a nine-byte selector on disk,
    charges each boot of an unverified candidate before the candidate runs,
@@ -289,8 +293,8 @@ Each rung must be runnable and differentially testable against the rung below:
    trusted slot, the selector's own bytes and workspace generations are
    still unsigned, and there is no root of trust before the BIOS stage.
 47. **Live system:** signed workspace generations, the trusted slot checked
-   before it runs, and the same selection on the machines without a BIOS
-   stage.
+   before it runs, and kernel-image selection on the machines without a BIOS
+   stage, whose kernels QEMU loads as ELFs.
 48. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a

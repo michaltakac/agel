@@ -11,4 +11,6 @@ case "$architecture" in
     kernel=$(./scripts/build-kernel.sh "$architecture" --features isolated-repl | tail -n 1) ;;
   *) printf 'unknown architecture: %s\n' "$architecture" >&2; exit 2 ;;
 esac
+# Without --disk the harness attaches a blank scratch disk, snapshot-on, so
+# every machine runs the same session against a disk-backed workshop.
 exec python3 ./scripts/test-native-repl.py "$kernel" --arch "$architecture"

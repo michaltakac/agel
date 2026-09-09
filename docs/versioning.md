@@ -115,6 +115,11 @@ promise.
   verifies a staged candidate against `bootstrap/kernel-signing.pub` before the
   boot stage may load it, and `agel-integrity` gains a `no_std` mode with a
   streaming SHA-512. Version 1 selectors read as absent.
+  `v0.2.33` gives AArch64 and RISC-V a disk: a virtio block device driven from
+  an unprivileged domain granted one register page and one DMA frame, so the
+  dual-slot workspace and the disk-backed recovery plane exist on all three
+  research machines and the persistence suite runs on each. The workspace and
+  record formats are unchanged; the `virt` supervisor stack grows to 512 KiB.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
