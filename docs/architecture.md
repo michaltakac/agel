@@ -240,13 +240,18 @@ Each rung must be runnable and differentially testable against the rung below:
    signed over canonical bytes and a supervisor that refuses unsigned
    promotion once a key is trusted; and operator key generation in the CLI.
    Native disk slots, the seL4 manifest and kernel images remain unsigned.
-40. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+40. **Diverse kernel contract (complete at v0.2.25):** a second implementation
+   of the kernel contract written from the contract document and corpus
+   without reading the reference model, reproducing the frozen transcript and
+   agreeing with the model on all 81 steps; the seL4 broker runs it, so the
+   seL4 transcript is now the agreement of two implementations.
+41. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-41. **POSIX personality:** a Rust C library and the filesystem and process
+42. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-42. **Local inference:** model inference in its own domain, over quantized
+43. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

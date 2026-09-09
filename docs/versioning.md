@@ -78,6 +78,10 @@ promise.
   portable-image envelopes with verified loads, signed A/B promotion evidence,
   and operator key generation in the CLI. The v1 image bytes inside an
   envelope are unchanged; the kernel contract is unchanged.
+  `v0.2.25` adds a second implementation of the kernel contract written from
+  the contract and corpus without the reference model, held to the frozen
+  transcript and to step-by-step agreement with the model, and makes the seL4
+  broker run it. The contract, corpus and transcript are unchanged.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

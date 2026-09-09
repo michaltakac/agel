@@ -4,7 +4,10 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.24: Ed25519-signed portable images and promotion evidence
+The current repository is **v0.2.25: a second, independently written implementation of the
+kernel contract that reproduces the frozen transcript and runs inside the seL4 broker, so the
+seL4 backend's byte-identical transcript is now two implementations agreeing; Ed25519-signed
+portable images and promotion evidence
 from a dependency-free, RFC-vector-tested implementation, with verified loads that never
 downgrade to an unsigned generation; strings, symbols, lists and maps as first-class values
 inside the freestanding evaluator, in a bounded heap with a copying collector at every commit,
@@ -212,7 +215,8 @@ It provides:
   frozen reference;
 - the same contract on an **unmodified seL4 kernel** under Microkit: four
   protection domains where an unprivileged world asks an unprivileged broker,
-  and the kernel is never taught what Agel is;
+  and the kernel is never taught what Agel is; the broker answers with a
+  second implementation written independently of the reference model;
 - a release manifest naming the exact kernel, configuration and toolchain, and
   stating plainly that the configuration is not a proved one;
 - containment, on every architecture, of worlds that write kernel memory,

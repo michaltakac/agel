@@ -27,11 +27,11 @@ requires the same toolchain.
 | Artifact | SHA-256 |
 |---|---|
 | Rust | `rustc 1.89.0 (29483883e 2025-08-04)` |
-| Bootable image | `1fea4bbe3f467131a814622d5dc35170ed361793540f290ae933b040b2be37c6` |
-| Protection domain `serial` | `842c8312b9578fdd5af02ea3e779ef7af395aab5672ca4ce5a7e1af22032528c` |
-| Protection domain `broker` | `0c6b19251f221ec12714f6eaa858da615f6abd55d51d240a5602ba494744de9d` |
-| Protection domain `recovery` | `3ea4fb87dff72486f99da0e242a401f9ab172f0e5e6d58f7e099719c384cdb72` |
-| Protection domain `world` | `a6c3a28fd29b92a538d85e3e6e2c4f93b089dff82c948abe9acb157fba9161cd` |
+| Bootable image | `9f3fb4b99ad0e3d770a01ef865cd616114dba30da7917f2ef08d1c97c2e7dd90` |
+| Protection domain `serial` | `009849b86e1e4fbe4bd8a75b44ae3b12dbc03cd06110ce22241a79246d2b9554` |
+| Protection domain `broker` | `58794bda04b57f3963febf5353d2d7a2bf4e66417ee79ca9443c01a73e85173f` |
+| Protection domain `recovery` | `e503e0eff58a05a2cef3a076e5b317c8280fcade2a8c58218db03e51133b4ecb` |
+| Protection domain `world` | `2ef1e24cd815d007ea8da263a17c77823b70574bde633e1458a8f115e1239a1a` |
 
 Protection domains are built for `aarch64-unknown-none-softfloat`. The seL4
 kernel and `libmicrokit.a` are the published release binaries: nothing in

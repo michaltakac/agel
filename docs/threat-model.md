@@ -549,6 +549,29 @@ constant-time: signing keys must not be used where an adversary can time the
 signer. Nothing here signs native disk slots, the seL4 manifest or kernel
 images; those remain hash-checked or unsigned, as their documents say.
 
+## v0.2.25
+
+- **Four transcripts from one implementation:** every native backend, seL4
+  included, had answered the contract by linking the same reference model, so
+  byte-identical transcripts proved the boundary held and nothing about the
+  semantics. A second implementation now exists, written from the contract
+  document and the corpus without reading the model, and the seL4 broker runs
+  it. The hosted suite requires both to reproduce the frozen transcript and to
+  agree on every step, and still catches a deliberately widening variant.
+- **Silent conventions where the corpus is silent:** the independent
+  implementation records each unpinned choice at the point it is made, so
+  the next contract minor can freeze them as corpus steps instead of
+  discovering them as divergences.
+- **Revocation that misses a grandchild:** the first draft of the independent
+  implementation tombstoned a parent before checking its child and revoked
+  four descendants where the corpus expects five. The corpus caught it. That
+  is the kind of bug a single implementation cannot notice about itself.
+
+Two implementations agreeing is not a proof of either. Both are unverified
+Rust; the corpus is 81 steps; and the research kernels still run the reference
+model, so on x86-64, AArch64 and RISC-V the boundary is diverse and the
+semantics are not.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

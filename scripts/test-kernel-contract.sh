@@ -6,5 +6,7 @@ trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 
 cargo run -q -p agel-kernel-abi --example contract_conformance > "$work_dir/model.trace"
 diff -u bootstrap/kernel-contract.trace "$work_dir/model.trace"
+cargo run -q -p agel-kernel-abi --example independent_conformance > "$work_dir/independent.trace"
+diff -u bootstrap/kernel-contract.trace "$work_dir/independent.trace"
 
-printf '%s\n' "Agel kernel contract: reference model = frozen v1.0 transcript"
+printf '%s\n' "Agel kernel contract: reference model = independent implementation = frozen v1.0 transcript"

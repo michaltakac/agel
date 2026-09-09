@@ -22,6 +22,7 @@
 #![forbid(unsafe_code)]
 
 pub mod conformance;
+pub mod independent;
 pub mod model;
 
 use core::fmt;

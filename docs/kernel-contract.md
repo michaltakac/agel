@@ -169,7 +169,9 @@ table lives in supervisor-only memory, the caller holds slot numbers rather than
 references, and the only path to any of it from an unprivileged world is a trap
 gate. That is the honest division of labour for this phase — the research
 backend's job is to put already-specified semantics behind a hardware privilege
-boundary, and seL4 will be the independent second implementation.
+boundary. The independent second implementation exists since v0.2.25
+(`agel_kernel_abi::independent`) and is what the seL4 broker runs; see the seL4
+notes below.
 
 It builds for three architectures from one source. The shared driver, the
 capability space, the shared handshake page, the tick budget, and the rule that
@@ -196,12 +198,35 @@ Slot 31 is a backend convention rather than part of the contract: a send on it
 is how a world hands control back to its supervisor. It sits above every slot
 the corpus touches, so the corpus never observes that it exists.
 
+## Two implementations, one transcript
+
+`agel_kernel_abi::model` is the reference model. `agel_kernel_abi::independent`
+is a second implementation written from this document, the crate's type
+definitions, the corpus and its frozen transcript, and deliberately not from
+the model's source. They share only the contract types and the well-known slot
+and profile constants. Both reproduce `bootstrap/kernel-contract.trace` byte
+for byte; `conformance::compare` requires them to agree on all 81 steps; and
+the hosted test suite checks that a widening variant of the independent
+implementation is still caught at `derive/mint-cannot-widen`.
+`./scripts/test-kernel-contract.sh` diffs both hosted transcripts against the
+freeze.
+
+Where the corpus does not pin a choice, the independent implementation
+documents the one it made at the point it is made: reserved argument words are
+checked after type and rights; a tombstoned slot is a free derivation target;
+`endpoint.call` queues nothing when it cannot complete; the derivation tree is
+walked on a snapshot taken before any slot is revoked. Each of those is a
+candidate for a future corpus step rather than a silent convention.
+
 ## Backend notes: seL4
 
 The seL4 backend is where the contract earns its shape. seL4 is unmodified and
 knows nothing about Agel, so the contract cannot be answered by the kernel: it
 is answered by an ordinary unprivileged **broker** protection domain, and an
-invocation is a protected procedure call to it. That is exactly what
+invocation is a protected procedure call to it. Since v0.2.25 the broker
+answers with the independent implementation, so the frozen transcript this
+backend must reproduce is the agreement of two implementations behind two
+different kinds of boundary, not one implementation behind two. That is exactly what
 [`microkernel-research.md`](microkernel-research.md) requires — Lisp objects,
 mailboxes and policy belong in isolated servers, not in a kernel whose value is
 that nobody changed it.
