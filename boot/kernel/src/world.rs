@@ -29,7 +29,6 @@ pub unsafe fn copy_supervisor_words(destination: *mut u8, source: *const u8, byt
 }
 
 /// Pages of stack given to a small contract or driver domain.
-#[cfg(not(feature = "native-graphics"))]
 pub const STACK_PAGES: u64 = 4;
 
 /// Pages reserved for a native evaluator domain.
@@ -82,6 +81,18 @@ pub mod shared {
     pub const COMMAND_WRITE_CONSOLE: u64 = 0x6000;
     /// Touch the console device without having been granted it.
     pub const COMMAND_FAULT_DEVICE: u64 = 0x7000;
+    /// Read the sector named by the first argument word into the block area.
+    #[cfg(target_arch = "x86_64")]
+    pub const COMMAND_READ_SECTOR: u64 = 0xa000;
+    /// Write the block area to the sector named by the first argument word.
+    #[cfg(target_arch = "x86_64")]
+    pub const COMMAND_WRITE_SECTOR: u64 = 0xa100;
+    /// Flush the disk's write cache.
+    #[cfg(target_arch = "x86_64")]
+    pub const COMMAND_FLUSH_DISK: u64 = 0xa200;
+    /// Touch the disk controller without having been granted it.
+    #[cfg(target_arch = "x86_64")]
+    pub const COMMAND_FAULT_STORAGE_DEVICE: u64 = 0xa300;
     /// Evaluate the source bytes in the shared payload using the native Agel
     /// session owned by this domain.
     pub const COMMAND_EVALUATE: u64 = 0x8000;
@@ -336,6 +347,16 @@ pub const PAYLOAD_OFFSET: usize = 128;
 /// Bytes of console payload one request may carry.
 pub const PAYLOAD_BYTES: usize = 256;
 
+/// Byte offset in the shared page of the one-sector block area a storage
+/// driver domain reads from and writes to. It sits well past the text payload
+/// so the two can never overlap.
+#[cfg(target_arch = "x86_64")]
+pub const BLOCK_OFFSET: usize = 1024;
+
+/// Bytes in the block area: exactly one disk sector.
+#[cfg(target_arch = "x86_64")]
+pub const BLOCK_BYTES: usize = 512;
+
 impl DomainCore {
     /// Write one byte of the console payload area.
     pub fn write_payload(&mut self, offset: usize, byte: u8) {
@@ -353,6 +374,33 @@ impl DomainCore {
     pub fn read_payload(&self, offset: usize) -> u8 {
         let offset = PAYLOAD_OFFSET + (offset % PAYLOAD_BYTES);
         // Safety: as in `write_payload`; the result remains untrusted data.
+        unsafe {
+            (self.shared_physical as *const u8)
+                .add(offset)
+                .read_volatile()
+        }
+    }
+
+    /// Write one byte of the block area.
+    #[cfg(all(
+        target_arch = "x86_64",
+        any(feature = "isolated-repl", feature = "native-graphics")
+    ))]
+    pub fn write_block(&mut self, offset: usize, byte: u8) {
+        let offset = BLOCK_OFFSET + (offset % BLOCK_BYTES);
+        // Safety: as in `write_payload`; the block area is inside the page.
+        unsafe {
+            (self.shared_physical as *mut u8)
+                .add(offset)
+                .write_volatile(byte)
+        };
+    }
+
+    /// Read one untrusted byte of the block area.
+    #[cfg(target_arch = "x86_64")]
+    pub fn read_block(&self, offset: usize) -> u8 {
+        let offset = BLOCK_OFFSET + (offset % BLOCK_BYTES);
+        // Safety: as in `read_payload`.
         unsafe {
             (self.shared_physical as *const u8)
                 .add(offset)

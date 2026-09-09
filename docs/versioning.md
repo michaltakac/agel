@@ -82,6 +82,10 @@ promise.
   the contract and corpus without the reference model, held to the frozen
   transcript and to step-by-step agreement with the model, and makes the seL4
   broker run it. The contract, corpus and transcript are unchanged.
+  `v0.2.26` moves the x86-64 ATA driver out of the supervisor into an
+  unprivileged, restartable domain granted exactly the disk's ports, with
+  generation-checked handles and a stale-handle refusal in CI. The workspace
+  format, slot layout and every language surface are unchanged.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -8,6 +8,7 @@ use crate::arch;
 use crate::console;
 use crate::kprint;
 use crate::native_session::{replay as replay_workspace, request as evaluator_request};
+use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};
 
@@ -697,8 +698,11 @@ impl StatusLine {
     }
 }
 
-fn restore_from_disk(evaluator: &mut arch::Domain) -> Result<(Workspace, u64, u64), &'static str> {
-    let candidates = crate::workspace::load()?;
+fn restore_from_disk(
+    evaluator: &mut arch::Domain,
+    storage: &mut ServiceDomain,
+) -> Result<(Workspace, u64, u64), &'static str> {
+    let candidates = crate::workspace::load(storage)?;
     let mut highest_generation = 0;
     for loaded in candidates.into_iter().flatten() {
         highest_generation = highest_generation.max(loaded.generation);
@@ -743,6 +747,7 @@ fn scene_command(line: &[u8]) -> bool {
 fn execute_workshop(
     compositor: &mut arch::Domain,
     evaluator: &mut arch::Domain,
+    storage: &mut ServiceDomain,
     current: &mut Scene,
     previous: &mut Scene,
     scene_revision: &mut u8,
@@ -842,7 +847,7 @@ fn execute_workshop(
         return status;
     }
     if line == b":save" {
-        return match crate::native_session::save(evaluator, workspace, *generation) {
+        return match crate::native_session::save(evaluator, storage, workspace, *generation) {
             Ok((next, revision)) => {
                 *generation = next;
                 *committed_workspace = *workspace;
@@ -856,7 +861,7 @@ fn execute_workshop(
         };
     }
     if line == b":reload" {
-        return match restore_from_disk(evaluator) {
+        return match restore_from_disk(evaluator, storage) {
             Ok((restored, restored_generation, revision)) => {
                 *workspace = restored;
                 *committed_workspace = restored;
@@ -1113,8 +1118,13 @@ fn interactive(
     let mut evaluator = machine
         .create_evaluator_world(evaluator_entry, 20)
         .unwrap_or_else(|reason| failed(reason));
+    let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
+    let mut storage = machine
+        .create_storage_world(storage_entry, 50)
+        .map(|domain| ServiceDomain::new(domain, ServiceKind::Storage, storage_entry, 50))
+        .unwrap_or_else(|reason| failed(reason));
     let (mut workspace, mut generation, mut evaluator_revision) =
-        restore_from_disk(&mut evaluator).unwrap_or_else(|reason| failed(reason));
+        restore_from_disk(&mut evaluator, &mut storage).unwrap_or_else(|reason| failed(reason));
     let mut committed_workspace = workspace;
     let mut dirty = false;
     let mut scene_revision = 0_u8;
@@ -1195,6 +1205,7 @@ fn interactive(
                 status = execute_workshop(
                     compositor,
                     &mut evaluator,
+                    &mut storage,
                     &mut current,
                     &mut previous,
                     &mut scene_revision,

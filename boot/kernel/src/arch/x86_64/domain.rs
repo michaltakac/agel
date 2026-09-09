@@ -4,7 +4,7 @@
 //! What remains here is exactly the machine-specific part: an address space, a
 //! register frame, the ring transition, and the trap decode.
 
-use super::cpu::{self, TrapFrame};
+use super::cpu::{self, PortGrant, TrapFrame};
 use super::memory::{AddressSpace, DOMAIN_BASE};
 use crate::memory::{Access, FramePool, MemoryError, PAGE};
 use crate::world::{DomainCore, Fault, Stop};
@@ -24,9 +24,9 @@ pub struct Domain {
     space: AddressSpace,
     frame: TrapFrame,
     core: DomainCore,
-    /// Whether this domain is the console driver. The device is granted for
-    /// the duration of its entries and withheld for everyone else's.
-    console: bool,
+    /// Which device this domain is the driver for, if any. The device is
+    /// granted for the duration of its entries and withheld for everyone else's.
+    grant: PortGrant,
 }
 
 impl Domain {
@@ -37,7 +37,7 @@ impl Domain {
         identity_pdpt: u64,
         entry: u64,
         tick_budget: u32,
-        console: bool,
+        grant: PortGrant,
         stack_pages: u64,
     ) -> Result<Self, MemoryError> {
         let mut space = AddressSpace::new(pool, identity_pdpt)?;
@@ -55,7 +55,7 @@ impl Domain {
             space,
             frame: TrapFrame::user(entry, stack_top, SHARED_BASE),
             core: DomainCore::new(shared_physical, tick_budget),
-            console,
+            grant,
         })
     }
 
@@ -73,7 +73,7 @@ impl Domain {
         physical: u64,
         bytes: u64,
     ) -> Result<(Self, u64), MemoryError> {
-        let mut domain = Self::new(pool, identity_pdpt, entry, tick_budget, false, 8)?;
+        let mut domain = Self::new(pool, identity_pdpt, entry, tick_budget, PortGrant::None, 8)?;
         let page_offset = physical & (PAGE - 1);
         let physical_start = physical - page_offset;
         let mapped_bytes = page_offset
@@ -105,7 +105,6 @@ impl Domain {
 
     /// Ask the world to do something it is not allowed to do, and report how it
     /// was stopped.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn provoke(&mut self, command: u64) -> Stop {
         self.core.stage_command(command);
         self.run()
@@ -123,19 +122,18 @@ impl Domain {
         // the trap path stays reachable across the switch, and the port grant
         // is installed and withdrawn around this entry alone.
         unsafe {
-            cpu::grant_console_ports(self.console);
+            cpu::grant_ports(self.grant);
             self.space.activate();
             CURRENT = self;
             cpu::enter_domain(&raw mut self.frame);
             CURRENT = core::ptr::null_mut();
             restore_kernel_space();
-            cpu::grant_console_ports(false);
+            cpu::grant_ports(PortGrant::None);
         }
         self.core.outcome()
     }
 
     /// The domain's recorded stop reason, if it has one.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn stopped(&self) -> Option<Stop> {
         self.core.stopped()
     }

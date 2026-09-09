@@ -13,7 +13,7 @@ use crate::arch;
 use crate::console;
 use crate::kprint;
 use crate::monitor::RecoveryMonitor;
-use crate::service::{ServiceDomain, ServiceError, ServiceWriter};
+use crate::service::{ServiceDomain, ServiceError, ServiceKind, ServiceWriter};
 use crate::world::{shared, Stop};
 use agel_kernel_abi::model::ModelKernel;
 use agel_kernel_abi::{conformance, write_step, Kernel};
@@ -50,7 +50,7 @@ pub fn run() -> ! {
     // appear, and the frozen-transcript diff fails. That is a stronger check
     // than any assertion about the driver could be.
     let mut console = match machine.create_console_world(entry, 8) {
-        Ok(domain) => ServiceDomain::new(domain, entry, 8),
+        Ok(domain) => ServiceDomain::new(domain, ServiceKind::Console, entry, 8),
         Err(reason) => failed(reason),
     };
     kprint!(
@@ -63,6 +63,8 @@ pub fn run() -> ! {
     run_native_evaluator(&mut machine, &mut console);
     run_containment(&mut machine);
     run_driver_restart(&mut machine, &mut console);
+    #[cfg(target_arch = "x86_64")]
+    run_storage_driver(&mut machine);
 
     // The recovery plane must still work after everything above. A supervisor
     // that survives a hostile world but loses its own recovery policy has not
@@ -328,6 +330,74 @@ fn run_containment(machine: &mut arch::Machine) {
         }
     }
     let _ = shared::COMMAND_INVOKE;
+}
+
+/// The disk leaves the supervisor too: a driver domain granted exactly the
+/// ATA ports reads the boot sector, is lost, is replaced at a new generation,
+/// and refuses the handle from before.
+#[cfg(target_arch = "x86_64")]
+fn run_storage_driver(machine: &mut arch::Machine) {
+    let entry = crate::user::agel_storage_main as *const () as usize as u64;
+    if !arch::user_text_range().contains(&entry) {
+        failed("the storage driver entry point is not in user-executable text");
+    }
+    let mut storage = match machine.create_storage_world(entry, 50) {
+        Ok(domain) => ServiceDomain::new(domain, ServiceKind::Storage, entry, 50),
+        Err(reason) => failed(reason),
+    };
+    let mut sector = [0_u8; crate::world::BLOCK_BYTES];
+    if let Err(error) = storage.read_sector(storage.handle(), 0, &mut sector) {
+        kprint!(
+            "isolation[{}]: storage driver failed: {}\n",
+            arch::NAME,
+            error.name()
+        );
+        failed("the storage driver could not read the boot sector");
+    }
+    if sector[510] != 0x55 || sector[511] != 0xaa {
+        failed("the storage driver returned something other than the boot sector");
+    }
+    kprint!(
+        "isolation[{}]: storage driver read the boot sector from an unprivileged domain, generation {}\n",
+        arch::NAME,
+        storage.generation()
+    );
+
+    let stale = storage.handle();
+    match storage.provoke(shared::COMMAND_FAULT_WRITE) {
+        Stop::Faulted(fault) => kprint!(
+            "isolation[{}]: the storage driver faulted: {} at {:#x}\n",
+            arch::NAME,
+            fault.name(),
+            fault.pc
+        ),
+        _ => failed("the storage driver was not contained"),
+    }
+    if let Err(reason) = storage.restart(machine) {
+        failed(reason);
+    }
+    match storage.read_sector(stale, 0, &mut sector) {
+        Err(ServiceError::Stale) => kprint!(
+            "isolation[{}]: replaced the storage driver; a handle from generation {} was refused: {}\n",
+            arch::NAME,
+            stale.generation(),
+            ServiceError::Stale.status().name()
+        ),
+        _ => failed("a stale storage handle was not refused"),
+    }
+    let mut again = [0_u8; crate::world::BLOCK_BYTES];
+    if storage
+        .read_sector(storage.handle(), 0, &mut again)
+        .is_err()
+        || again != sector
+    {
+        failed("the replacement storage driver did not read the same boot sector");
+    }
+    kprint!(
+        "isolation[{}]: the replacement storage driver, generation {}, read the boot sector again\n",
+        arch::NAME,
+        storage.generation()
+    );
 }
 
 /// Lose the console driver on purpose, replace it, and require the supervisor

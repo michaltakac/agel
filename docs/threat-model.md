@@ -572,6 +572,32 @@ Rust; the corpus is 81 steps; and the research kernels still run the reference
 model, so on x86-64, AArch64 and RISC-V the boundary is diverse and the
 semantics are not.
 
+## v0.2.26
+
+- **A disk that is ambient to the supervisor:** the ATA port I/O has left ring
+  0. The storage driver is an unprivileged domain whose task-state-segment
+  bitmap clears exactly the eight command-block ports and the alternate status
+  port for the duration of its entries; every other world executing the same
+  status read is refused by the processor, and CI asserts it as a contained
+  general-protection fault alongside the console case.
+- **A driver that decides policy:** the driver carries sectors and status codes,
+  never text and never slot numbers. Which sectors are workspace slots, what a
+  header means, when a generation is published and how a torn slot falls back
+  are supervisor decisions made on bytes the driver merely moved.
+- **A restarted driver serving an old conversation:** every request checks a
+  generation-bearing handle first. The isolation suite loses the driver on
+  purpose, replaces it at generation two, refuses the generation-one handle
+  with `stale-generation`, and requires the replacement to read the same boot
+  sector.
+- **One bitmap for two drivers:** the grant is rewritten per entry, so the
+  console driver never has the disk and the storage driver never has the
+  console, with no per-domain bitmap to keep consistent.
+
+Timers and serial input are still the supervisor's; the disk driver exists on
+x86-64 only, since it is the only backend with storage; and a driver that
+faults mid-write leaves the supervisor's slot protocol, not the driver, to
+recover. The frame pool still never reclaims a replaced domain's frames.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

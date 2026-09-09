@@ -563,7 +563,247 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
             if command == shared::COMMAND_FAULT_DIVIDE {
                 unsafe { divide_by_zero() };
             }
+            #[cfg(target_arch = "x86_64")]
+            if command == shared::COMMAND_FAULT_STORAGE_DEVICE {
+                // The same status read the storage driver performs, in a world
+                // that was never granted the disk.
+                let _ = unsafe { port_in8(0x1f7) };
+            }
         }
+        unsafe { yield_to_supervisor() };
+    }
+}
+
+/// One byte in from a port. Faults unless this domain was granted the port.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn port_in8(port: u16) -> u8 {
+    let value: u8;
+    unsafe { asm!("in al, dx", in("dx") port, out("al") value, options(nomem, nostack)) };
+    value
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn port_out8(port: u16, value: u8) {
+    unsafe { asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack)) };
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn port_in16(port: u16) -> u16 {
+    let value: u16;
+    unsafe { asm!("in ax, dx", in("dx") port, out("ax") value, options(nomem, nostack)) };
+    value
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn port_out16(port: u16, value: u16) {
+    unsafe { asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack)) };
+}
+
+/// Outcomes the storage driver reports in the status word. The supervisor
+/// turns them into the workspace's error messages; the driver never carries
+/// text.
+#[cfg(target_arch = "x86_64")]
+pub mod storage_status {
+    pub const OK: u64 = 0;
+    pub const ABSENT: u64 = 1;
+    pub const BUSY: u64 = 2;
+    pub const DEVICE_ERROR: u64 = 3;
+    pub const DATA_TIMEOUT: u64 = 4;
+    pub const OUT_OF_RANGE: u64 = 5;
+    pub const UNKNOWN_COMMAND: u64 = 6;
+}
+
+#[cfg(target_arch = "x86_64")]
+const ATA_DATA: u16 = 0x1f0;
+#[cfg(target_arch = "x86_64")]
+const ATA_SECTOR_COUNT: u16 = 0x1f2;
+#[cfg(target_arch = "x86_64")]
+const ATA_LBA_LOW: u16 = 0x1f3;
+#[cfg(target_arch = "x86_64")]
+const ATA_LBA_MID: u16 = 0x1f4;
+#[cfg(target_arch = "x86_64")]
+const ATA_LBA_HIGH: u16 = 0x1f5;
+#[cfg(target_arch = "x86_64")]
+const ATA_DRIVE: u16 = 0x1f6;
+#[cfg(target_arch = "x86_64")]
+const ATA_STATUS_COMMAND: u16 = 0x1f7;
+#[cfg(target_arch = "x86_64")]
+const ATA_ALTERNATE_STATUS: u16 = 0x3f6;
+#[cfg(target_arch = "x86_64")]
+const ATA_POLL_LIMIT: usize = 10_000_000;
+
+/// Wait until a new command may be issued. A completed command can leave ERR
+/// latched; only the next command clears it, so this must not treat that as a
+/// permanent lockout.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn ata_wait_ready() -> u64 {
+    let mut polls = 0;
+    while polls < ATA_POLL_LIMIT {
+        let status = unsafe { port_in8(ATA_STATUS_COMMAND) };
+        if status == 0 || status == 0xff {
+            return storage_status::ABSENT;
+        }
+        if status & 0x80 == 0 {
+            return storage_status::OK;
+        }
+        polls += 1;
+    }
+    storage_status::BUSY
+}
+
+/// Wait for the drive to be ready to transfer data, or to report an error.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn ata_wait_data() -> u64 {
+    let mut polls = 0;
+    while polls < ATA_POLL_LIMIT {
+        let status = unsafe { port_in8(ATA_STATUS_COMMAND) };
+        if status == 0 || status == 0xff {
+            return storage_status::ABSENT;
+        }
+        if status & 0x80 == 0 {
+            if status & 0x21 != 0 {
+                return storage_status::DEVICE_ERROR;
+            }
+            if status & 0x08 != 0 {
+                return storage_status::OK;
+            }
+        }
+        polls += 1;
+    }
+    storage_status::DATA_TIMEOUT
+}
+
+/// Wait for a command to finish.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn ata_wait_finished() -> u64 {
+    let mut polls = 0;
+    while polls < ATA_POLL_LIMIT {
+        let status = unsafe { port_in8(ATA_STATUS_COMMAND) };
+        if status == 0 || status == 0xff {
+            return storage_status::ABSENT;
+        }
+        if status & 0x80 == 0 {
+            if status & 0x21 != 0 {
+                return storage_status::DEVICE_ERROR;
+            }
+            return storage_status::OK;
+        }
+        polls += 1;
+    }
+    storage_status::BUSY
+}
+
+/// Select one LBA28 sector and issue `command`.
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn ata_select(lba: u64, command: u8) -> u64 {
+    if lba >= 1 << 28 {
+        return storage_status::OUT_OF_RANGE;
+    }
+    let ready = unsafe { ata_wait_ready() };
+    if ready != storage_status::OK {
+        return ready;
+    }
+    unsafe {
+        port_out8(ATA_DRIVE, 0xe0 | ((lba >> 24) as u8 & 0x0f));
+        // ATA requires 400 ns after selecting a drive; four alternate-status
+        // reads provide it without acknowledging anything.
+        let _ = port_in8(ATA_ALTERNATE_STATUS);
+        let _ = port_in8(ATA_ALTERNATE_STATUS);
+        let _ = port_in8(ATA_ALTERNATE_STATUS);
+        let _ = port_in8(ATA_ALTERNATE_STATUS);
+        port_out8(ATA_SECTOR_COUNT, 1);
+        port_out8(ATA_LBA_LOW, lba as u8);
+        port_out8(ATA_LBA_MID, (lba >> 8) as u8);
+        port_out8(ATA_LBA_HIGH, (lba >> 16) as u8);
+        port_out8(ATA_STATUS_COMMAND, command);
+    }
+    storage_status::OK
+}
+
+/// The storage driver: the one domain granted the primary ATA controller.
+///
+/// It moves single sectors between the disk and the block area of its shared
+/// page on the supervisor's request. It holds no policy: which sectors are
+/// workspace slots, what a header means, and when to publish a generation are
+/// the supervisor's decisions, made on bytes this domain merely carried.
+///
+/// # Safety
+/// Entered by the architecture's return-from-exception instruction with a
+/// private stack, a valid shared page, and the disk ports granted.
+#[cfg(target_arch = "x86_64")]
+#[no_mangle]
+#[link_section = ".user_text"]
+pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
+    let page = shared_page as *mut u64;
+    let block = (shared_page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+    loop {
+        let command = unsafe { page.add(shared::COMMAND).read_volatile() };
+        let lba = unsafe { page.add(shared::ARGUMENTS).read_volatile() };
+        let status = if command == shared::COMMAND_READ_SECTOR {
+            let selected = unsafe { ata_select(lba, 0x20) };
+            if selected != storage_status::OK {
+                selected
+            } else {
+                let ready = unsafe { ata_wait_data() };
+                if ready != storage_status::OK {
+                    ready
+                } else {
+                    let mut offset = 0;
+                    while offset < crate::world::BLOCK_BYTES {
+                        let word = unsafe { port_in16(ATA_DATA) };
+                        unsafe {
+                            block.add(offset).write_volatile(word as u8);
+                            block.add(offset + 1).write_volatile((word >> 8) as u8);
+                        }
+                        offset += 2;
+                    }
+                    unsafe { ata_wait_finished() }
+                }
+            }
+        } else if command == shared::COMMAND_WRITE_SECTOR {
+            let selected = unsafe { ata_select(lba, 0x30) };
+            if selected != storage_status::OK {
+                selected
+            } else {
+                let ready = unsafe { ata_wait_data() };
+                if ready != storage_status::OK {
+                    ready
+                } else {
+                    let mut offset = 0;
+                    while offset < crate::world::BLOCK_BYTES {
+                        let low = unsafe { block.add(offset).read_volatile() };
+                        let high = unsafe { block.add(offset + 1).read_volatile() };
+                        unsafe { port_out16(ATA_DATA, u16::from(low) | (u16::from(high) << 8)) };
+                        offset += 2;
+                    }
+                    unsafe { ata_wait_finished() }
+                }
+            }
+        } else if command == shared::COMMAND_FLUSH_DISK {
+            let ready = unsafe { ata_wait_ready() };
+            if ready != storage_status::OK {
+                ready
+            } else {
+                unsafe { port_out8(ATA_STATUS_COMMAND, 0xe7) };
+                unsafe { ata_wait_finished() }
+            }
+        } else if command == shared::COMMAND_FAULT_WRITE {
+            // For the restart test: a driver that misbehaves is contained like
+            // any other world.
+            unsafe { (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead) };
+            storage_status::UNKNOWN_COMMAND
+        } else {
+            storage_status::UNKNOWN_COMMAND
+        };
+        unsafe { page.add(shared::STATUS).write_volatile(status) };
         unsafe { yield_to_supervisor() };
     }
 }

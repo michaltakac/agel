@@ -122,8 +122,8 @@ struct TaskStateSegment {
     reserved2: u64,
     reserved3: u16,
     iomap_base: u16,
-    /// A set bit denies a port. The map is built denying everything and then
-    /// has exactly the console's eight ports cleared.
+    /// A set bit denies a port. The map is built denying everything and has
+    /// exactly one driver's ports cleared around that driver's entries.
     io_bitmap: [u8; IO_BITMAP_BYTES],
 }
 
@@ -142,23 +142,45 @@ impl TaskStateSegment {
     };
 }
 
-/// Grant or withhold the console device for the next ring-3 entry.
+/// Which device, if any, the next ring-3 entry may reach through port I/O.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortGrant {
+    /// No port at all: every port instruction faults.
+    None,
+    /// The eight COM1 ports.
+    #[cfg(not(feature = "native-graphics"))]
+    Console,
+    /// The primary ATA command block and its alternate status port.
+    Storage,
+}
+
+/// Grant or withhold a device for the next ring-3 entry.
 ///
 /// There is one task-state segment, so the grant is per *entry* rather than
-/// per domain: the supervisor points `iomap_base` at the bitmap before entering
-/// the driver and past the end of the segment before entering anything else.
-/// The check itself is the processor's, on every port instruction.
+/// per domain: the supervisor rewrites the bitmap to exactly the granted ports
+/// and points `iomap_base` at it before entering a driver, and past the end of
+/// the segment before entering anything else. The check itself is the
+/// processor's, on every port instruction.
 ///
 /// # Safety
 /// Must be called from ring 0, with no ring-3 domain currently running.
-pub unsafe fn grant_console_ports(granted: bool) {
+pub unsafe fn grant_ports(grant: PortGrant) {
     let tss = &raw mut TSS;
     unsafe {
-        (*tss).iomap_base = if granted {
-            IO_BITMAP_OFFSET
-        } else {
-            (core::mem::size_of::<TaskStateSegment>() + 1) as u16
-        };
+        (*tss).io_bitmap = [0xff; IO_BITMAP_BYTES];
+        match grant {
+            PortGrant::None => {
+                (*tss).iomap_base = (core::mem::size_of::<TaskStateSegment>() + 1) as u16;
+                return;
+            }
+            #[cfg(not(feature = "native-graphics"))]
+            PortGrant::Console => (*tss).io_bitmap[0x3f8 / 8] = 0x00,
+            PortGrant::Storage => {
+                (*tss).io_bitmap[0x1f0 / 8] = 0x00;
+                (*tss).io_bitmap[0x3f6 / 8] &= !(1 << (0x3f6 % 8));
+            }
+        }
+        (*tss).iomap_base = IO_BITMAP_OFFSET;
     }
 }
 
@@ -225,11 +247,10 @@ pub unsafe fn install(trap_stack_top: u64, fault_stack_top: u64) {
     unsafe {
         (*tss).rsp[0] = trap_stack_top;
         (*tss).ist[0] = fault_stack_top;
-        // Deny every port, then clear exactly the eight the console occupies.
-        // The map is only consulted when `iomap_base` points at it, which is
-        // only while the driver domain is running.
+        // Deny every port. A driver's ports are cleared around its entries by
+        // `grant_ports`; the map is only consulted while `iomap_base` points at
+        // it, which is only while a driver domain is running.
         (*tss).io_bitmap = [0xff; IO_BITMAP_BYTES];
-        (*tss).io_bitmap[0x3f8 / 8] = 0x00;
     }
     let tss_base = tss as u64;
     let tss_limit = (core::mem::size_of::<TaskStateSegment>() - 1) as u64;

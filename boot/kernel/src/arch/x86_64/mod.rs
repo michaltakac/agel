@@ -7,9 +7,6 @@
 
 pub mod hal;
 
-#[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
-mod disk;
-
 #[cfg(feature = "isolation-selftest")]
 pub mod cpu;
 #[cfg(feature = "isolation-selftest")]
@@ -137,9 +134,6 @@ pub fn pointer_enable() -> bool {
     true
 }
 
-#[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
-pub use disk::{flush_disk, read_disk_sector, write_disk_sector};
-
 /// Leave QEMU through the debug-exit device.
 ///
 /// The device maps a guest value `v` to host status `(v << 1) | 1`, so 0x10
@@ -221,6 +215,11 @@ pub const PROVOCATIONS: &[Provocation] = &[
         description: "touching a device it was not granted",
     },
     Provocation {
+        command: crate::world::shared::COMMAND_FAULT_STORAGE_DEVICE,
+        expected: Some("general-protection"),
+        description: "touching the disk it was not granted",
+    },
+    Provocation {
         command: crate::world::shared::COMMAND_SPIN,
         expected: None,
         description: "that never yields",
@@ -276,7 +275,7 @@ impl Machine {
             self.identity,
             entry,
             ticks,
-            false,
+            cpu::PortGrant::None,
             crate::world::STACK_PAGES,
         )
         .map_err(|error| error.name())
@@ -293,8 +292,23 @@ impl Machine {
             self.identity,
             entry,
             ticks,
-            false,
+            cpu::PortGrant::None,
             crate::world::EVALUATOR_STACK_PAGES,
+        )
+        .map_err(|error| error.name())
+    }
+
+    /// Build a protection domain that is additionally granted the primary ATA
+    /// controller: its eight command-block ports and the alternate status
+    /// port, and nothing else. The disk is a capability of this one domain.
+    pub fn create_storage_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            cpu::PortGrant::Storage,
+            crate::world::STACK_PAGES,
         )
         .map_err(|error| error.name())
     }
@@ -308,7 +322,7 @@ impl Machine {
             self.identity,
             entry,
             ticks,
-            true,
+            cpu::PortGrant::Console,
             crate::world::STACK_PAGES,
         )
         .map_err(|error| error.name())

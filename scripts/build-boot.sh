@@ -18,7 +18,12 @@ else
   printf '%s\n' "objcopy is required (Homebrew: brew install binutils)" >&2
   exit 1
 fi
-rust_lld="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/rust-lld"
+sysroot=$(rustc --print sysroot)
+rust_lld="$sysroot/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/rust-lld"
+# Invoked directly rather than through rustc, rust-lld must be told where the
+# toolchain keeps libLLVM; rustc's own driver arranges this for its links.
+export DYLD_LIBRARY_PATH="$sysroot/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$sysroot/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 kernel_elf="$kernel_dir/target/x86_64-unknown-none/release/agel-boot"
 kernel_bin="$build_dir/kernel.bin"
 boot_object="$build_dir/boot.o"

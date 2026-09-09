@@ -52,7 +52,7 @@ mod isolation;
 mod memory;
 #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
 mod pointer;
-#[cfg(all(feature = "isolation-selftest", not(feature = "native-graphics")))]
+#[cfg(feature = "isolation-selftest")]
 mod service;
 #[cfg(feature = "isolation-selftest")]
 mod user;

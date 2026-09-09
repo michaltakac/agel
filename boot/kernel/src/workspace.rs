@@ -5,6 +5,9 @@
 //! invalidates the older slot, writes its payload, and publishes its header
 //! last; boot accepts only a bounded, checksummed, canonically decoded image.
 
+use crate::service::{ServiceDomain, ServiceError};
+use crate::user::storage_status;
+
 pub const MAX_CELLS: usize = 16;
 pub const MAX_CELL_NAME: usize = 24;
 pub const MAX_CELL_SOURCE: usize = crate::world::PAYLOAD_BYTES;
@@ -160,11 +163,55 @@ pub struct LoadedWorkspace {
     pub generation: u64,
 }
 
+/// Translate a storage service failure into the workspace's own vocabulary.
+/// The driver carries codes; the supervisor decides what they mean.
+fn storage_message(error: ServiceError) -> &'static str {
+    match error {
+        ServiceError::Stale => "storage driver handle is stale",
+        ServiceError::Stopped | ServiceError::Faulted => "storage driver stopped; restart required",
+        ServiceError::Device(storage_status::ABSENT) => "workspace disk is absent",
+        ServiceError::Device(storage_status::BUSY) => "workspace disk remained busy",
+        ServiceError::Device(storage_status::DEVICE_ERROR) => "workspace disk reported an error",
+        ServiceError::Device(storage_status::DATA_TIMEOUT) => {
+            "workspace disk data request timed out"
+        }
+        ServiceError::Device(storage_status::OUT_OF_RANGE) => "workspace sector is outside LBA28",
+        ServiceError::Device(_) => "storage driver refused the request",
+    }
+}
+
+fn read_sector(
+    storage: &mut ServiceDomain,
+    lba: u32,
+    sector: &mut [u8; 512],
+) -> Result<(), &'static str> {
+    let handle = storage.handle();
+    storage
+        .read_sector(handle, lba, sector)
+        .map_err(storage_message)
+}
+
+fn write_sector(
+    storage: &mut ServiceDomain,
+    lba: u32,
+    sector: &[u8; 512],
+) -> Result<(), &'static str> {
+    let handle = storage.handle();
+    storage
+        .write_sector(handle, lba, sector)
+        .map_err(storage_message)
+}
+
+fn flush(storage: &mut ServiceDomain) -> Result<(), &'static str> {
+    let handle = storage.handle();
+    storage.flush(handle).map_err(storage_message)
+}
+
 /// Read both slots independently and return valid candidates newest-first.
 /// A localized read failure cannot hide a valid twin slot.
-pub fn load() -> Result<[Option<LoadedWorkspace>; 2], &'static str> {
-    let a = load_slot(SLOT_A);
-    let b = load_slot(SLOT_B);
+pub fn load(storage: &mut ServiceDomain) -> Result<[Option<LoadedWorkspace>; 2], &'static str> {
+    let a = load_slot(storage, SLOT_A);
+    let b = load_slot(storage, SLOT_B);
     match (a, b) {
         (Ok(Some(left)), Ok(Some(right))) if right.generation > left.generation => {
             Ok([Some(right), Some(left)])
@@ -178,7 +225,11 @@ pub fn load() -> Result<[Option<LoadedWorkspace>; 2], &'static str> {
     }
 }
 
-pub fn save(workspace: &Workspace, generation: u64) -> Result<u64, &'static str> {
+pub fn save(
+    storage: &mut ServiceDomain,
+    workspace: &Workspace,
+    generation: u64,
+) -> Result<u64, &'static str> {
     let next = generation
         .checked_add(1)
         .ok_or("workspace generation exhausted")?;
@@ -189,15 +240,15 @@ pub fn save(workspace: &Workspace, generation: u64) -> Result<u64, &'static str>
     // Invalidate this slot before changing its payload. The other slot remains
     // a complete rollback point until the final header and cache flush land.
     let empty = [0_u8; 512];
-    crate::arch::write_disk_sector(slot, &empty)?;
-    crate::arch::flush_disk()?;
+    write_sector(storage, slot, &empty)?;
+    flush(storage)?;
     for index in 0..PAYLOAD_SECTORS {
         let mut sector = [0_u8; 512];
         let start = index * 512;
         sector.copy_from_slice(&payload[start..start + 512]);
-        crate::arch::write_disk_sector(slot + 1 + index as u32, &sector)?;
+        write_sector(storage, slot + 1 + index as u32, &sector)?;
     }
-    crate::arch::flush_disk()?;
+    flush(storage)?;
 
     let mut header = [0_u8; 512];
     header[..MAGIC.len()].copy_from_slice(MAGIC);
@@ -206,10 +257,10 @@ pub fn save(workspace: &Workspace, generation: u64) -> Result<u64, &'static str>
     header[24..28].copy_from_slice(&(length as u32).to_be_bytes());
     let image_checksum = checksum_parts(&header[..28], &payload[..length]);
     header[28..32].copy_from_slice(&image_checksum.to_be_bytes());
-    crate::arch::write_disk_sector(slot, &header)?;
-    crate::arch::flush_disk()?;
+    write_sector(storage, slot, &header)?;
+    flush(storage)?;
 
-    let verified = load_slot(slot);
+    let verified = load_slot(storage, slot);
     if !matches!(
         verified,
         Ok(Some(image)) if image.generation == next && image.workspace == *workspace
@@ -218,9 +269,7 @@ pub fn save(workspace: &Workspace, generation: u64) -> Result<u64, &'static str>
         // bootable header for it remains. Best-effort invalidation converts a
         // failed verification into an unpublished slot; if that also fails,
         // report the only honest outcome.
-        if crate::arch::write_disk_sector(slot, &empty).is_err()
-            || crate::arch::flush_disk().is_err()
-        {
+        if write_sector(storage, slot, &empty).is_err() || flush(storage).is_err() {
             return Err("workspace save outcome is indeterminate");
         }
         return Err("workspace save verification failed; generation unpublished");
@@ -228,9 +277,12 @@ pub fn save(workspace: &Workspace, generation: u64) -> Result<u64, &'static str>
     Ok(next)
 }
 
-fn load_slot(slot: u32) -> Result<Option<LoadedWorkspace>, &'static str> {
+fn load_slot(
+    storage: &mut ServiceDomain,
+    slot: u32,
+) -> Result<Option<LoadedWorkspace>, &'static str> {
     let mut header = [0_u8; 512];
-    crate::arch::read_disk_sector(slot, &mut header)?;
+    read_sector(storage, slot, &mut header)?;
     if header[..MAGIC.len()] != MAGIC[..] {
         return Ok(None);
     }
@@ -261,7 +313,7 @@ fn load_slot(slot: u32) -> Result<Option<LoadedWorkspace>, &'static str> {
     let mut payload = [0_u8; PAYLOAD_BYTES];
     for index in 0..PAYLOAD_SECTORS {
         let mut sector = [0_u8; 512];
-        crate::arch::read_disk_sector(slot + 1 + index as u32, &mut sector)?;
+        read_sector(storage, slot + 1 + index as u32, &mut sector)?;
         let start = index * 512;
         payload[start..start + 512].copy_from_slice(&sector);
     }

@@ -704,8 +704,9 @@ phase quietly claims.
   research backends. It runs unprivileged, holds the device, and prints the
   conformance transcript on the supervisor's behalf: if the driver does not
   work, the transcript does not appear and the frozen-transcript diff fails.
-  v0.1.7 adds a bounded ATA-backed source workspace, but that storage mechanism
-  is still in the supervisor rather than a restartable driver domain. Timers are
+  v0.1.7 adds a bounded ATA-backed source workspace, and v0.2.26 moves its ATA
+  driver into an unprivileged, restartable domain granted only the disk's nine
+  ports; the supervisor keeps slot policy and the codec. Timers are
   not split — preemption is the supervisor's own mechanism for
   containing a world, so moving it out is a later question rather than an
   obvious next step. Networking and model/tool brokering are untouched.

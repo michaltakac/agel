@@ -18,10 +18,25 @@
 //! driver domain is what it prints through.
 
 use crate::arch;
-use crate::world::{shared, Stop, PAYLOAD_BYTES};
-#[cfg(not(feature = "isolated-repl"))]
+#[cfg(not(feature = "native-graphics"))]
+use crate::world::PAYLOAD_BYTES;
+use crate::world::{shared, Stop};
+#[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
 use agel_kernel_abi::Status;
+#[cfg(not(feature = "native-graphics"))]
 use core::fmt;
+
+/// Which device a service domain drives. The kind decides how the domain is
+/// rebuilt on restart: the same entry point, the same grant, a new generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceKind {
+    /// The console: COM1 on x86-64, the UART page elsewhere.
+    #[cfg(not(feature = "native-graphics"))]
+    Console,
+    /// The primary ATA disk, x86-64 only.
+    #[cfg(target_arch = "x86_64")]
+    Storage,
+}
 
 /// A capability-shaped reference to a service.
 ///
@@ -35,7 +50,7 @@ pub struct ServiceHandle {
 
 impl ServiceHandle {
     /// The generation this handle was issued against.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn generation(self) -> u32 {
         self.generation
     }
@@ -52,25 +67,33 @@ pub enum ServiceError {
     Stopped,
     /// The service faulted while handling this request.
     Faulted,
+    /// The service ran and its device reported a problem, identified by the
+    /// driver's status code. The driver carries codes, never text.
+    #[cfg(target_arch = "x86_64")]
+    Device(u64),
 }
 
 impl ServiceError {
     /// The contract status this corresponds to.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn status(self) -> Status {
         match self {
             Self::Stale => Status::StaleGeneration,
             Self::Stopped | Self::Faulted => Status::FaultedDomain,
+            #[cfg(target_arch = "x86_64")]
+            Self::Device(_) => Status::ResourceExhausted,
         }
     }
 
     /// A short name for serial reports.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn name(self) -> &'static str {
         match self {
             Self::Stale => "stale-generation",
             Self::Stopped => "faulted-domain",
             Self::Faulted => "faulted-domain",
+            #[cfg(target_arch = "x86_64")]
+            Self::Device(_) => "device-error",
         }
     }
 }
@@ -78,27 +101,104 @@ impl ServiceError {
 /// An unprivileged driver domain the supervisor can lose and replace.
 pub struct ServiceDomain {
     domain: arch::Domain,
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    kind: ServiceKind,
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     entry: u64,
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     ticks: u32,
     generation: u32,
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     restarts: u32,
 }
 
 impl ServiceDomain {
-    /// Adopt `domain` as generation one of a service entered at `entry`.
-    pub fn new(domain: arch::Domain, _entry: u64, _ticks: u32) -> Self {
+    /// Adopt `domain` as generation one of a `kind` service entered at `entry`.
+    pub fn new(domain: arch::Domain, _kind: ServiceKind, _entry: u64, _ticks: u32) -> Self {
         Self {
             domain,
-            #[cfg(not(feature = "isolated-repl"))]
+            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+            kind: _kind,
+            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
             entry: _entry,
-            #[cfg(not(feature = "isolated-repl"))]
+            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
             ticks: _ticks,
             generation: 1,
-            #[cfg(not(feature = "isolated-repl"))]
+            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
             restarts: 0,
+        }
+    }
+
+    /// Ask the storage driver to read sector `lba` into `sector`.
+    #[cfg(target_arch = "x86_64")]
+    pub fn read_sector(
+        &mut self,
+        handle: ServiceHandle,
+        lba: u32,
+        sector: &mut [u8; crate::world::BLOCK_BYTES],
+    ) -> Result<(), ServiceError> {
+        self.block_request(handle, shared::COMMAND_READ_SECTOR, lba)?;
+        for (offset, byte) in sector.iter_mut().enumerate() {
+            *byte = self.domain.core().read_block(offset);
+        }
+        Ok(())
+    }
+
+    /// Ask the storage driver to write `sector` to sector `lba`.
+    #[cfg(all(
+        target_arch = "x86_64",
+        any(feature = "isolated-repl", feature = "native-graphics")
+    ))]
+    pub fn write_sector(
+        &mut self,
+        handle: ServiceHandle,
+        lba: u32,
+        sector: &[u8; crate::world::BLOCK_BYTES],
+    ) -> Result<(), ServiceError> {
+        self.check(handle)?;
+        for (offset, byte) in sector.iter().enumerate() {
+            self.domain.core().write_block(offset, *byte);
+        }
+        self.block_request(handle, shared::COMMAND_WRITE_SECTOR, lba)
+    }
+
+    /// Ask the storage driver to flush the disk's write cache.
+    #[cfg(all(
+        target_arch = "x86_64",
+        any(feature = "isolated-repl", feature = "native-graphics")
+    ))]
+    pub fn flush(&mut self, handle: ServiceHandle) -> Result<(), ServiceError> {
+        self.block_request(handle, shared::COMMAND_FLUSH_DISK, 0)
+    }
+
+    fn check(&self, handle: ServiceHandle) -> Result<(), ServiceError> {
+        if handle.generation != self.generation {
+            return Err(ServiceError::Stale);
+        }
+        if self.domain.stopped().is_some() {
+            return Err(ServiceError::Stopped);
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn block_request(
+        &mut self,
+        handle: ServiceHandle,
+        command: u64,
+        lba: u32,
+    ) -> Result<(), ServiceError> {
+        self.check(handle)?;
+        self.domain
+            .core()
+            .write_shared(shared::ARGUMENTS, u64::from(lba));
+        match self.domain.provoke(command) {
+            Stop::Replied => {}
+            _ => return Err(ServiceError::Faulted),
+        }
+        match self.domain.core().read_shared(shared::STATUS) {
+            0 => Ok(()),
+            code => Err(ServiceError::Device(code)),
         }
     }
 
@@ -110,19 +210,19 @@ impl ServiceDomain {
     }
 
     /// The current generation.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn generation(&self) -> u32 {
         self.generation
     }
 
     /// How many times this service has been replaced.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn restarts(&self) -> u32 {
         self.restarts
     }
 
     /// Whether the service is currently stopped.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn stopped(&self) -> Option<Stop> {
         self.domain.stopped()
     }
@@ -131,17 +231,13 @@ impl ServiceDomain {
     ///
     /// The handle is checked before anything else, so a caller holding a stale
     /// one is refused without the service being entered at all.
+    #[cfg(not(feature = "native-graphics"))]
     pub fn write_console(
         &mut self,
         handle: ServiceHandle,
         bytes: &[u8],
     ) -> Result<(), ServiceError> {
-        if handle.generation != self.generation {
-            return Err(ServiceError::Stale);
-        }
-        if self.domain.stopped().is_some() {
-            return Err(ServiceError::Stopped);
-        }
+        self.check(handle)?;
         let count = bytes.len().min(PAYLOAD_BYTES);
         for (offset, byte) in bytes.iter().take(count).enumerate() {
             self.domain.core().write_payload(offset, *byte);
@@ -157,7 +253,7 @@ impl ServiceDomain {
 
     /// Ask the driver to do something that will stop it, for the test that
     /// proves the supervisor survives losing it.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn provoke(&mut self, command: u64) -> Stop {
         self.domain.provoke(command)
     }
@@ -168,9 +264,13 @@ impl ServiceDomain {
     /// which is stated rather than hidden here as everywhere else. What matters
     /// for the restart claim is that the replacement is a different domain with
     /// a different address space, not a resumed one.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn restart(&mut self, machine: &mut arch::Machine) -> Result<(), &'static str> {
-        let replacement = machine.create_console_world(self.entry, self.ticks)?;
+        let replacement = match self.kind {
+            ServiceKind::Console => machine.create_console_world(self.entry, self.ticks)?,
+            #[cfg(target_arch = "x86_64")]
+            ServiceKind::Storage => machine.create_storage_world(self.entry, self.ticks)?,
+        };
         self.domain = replacement;
         self.generation = self
             .generation
@@ -186,6 +286,7 @@ impl ServiceDomain {
 /// Text is buffered here rather than in the domain's page so that a restart in
 /// the middle of a line cannot leave half a message in a page that no longer
 /// belongs to anyone.
+#[cfg(not(feature = "native-graphics"))]
 pub struct ServiceWriter<'a> {
     service: &'a mut ServiceDomain,
     handle: ServiceHandle,
@@ -194,6 +295,7 @@ pub struct ServiceWriter<'a> {
     failure: Option<ServiceError>,
 }
 
+#[cfg(not(feature = "native-graphics"))]
 impl<'a> ServiceWriter<'a> {
     /// Write through `service`, using a handle taken at its current generation.
     pub fn new(service: &'a mut ServiceDomain) -> Self {
@@ -209,7 +311,7 @@ impl<'a> ServiceWriter<'a> {
 
     /// Write through `service` using a handle the caller already holds, which
     /// may be older than the service's current generation.
-    #[cfg(not(feature = "isolated-repl"))]
+    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn with_handle(service: &'a mut ServiceDomain, handle: ServiceHandle) -> Self {
         Self {
             service,
@@ -257,6 +359,7 @@ impl<'a> ServiceWriter<'a> {
     }
 }
 
+#[cfg(not(feature = "native-graphics"))]
 impl fmt::Write for ServiceWriter<'_> {
     fn write_str(&mut self, text: &str) -> fmt::Result {
         for byte in text.bytes() {

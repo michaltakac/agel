@@ -4,6 +4,7 @@
 //! for talking to an evaluator domain and reconstructing it from source cells.
 
 use crate::arch;
+use crate::service::ServiceDomain;
 use crate::workspace::Workspace;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};
 
@@ -95,6 +96,7 @@ impl ReplayFailure {
 /// the candidate. No failed validation or disk write resets the live evaluator.
 pub fn save(
     evaluator: &mut arch::Domain,
+    storage: &mut ServiceDomain,
     workspace: &Workspace,
     generation: u64,
 ) -> Result<(u64, u64), &'static str> {
@@ -106,7 +108,7 @@ pub fn save(
             return Err("source candidate rejected; live world retained");
         }
     }
-    let next = match crate::workspace::save(workspace, generation) {
+    let next = match crate::workspace::save(storage, workspace, generation) {
         Ok(next) => next,
         Err(reason) => {
             let _ = request(evaluator, shared::COMMAND_EVALUATOR_DISCARD, b"");

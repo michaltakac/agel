@@ -4,7 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.25: a second, independently written implementation of the
+The current repository is **v0.2.26: the disk leaves the supervisor into an unprivileged,
+restartable ATA driver domain granted exactly nine I/O ports, with generation-checked handles
+and a stale-handle refusal proved in CI; a second, independently written implementation of the
 kernel contract that reproduces the frozen transcript and runs inside the seL4 broker, so the
 seL4 backend's byte-identical transcript is now two implementations agreeing; Ed25519-signed
 portable images and promotion evidence
@@ -225,7 +227,10 @@ It provides:
 - a console driver in its own unprivileged, restartable domain, holding the
   device by whatever mechanism the architecture grants one, which the supervisor
   can lose and replace at a new generation while handles from before the restart
-  fail closed; and
+  fail closed;
+- an x86-64 storage driver in its own unprivileged, restartable domain, granted
+  the primary ATA ports and nothing else, carrying sectors for a supervisor
+  that keeps all slot policy; and
 - the fixed-memory native evaluator running unprivileged on x86-64, AArch64,
   and RISC-V, with its transactional world on a private bounded stack and only
   a shared-page request/reply boundary to the supervisor; and
@@ -251,7 +256,8 @@ This is the first Agel evaluator running on the independently bootable
 substrate, and the first hardware protection boundary the project can point at,
 but not yet a general-purpose operating system. `run-qemu.sh` now places the
 evaluator and console output in separate unprivileged domains; serial input,
-raw storage, and recovery policy remain in the supervisor. Native source cells
+and recovery policy remain in the supervisor; since v0.2.26 the disk is driven
+by its own restartable unprivileged domain. Native source cells
 now survive reboot, but the full agent runtime, filesystem, compiler, signed
 portable images, and editor implementation in Agel remain hosted or future
 components. See

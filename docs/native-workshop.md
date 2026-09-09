@@ -175,8 +175,9 @@ isolated REPL through a stateful, recursive, rollback-producing session.
 This is enough to write, organize, and retain small programs inside Agel itself,
 and to run fixed-memory agents beside an Agel-authored vector frame in the VM.
 It is not yet a self-hosted graphical development environment: the editor and
-storage codec are trusted Rust services, and hosted macros, modules, effects,
-model adapters, and rich agent protocols are not yet in the VM. Since v0.2.6
+storage codec are trusted Rust services (since v0.2.26 the ATA driver beneath
+the codec is an unprivileged, restartable domain), and hosted macros, modules,
+effects, model adapters, and rich agent protocols are not yet in the VM. Since v0.2.6
 the graphical command surface and persistent source-cell workshop share the
 real native evaluator. Project v0.2.8 adds the downward-bootstrap actor seed;
 its exact transaction and containment semantics are in

@@ -140,6 +140,20 @@ run_architecture() {
     exit 1
   fi
 
+  if test "$architecture" = x86_64; then
+    # Phase 3, continued: the disk is a driver domain too, granted exactly the
+    # ATA ports; it reads, is lost, is replaced, and refuses its old handle.
+    grep -q "isolation\[$architecture\]: contained a world touching the disk it was not granted" \
+      "$output_file"
+    grep -q "isolation\[$architecture\]: storage driver read the boot sector from an unprivileged domain, generation 1" \
+      "$output_file"
+    grep -q "isolation\[$architecture\]: the storage driver faulted" "$output_file"
+    grep -q "isolation\[$architecture\]: replaced the storage driver; a handle from generation 1 was refused: stale-generation" \
+      "$output_file"
+    grep -q "isolation\[$architecture\]: the replacement storage driver, generation 2, read the boot sector again" \
+      "$output_file"
+  fi
+
   contained=$(grep -c "isolation\[$architecture\]: contained a world" "$output_file")
   if test "$contained" -lt 3; then
     printf '%s\n' "$architecture: only $contained containments reported" >&2

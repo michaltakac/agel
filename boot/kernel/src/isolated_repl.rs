@@ -6,10 +6,12 @@
 //! domain introduced in v0.1.5. Neither mutable component owns the recovery
 //! monitor or can address the other's private stack.
 //!
-//! v0.1.7 adds a tiny structural editor and a dual-slot source workspace. The
-//! supervisor owns the raw-disk mechanism, but persisted bytes are bounded
-//! named Agel forms which are replayed into a fresh evaluator rather than a
-//! dump of Rust memory or authority-bearing state.
+//! v0.1.7 adds a tiny structural editor and a dual-slot source workspace.
+//! Since v0.2.26 the disk is driven by its own unprivileged, restartable
+//! domain granted exactly the ATA ports; the supervisor keeps the slot policy
+//! and the codec, and persisted bytes are bounded named Agel forms which are
+//! replayed into a fresh evaluator rather than a dump of Rust memory or
+//! authority-bearing state.
 
 use crate::arch;
 use crate::monitor::RecoveryMonitor;
@@ -17,7 +19,7 @@ use crate::native_session::{
     replay as replay_workspace, request as evaluator_request_raw, reset as reset_evaluator,
     ReplayFailure,
 };
-use crate::service::{ServiceDomain, ServiceWriter};
+use crate::service::{ServiceDomain, ServiceKind, ServiceWriter};
 use crate::workspace::{Workspace, MAX_CELL_NAME};
 use crate::world::{shared, PAYLOAD_BYTES};
 use core::fmt::Write as _;
@@ -31,7 +33,12 @@ pub fn run() -> ! {
     let worker_entry = crate::user::agel_world_main as *const () as usize as u64;
     let evaluator_entry = crate::user::agel_evaluator_main as *const () as usize as u64;
     let mut driver = match machine.create_console_world(worker_entry, 8) {
-        Ok(domain) => ServiceDomain::new(domain, worker_entry, 8),
+        Ok(domain) => ServiceDomain::new(domain, ServiceKind::Console, worker_entry, 8),
+        Err(reason) => fatal(reason),
+    };
+    let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
+    let mut storage = match machine.create_storage_world(storage_entry, 50) {
+        Ok(domain) => ServiceDomain::new(domain, ServiceKind::Storage, storage_entry, 50),
         Err(reason) => fatal(reason),
     };
     let mut evaluator = match machine.create_evaluator_world(evaluator_entry, 20) {
@@ -49,10 +56,10 @@ pub fn run() -> ! {
     driver_line(&mut driver, b"AGEL_NATIVE_READY");
     driver_line(
         &mut driver,
-        b"Evaluator: unprivileged domain; output: restartable console domain; source workspace: dual-slot disk image. Type :help.",
+        b"Evaluator: unprivileged domain; output: restartable console domain; storage: unprivileged disk driver domain; source workspace: dual-slot disk image. Type :help.",
     );
 
-    match load_replay_candidates(&mut evaluator, &mut driver) {
+    match load_replay_candidates(&mut evaluator, &mut driver, &mut storage) {
         Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {
             workspace = loaded.workspace;
             committed_workspace = loaded.workspace;
@@ -142,7 +149,12 @@ pub fn run() -> ! {
                 generation,
                 dirty,
             ),
-            b":save" => match crate::native_session::save(&mut evaluator, &workspace, generation) {
+            b":save" => match crate::native_session::save(
+                &mut evaluator,
+                &mut storage,
+                &workspace,
+                generation,
+            ) {
                     Ok((next_generation, candidate_revision)) => {
                         generation = next_generation;
                         committed_workspace = workspace;
@@ -158,7 +170,7 @@ pub fn run() -> ! {
                         );
                     }
             },
-            b":reload" => match load_replay_candidates(&mut evaluator, &mut driver) {
+            b":reload" => match load_replay_candidates(&mut evaluator, &mut driver, &mut storage) {
                 Ok(DiskWorkspace::Restored(loaded, restored_revision)) => {
                     workspace = loaded.workspace;
                     committed_workspace = loaded.workspace;
@@ -272,8 +284,9 @@ enum DiskWorkspace {
 fn load_replay_candidates(
     evaluator: &mut arch::Domain,
     driver: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
 ) -> Result<DiskWorkspace, &'static str> {
-    let candidates = crate::workspace::load()?;
+    let candidates = crate::workspace::load(storage)?;
     let mut found = false;
     let mut highest_generation = 0;
     for loaded in candidates.into_iter().flatten() {
