@@ -1,0 +1,8 @@
+; Ordered modules: private definitions stay private; only exports cross imports.
+(module arithmetic
+  (export double)
+  (defsyntax double (x) (* x 2)))
+(module dock
+  (import arithmetic)
+  (export behavior)
+  (def behavior (fn (self state message) (+ state (double message)))))

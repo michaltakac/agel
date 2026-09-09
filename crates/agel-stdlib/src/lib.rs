@@ -5,11 +5,17 @@ use agel_core::{Commit, EvaluationOptions, TransactionError, World};
 /// Closed Agel frontend, also used as input to its own native compilation.
 pub const NATIVE_COMPILER: &str = include_str!("../native-compiler.agel");
 pub const NATIVE_READER: &str = include_str!("../native-reader.agel");
+pub const NATIVE_MODULES: &str = include_str!("../native-modules.agel");
 pub const NATIVE_AGENT_KERNEL: &str = include_str!("../native-agent-kernel.agel");
 pub const NATIVE_SYSTEM_BUILDER: &str = include_str!("../native-system-builder.agel");
 
 pub const SOURCE: &str = concat!(
     include_str!("../stdlib.agel"),
+    "\n(module agel/native-modules (export native-link native-link-source) (def native-link ",
+    include_str!("../native-modules.agel"),
+    ") (def native-link-source '",
+    include_str!("../native-modules.agel"),
+    "))\n",
     "\n(module agel/native-reader (export native-read native-reader-source) (def native-read ",
     include_str!("../native-reader.agel"),
     ") (def native-reader-source '",

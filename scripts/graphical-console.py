@@ -16,6 +16,43 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+MODULE_TOOL = Path(__file__).resolve().parents[1] / "target/release/examples/module_workshop"
+module_lock = threading.Lock()
+
+
+def compile_module(source):
+    """Host compilation only. Output is a bounded definition, never a command stream."""
+    if not isinstance(source, str) or not 0 < len(source.encode("utf-8")) <= 65536:
+        raise ValueError("Module source must be 1–65536 UTF-8 bytes")
+    if not MODULE_TOOL.is_file():
+        raise ValueError("Build the bridge: cargo build --release -p agel-jit --example module_workshop")
+    if not module_lock.acquire(blocking=False):
+        raise ValueError("A module compilation is already running")
+    try:
+        result = subprocess.run([str(MODULE_TOOL), "--workbench"], input=source,
+                                text=True, capture_output=True, timeout=30, check=False)
+        if result.returncode:
+            raise ValueError("Module rejected: " + result.stderr.strip()[-1000:])
+        definition = result.stdout.strip()
+        if not definition.startswith("(def behavior ") or len(definition.encode()) > 180:
+            raise ValueError("Invalid or oversized compiled behavior")
+        if any(ord(c) < 32 or ord(c) > 126 for c in definition):
+            raise ValueError("Compiled behavior is not one ASCII source form")
+        return definition
+    finally:
+        module_lock.release()
+
+
+def module_action(machine, source, action):
+    if action not in ("preview", "stage"):
+        raise ValueError("Choose preview or stage; promotion and saving are explicit OS commands")
+    definition = compile_module(source)
+    if action == "preview":
+        command = f":preview (begin {definition} (agent-become dock behavior) (activate))"
+    else:
+        command = f":cell wb-3 {definition}"
+    return {"definition": definition, "result": machine.submit(command)}
+
 
 def connect(path):
     deadline = time.monotonic() + 15
@@ -166,18 +203,23 @@ def main():
 
             def do_POST(self):
                 origin = f"http://127.0.0.1:{self.server.server_port}"
-                if self.path != f"/{token}/input" or self.headers.get("Origin") != origin:
+                if self.path not in (f"/{token}/input", f"/{token}/module") or self.headers.get("Origin") != origin:
                     self.respond(b"Forbidden", "text/plain", 403)
                     return
                 try:
                     length = int(self.headers.get("Content-Length", "0"))
-                    if not 0 < length <= 4096:
+                    is_module = self.path == f"/{token}/module"
+                    if not 0 < length <= (131072 if is_module else 4096):
                         raise ValueError("Invalid request size")
-                    source = json.loads(self.rfile.read(length))["source"]
+                    payload = json.loads(self.rfile.read(length))
+                    source = payload["source"]
                     if not isinstance(source, str):
                         raise ValueError("Source must be text")
-                    result = machine.submit(source)
-                    self.respond(json.dumps({"result": result}).encode(), "application/json")
+                    if is_module:
+                        result = module_action(machine, source, payload.get("action"))
+                    else:
+                        result = {"result": machine.submit(source)}
+                    self.respond(json.dumps(result).encode(), "application/json")
                 except Exception as error:
                     self.respond(json.dumps({"error": str(error)}).encode(), "application/json", 400)
 

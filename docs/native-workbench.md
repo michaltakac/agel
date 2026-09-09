@@ -1,5 +1,9 @@
 # Native agent workbench
 
+Update: [v0.2.21](native-modules.md) adds a modular source editor to the optional
+`--web` input bridge. Native Agel compiles on the host; the existing guest
+candidate and persistence mechanisms below validate and install expanded source.
+
 v0.2.11 is a small, real native programming playground, not a browser simulation.
 Start `./scripts/run-graphics.sh --workbench`. This uses a separate persistent
 `target/boot/agel-workbench.img`, preserving your existing workshop disk. On its

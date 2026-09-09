@@ -1,0 +1,6 @@
+; Pure source adapter, not an authority grant. paint exists only in the OS workbench.
+(fn (behavior)
+  (list 'def 'behavior
+    (list 'fn '(s h m)
+      (list '(fn (n) (begin (paint s n) n))
+        (list behavior 's 'h 'm)))))

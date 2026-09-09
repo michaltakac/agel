@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.20: a native Agel reader that reads and rebuilds
+The current repository is **v0.2.21: native Agel module linking and expression-template
+macro expansion with a preview/persistence bridge into the real OS, a native Agel reader that reads and rebuilds
 the reader and compiler from source text, agent-proposed native behavior upgrades with
 revision-bound preview and code-only rollback, a self-compiling Agel frontend with validated
 tail calls and safe-boundary heap reclamation, an Agel-written compiled mailbox scheduler, native lexical closures,
@@ -34,6 +35,19 @@ restartable privileged console service from the v0.1 line.
 Agel is still pre-production. Project releases follow the policy in
 [`docs/versioning.md`](docs/versioning.md); `v1.0.0` is reserved for the first
 production-ready system. The separately versioned kernel contract remains v1.0.
+
+Try modular compilation and the live OS bridge:
+
+```sh
+cargo run --release -q -p agel-jit --example module_workshop
+./scripts/run-graphics.sh --workbench --web
+```
+
+In a fresh OS world enter `:workbench`, open **Compile a modular dock behavior**,
+then **Compile and preview**. Use `:promote` or `:discard`; stage the expanded
+source and `:save` to keep it after reboot. The optional web panel compiles on
+the host; the actual candidate, agent turn, scene and save run in the QEMU guest.
+See [modules, macros and the OS bridge](docs/native-modules.md).
 
 Try the compiler bootstrap and native closure workshop (Rust 1.86+):
 

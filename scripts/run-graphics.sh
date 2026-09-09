@@ -20,6 +20,7 @@ if test "${1:-}" = "--workbench"; then
 fi
 if test "${1:-}" = "--web"; then
   shift
+  cargo build --release -q -p agel-jit --example module_workshop
   exec python3 ./scripts/graphical-console.py "$image" "$@"
 fi
 printf '%s\n' 'Direct QEMU input uses a US physical layout. Use --web for Slovak/macOS text composition.'

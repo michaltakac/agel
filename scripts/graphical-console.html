@@ -12,6 +12,19 @@
 <footer><button id="send">Run in Agel</button><span id="status" role="status">Ready</span></footer></form>
 <small id="hint">Enter runs one line. Option symbols, Slovak dead keys, and ⌘V paste work here. Click the image to focus input. Your pointer stays free.</small>
 <pre id="transcript" aria-live="polite">Results from the running OS appear here.</pre>
+<details><summary>Compile a modular dock behavior (host-assisted)</summary>
+<p>Start <code>:workbench</code> in a fresh world first. Native Agel links these modules and expands macros on the host. Preview runs the expanded behavior in the real OS candidate world. Use <code>:promote</code> or <code>:discard</code> above. Stage replaces source cell <code>wb-3</code>; <code>:save</code> validates and saves it separately.</p>
+<label for="module-source">Module source — exported dock/behavior takes self, state, message</label>
+<textarea id="module-source" rows="9" spellcheck="false">(module arithmetic
+  (export double)
+  (defsyntax double (x) (* x 2)))
+(module dock
+  (import arithmetic)
+  (export behavior)
+  (def behavior (fn (self state message) (+ state (double message)))))</textarea>
+<footer><button type="button" data-module="preview">Compile and preview</button><button type="button" data-module="stage">Stage expanded source in wb-3</button></footer>
+<small>Expression-template macros, not arbitrary compile-time evaluation. Guest resource limits still apply. Save stores expanded source, not this editable module bundle; keep your module source separately.</small>
+</details>
 <p><small>This input panel is a host bridge. The guest evaluates your exact UTF-8 source. Its seed framebuffer font still shows unsupported non-ASCII glyphs as “?”. The text field and transcript retain the original characters. Character entry does not add language syntax: for example, ≤ is not an alias for &lt;.</small></p>
 </main>
 <script>
@@ -30,6 +43,12 @@ document.querySelector('#form').addEventListener('submit',async event=>{
  finally{busy=false;button.disabled=false;source.focus();}
 });
 frame.addEventListener('click',()=>source.focus());
+document.querySelectorAll('[data-module]').forEach(control=>control.addEventListener('click',async()=>{
+ if(busy)return;busy=true;button.disabled=true;status.textContent='Compiling with native Agel…';
+ try{const response=await fetch('module',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:document.querySelector('#module-source').value,action:control.dataset.module})});const data=await response.json();if(!response.ok)throw Error(data.error);transcript.textContent=(data.definition+'\n'+data.result+'\n'+transcript.textContent).slice(0,16000);status.textContent='Compilation finished; inspect the guest result before promoting or saving.';}
+ catch(error){status.textContent=error.message;}
+ finally{busy=false;button.disabled=false;}
+}));
 function refresh(){frame.src='frame.png?t='+Date.now();}
 frame.addEventListener('load',()=>setTimeout(refresh,500));
 frame.addEventListener('error',()=>setTimeout(refresh,2000));

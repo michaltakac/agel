@@ -58,6 +58,10 @@ promise.
   `v0.2.20` adds an Agel-written native reader, self-reading/rebuilding reader
   and compiler checks, and a source-text workshop independent of the seed
   evaluator after bootstrap. Five bounded UTF-8 mechanisms support the reader.
+  `v0.2.21` adds an Agel-authored static module linker and restricted expression
+  templates, plus a host-assisted graphical bridge deploying expanded behaviors
+  through real OS candidate validation and source persistence. This is not an
+  in-guest JIT or general procedural macro compilation.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -1,5 +1,9 @@
 # Self-hosting without permanent interpreter overhead
 
+Current follow-up: [v0.2.21](native-modules.md) adds static module linking and
+expression-template macro expansion in native Agel, with an expanded-source
+bridge to the real graphical OS. Compilation remains host-assisted.
+
 Current follow-up: [v0.2.20](native-reader.md) removes the seed reader from the
 post-bootstrap source-text pipeline. Native Agel reads and rebuilds its reader
 and compiler, then reads, compiles and runs a fresh program.
