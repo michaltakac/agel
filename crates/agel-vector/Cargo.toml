@@ -9,5 +9,8 @@ rust-version.workspace = true
 agel-core = { path = "../agel-core" }
 agel-stdlib = { path = "../agel-stdlib" }
 
+[dev-dependencies]
+agel-integrity = { path = "../agel-integrity" }
+
 [lints]
 workspace = true

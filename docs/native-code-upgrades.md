@@ -6,7 +6,7 @@ cargo test -p agel-jit --test upgrades
 ```
 
 The example boots a native Agel compiler, a native source composer, and an
-Agel-written scheduler. A compiled designer actor then constructs a new counter
+Agel-written scheduler from [`examples/jit-live-upgrade.agel`](../examples/jit-live-upgrade.agel). A compiled designer actor then constructs a new counter
 behavior as ordinary source data:
 
 ```lisp

@@ -27,8 +27,10 @@ to the guest. Clicking the image focuses the field without capturing your
 mouse. Stop the viewer and QEMU with Ctrl-C in the launching terminal. The disk
 is persistent: `:save` publishes source cells replayed on the next boot.
 
-`./scripts/run-graphics.sh` (also accepting `--native`) uses QEMU's direct window and serial
-terminal input. This physical PS/2 path uses a US layout, now including all
+`./scripts/run-graphics.sh` (equivalently `--native`) uses QEMU's direct window and serial
+terminal input. The launcher validates its flags, accepts `--workbench`, `--native`,
+`--web` and `--help` in any order, rejects anything else, and passes arguments
+after `--` to QEMU. This physical PS/2 path uses a US layout, now including all
 ASCII punctuation, uppercase, Caps Lock, independent Shift keys, and Ctrl-U/C
 to clear the line (Ctrl-H backspaces). It does not inherit macOS text layout or
 Option dead-key composition. QEMU's Cocoa frontend controls mouse capture;
@@ -119,8 +121,8 @@ workshop:
 :save
 ```
 
-`:cell NAME FORM` stages one bounded named form. `:run`, `:show`, `:delete`, and
-`:cells` inspect and manipulate that source workspace. `:save` resets the
+`:cell NAME FORM` stages one bounded named form. `:run`, `:show`, `:delete`,
+`:cells` and `:workspace` inspect and manipulate that source workspace. `:save` resets the
 evaluator and successfully replays every staged cell before publishing an
 alternating, CRC-checked raw-disk slot. A failed form or failed write restores
 the preceding committed evaluator. On boot, the newest structurally valid and
@@ -130,7 +132,9 @@ to its twin.
 This is deliberately source persistence, not a memory dump. Authority-bearing
 state, device handles, evaluator stacks, and Rust layouts never cross a reboot.
 See [`examples/graphical-workshop.txt`](../examples/graphical-workshop.txt) for a
-complete session. `:help` prints the self-documenting command postcard.
+complete session. `:help` prints the self-documenting command postcard; since
+v0.2.22 its length is checked at build time against the status line, so it can
+no longer be silently truncated.
 
 ## Device handoff
 

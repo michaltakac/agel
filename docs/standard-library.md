@@ -72,16 +72,57 @@ model, and examples are in [`agentic-fixed-points.md`](agentic-fixed-points.md).
 
 ## `agel/meta`
 
-`agel/meta` is an evaluator written in Agel. `meta-base-env` returns explicit
-bindings for its primitives; `(meta-eval quoted-program environment)` evaluates
-literals, symbols, `quote`, `if`, single-body lexical `fn`, and ordinary calls.
-Metacircular closures are transparent tagged lists containing parameters, body,
-and captured environment.
+`agel/meta` is an evaluator written in Agel. It exports `meta-base-env`,
+`meta-eval`, `meta-apply` and `meta-analyze`. `meta-base-env` returns explicit
+bindings for the arithmetic, comparison, list, map and text primitives plus
+`type-of` and `apply`; `(meta-eval quoted-program environment)` evaluates
+literals, strings, symbols, `quote`, `if`, `begin`, parallel `let`, multi-body
+lexical `fn`, and ordinary calls. `(meta-apply closure arguments)` invokes an
+interpreted closure from outside the interpreter, and `(meta-analyze source)`
+performs syntax analysis once and returns an ordinary Agel closure that takes
+an environment, so repeated execution skips source dispatch. Metacircular
+closures are transparent tagged lists containing parameters, body, and captured
+environment.
 
 This is the first self-hosting stratum, not yet a replacement for the seed. It
 deliberately omits world mutation, macros, modules, agents, effects, and resource
 accounting of its own; the enclosing seed still supplies budgets and transaction
 rollback. Run `examples/metacircular.agel` to inspect code, closures, and results.
+See [Agel in Agel](agel-in-agel.md) and
+[self-hosting and performance](self-hosting-performance.md).
+
+## `agel/meta-agent`
+
+`agel/meta-agent` exports `make-meta-agent`, `make-analyzed-agent`,
+`meta-agent-state` and `meta-agent-source`. Both constructors validate a
+literal three-parameter `fn` source form before spawning a real scheduled
+agent whose heap retains the source, its interpreted (or analyzed) closure and
+the user state; each turn threads the state through `meta-apply`. The source
+remains inspectable while the agent runs. Neither constructor grants model
+capabilities. `examples/metacircular-agents.agel` and
+`examples/analyzed-agents.agel` are the executable walkthroughs.
+
+## `agel/jit`
+
+`agel/jit` exports `jit-compile` and `jit-run`. `jit-compile` lowers a
+single-body integer function to the inspectable `agel/jit-v1` IR entirely in
+Agel, and `jit-run` is the portable IR interpreter used as an oracle. Machine
+code is produced only by the separate, opt-in `agel-jit` Rust crate; the CLI
+never links it. See [the integer JIT](integer-jit.md).
+
+## `agel/native` and the native toolchain modules
+
+The standard library also installs the Agel-written native toolchain as
+ordinary modules, each exporting an executable closed function and the same
+source as quoted data: `agel/native` (`native-compile`,
+`native-compiler-source`), `agel/native-reader` (`native-read`,
+`native-reader-source`), `agel/native-modules` (`native-link`,
+`native-link-source`), `agel/native-agent-kernel`, `agel/native-system-builder`
+and `agel/native-agents`. They are documented in
+[managed native compilation](managed-jit.md), [reading Agel in Agel](native-reader.md),
+[modules and macros](native-modules.md), [tail calls and compiled agents](native-tail-agents.md)
+and [native code upgrades](native-code-upgrades.md). Installing them grants no
+authority: they return IR or source data that only the host backend can compile.
 
 ## `agel/ui`
 
@@ -136,7 +177,8 @@ proposed.
 The `agel-vector` executable is the first replaceable output service. It treats
 the language-produced frame as untrusted, checks structure, arithmetic,
 dimensions, colors, path budgets, state-stack balance, and output size again,
-then emits deterministic SVG without third-party dependencies.
+then emits deterministic SVG. The renderer crate declares no third-party
+dependency of its own; its integration tests freeze the kitchen-sink SVG digest.
 
 ## `agel/desktop`
 

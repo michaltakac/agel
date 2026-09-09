@@ -12,8 +12,9 @@ cargo run --release -q -p agel-jit --example self_host
 cargo test -p agel-jit
 ```
 
-`--ping` runs an Agel-compiled actor for 1,000 self-message turns, with an explicit
-10M fuel allowance. It commits state 1,000 and leaves one queued message. It also
+`--ping` runs the Agel-compiled actor from
+[`examples/jit-agent-ping.agel`](../examples/jit-agent-ping.agel) for 1,000
+self-message turns, with an explicit 10M fuel allowance. It commits state 1,000 and leaves one queued message. It also
 demonstrates that a failed batch preserves state/messages/revision and prints
 collection statistics. This is the isolated hosted scheduler, not a graphical
 OS actor or a model-backed agent.

@@ -1,5 +1,5 @@
 use agel_core::{ModelOutcome, ModelRequest};
-use agel_effects::{EffectError, Principal, ProcessSandbox, ProcessSpec};
+use agel_effects::{EffectError, EffectKind, Principal, ProcessSandbox, ProcessSpec, StaticPolicy};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
@@ -127,7 +127,7 @@ impl ClaudeCodeProvider {
     pub fn new(executable: impl Into<PathBuf>, limits: CommandLimits) -> Self {
         let executable = executable.into();
         Self {
-            sandbox: process_sandbox(&executable, &limits),
+            sandbox: process_sandbox("claude", &executable, &limits),
             executable,
             model: None,
             max_budget_usd: None,
@@ -196,7 +196,7 @@ impl CodexProvider {
     pub fn new(executable: impl Into<PathBuf>, limits: CommandLimits) -> Self {
         let executable = executable.into();
         Self {
-            sandbox: process_sandbox(&executable, &limits),
+            sandbox: process_sandbox("codex", &executable, &limits),
             executable,
             model: None,
             limits,
@@ -282,12 +282,24 @@ fn run_command(
         .map_err(|_| ProviderError::InvalidUtf8)
 }
 
-fn process_sandbox(executable: &std::path::Path, limits: &CommandLimits) -> ProcessSandbox {
+fn process_sandbox(
+    provider: &str,
+    executable: &std::path::Path,
+    limits: &CommandLimits,
+) -> ProcessSandbox {
+    // Default-deny: the only process effect this adapter may perform is an
+    // inference request for its own provider. The executable allowlist is the
+    // second, independent gate.
+    let policy = StaticPolicy::default().allow_prefix(
+        EffectKind::Process,
+        format!("model/infer/{provider}/request/"),
+    );
     ProcessSandbox::new(CommandLimits {
         timeout: limits.timeout,
         max_output_bytes: limits.max_output_bytes,
         workspace: limits.workspace.clone(),
     })
+    .with_policy(policy)
     .allow_executable(executable)
     .inherit_environment([
         "HOME",

@@ -59,6 +59,9 @@ stdin.
   messages rather than runtime crashes.
 - Both clear ambient process environment and restore only named login/config
   variables required to find the executable and existing subscription state.
+- Since v0.2.22 each adapter's sandbox consults a default-deny effect policy
+  that admits only `model/infer/<provider>/request/*` process intents before
+  the executable allowlist is checked; a denial is audited and never spawns.
   Every decision and outcome is retained in a typed audit log; use `:effects`
   after dispatch to inspect it.
 

@@ -120,10 +120,14 @@ not make.
 
 ## Trust boundary
 
-`boot/kernel` is intentionally a separate Cargo workspace, and the main hosted
-workspace still has `unsafe_code = "forbid"`. Privileged instructions are
-confined to `boot/kernel/src/hal.rs`; BIOS transition assembly lives in
-`boot/bios`.
+`boot/kernel` is intentionally a separate Cargo workspace. The main hosted
+workspace forbids `unsafe` in every crate except the optional `agel-jit`
+backend, which sets `unsafe_code = "deny"` and carries four audited
+`#[allow(unsafe_code)]` sites for entering generated code and releasing
+executable memory; see [`integer-jit.md`](integer-jit.md). Privileged
+instructions are confined to the per-architecture
+`boot/kernel/src/arch/{x86_64,aarch64,riscv64}/hal.rs`; BIOS transition
+assembly lives in `boot/bios`.
 
 Since v0.1.6, `./scripts/run-qemu.sh` boots an x86-64 interactive workshop whose
 evaluator lives on a private 512 KiB bounded domain stack and whose output goes

@@ -385,6 +385,21 @@ def main() -> int:
         )
         harness.send(":fault", "watchdog fault: rolled back to slot A", 29)
         harness.send(":recovery-status", "active slot: A (stable)", 29)
+        harness.send("(let ((x 20) (y 22)) (+ x y))", "42", 30)
+        harness.send("(let ((x 40)) (let ((x 1) (y x)) (+ x y)))", "41", 31)
+        harness.send("(- (* 2 3 7) (+) (*) -1)", "42", 32)
+        harness.send(
+            "(def norm (fn (a b) (def last a) (- (* a a) (* b b))))",
+            "#<native-function>",
+            33,
+        )
+        harness.send("(norm 9 6)", "45", 34)
+        harness.send("last", "9", 35)
+        harness.send(
+            "(/ 1)",
+            "error: / expects at least two integers (transaction rolled back)",
+            35,
+        )
 
         assert harness.process.stdin is not None
         for byte in b":shutdown":

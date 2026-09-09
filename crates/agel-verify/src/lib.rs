@@ -181,11 +181,16 @@ impl Verifier {
         })
     }
 
-    pub fn promote(
-        world: &mut World,
+    /// Check that `evidence` still authorizes promoting `proposal` onto `world`:
+    /// the proposal is unaltered and its base is the live world, and the evidence
+    /// binds exactly this proposal, this base, and the current policy version.
+    /// Hosts that submit the source themselves (for example to record it in a
+    /// portable image) call this first; [`Verifier::promote`] calls it too.
+    pub fn check_promotion(
+        world: &World,
         proposal: &Proposal,
         evidence: &Evidence,
-    ) -> Result<Commit, VerificationError> {
+    ) -> Result<(), VerificationError> {
         validate_identity(world, proposal)?;
         if evidence.proposal_digest != proposal.digest()
             || evidence.base_digest != world.content_digest()
@@ -193,6 +198,15 @@ impl Verifier {
         {
             return Err(VerificationError::EvidenceMismatch);
         }
+        Ok(())
+    }
+
+    pub fn promote(
+        world: &mut World,
+        proposal: &Proposal,
+        evidence: &Evidence,
+    ) -> Result<Commit, VerificationError> {
+        Self::check_promotion(world, proposal, evidence)?;
         let options = EvaluationOptions {
             budget: proposal.budget.clone(),
             capabilities: Vec::new(),
@@ -219,19 +233,35 @@ fn validate_identity(world: &World, proposal: &Proposal) -> Result<(), Verificat
     Ok(())
 }
 
+/// Effect-bearing builtin names and the effect each one declares.
+///
+/// Inference is deliberately syntactic and conservative: a name counts wherever
+/// it occurs, not only in call-head position. Builtins are first-class values,
+/// so `(apply model-request ...)`, `(let ((m model-request)) (m ...))`, or a
+/// module export aliasing the builtin would otherwise reach the canary with no
+/// declared effect. Quoted data mentioning the name is over-approximated as an
+/// effect too; a proposal that only talks about an effect must still declare it.
+const EFFECT_NAMES: &[(&str, &str)] = &[
+    ("model-request", "model/infer"),
+    ("request-capability", "authority/request"),
+];
+
 fn infer_effects(expressions: &[Expr]) -> BTreeSet<String> {
     fn walk(expression: &Expr, effects: &mut BTreeSet<String>) {
-        if let Expr::List(items) = expression {
-            if let Some(Expr::Symbol(head)) = items.first() {
-                if head == "model-request" {
-                    effects.insert("model/infer".into());
-                } else if head == "request-capability" {
-                    effects.insert("authority/request".into());
+        match expression {
+            Expr::Symbol(name) | Expr::ScopedSymbol { name, .. } => {
+                for (builtin, effect) in EFFECT_NAMES {
+                    if name == builtin {
+                        effects.insert((*effect).into());
+                    }
                 }
             }
-            for item in items {
-                walk(item, effects);
+            Expr::List(items) => {
+                for item in items {
+                    walk(item, effects);
+                }
             }
+            Expr::Nil | Expr::Bool(_) | Expr::Int(_) | Expr::String(_) => {}
         }
     }
     let mut effects = BTreeSet::new();
@@ -340,5 +370,50 @@ mod tests {
                 "agel/trusted-verifier".into()
             ))
         );
+    }
+
+    #[test]
+    fn effect_inference_covers_first_class_and_aliased_builtins() {
+        let world = World::default();
+        for source in [
+            "(apply model-request (list 'claude \"x\" target))",
+            "(let ((m model-request)) (def later (fn () (m 'claude \"x\" target))))",
+            "(def behavior (fn (self heap message) (begin (model-request 'claude \"x\" self) heap)))",
+            "(module m (export ask) (def ask model-request))",
+            "(def data '(model-request))",
+        ] {
+            assert_eq!(
+                Verifier::verify(&world, &Proposal::new(&world, source)),
+                Err(VerificationError::UndeclaredEffect("model/infer".into())),
+                "{source}"
+            );
+        }
+        assert_eq!(
+            Verifier::verify(
+                &world,
+                &Proposal::new(
+                    &world,
+                    "(def grab (fn () (request-capability 'model/infer \"claude\")))"
+                )
+            ),
+            Err(VerificationError::UndeclaredEffect(
+                "authority/request".into()
+            ))
+        );
+        // Declaring the effect admits the syntax; the zero-authority canary still
+        // rejects an actual invocation because no capability exists there.
+        let declared = Proposal::new(
+            &world,
+            "(def ask (fn (self) (model-request 'claude \"x\" self)))",
+        )
+        .declares("model/infer");
+        let evidence = Verifier::verify(&world, &declared).unwrap();
+        assert!(evidence.inferred_effects.contains("model/infer"));
+        let invoked =
+            Proposal::new(&world, "(model-request 'claude \"x\" 1)").declares("model/infer");
+        assert!(matches!(
+            Verifier::verify(&world, &invoked),
+            Err(VerificationError::Canary(_))
+        ));
     }
 }

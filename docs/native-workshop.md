@@ -1,7 +1,8 @@
 # The native Agel workshop
 
 `./scripts/run-qemu.sh` now boots directly into an Agel REPL on the freestanding
-kernel. Since v0.1.6, source crosses a bounded shared page into an unprivileged
+kernel; [`examples/native-workshop.agel`](../examples/native-workshop.agel) is a
+form-by-form session to type into it. Since v0.1.6, source crosses a bounded shared page into an unprivileged
 evaluator domain, its transactional state lives on that domain's private stack,
 and results are printed through a separate console-driver domain. Evaluation
 uses no Rust allocator or host operating system. Since v0.1.7, named source cells
@@ -16,22 +17,33 @@ same Lisp syntax and `;` begins a comment. A leading apostrophe quotes the next
 form. Implemented special forms and functions are:
 
 ```text
-quote  if  begin  def  fn
+quote  if  begin  let  def  fn
 +  -  *  /  =  <  eval
 spawn  send  step  run
 agent-state  agent-pending  agent-turns  agent-faulted?
 restart-agent  drop-message  agent-count
+scene-clear  scene-rect  scene-count  scene-bind  scene-hit  scene-owner
+agent-become
 ```
 
-Arithmetic and comparison currently take exactly two integers. `fn` accepts at
-most four parameters and one body form; use `begin` for multiple actions. Named
-functions resolve globals at call time, enabling top-level recursion. Immediate
-lambdas capture bounded scalar lexical parameters, so
+Since v0.2.22 arithmetic follows the hosted seed: `+` and `*` fold any number
+of integers from their identities, `-` negates one argument or folds several,
+and `/` requires at least two. `=` and `<` still compare exactly two integers.
+Parallel `let` evaluates every initializer in the enclosing scope and binds the
+names for a sequence of body forms; a repeated name takes its last value.
+`fn` accepts at most four parameters and any number of body forms, which a
+persisted definition stores as one explicit `begin` sequence. Bindings from
+parameters and `let` share the eight bounded local slots that `:limits`
+reports. Named functions resolve globals at call time, enabling top-level
+recursion. Immediate lambdas capture bounded scalar lexical parameters, so
 `(((fn (x) (fn (y) (+ x y))) 40) 2)` evaluates to `42`. A lambda created inside
 a lexical call cannot yet be persisted by `def`; this is rejected rather than
 silently losing its captures. Function-valued captures are also deferred.
 Quoted syntax is valid for the current transaction and can be passed to `eval`,
-but v0.1.1 does not persist quoted graphs in globals.
+but the native world does not persist quoted graphs in globals. Strings, lists
+and maps are still absent from the freestanding evaluator; the scene and agent
+primitives are specified in [`native-scenes.md`](native-scenes.md),
+[`native-agents.md`](native-agents.md) and [`native-workbench.md`](native-workbench.md).
 
 ## Transaction protocol
 
@@ -76,6 +88,16 @@ definition without rebooting the VM.
 :fault             simulate watchdog rollback to A
 :shutdown          leave QEMU when the debug-exit device is present
 ```
+
+The serial workshop's `:verify`/`:promote`/`:fault` address the **boot recovery
+monitor**: they select which A/B recovery image is trusted. The graphical
+workshop reuses the word `:promote` for a different, less privileged decision:
+adopting a previewed **evaluator candidate world** after `:preview` (see
+[`native-workbench.md`](native-workbench.md)). The two surfaces are compiled
+from different features and never expose both meanings at once; the graphical
+build has no route to the recovery monitor. The graphical workshop's `:cell`,
+`:preview`, `:discard`, `:source` and `:workbench` commands are documented in
+[`native-graphics.md`](native-graphics.md) and the workbench guide.
 
 ## Deterministic limits
 

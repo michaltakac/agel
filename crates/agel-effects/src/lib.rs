@@ -96,15 +96,30 @@ pub trait Policy: Send + Sync {
     fn decide(&self, intent: &EffectIntent) -> Decision;
 }
 
+impl fmt::Debug for dyn Policy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Policy")
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct StaticPolicy {
     allowed: BTreeSet<(EffectKind, String)>,
+    allowed_prefixes: BTreeSet<(EffectKind, String)>,
     virtualized: BTreeSet<EffectKind>,
 }
 
 impl StaticPolicy {
     pub fn allow(mut self, kind: EffectKind, operation: impl Into<String>) -> Self {
         self.allowed.insert((kind, operation.into()));
+        self
+    }
+
+    /// Allow every operation of `kind` whose name starts with `prefix`. This is
+    /// how a policy admits a family of per-request operations such as
+    /// `model/infer/claude/request/N` without enumerating request numbers.
+    pub fn allow_prefix(mut self, kind: EffectKind, prefix: impl Into<String>) -> Self {
+        self.allowed_prefixes.insert((kind, prefix.into()));
         self
     }
 
@@ -119,6 +134,10 @@ impl Policy for StaticPolicy {
         if self
             .allowed
             .contains(&(intent.kind.clone(), intent.operation.clone()))
+            || self
+                .allowed_prefixes
+                .iter()
+                .any(|(kind, prefix)| *kind == intent.kind && intent.operation.starts_with(prefix))
         {
             Decision::Allow
         } else if self.virtualized.contains(&intent.kind) {
@@ -290,6 +309,155 @@ impl CowWorkspace {
     }
 }
 
+/// A policy-mediated view of a [`CowWorkspace`]: every read, write and delete
+/// is a typed `file/read` or `file/write` intent that the policy decides and the
+/// audit log records before any byte moves.
+///
+/// `Allow` writes through to the base image immediately. `Virtualize` stages
+/// the change in the copy-on-write overlay, where it is visible to later reads,
+/// inspectable as a diff, and either committed or rolled back explicitly. `Deny`
+/// changes nothing. The workspace is in-memory; this is the effect vocabulary
+/// and decision point, not host filesystem confinement.
+#[derive(Clone, Debug)]
+pub struct WorkspaceBroker {
+    policy: Arc<dyn Policy>,
+    workspace: CowWorkspace,
+    audit: AuditLog,
+}
+
+impl WorkspaceBroker {
+    pub fn new(policy: impl Policy + 'static, workspace: CowWorkspace) -> Self {
+        Self {
+            policy: Arc::new(policy),
+            workspace,
+            audit: AuditLog::default(),
+        }
+    }
+
+    pub fn audit_log(&self) -> AuditLog {
+        self.audit.clone()
+    }
+
+    pub fn workspace(&self) -> &CowWorkspace {
+        &self.workspace
+    }
+
+    pub fn read(
+        &self,
+        principal: Principal,
+        path: impl AsRef<Path>,
+    ) -> Result<Option<Vec<u8>>, EffectError> {
+        let path = VirtualPath::new(path)?;
+        let intent = file_intent(principal, EffectKind::FileRead, "read", &path, &[]);
+        match self.policy.decide(&intent) {
+            Decision::Deny(reason) => {
+                self.audit
+                    .append(&intent, AuditOutcome::Denied(reason.clone()));
+                Err(EffectError::Denied(reason))
+            }
+            Decision::Allow | Decision::Virtualize => {
+                self.audit.append(&intent, AuditOutcome::Allowed);
+                let bytes = self.workspace.read(path.as_str())?.map(<[u8]>::to_vec);
+                self.audit
+                    .append(&intent, AuditOutcome::Succeeded { status: 0 });
+                Ok(bytes)
+            }
+        }
+    }
+
+    pub fn write(
+        &mut self,
+        principal: Principal,
+        path: impl AsRef<Path>,
+        bytes: impl Into<Vec<u8>>,
+    ) -> Result<Decision, EffectError> {
+        let path = VirtualPath::new(path)?;
+        let bytes = bytes.into();
+        let intent = file_intent(principal, EffectKind::FileWrite, "write", &path, &bytes);
+        self.mutate(intent, |workspace| workspace.write(path.as_str(), bytes))
+    }
+
+    pub fn delete(
+        &mut self,
+        principal: Principal,
+        path: impl AsRef<Path>,
+    ) -> Result<Decision, EffectError> {
+        let path = VirtualPath::new(path)?;
+        let intent = file_intent(principal, EffectKind::FileWrite, "delete", &path, &[]);
+        self.mutate(intent, |workspace| workspace.delete(path.as_str()))
+    }
+
+    fn mutate(
+        &mut self,
+        intent: EffectIntent,
+        change: impl FnOnce(&mut CowWorkspace) -> Result<(), EffectError>,
+    ) -> Result<Decision, EffectError> {
+        let decision = self.policy.decide(&intent);
+        match &decision {
+            Decision::Deny(reason) => {
+                self.audit
+                    .append(&intent, AuditOutcome::Denied(reason.clone()));
+                return Err(EffectError::Denied(reason.clone()));
+            }
+            Decision::Allow | Decision::Virtualize => {
+                self.audit.append(&intent, AuditOutcome::Allowed)
+            }
+        }
+        // Stage in the overlay first so an invalid change cannot half-apply.
+        let staged = self.workspace.diff();
+        if let Err(error) = change(&mut self.workspace) {
+            self.workspace.rollback();
+            for change in staged {
+                match change {
+                    Change::Write { path, bytes } => {
+                        self.workspace.overlay.insert(path, Some(bytes));
+                    }
+                    Change::Delete { path } => {
+                        self.workspace.overlay.insert(path, None);
+                    }
+                }
+            }
+            self.audit
+                .append(&intent, AuditOutcome::Failed(error.to_string()));
+            return Err(error);
+        }
+        if decision == Decision::Allow {
+            self.workspace.commit();
+        }
+        self.audit
+            .append(&intent, AuditOutcome::Succeeded { status: 0 });
+        Ok(decision)
+    }
+
+    pub fn diff(&self) -> Vec<Change> {
+        self.workspace.diff()
+    }
+
+    pub fn commit(&mut self) -> Vec<Change> {
+        self.workspace.commit()
+    }
+
+    pub fn rollback(&mut self) {
+        self.workspace.rollback();
+    }
+}
+
+fn file_intent(
+    principal: Principal,
+    kind: EffectKind,
+    operation: &str,
+    path: &VirtualPath,
+    payload: &[u8],
+) -> EffectIntent {
+    EffectIntent {
+        principal,
+        kind,
+        operation: operation.into(),
+        resource: path.as_str().to_owned(),
+        payload_digest: sha256(payload),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ProcessLimits {
     pub timeout: Duration,
@@ -327,6 +495,7 @@ pub struct ProcessSandbox {
     inherited_environment: BTreeSet<String>,
     limits: ProcessLimits,
     audit: AuditLog,
+    policy: Option<Arc<dyn Policy>>,
 }
 
 impl ProcessSandbox {
@@ -336,7 +505,17 @@ impl ProcessSandbox {
             inherited_environment: BTreeSet::new(),
             limits,
             audit: AuditLog::default(),
+            policy: None,
         }
+    }
+
+    /// Consult `policy` for every `process/run` intent before the executable
+    /// allowlist. A denial is recorded and returned without spawning anything;
+    /// `Virtualize` is also a denial here because no process virtualization
+    /// exists. Without a policy the executable allowlist remains the only gate.
+    pub fn with_policy(mut self, policy: impl Policy + 'static) -> Self {
+        self.policy = Some(Arc::new(policy));
+        self
     }
 
     pub fn allow_executable(mut self, executable: impl Into<PathBuf>) -> Self {
@@ -379,6 +558,20 @@ impl ProcessSandbox {
                 sha256(&payload)
             },
         };
+        if let Some(policy) = &self.policy {
+            let refused = match policy.decide(&intent) {
+                Decision::Allow => None,
+                Decision::Deny(reason) => Some(reason),
+                Decision::Virtualize => {
+                    Some("process effects cannot be virtualized; refusing".into())
+                }
+            };
+            if let Some(reason) = refused {
+                self.audit
+                    .append(&intent, AuditOutcome::Denied(reason.clone()));
+                return Err(EffectError::Denied(reason));
+            }
+        }
         if !self.allowed_executables.contains(&spec.executable) {
             let reason = format!("executable {:?} is not allowlisted", spec.executable);
             self.audit
@@ -670,6 +863,123 @@ mod tests {
         let mut changed = intent.clone();
         changed.resource.push('0');
         assert_ne!(intent.key(), changed.key());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_policy_is_consulted_before_the_executable_allowlist() {
+        let limits = ProcessLimits::new(std::env::temp_dir());
+        let spec = || ProcessSpec {
+            executable: "/bin/echo".into(),
+            arguments: vec!["ok".into()],
+            stdin: vec![],
+        };
+        let denied = ProcessSandbox::new(limits.clone())
+            .allow_executable("/bin/echo")
+            .with_policy(StaticPolicy::default().allow(EffectKind::Process, "other"));
+        assert!(matches!(
+            denied.run(Principal::host(), "model/infer/claude/request/1", spec()),
+            Err(EffectError::Denied(_))
+        ));
+        let virtualized = ProcessSandbox::new(limits.clone())
+            .allow_executable("/bin/echo")
+            .with_policy(StaticPolicy::default().virtualize(EffectKind::Process));
+        assert!(matches!(
+            virtualized.run(Principal::host(), "model/infer/claude/request/1", spec()),
+            Err(EffectError::Denied(_))
+        ));
+        let records = denied.audit_log().records();
+        assert_eq!(records.len(), 1);
+        assert!(matches!(records[0].outcome, AuditOutcome::Denied(_)));
+        let allowed = ProcessSandbox::new(limits)
+            .allow_executable("/bin/echo")
+            .with_policy(
+                StaticPolicy::default().allow_prefix(EffectKind::Process, "model/infer/claude/"),
+            );
+        assert_eq!(
+            allowed
+                .run(Principal::host(), "model/infer/claude/request/7", spec())
+                .unwrap()
+                .stdout,
+            b"ok\n"
+        );
+        assert!(matches!(
+            allowed.run(Principal::host(), "model/infer/codex/request/7", spec()),
+            Err(EffectError::Denied(_))
+        ));
+    }
+
+    #[test]
+    fn workspace_broker_routes_file_effects_through_policy() {
+        let workspace =
+            CowWorkspace::from_files([("/src/main.agel".into(), b"old".to_vec())]).unwrap();
+        let policy = StaticPolicy::default()
+            .allow(EffectKind::FileRead, "read")
+            .virtualize(EffectKind::FileWrite);
+        let mut broker = WorkspaceBroker::new(policy, workspace.clone());
+        assert_eq!(
+            broker.read(Principal::host(), "/src/main.agel").unwrap(),
+            Some(b"old".to_vec())
+        );
+        assert_eq!(
+            broker
+                .write(Principal::host(), "/src/main.agel", b"new".to_vec())
+                .unwrap(),
+            Decision::Virtualize
+        );
+        assert_eq!(
+            broker.read(Principal::host(), "/src/main.agel").unwrap(),
+            Some(b"new".to_vec())
+        );
+        assert_eq!(broker.diff().len(), 1);
+        assert_eq!(
+            broker
+                .workspace()
+                .base
+                .get(&VirtualPath::new("/src/main.agel").unwrap()),
+            Some(&b"old".to_vec())
+        );
+        broker.rollback();
+        assert!(broker.diff().is_empty());
+        assert!(matches!(
+            broker.write(Principal::host(), "../escape", b"x".to_vec()),
+            Err(EffectError::InvalidPath(_))
+        ));
+
+        let mut denied = WorkspaceBroker::new(StaticPolicy::default(), workspace.clone());
+        assert!(matches!(
+            denied.read(Principal::host(), "/src/main.agel"),
+            Err(EffectError::Denied(_))
+        ));
+        assert!(matches!(
+            denied.delete(Principal::host(), "/src/main.agel"),
+            Err(EffectError::Denied(_))
+        ));
+        assert!(denied
+            .audit_log()
+            .records()
+            .iter()
+            .all(|record| matches!(record.outcome, AuditOutcome::Denied(_))));
+        assert_eq!(denied.audit_log().records().len(), 2);
+
+        let mut direct = WorkspaceBroker::new(
+            StaticPolicy::default().allow(EffectKind::FileWrite, "write"),
+            workspace,
+        );
+        assert_eq!(
+            direct
+                .write(Principal::host(), "/src/main.agel", b"direct".to_vec())
+                .unwrap(),
+            Decision::Allow
+        );
+        assert!(direct.diff().is_empty());
+        assert_eq!(
+            direct
+                .workspace()
+                .base
+                .get(&VirtualPath::new("/src/main.agel").unwrap()),
+            Some(&b"direct".to_vec())
+        );
     }
 
     #[test]

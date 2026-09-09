@@ -4,7 +4,13 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.21: native Agel module linking and expression-template
+The current repository is **v0.2.22: a live upgrade pipeline in the CLI (proposal files
+verified in a zero-authority canary, then promoted atomically or recorded into a portable
+image), conservative effect inference over first-class builtins, a typed default-deny
+effect policy consulted by every model process launch, a policy-mediated copy-on-write
+workspace broker, a three-evaluator conformance corpus that now covers maps and text, and a
+freestanding evaluator with `let`, variadic arithmetic and multi-form functions; on top of
+native Agel module linking and expression-template
 macro expansion with a preview/persistence bridge into the real OS, a native Agel reader that reads and rebuilds
 the reader and compiler from source text, agent-proposed native behavior upgrades with
 revision-bound preview and code-only rollback, a self-compiling Agel frontend with validated
@@ -35,6 +41,19 @@ restartable privileged console service from the v0.1 line.
 Agel is still pre-production. Project releases follow the policy in
 [`docs/versioning.md`](docs/versioning.md); `v1.0.0` is reserved for the first
 production-ready system. The separately versioned kernel contract remains v1.0.
+
+Try the live upgrade pipeline and a portable world:
+
+```sh
+cargo run -q -p agel-cli -- --image target/agel-world.image
+```
+
+Inside the REPL, `:propose examples/upgrade-proposal.agel` reads a proposal
+file, infers its effects, runs its `;test` lines in a zero-authority canary and
+prints evidence; `:promote` commits it atomically or `:discard` drops it. Every
+committed input, grant and model completion is appended to the tamper-evident
+image and replayed on the next start. See [evidence-carrying upgrades](docs/evidence-upgrades.md)
+and [portable images](docs/portable-images.md).
 
 Try modular compilation and the live OS bridge:
 
@@ -200,7 +219,9 @@ It provides:
   alternating CRC-checked disk slots, replayed after reboot, and recovered from
   the preceding generation when the newest image is torn, corrupt, or fails
   semantic replay; and
-- a Rust CLI and test suite with no third-party crate dependencies.
+- a Rust CLI and test suite whose language, agent, effect, image, verification
+  and vector crates declare no third-party dependency of their own; the hosted
+  evaluator uses one stack-growth crate, and the opt-in JIT crate uses Cranelift.
 
 Agel is a **Unix-like agentic operating system on a microkernel**. It does model
 **inference, not training** — training would require a proprietary kernel-mode
@@ -233,11 +254,13 @@ cargo run -p agel-cli
 ```
 
 The CLI installs `agel/sequence`, `agel/result`, `agel/swarm`, `agel/fixed-point`,
-`agel/meta`, `agel/meta-agent`,
-`agel/jit`,
-`agel/ui`, `agel/vector`, `agel/ui-layout`, `agel/ui-vector`, and `agel/desktop`
-by default.
-Use `--no-stdlib` to expose only the minimal language substrate.
+`agel/meta`, `agel/meta-agent`, `agel/jit`, `agel/ui`, `agel/vector`,
+`agel/ui-layout`, `agel/ui-vector`, `agel/desktop`, and the Agel-written native
+toolchain modules `agel/native`, `agel/native-reader`, `agel/native-modules`,
+`agel/native-agent-kernel`, `agel/native-system-builder` and `agel/native-agents`
+by default; the startup banner lists exactly what was installed.
+Use `--no-stdlib` to expose only the minimal language substrate, and
+`--image PATH` to persist the world as a portable image.
 
 ### Graphical kitchen sink
 
@@ -294,6 +317,8 @@ layout composition, including Slovak/Option symbols and paste. For example:
 (send counter 42)
 (step)
 (agent-state counter)
+(let ((x 20) (y 22)) (+ x y))
+(def norm (fn (a b) (def last a) (- (* a a) (* b b) 1)))
 (accent cyan)
 (workspace 2)
 (title "LIVE AGEL")
@@ -303,7 +328,8 @@ layout composition, including Slovak/Option symbols and paste. For example:
 
 Run `:help` inside the desktop for its command postcard. Named cells survive
 `:shutdown` and the next `./scripts/run-graphics.sh`; a complete walkthrough is
-in [`examples/graphical-workshop.txt`](examples/graphical-workshop.txt).
+in [`examples/graphical-workshop.txt`](examples/graphical-workshop.txt), and the
+workbench session is [`examples/native-workbench.txt`](examples/native-workbench.txt).
 The native actor walkthrough is
 [`examples/native-agents.txt`](examples/native-agents.txt), with its exact
 fault and transaction contract in
@@ -340,6 +366,9 @@ REPL commands:
 - `:effects` prints host-effect authorization and outcome records.
 - `:providers`, `:requests`, and `:dispatch` control explicit model invocation.
 - `:snapshot NAME`, `:restore NAME`, and `:snapshots` provide live time travel.
+- `:image` shows the portable image root and entry count when `--image` is set.
+- `:propose FILE [EFFECT ...]`, `:proposal`, `:promote`, and `:discard` run the
+  evidence-carrying upgrade gate on a proposal file.
 - `:quit` exits.
 
 Balanced expressions may span multiple lines and commit as one transaction.
@@ -360,10 +389,12 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Self-improvement demonstration:
+Self-improvement demonstration, as a library and inside the CLI:
 
 ```sh
 cargo run -q -p agel-verify --example safe_upgrade
+printf '(def transform (fn (x) (+ x 1)))\n:propose examples/upgrade-proposal.agel\n:promote\n(transform 41)\n' \
+  | cargo run -q -p agel-cli
 ```
 
 Disposable filesystem demonstration:
@@ -372,10 +403,11 @@ Disposable filesystem demonstration:
 cargo run -q -p agel-effects --example cow_workspace
 ```
 
-Portable image demonstration:
+Portable image demonstration, as a library and as the CLI's persistence:
 
 ```sh
 cargo run -q -p agel-image --example portable_image
+cargo run -q -p agel-cli -- --image target/agel-world.image
 ```
 
 Library-defined orchestration demonstration:

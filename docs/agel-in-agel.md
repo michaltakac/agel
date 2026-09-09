@@ -42,8 +42,8 @@ reader/value traversal is stack-independent. The corpus runs on an explicit
 ; => 42
 ```
 
-The base environment exposes arithmetic and collection operations, not host
-globals, agent services or model APIs. An explicit environment can inject a
+The base environment exposes arithmetic, collection and (since v0.2.22) the
+five text operations, not host globals, agent services or model APIs. An explicit environment can inject a
 service. This is name visibility, not a new security boundary: injected host
 closures carry their own behavior and authority, and the seed still enforces
 capabilities, fuel, call depth and transactional turns.

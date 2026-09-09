@@ -1,0 +1,13 @@
+; A proposal file for the CLI's evidence-carrying upgrade gate.
+; Ordinary lines are Agel source committed as one transaction on promotion.
+; `;effect NAME` declares an effect the checker must find in the source.
+; `;test EXPR => EXPECTED` runs in a fork of the zero-authority canary world.
+; Run in the CLI after (def transform (fn (x) (+ x 1))):
+;   :propose examples/upgrade-proposal.agel
+;   :promote
+;test (transform 9) => 10
+;test (transform -1) => 0
+;test (transform-all '(1 2 3)) => '(2 3 4)
+(import agel/sequence)
+(def transform (fn (x) (+ 1 x)))
+(def transform-all (fn (values) (map transform values)))

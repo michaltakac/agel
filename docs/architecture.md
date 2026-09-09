@@ -27,7 +27,8 @@ roles that classic Lisp images often combined:
 
 The language core implements the first two roles, explicit authority and resource
 boundaries, and the revision portion of the fourth. `agel-verify` implements the
-first conservative verification gate. This is not a claim that macros—or the
+first conservative verification gate, and since v0.2.22 the CLI exposes it as
+`:propose`, `:promote` and `:discard`. This is not a claim that macros—or the
 current deterministic checker—can prove arbitrary code safe.
 
 ## Safety invariants
@@ -126,8 +127,11 @@ Each rung must be runnable and differentially testable against the rung below:
    The supervisor prints through it, can lose it, replaces it at a new
    generation, and refuses handles issued before the restart. Timers, storage,
    networking and model brokering are still the supervisor's.
-16. **Complete self-host:** reader, hygienic expander, agent runtime, image codec,
-   and compiler in Agel; extend diverse comparison to every kernel semantic.
+16. **Complete self-host (in progress):** reader, hygienic expander, agent
+   runtime, image codec, and compiler in Agel; extend diverse comparison to
+   every kernel semantic. Rungs 32 through 36 supply the reader, a restricted
+   expander, a compiled agent kernel and the compiler frontend as Agel; the
+   image codec, the backend and the in-guest toolchain remain Rust or host-side.
 17. **Native evaluator world (complete at v0.1.6):** the fixed-memory evaluator
    runs at the lowest privilege level on all three research backends. The x86-64
    interactive workshop sends source over a bounded shared page and prints
@@ -148,7 +152,8 @@ Each rung must be runnable and differentially testable against the rung below:
 20. **Agentic desktop object model (complete at v0.2.0):** retained scene nodes,
    semantic authority-bearing intents, structural validation, inspectable
    patches, and a typed preview/commit/discard/rollback desktop agent are Agel
-   standard-library code. This is not yet a renderer or native graphical shell.
+   standard-library code. At that rung this was not yet a renderer or native
+   graphical shell; rungs 22 through 24 supplied both.
 21. **Default shell and deterministic layout (complete at v0.2.1):** a
    COSMIC-inspired panel/workspace/dock scene, theme tokens, fixed/flexible
    geometry, validated display lists, semantic hit-testing, and a transactional
@@ -160,19 +165,73 @@ Each rung must be runnable and differentially testable against the rung below:
    1024×768×32 VBE framebuffer. Only a ring-3 compositor maps its device pages;
    it consumes a build-validated Agel vector stream, rejects malformed records
    without changing the frame, and can fault and be replaced while the last
-   good pixels remain. This is output, not yet interactive input.
+   good pixels remain. That rung was output only; rung 24 added input.
 24. **Live native desktop (complete at v0.2.4):** nonblocking serial and PS/2
    keyboard adapters normalize bytes into a visible command surface. A bounded
    Lisp grammar produces semantic candidate scenes; complete frames are
    validated and rendered before the revision advances, rejected input leaves
    state untouched, and rollback restores the preceding scene while QEMU runs.
-25. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+25. **Graphical kitchen sink (complete at v0.2.5):** one Agel value combining
+   shell, agent graph, inspectors, gradients, clipping, paths, transforms and
+   scalable text renders to a frozen SVG digest and a checked 2880×1800
+   screenshot.
+26. **Persistent graphical workshop (complete at v0.2.6):** the graphical
+   command surface and the crash-tolerant named-source-cell workspace share
+   the protected native evaluator, with replay-validated save and
+   reconstruction after reboot.
+27. **Agentic fixed points (complete at v0.2.7):** eager-safe and bounded
+   lexical fixed points, immutable convergence, and a transactional agent
+   fixed-point driver with bounded tracing, explicit model transitions and
+   message-ordered code evolution, all as Agel library code.
+28. **Native agents (complete at v0.2.8):** the first downward bootstrap of
+   executable agents into the freestanding evaluator: bounded scalar
+   mailboxes, deterministic round-robin turns, atomic behavior turns,
+   inspection, and contained fault recovery inside the graphical OS.
+29. **Layout-aware input (complete at v0.2.9):** native punctuation and
+   modifiers, and a loopback host-layout console for Unicode composition and
+   paste without mouse capture.
+30. **Agel-authored live native scenes (complete at v0.2.10):** committed
+   native scene records reach the compositor; an Agel dock library, actor-driven
+   repaint, rollback and reboot replay.
+31. **Native agent workbench (complete at v0.2.11, repaired at v0.2.12):**
+   pointer-to-agent actions, keyboard focus, source inspection, isolated
+   candidate previews, turn-boundary behavior replacement, explicit
+   promotion/discard, persisted source upgrades, failed-save recovery and
+   hardened process limits.
+32. **Agel in Agel (complete at v0.2.13):** an Agel-written functional
+   interpreter, source-backed hosted agents, and a three-evaluator conformance
+   corpus shared by the Rust seed, the Common Lisp reference and `agel/meta`.
+33. **Analyzed execution and shared closures (complete at v0.2.14):** reusable
+   execution plans analyzed in Agel, opt-in analyzed agents, and structurally
+   shared immutable closure code and lexical frames in the Rust bootstrap.
+34. **Machine code (complete at v0.2.15 and v0.2.16):** an Agel-authored
+   integer-IR compiler with an isolated Cranelift backend, then a self-compiling
+   Agel frontend over managed native closures, immutable collections and
+   metered calls, with three-stage IR agreement.
+35. **Compiled actors (complete at v0.2.17 through v0.2.19):** tail-call IR with
+   native trampolining, an Agel-written compiled scheduler with peer permissions
+   and revision-checked commits, metered compacting collection at tail
+   boundaries, and agent-proposed compiled behavior upgrades with owner- and
+   revision-bound previews, code-only promotion and checked rollback.
+36. **Native reader and modules (complete at v0.2.20 and v0.2.21):** an
+   Agel-written reader that reads and rebuilds the reader and compiler from
+   text, and an Agel-authored static module linker with restricted expression
+   templates whose expanded behaviors reach the real OS through candidate
+   validation and source persistence. Compilation remains host-assisted.
+37. **Live upgrade pipeline and portable worlds (complete at v0.2.22):** the
+   verification gate, portable images and typed effect policy become live paths
+   rather than library demonstrations. The CLI verifies and promotes proposal
+   files, persists every committed input to a tamper-evident image, and effect
+   inference is conservative over first-class builtins. The Common Lisp
+   reference and `agel/meta` cover maps and text, and the freestanding
+   evaluator gains `let`, variadic arithmetic and multi-form functions.
+38. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-26. **POSIX personality:** a Rust C library and the filesystem and process
+39. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-27. **Local inference:** model inference in its own domain, over quantized
+40. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

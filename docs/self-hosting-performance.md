@@ -1,5 +1,10 @@
 # Self-hosting without permanent interpreter overhead
 
+Current follow-up: v0.2.22 makes the verification gate, portable images and
+effect policy live paths in the CLI, extends the three-evaluator corpus to maps
+and text, and gives the freestanding evaluator `let`, variadic arithmetic and
+multi-form functions. Compilation still does not run in the guest.
+
 Current follow-up: [v0.2.21](native-modules.md) adds static module linking and
 expression-template macro expansion in native Agel, with an expanded-source
 bridge to the real graphical OS. Compilation remains host-assisted.

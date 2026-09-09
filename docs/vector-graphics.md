@@ -58,7 +58,8 @@ cannot partially mutate an Agel world.
 
 SVG preserves curves and text as vectors and maps a logical frame directly to a
 requested high-density surface. Serialization is one bounded linear pass after
-validation and requires no third-party crates. This is the reference backend,
+validation, and the renderer crate itself declares no third-party dependency
+(the hosted evaluator beneath it uses a stack-growth crate). This is the reference backend,
 not a claim that browser SVG will be the final compositor.
 
 ## Run it

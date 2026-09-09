@@ -21,6 +21,10 @@ const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
 const MAX_SCENE_COMMANDS: usize = 80;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
+/// The self-documenting command postcard. It must fit one status line, and a
+/// longer postcard is a build error rather than a silently truncated `:help`.
+const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-bind/hit/owner | :cell :run :show :delete :cells :workspace :save :reload | :revision :rollback :defs :limits :shutdown";
+const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 22;
 
 const VIOLET: [u32; 3] = [0x92_85_ff, 0x62_54_e7, 0x9b_8c_ff];
@@ -789,7 +793,7 @@ fn execute_workshop(
         };
     }
     if line == b":help" {
-        return StatusLine::new(b":workbench | :preview FORM :promote :discard :source ID | Tab focus, Enter activate | Lisp: quote if begin def fn | spawn send step run | scene-bind scene-hit scene-owner | :cell :run :show :delete :cells :save :reload | :revision :rollback :defs :limits :shutdown");
+        return StatusLine::new(HELP_POSTCARD);
     }
     if line == b":revision" {
         let mut status = StatusLine::new(b"EVAL REV ");

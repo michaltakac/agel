@@ -15,7 +15,8 @@ first boot, in the **fresh empty** world enter:
 
 This stages eleven named source cells (`wb-0` through `wb-10`) from
 [`workbench.agel`](../boot/desktop/workbench.agel), then reconstructs them inside
-the unprivileged native evaluator. It refuses to overwrite an existing world.
+the unprivileged native evaluator. The complete keystroke transcript of this
+guide is [`examples/native-workbench.txt`](../examples/native-workbench.txt). It refuses to overwrite an existing world.
 After `:save`, this separate workbench restores on subsequent launches. Do not
 erase your existing disk to try the demo. Plain `./scripts/run-graphics.sh`
 continues to use your original workshop. Add `--web` after `--workbench` if you
@@ -61,7 +62,9 @@ Enter these lines separately. A replacement is a stored three-argument function.
 Preview runs the test action in a separate candidate world and displays its
 scene. The live agent, mailbox, scene and rollback point remain unchanged.
 `:discard` restores the live scene; `:promote` adopts the already-tested candidate
-without running it again. `:rollback` restores the preceding committed world,
+without running it again. (This `:promote` adopts an evaluator candidate world;
+the serial workshop's `:promote` in [`native-workshop.md`](native-workshop.md)
+selects a boot recovery image. The graphical build cannot reach the latter.) `:rollback` restores the preceding committed world,
 including its behavior and state. Inspect source before previewing: ordinary
 evaluation, including a state query, invalidates a pending candidate. Promotion
 then fails closed and requires a fresh preview. Source/definition metadata

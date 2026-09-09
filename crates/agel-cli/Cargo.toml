@@ -7,8 +7,11 @@ rust-version.workspace = true
 
 [dependencies]
 agel-core = { path = "../agel-core" }
+agel-image = { path = "../agel-image" }
+agel-integrity = { path = "../agel-integrity" }
 agel-model = { path = "../agel-model" }
 agel-stdlib = { path = "../agel-stdlib" }
+agel-verify = { path = "../agel-verify" }
 
 [lints]
 workspace = true

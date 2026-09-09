@@ -7,8 +7,11 @@ single metacircular demo as proof that the host can be removed.
 
 `bootstrap/common-lisp/agel-reference.lisp` is a separate evaluator for the
 functional kernel: literals, lexical lookup, `quote`, `if`, `begin`, `let`,
-multi-body `fn`, `def`, application, and foundational collection/arithmetic
-operations. It uses Common Lisp data as the bootstrap representation but does
+multi-body `fn`, `def`, application, checked variadic arithmetic, lists,
+insertion-ordered persistent maps with structural equality, and the five
+byte-oriented UTF-8 text mechanisms (`text-bytes`, `text-byte`, `text-slice`,
+`text-concat`, `text-symbol`). Maps and text joined the shared corpus in
+v0.2.22. It uses Common Lisp data as the bootstrap representation but does
 not share evaluator code with Rust.
 
 Both evaluators consume `bootstrap/conformance.forms` plus a required-failure

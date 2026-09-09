@@ -823,6 +823,9 @@ fn evaluate_list(
     if symbol_is(document, source, first, b"def") {
         return evaluate_def(document, source, first, world, locals, depth, fuel);
     }
+    if symbol_is(document, source, first, b"let") {
+        return evaluate_let(document, source, first, world, locals, depth, fuel);
+    }
     if symbol_is(document, source, first, b"fn") {
         validate_lambda(document, source, first)?;
         return Ok(RuntimeValue::Lambda {
@@ -895,6 +898,7 @@ fn evaluate_def(
             | b"if"
             | b"begin"
             | b"def"
+            | b"let"
             | b"fn"
             | b"+"
             | b"-"
@@ -947,15 +951,87 @@ fn evaluate_def(
     })
 }
 
+/// Parallel `let`: every initializer sees the enclosing scope, then the body
+/// forms run in sequence with the new bindings. A repeated name takes its last
+/// value, matching the hosted seed. Bindings occupy the same bounded local
+/// slots as parameters, so `:limits` still describes the whole scope.
+fn evaluate_let(
+    document: &Document,
+    source: &[u8],
+    let_node: u16,
+    world: &mut World,
+    locals: &[Local; MAX_LOCALS],
+    depth: u8,
+    fuel: &mut u16,
+) -> Result<RuntimeValue, Error> {
+    let bindings = child_after(document, let_node)?;
+    if !matches!(document.nodes[bindings as usize].kind, NodeKind::List) {
+        return Err(Error("let expects a binding list"));
+    }
+    let body = child_after(document, bindings)?;
+    let mut inner = *locals;
+    let mut pair = document.nodes[bindings as usize].first;
+    while pair != NONE {
+        if !matches!(document.nodes[pair as usize].kind, NodeKind::List) {
+            return Err(Error("let binding must be a name and value"));
+        }
+        let name_node = document.nodes[pair as usize].first;
+        if name_node == NONE || !matches!(document.nodes[name_node as usize].kind, NodeKind::Symbol)
+        {
+            return Err(Error("let binding must be a name and value"));
+        }
+        let value_node = child_after(document, name_node)?;
+        if document.nodes[value_node as usize].next != NONE {
+            return Err(Error("let binding must be a name and value"));
+        }
+        let name_bytes = node_bytes(document, source, name_node);
+        if is_special_form(name_bytes) {
+            return Err(Error("native special forms cannot be rebound"));
+        }
+        let name = Name::new(name_bytes)?;
+        let value = evaluate_node(document, source, value_node, world, locals, depth + 1, fuel)?;
+        let slot = inner
+            .iter()
+            .position(|local| local.used && local.name.equals(name_bytes))
+            .or_else(|| inner.iter().position(|local| !local.used))
+            .ok_or(Error("native local binding limit exceeded"))?;
+        inner[slot] = Local {
+            used: true,
+            name,
+            value,
+        };
+        pair = document.nodes[pair as usize].next;
+    }
+    evaluate_sequence(document, source, body, world, &inner, depth, fuel)
+}
+
+fn evaluate_sequence(
+    document: &Document,
+    source: &[u8],
+    mut child: u16,
+    world: &mut World,
+    locals: &[Local; MAX_LOCALS],
+    depth: u8,
+    fuel: &mut u16,
+) -> Result<RuntimeValue, Error> {
+    let mut result = RuntimeValue::Scalar(Scalar::Nil);
+    while child != NONE {
+        result = evaluate_node(document, source, child, world, locals, depth + 1, fuel)?;
+        child = document.nodes[child as usize].next;
+    }
+    Ok(result)
+}
+
+fn is_special_form(name: &[u8]) -> bool {
+    matches!(name, b"quote" | b"if" | b"begin" | b"def" | b"let" | b"fn")
+}
+
 fn validate_lambda(document: &Document, source: &[u8], fn_node: u16) -> Result<(), Error> {
     let parameters = child_after(document, fn_node)?;
     if !matches!(document.nodes[parameters as usize].kind, NodeKind::List) {
         return Err(Error("fn parameters must be a list"));
     }
-    let body = child_after(document, parameters)?;
-    if document.nodes[body as usize].next != NONE {
-        return Err(Error("native fn accepts one body form"));
-    }
+    child_after(document, parameters)?;
     let mut parameter = document.nodes[parameters as usize].first;
     let mut count = 0;
     while parameter != NONE {
@@ -984,13 +1060,33 @@ fn capture_function(document: &Document, source: &[u8], fn_node: u16) -> Result<
     validate_lambda(document, source, fn_node)?;
     let parameters = child_after(document, fn_node)?;
     let body_node = child_after(document, parameters)?;
-    let body_source = node_bytes(document, source, body_node);
-    if body_source.len() > MAX_BODY {
-        return Err(Error("native function body is too large"));
-    }
     let mut function = Function::EMPTY;
-    function.body[..body_source.len()].copy_from_slice(body_source);
-    function.body_length = body_source.len() as u16;
+    if document.nodes[body_node as usize].next == NONE {
+        let body_source = node_bytes(document, source, body_node);
+        if body_source.len() > MAX_BODY {
+            return Err(Error("native function body is too large"));
+        }
+        function.body[..body_source.len()].copy_from_slice(body_source);
+        function.body_length = body_source.len() as u16;
+    } else {
+        // Several body forms persist as one explicit sequence, so the stored
+        // representation stays a single balanced form that `:source` can show.
+        let mut last = body_node;
+        while document.nodes[last as usize].next != NONE {
+            last = document.nodes[last as usize].next;
+        }
+        let start = document.nodes[body_node as usize].start as usize;
+        let end = document.nodes[last as usize].end as usize;
+        let span = &source[start..end];
+        let length = span.len() + b"(begin )".len();
+        if length > MAX_BODY {
+            return Err(Error("native function body is too large"));
+        }
+        function.body[..7].copy_from_slice(b"(begin ");
+        function.body[7..7 + span.len()].copy_from_slice(span);
+        function.body[7 + span.len()] = b')';
+        function.body_length = length as u16;
+    }
     let mut parameter = document.nodes[parameters as usize].first;
     while parameter != NONE {
         let index = function.parameter_count as usize;
@@ -1092,7 +1188,7 @@ fn apply_lambda(
             value: RuntimeValue::Scalar(captured.value),
         };
     }
-    evaluate_node(document, source, body, world, &locals, depth + 1, fuel)
+    evaluate_sequence(document, source, body, world, &locals, depth, fuel)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1266,21 +1362,46 @@ fn apply_builtin(
         }
         return Err(Error("eval expects one quoted form"));
     }
+    let (values, count) = integer_arguments(arguments)?;
+    let values = &values[..count];
     if matches!(builtin, Builtin::Equal | Builtin::Less) {
-        let [left, right] = scalar_integers(arguments)?;
+        let [left, right] = values else {
+            return Err(Error("= and < expect two integers"));
+        };
         return Ok(RuntimeValue::Scalar(Scalar::Bool(match builtin {
             Builtin::Equal => left == right,
             Builtin::Less => left < right,
             _ => false,
         })));
     }
-    let [left, right] = scalar_integers(arguments)?;
+    // Variadic checked arithmetic with the hosted seed's identities and arities.
     let result = match builtin {
-        Builtin::Add => left.checked_add(right),
-        Builtin::Subtract => left.checked_sub(right),
-        Builtin::Multiply => left.checked_mul(right),
-        Builtin::Divide if right != 0 => left.checked_div(right),
-        Builtin::Divide => return Err(Error("division by zero")),
+        Builtin::Add => values
+            .iter()
+            .try_fold(0_i64, |total, value| total.checked_add(*value)),
+        Builtin::Multiply => values
+            .iter()
+            .try_fold(1_i64, |total, value| total.checked_mul(*value)),
+        Builtin::Subtract => match values {
+            [] => return Err(Error("- expects at least one integer")),
+            [only] => only.checked_neg(),
+            [first, rest @ ..] => rest
+                .iter()
+                .try_fold(*first, |total, value| total.checked_sub(*value)),
+        },
+        Builtin::Divide => match values {
+            [first, rest @ ..] if !rest.is_empty() => {
+                let mut total = *first;
+                for value in rest {
+                    if *value == 0 {
+                        return Err(Error("division by zero"));
+                    }
+                    total = total.checked_div(*value).ok_or(Error("integer overflow"))?;
+                }
+                Some(total)
+            }
+            _ => return Err(Error("/ expects at least two integers")),
+        },
         _ => None,
     }
     .ok_or(Error("integer overflow"))?;
@@ -1482,18 +1603,15 @@ fn agent_index(world: &World, id: u8) -> Result<usize, Error> {
     Ok(index)
 }
 
-fn scalar_integers(arguments: &[RuntimeValue]) -> Result<[i64; 2], Error> {
-    if arguments.len() != 2 {
-        return Err(Error("native arithmetic currently expects two integers"));
-    }
-    let mut values = [0; 2];
+fn integer_arguments(arguments: &[RuntimeValue]) -> Result<([i64; MAX_ARGUMENTS], usize), Error> {
+    let mut values = [0; MAX_ARGUMENTS];
     for (index, value) in arguments.iter().enumerate() {
         values[index] = match value {
             RuntimeValue::Scalar(Scalar::Int(value)) => *value,
             _ => return Err(Error("expected integer")),
         };
     }
-    Ok(values)
+    Ok((values, arguments.len()))
 }
 
 fn resolve_symbol(
@@ -1717,6 +1835,66 @@ mod tests {
 
     fn eval(session: &mut Session, source: &str) -> Value {
         session.evaluate(source.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn let_variadic_arithmetic_and_multi_body_functions_match_the_seed() {
+        let mut session = Session::new();
+        for (source, expected) in [
+            ("(let ((x 20) (y 22)) (+ x y))", 42),
+            ("(let ((x 40)) (let ((x 1) (y x)) (+ x y)))", 41),
+            ("(let ((x 1) (x 42)) x)", 42),
+            ("(let ((x 40)) (+ x 1) (+ x 2))", 42),
+            (
+                "(let ((x 40)) ((fn (f) (let ((x 99)) (f 2))) (fn (y) (+ x y))))",
+                42,
+            ),
+            ("(+)", 0),
+            ("(*)", 1),
+            ("(* 2 3 7)", 42),
+            ("(- 5)", -5),
+            ("(- 50 5 3)", 42),
+            ("(/ 336 2 2 2)", 42),
+            ("((fn () 1 42))", 42),
+            ("((fn (x) (+ x 1) (+ x 2)) 40)", 40 + 2),
+        ] {
+            assert_eq!(eval(&mut session, source), Value::Int(expected), "{source}");
+        }
+        eval(
+            &mut session,
+            "(def f (fn (x) (def seen x) (let ((twice (* x 2))) (- twice 38))))",
+        );
+        assert_eq!(eval(&mut session, "(f 40)"), Value::Int(42));
+        assert_eq!(eval(&mut session, "seen"), Value::Int(40));
+        eval(
+            &mut session,
+            "(def tick (fn (self state message) (send self 1) (+ state message)))",
+        );
+        eval(&mut session, "(def counter (spawn tick 0))");
+        eval(&mut session, "(send counter 41)");
+        eval(&mut session, "(run 2)");
+        assert_eq!(eval(&mut session, "(agent-state counter)"), Value::Int(42));
+        let revision = session.revision();
+        for bad in [
+            "(let ((x 1 2)) x)",
+            "(let (x) 1)",
+            "(let ((1 2)) 3)",
+            "(let ())",
+            "(let ((if 1)) 1)",
+            "(let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6) (g 7) (h 8) (i 9)) i)",
+            "(/ 1)",
+            "(/ 1 0 2)",
+            "(-)",
+            "(= 1)",
+            "(< 1 2 3)",
+            "(+ 1 #t)",
+            "(- -9223372036854775808)",
+            "(fn (x))",
+            "(def let 1)",
+        ] {
+            assert!(session.evaluate(bad.as_bytes()).is_err(), "accepted {bad}");
+        }
+        assert_eq!(session.revision(), revision);
     }
 
     #[test]

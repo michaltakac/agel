@@ -462,6 +462,41 @@ UI action broker. The native build adapter consumes a small Agel vector source;
 it is not yet the full hosted evaluator running the standard-library UI stack.
 These remain explicit later boundaries.
 
+## v0.2.22
+
+- **An effect hidden behind a first-class builtin:** the verifier inferred
+  effects only from call-head symbols, so `(apply model-request ...)` or an
+  aliased builtin carried no declared effect into promotion. Inference now
+  counts any occurrence of an effect-bearing name, including inside quoted
+  data, and the zero-authority canary remains the runtime backstop.
+- **A policy that nothing consults:** the typed default-deny `Policy` existed
+  without a caller. Every model process launch is now decided by a policy that
+  admits only that provider's inference requests, before the executable
+  allowlist, and every denial is audited. File effects on the copy-on-write
+  workspace pass through the same decision point, with `Virtualize` meaning
+  "stage in the overlay" rather than a silent allow.
+- **A gate reachable only from an example:** verification, promotion and
+  portable images are CLI commands. A promotion rechecks the evidence binding
+  against the live world immediately before the commit; any intervening
+  transaction makes it fail closed.
+- **A log that disagrees with its world:** in image mode `:rollback` and
+  `:restore` are refused rather than leaving an append-only image claiming to
+  reconstruct a world it no longer describes. A failed save keeps the expected
+  root so a concurrent writer is detected on the next commit.
+- **A help postcard longer than its status line:** the graphical `:help` text
+  had already outgrown the 256-byte line and was truncated silently. Its
+  length is now a compile-time assertion.
+- **Native forms accepted with hosted meaning but native limits:** `let`,
+  variadic arithmetic and multi-form functions in the freestanding evaluator
+  keep every existing bound. Bindings share the eight local slots, arithmetic
+  stays checked, and the overflow of a stored multi-form body is rejected at
+  definition rather than truncated.
+
+The in-memory workspace broker is not host filesystem confinement, the model
+adapters' policy is still enforced by the trusted Rust host, and the CLI's
+proposal files are read from the operator's filesystem with the operator's
+authority. Nothing here is a syscall boundary.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

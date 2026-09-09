@@ -50,10 +50,29 @@ The sequence protects one local writer from process or machine interruption.
 The root check detects a stale caller but is not a cross-process lock; deployments
 with concurrent writers must serialize commits above this API.
 
+## The CLI as an image writer (v0.2.22)
+
+`cargo run -p agel-cli -- --image PATH` runs the ordinary REPL over an
+`ImageSession`. If the file exists it is loaded (falling back to the
+`.previous` sidecar), rebuilt by replay, and its root printed; otherwise a new
+image is started and the standard library's source becomes its first committed
+input. Every successful transaction, provider grant, model claim and model
+completion is appended and the file is atomically replaced; a failed save is
+reported and retried against the same expected root on the next commit, so a
+concurrent writer is detected rather than overwritten. `:image` shows the path,
+entry count and root.
+
+`:rollback` and `:restore` are refused in image mode. An image is an
+append-only log of committed inputs; rewinding the live world without rewinding
+the log would leave a file that no longer reconstructs the world it claims to.
+`:snapshot` remains available for inspection. Provider grants are not
+duplicated on restart: a reconstructed image already replayed them.
+
 ## Try it
 
 ```sh
 cargo run -q -p agel-image --example portable_image
+cargo run -q -p agel-cli -- --image target/agel-world.image
 ```
 
 The output shows the entry count, stable root, restored value, and encoded size.

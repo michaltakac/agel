@@ -10,7 +10,9 @@ Agel to read both tools' own source text and compile them again. Their IR must
 match the bootstrap artifacts exactly. It then reads, compiles and executes a
 new program, returning `{answer 3628800 message "Ahoj z Agelu 👋"}`.
 
-Pass a file path to run your own single closed function with integer argument 10:
+Pass a file path to run your own single closed function with integer argument 10;
+[`examples/jit-text-workshop.agel`](../examples/jit-text-workshop.agel) is the
+default program:
 
 ```sh
 cargo run --release -q -p agel-jit --example text_workshop -- my-program.agel
@@ -50,8 +52,10 @@ and managed JIT:
 Copying spends fuel proportional to bytes. The JIT reserves text quota before
 copying; the seed charges fuel and enforces its collection-length limit. These
 are runtime mechanisms, not calls to Rust's reader or integer parser. Existing
-`count` semantics and the frozen kernel ABI are unchanged. The five primitives
-are not yet available in the freestanding evaluator or every alternate evaluator.
+`count` semantics and the frozen kernel ABI are unchanged. Since v0.2.22 the
+Common Lisp reference and the Agel-written `agel/meta` evaluator implement the
+same five primitives and are checked against the seed on a shared corpus; the
+freestanding evaluator still has no string values at all.
 
 ## Limits and performance
 

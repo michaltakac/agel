@@ -62,6 +62,13 @@ promise.
   templates, plus a host-assisted graphical bridge deploying expanded behaviors
   through real OS candidate validation and source persistence. This is not an
   in-guest JIT or general procedural macro compilation.
+  `v0.2.22` makes three library rungs live paths: the CLI verifies and promotes
+  proposal files, persists worlds as portable images, and every model process
+  launch is decided by a typed default-deny effect policy. Effect inference is
+  conservative over first-class builtins, the copy-on-write workspace gains a
+  policy broker, the Common Lisp reference and `agel/meta` cover maps and text,
+  and the freestanding evaluator gains `let`, variadic arithmetic and
+  multi-form functions. No kernel-contract, image-format or wire change.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

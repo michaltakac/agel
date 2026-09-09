@@ -1,5 +1,28 @@
 # Typed effects and copy-on-write sandboxes
 
+## v0.2.22: the policy is consulted
+
+Until v0.2.22 the `Policy` trait and `StaticPolicy` existed but nothing asked
+them anything: `ProcessSandbox` relied on its executable allowlist alone, and
+`Decision::Virtualize` had no consumer. Now:
+
+- `ProcessSandbox::with_policy` installs a policy that is consulted for every
+  `process/run` intent **before** the executable allowlist. `Deny` and
+  `Virtualize` (no process virtualization exists) are recorded in the audit
+  log and returned without spawning. Each model adapter installs a
+  default-deny policy that admits only `model/infer/<its provider>/request/*`,
+  through `StaticPolicy::allow_prefix`; the executable allowlist remains a
+  second, independent gate.
+- `WorkspaceBroker` puts a policy in front of `CowWorkspace`. Reads, writes and
+  deletes are `file/read` and `file/write` intents with the virtual path as the
+  resource and a digest of the payload. `Allow` writes through to the base
+  image, `Virtualize` stages the change in the overlay for an explicit
+  `commit` or `rollback`, and `Deny` changes nothing. Every decision and
+  outcome is audited.
+
+The workspace is still in-memory: this is the effect vocabulary, decision point
+and audit trail, not host filesystem confinement.
+
 ## v0.2.12 audit corrections
 
 Process deadlines now cover pipe completion even when the immediate child has

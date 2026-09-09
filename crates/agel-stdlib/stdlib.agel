@@ -542,7 +542,9 @@
         'list list 'cons cons 'car car 'cdr cdr
         'dict dict 'get get 'assoc assoc 'count count
         'has-key? has-key? 'type-of type-of
-        'dissoc dissoc 'keys keys 'apply 'meta/apply)))
+        'dissoc dissoc 'keys keys 'apply 'meta/apply
+        'text-bytes text-bytes 'text-byte text-byte 'text-slice text-slice
+        'text-concat text-concat 'text-symbol text-symbol)))
 
   (def meta-list?
     (fn (value)

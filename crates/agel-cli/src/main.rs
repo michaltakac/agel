@@ -1,12 +1,16 @@
 use agel_core::{
-    read_all, EvaluationOptions, ModelCompletion, ModelOutcome, ReadError, Snapshot, World,
+    read_all, Commit, EvaluationOptions, ModelCompletion, ModelOutcome, ModelRequest, ReadError,
+    Snapshot, Value, World,
 };
+use agel_image::{Image, ImageSession, ImageStore};
+use agel_integrity::Digest;
 use agel_model::{
     ClaudeCodeProvider, CodexProvider, CommandLimits, ProviderError, ProviderRegistry,
 };
+use agel_verify::{Evidence, Proposal, TestCase, Verifier};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -22,6 +26,7 @@ struct CliConfig {
     timeout: Duration,
     max_output_bytes: usize,
     stdlib: bool,
+    image: Option<PathBuf>,
 }
 
 impl CliConfig {
@@ -38,6 +43,7 @@ impl CliConfig {
             timeout: Duration::from_secs(300),
             max_output_bytes: 1_048_576,
             stdlib: true,
+            image: None,
         };
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
@@ -46,6 +52,7 @@ impl CliConfig {
                 "--enable-claude" => config.claude = true,
                 "--enable-codex" => config.codex = true,
                 "--no-stdlib" => config.stdlib = false,
+                "--image" => config.image = Some(required_value(&mut arguments, &argument)?.into()),
                 "--claude-bin" => {
                     config.claude_bin = required_value(&mut arguments, &argument)?.into()
                 }
@@ -93,6 +100,242 @@ fn required_value(
         .ok_or_else(|| format!("{option} requires a value"))
 }
 
+/// The world the REPL talks to: either a volatile in-memory world, or a world
+/// reconstructed from and appended to a portable image on disk.
+///
+/// In image mode every committed input, capability grant, model claim, and
+/// model completion is appended to the tamper-evident image and the file is
+/// atomically replaced after each commit. Rollback and snapshot restore are
+/// refused there: an image is an append-only log of committed inputs, and
+/// rewinding the live world without rewinding the log would make the file
+/// disagree with the world it claims to reconstruct.
+enum Runtime {
+    Volatile {
+        world: World,
+        options: EvaluationOptions,
+    },
+    Image {
+        session: ImageSession,
+        store: ImageStore,
+        saved: Option<Digest>,
+    },
+}
+
+impl Runtime {
+    fn volatile() -> Self {
+        Self::Volatile {
+            world: World::default(),
+            options: EvaluationOptions::default(),
+        }
+    }
+
+    fn open_image(path: &Path) -> Result<(Self, bool), String> {
+        let store = ImageStore::new(path);
+        let existing = store
+            .load()
+            .map_err(|error| format!("cannot load image {}: {error}", path.display()))?;
+        let (session, saved) = match existing {
+            Some(image) => {
+                let session = image
+                    .rebuild()
+                    .map_err(|error| format!("cannot rebuild image {}: {error}", path.display()))?;
+                (session, Some(image.digest()))
+            }
+            None => (ImageSession::new(64, agel_core::Budget::default()), None),
+        };
+        let restored = saved.is_some();
+        Ok((
+            Self::Image {
+                session,
+                store,
+                saved,
+            },
+            restored,
+        ))
+    }
+
+    fn world(&self) -> &World {
+        match self {
+            Self::Volatile { world, .. } => world,
+            Self::Image { session, .. } => session.world(),
+        }
+    }
+
+    fn options(&self) -> &EvaluationOptions {
+        match self {
+            Self::Volatile { options, .. } => options,
+            Self::Image { session, .. } => session.options(),
+        }
+    }
+
+    fn image(&self) -> Option<&Image> {
+        match self {
+            Self::Volatile { .. } => None,
+            Self::Image { session, .. } => Some(session.image()),
+        }
+    }
+
+    fn evaluate(&mut self, source: &str) -> Result<Commit, String> {
+        match self {
+            Self::Volatile { world, options } => world
+                .evaluate_with(source, options)
+                .map_err(|error| error.to_string()),
+            Self::Image { session, .. } => {
+                let commit = session
+                    .evaluate(source)
+                    .map_err(|error| error.to_string())?;
+                self.persist()?;
+                Ok(commit)
+            }
+        }
+    }
+
+    fn grant(&mut self, kind: &str, scope: &str) -> Result<(), String> {
+        match self {
+            Self::Volatile { world, options } => {
+                let capability = world
+                    .issue_capability(kind, scope)
+                    .map_err(|error| error.to_string())?;
+                options.capabilities.push(capability);
+                Ok(())
+            }
+            Self::Image { session, .. } => {
+                // A reconstructed image already replayed its grants; do not
+                // append a duplicate entry on every start.
+                if session
+                    .options()
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability.kind() == kind && capability.scope() == scope)
+                {
+                    return Ok(());
+                }
+                session
+                    .grant(kind, scope)
+                    .map_err(|error| error.to_string())?;
+                self.persist()
+            }
+        }
+    }
+
+    fn claim_model_request(&mut self, id: u64) -> Result<(Commit, ModelRequest), String> {
+        match self {
+            Self::Volatile { world, options } => world
+                .claim_model_request(id, options)
+                .map_err(|error| error.to_string()),
+            Self::Image { session, .. } => {
+                let result = session
+                    .claim_model_request(id)
+                    .map_err(|error| error.to_string())?;
+                self.persist()?;
+                Ok(result)
+            }
+        }
+    }
+
+    fn complete_model_request(&mut self, completion: ModelCompletion) -> Result<Commit, String> {
+        match self {
+            Self::Volatile { world, options } => world
+                .complete_model_request(completion, options)
+                .map_err(|error| error.to_string()),
+            Self::Image { session, .. } => {
+                let commit = session
+                    .complete_model_request(completion)
+                    .map_err(|error| error.to_string())?;
+                self.persist()?;
+                Ok(commit)
+            }
+        }
+    }
+
+    fn rollback(&mut self) -> Result<Option<u64>, String> {
+        match self {
+            Self::Volatile { world, .. } => Ok(world.rollback()),
+            Self::Image { .. } => Err(
+                "an image is an append-only log of committed inputs; rollback is not recorded there"
+                    .into(),
+            ),
+        }
+    }
+
+    fn restore_snapshot(&mut self, snapshot: &Snapshot) -> Result<u64, String> {
+        match self {
+            Self::Volatile { world, .. } => world
+                .restore_snapshot(snapshot)
+                .map_err(|error| error.to_string()),
+            Self::Image { .. } => Err(
+                "an image is an append-only log of committed inputs; restore is not recorded there"
+                    .into(),
+            ),
+        }
+    }
+
+    /// Atomically replace the image file with the current log. The in-memory
+    /// world has already advanced; a failed save is reported and retried on
+    /// the next commit against the same expected root, so a concurrent writer
+    /// is detected rather than silently overwritten.
+    fn persist(&mut self) -> Result<(), String> {
+        let Self::Image {
+            session,
+            store,
+            saved,
+        } = self
+        else {
+            return Ok(());
+        };
+        let root = store
+            .save(session.image(), *saved)
+            .map_err(|error| format!("image not saved to {}: {error}", store.path().display()))?;
+        *saved = Some(root);
+        Ok(())
+    }
+}
+
+/// A verified proposal waiting for an explicit promotion decision.
+struct PendingProposal {
+    path: PathBuf,
+    proposal: Proposal,
+    evidence: Evidence,
+}
+
+/// Read a proposal file. Ordinary lines are Agel source. `;effect NAME`
+/// declares an effect and `;test EXPR => EXPECTED` adds an executable test
+/// whose expected value is evaluated in an empty world.
+fn read_proposal(world: &World, path: &Path, effects: &[String]) -> Result<Proposal, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let mut source = String::new();
+    let mut proposal_effects = effects.to_vec();
+    let mut tests = Vec::new();
+    for line in text.lines() {
+        if let Some(effect) = line.strip_prefix(";effect ") {
+            proposal_effects.push(effect.trim().to_owned());
+        } else if let Some(test) = line.strip_prefix(";test ") {
+            let (expression, expected) = test
+                .split_once("=>")
+                .ok_or_else(|| format!("test line needs `EXPR => EXPECTED`: {line}"))?;
+            let expected = World::default()
+                .evaluate(expected.trim())
+                .map_err(|error| format!("invalid expected value {:?}: {error}", expected.trim()))?
+                .values
+                .pop()
+                .unwrap_or(Value::Nil);
+            tests.push(TestCase::new(expression.trim(), expected));
+        } else {
+            source.push_str(line);
+            source.push('\n');
+        }
+    }
+    let mut proposal = Proposal::new(world, source);
+    for effect in proposal_effects {
+        proposal = proposal.declares(effect);
+    }
+    for test in tests {
+        proposal = proposal.tests(test);
+    }
+    Ok(proposal)
+}
+
 fn main() -> io::Result<()> {
     let Some(config) = CliConfig::from_args(std::env::args().skip(1))
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?
@@ -100,18 +343,20 @@ fn main() -> io::Result<()> {
         print_usage();
         return Ok(());
     };
-    let mut world = World::default();
-    let mut options = EvaluationOptions::default();
+    let (mut runtime, restored) = match &config.image {
+        Some(path) => Runtime::open_image(path).map_err(io::Error::other)?,
+        None => (Runtime::volatile(), false),
+    };
     let mut providers = ProviderRegistry::default();
-    let installed_modules = if config.stdlib {
-        let commit = agel_stdlib::install(&mut world, &options).map_err(|error| {
+    let installed_modules = if config.stdlib && !restored {
+        let commit = runtime.evaluate(agel_stdlib::SOURCE).map_err(|error| {
             io::Error::other(format!("cannot install standard library: {error}"))
         })?;
         commit
             .values
             .into_iter()
             .filter_map(|value| match value {
-                agel_core::Value::Module(name) => Some(name),
+                Value::Module(name) => Some(name),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -130,11 +375,9 @@ fn main() -> io::Result<()> {
             provider = provider.with_max_budget_usd(amount);
         }
         providers.register(provider);
-        options.capabilities.push(
-            world
-                .issue_capability("model/infer", "claude")
-                .expect("fresh world has capability ids"),
-        );
+        runtime
+            .grant("model/infer", "claude")
+            .map_err(io::Error::other)?;
     }
     if config.codex {
         let mut provider = CodexProvider::new(&config.codex_bin, limits);
@@ -142,20 +385,35 @@ fn main() -> io::Result<()> {
             provider = provider.with_model(model);
         }
         providers.register(provider);
-        options.capabilities.push(
-            world
-                .issue_capability("model/infer", "codex")
-                .expect("fresh world has capability ids"),
-        );
+        runtime
+            .grant("model/infer", "codex")
+            .map_err(io::Error::other)?;
     }
     let stdin = io::stdin();
     let mut line = String::new();
     let mut source = String::new();
     let mut last_steps = 0;
     let mut snapshots = BTreeMap::<String, Snapshot>::new();
+    let mut pending = None::<PendingProposal>;
 
-    println!("Agel agentic runtime — world revision {}", world.revision());
-    if config.stdlib {
+    println!(
+        "Agel agentic runtime — world revision {}",
+        runtime.world().revision()
+    );
+    if let (Some(path), Some(image)) = (&config.image, runtime.image()) {
+        println!(
+            "Portable image {}: {} committed inputs, root {}{}",
+            path.display(),
+            image.len(),
+            image.digest(),
+            if restored {
+                " (reconstructed by replay)"
+            } else {
+                " (new)"
+            }
+        );
+    }
+    if config.stdlib && !restored {
         println!(
             "Standard library installed: {}",
             installed_modules.join(", ")
@@ -173,7 +431,7 @@ fn main() -> io::Result<()> {
 
     loop {
         if source.is_empty() {
-            print!("agel[{}]> ", world.revision());
+            print!("agel[{}]> ", runtime.world().revision());
         } else {
             print!("       ... ");
         }
@@ -189,20 +447,23 @@ fn main() -> io::Result<()> {
             match command.next().expect("a command starts with ':'") {
                 ":quit" | ":q" => break,
                 ":help" => print_help(),
-                ":revision" => println!("revision {}", world.revision()),
+                ":revision" => println!("revision {}", runtime.world().revision()),
                 ":stats" => println!(
                     "revision {}, last transaction {} steps",
-                    world.revision(),
+                    runtime.world().revision(),
                     last_steps
                 ),
-                ":budget" => println!(
-                    "fuel={}, call-depth={}, collection={}, source-bytes={}, parse-depth={}",
-                    options.budget.fuel,
-                    options.budget.max_call_depth,
-                    options.budget.max_collection_len,
-                    options.budget.max_source_bytes,
-                    options.budget.max_parse_depth
-                ),
+                ":budget" => {
+                    let budget = &runtime.options().budget;
+                    println!(
+                        "fuel={}, call-depth={}, collection={}, source-bytes={}, parse-depth={}",
+                        budget.fuel,
+                        budget.max_call_depth,
+                        budget.max_collection_len,
+                        budget.max_source_bytes,
+                        budget.max_parse_depth
+                    )
+                }
                 ":providers" => {
                     let names = providers.names().collect::<Vec<_>>();
                     if names.is_empty() {
@@ -224,7 +485,7 @@ fn main() -> io::Result<()> {
                     }
                 }
                 ":requests" => {
-                    for request in world.pending_model_requests() {
+                    for request in runtime.world().pending_model_requests() {
                         println!(
                             "#{} {} agent:{} -> agent:{} ({} prompt bytes)",
                             request.id,
@@ -234,20 +495,21 @@ fn main() -> io::Result<()> {
                             request.prompt.len()
                         );
                     }
-                    for request in world.dispatching_model_requests() {
+                    for request in runtime.world().dispatching_model_requests() {
                         println!(
                             "#{} {} agent:{} -> agent:{} (dispatching/in-doubt)",
                             request.id, request.provider, request.requester, request.reply_to
                         );
                     }
                 }
-                ":dispatch" => dispatch_pending(&mut world, &providers, &options),
-                ":rollback" => match world.rollback() {
-                    Some(revision) => println!("restored revision {revision}"),
-                    None => println!("no retained revision to restore"),
+                ":dispatch" => dispatch_pending(&mut runtime, &providers),
+                ":rollback" => match runtime.rollback() {
+                    Ok(Some(revision)) => println!("restored revision {revision}"),
+                    Ok(None) => println!("no retained revision to restore"),
+                    Err(error) => eprintln!("cannot roll back: {error}"),
                 },
                 ":events" => {
-                    for event in world.events() {
+                    for event in runtime.world().events() {
                         println!(
                             "#{} {} agent:{} {}",
                             event.sequence,
@@ -259,7 +521,7 @@ fn main() -> io::Result<()> {
                 }
                 ":snapshot" => match command.next() {
                     Some(name) if command.next().is_none() => {
-                        let snapshot = world.snapshot();
+                        let snapshot = runtime.world().snapshot();
                         println!(
                             "saved {name} at revision {} digest {:016x}",
                             snapshot.revision(),
@@ -271,7 +533,7 @@ fn main() -> io::Result<()> {
                 },
                 ":restore" => match command.next() {
                     Some(name) if command.next().is_none() => match snapshots.get(name) {
-                        Some(snapshot) => match world.restore_snapshot(snapshot) {
+                        Some(snapshot) => match runtime.restore_snapshot(snapshot) {
                             Ok(revision) => println!("restored {name} as revision {revision}"),
                             Err(error) => eprintln!("cannot restore {name}: {error}"),
                         },
@@ -288,6 +550,70 @@ fn main() -> io::Result<()> {
                         );
                     }
                 }
+                ":image" => match (&config.image, runtime.image()) {
+                    (Some(path), Some(image)) => println!(
+                        "{}: {} committed inputs, root {}, budget fuel {}",
+                        path.display(),
+                        image.len(),
+                        image.digest(),
+                        image.budget().fuel
+                    ),
+                    _ => {
+                        println!("no portable image; start with --image PATH to persist this world")
+                    }
+                },
+                ":propose" => match command.next() {
+                    Some(path) => {
+                        let effects = command.map(str::to_owned).collect::<Vec<_>>();
+                        pending = None;
+                        match read_proposal(runtime.world(), Path::new(path), &effects) {
+                            Ok(proposal) => match Verifier::verify(runtime.world(), &proposal) {
+                                Ok(evidence) => {
+                                    print_evidence(&proposal, &evidence);
+                                    println!("enter :promote to adopt it or :discard to drop it");
+                                    pending = Some(PendingProposal {
+                                        path: path.into(),
+                                        proposal,
+                                        evidence,
+                                    });
+                                }
+                                Err(error) => eprintln!("proposal rejected: {error}"),
+                            },
+                            Err(error) => eprintln!("{error}"),
+                        }
+                    }
+                    None => eprintln!("usage: :propose FILE [EFFECT ...]"),
+                },
+                ":proposal" => match &pending {
+                    Some(pending) => {
+                        println!("{}", pending.path.display());
+                        print_evidence(&pending.proposal, &pending.evidence);
+                    }
+                    None => println!("no verified proposal is pending"),
+                },
+                ":promote" => match pending.take() {
+                    Some(candidate) => {
+                        match promote(&mut runtime, &candidate.proposal, &candidate.evidence) {
+                            Ok(commit) => {
+                                last_steps = commit.steps_used;
+                                println!(
+                                    "promoted {} as revision {}",
+                                    candidate.path.display(),
+                                    commit.revision
+                                );
+                            }
+                            Err(error) => eprintln!("promotion refused: {error}"),
+                        }
+                    }
+                    None => eprintln!("nothing to promote; verify a proposal with :propose FILE"),
+                },
+                ":discard" => {
+                    if pending.take().is_some() {
+                        println!("proposal discarded; the live world is unchanged");
+                    } else {
+                        println!("no verified proposal is pending");
+                    }
+                }
                 unknown => eprintln!("unknown command: {unknown}"),
             }
             continue;
@@ -299,11 +625,14 @@ fn main() -> io::Result<()> {
             _ => {}
         }
 
-        match world.evaluate_with(&source, &options) {
+        match runtime.evaluate(&source) {
             Ok(commit) => {
                 last_steps = commit.steps_used;
                 for value in commit.values {
                     println!("{value}");
+                }
+                if pending.take().is_some() {
+                    println!("pending proposal dropped: its base revision is no longer live");
                 }
             }
             Err(error) => eprintln!("{error} (transaction aborted)"),
@@ -314,8 +643,49 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn dispatch_pending(world: &mut World, providers: &ProviderRegistry, options: &EvaluationOptions) {
-    let requests = world.pending_model_requests();
+/// Promote a verified proposal through the runtime, so that in image mode the
+/// promoted source is recorded like any other committed input. The evidence
+/// binding is rechecked against the live world immediately before submission.
+fn promote(
+    runtime: &mut Runtime,
+    proposal: &Proposal,
+    evidence: &Evidence,
+) -> Result<Commit, String> {
+    Verifier::check_promotion(runtime.world(), proposal, evidence)
+        .map_err(|error| error.to_string())?;
+    runtime.evaluate(&proposal.source)
+}
+
+fn print_evidence(proposal: &Proposal, evidence: &Evidence) {
+    println!(
+        "proposal {} on base revision {}",
+        evidence.proposal_digest, proposal.base_revision
+    );
+    println!(
+        "  declared effects: {}",
+        join_or_none(proposal.declared_effects.iter())
+    );
+    println!(
+        "  inferred effects: {}",
+        join_or_none(evidence.inferred_effects.iter())
+    );
+    println!(
+        "  {} tests passed in a zero-authority canary; candidate digest {}",
+        evidence.tests_passed, evidence.candidate_digest
+    );
+}
+
+fn join_or_none<'a>(values: impl Iterator<Item = &'a String>) -> String {
+    let joined = values.cloned().collect::<Vec<_>>().join(", ");
+    if joined.is_empty() {
+        "none".into()
+    } else {
+        joined
+    }
+}
+
+fn dispatch_pending(runtime: &mut Runtime, providers: &ProviderRegistry) {
+    let requests = runtime.world().pending_model_requests();
     if requests.is_empty() {
         println!("no pending model requests");
         return;
@@ -328,7 +698,7 @@ fn dispatch_pending(world: &mut World, providers: &ProviderRegistry, options: &E
             );
             continue;
         }
-        let request = match world.claim_model_request(request.id, options) {
+        let request = match runtime.claim_model_request(request.id) {
             Ok((_, request)) => request,
             Err(error) => {
                 eprintln!("could not claim request #{}: {error}", request.id);
@@ -349,14 +719,11 @@ fn dispatch_pending(world: &mut World, providers: &ProviderRegistry, options: &E
                 provider_failure(error)
             }
         };
-        if let Err(error) = world.complete_model_request(
-            ModelCompletion {
-                request_id: request.id,
-                effect_key: request.effect_key,
-                outcome,
-            },
-            options,
-        ) {
+        if let Err(error) = runtime.complete_model_request(ModelCompletion {
+            request_id: request.id,
+            effect_key: request.effect_key,
+            outcome,
+        }) {
             eprintln!("could not commit request #{} result: {error}", request.id);
         }
     }
@@ -372,7 +739,7 @@ fn is_incomplete(error: &ReadError) -> bool {
 
 fn print_help() {
     println!(":revision  show the current committed revision");
-    println!(":rollback  restore the preceding retained revision");
+    println!(":rollback  restore the preceding retained revision (volatile worlds only)");
     println!(":stats     show revision and last transaction fuel use");
     println!(":budget    show default deterministic resource limits");
     println!(":events    show the agent event log");
@@ -381,14 +748,23 @@ fn print_help() {
     println!(":requests  show committed model requests awaiting dispatch");
     println!(":dispatch  explicitly invoke enabled providers for pending requests");
     println!(":snapshot NAME  save an in-memory world snapshot");
-    println!(":restore NAME   restore a snapshot as a new revision");
+    println!(":restore NAME   restore a snapshot as a new revision (volatile worlds only)");
     println!(":snapshots      list saved snapshots");
+    println!(":image          show the portable image this world is persisted to");
+    println!(":propose FILE [EFFECT ...]  verify a proposal file in a zero-authority canary");
+    println!(":proposal       show the pending verified proposal and its evidence");
+    println!(":promote        atomically commit the pending verified proposal");
+    println!(":discard        drop the pending proposal without changing the world");
     println!(":quit      exit the REPL");
     println!("Balanced multi-line forms commit as one transaction.");
+    println!(
+        "Proposal files are Agel source plus `;effect NAME` and `;test EXPR => EXPECTED` lines."
+    );
 }
 
 fn print_usage() {
-    println!("Usage: agel-cli [MODEL OPTIONS]");
+    println!("Usage: agel-cli [OPTIONS]");
+    println!("  --image PATH                 persist every committed input to a portable image");
     println!("  --enable-claude              enable restricted Claude Code dispatch");
     println!("  --enable-codex               enable read-only Codex dispatch");
     println!("  --no-stdlib                  start with only the postcard-sized core");
@@ -405,7 +781,6 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agel_core::ModelRequest;
     use agel_model::{Provider, ProviderError};
 
     struct FakeProvider;
@@ -419,6 +794,23 @@ mod tests {
             Ok(format!("fake answer to: {}", request.prompt))
         }
     }
+
+    fn temporary_path(name: &str) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("agel-cli-{}-{}", std::process::id(), name));
+        std::fs::create_dir_all(&directory).unwrap();
+        directory.join("world.image")
+    }
+
+    const MODEL_AGENT: &str = "(def cap (request-capability 'model/infer \"claude\"))
+         (def behavior
+           (fn (self heap message)
+             (if (= (car message) 'ask)
+                 (begin (model-request 'claude (car (cdr message)) self) heap)
+                 (car (cdr (cdr (cdr message)))))))
+         (def agent (spawn \"model-agent\" behavior nil nil nil 'stop 0 (list cap)))
+         (send agent '(ask \"hello\"))
+         (run)";
 
     #[test]
     fn only_recoverable_reader_errors_request_more_input() {
@@ -434,32 +826,15 @@ mod tests {
 
     #[test]
     fn dispatch_commits_fake_provider_output_for_an_agent() {
-        let mut world = World::default();
-        let capability = world.issue_capability("model/infer", "claude").unwrap();
-        let options = EvaluationOptions {
-            capabilities: vec![capability],
-            ..EvaluationOptions::default()
-        };
-        world
-            .evaluate_with(
-                "(def cap (request-capability 'model/infer \"claude\"))
-                 (def behavior
-                   (fn (self heap message)
-                     (if (= (car message) 'ask)
-                         (begin (model-request 'claude (car (cdr message)) self) heap)
-                         (car (cdr (cdr (cdr message)))))))
-                 (def agent (spawn \"model-agent\" behavior nil nil nil 'stop 0 (list cap)))
-                 (send agent '(ask \"hello\"))
-                 (run)",
-                &options,
-            )
-            .unwrap();
+        let mut runtime = Runtime::volatile();
+        runtime.grant("model/infer", "claude").unwrap();
+        runtime.evaluate(MODEL_AGENT).unwrap();
         let mut providers = ProviderRegistry::default();
         providers.register(FakeProvider);
-        dispatch_pending(&mut world, &providers, &options);
-        world.evaluate_with("(run)", &options).unwrap();
+        dispatch_pending(&mut runtime, &providers);
+        runtime.evaluate("(run)").unwrap();
         assert_eq!(
-            world
+            runtime
                 .evaluate("(get (agent-info agent) 'heap)")
                 .unwrap()
                 .values[0]
@@ -473,5 +848,139 @@ mod tests {
         let config = CliConfig::from_args(Vec::new()).unwrap().unwrap();
         assert!(!config.claude);
         assert!(!config.codex);
+        assert!(config.image.is_none());
+    }
+
+    #[test]
+    fn image_mode_persists_commits_grants_and_model_results_across_restarts() {
+        let path = temporary_path("persist");
+        let _ = std::fs::remove_file(&path);
+        {
+            let (mut runtime, restored) = Runtime::open_image(&path).unwrap();
+            assert!(!restored);
+            runtime.grant("model/infer", "claude").unwrap();
+            runtime.evaluate("(def answer (+ 20 22))").unwrap();
+            runtime.evaluate(MODEL_AGENT).unwrap();
+            let mut providers = ProviderRegistry::default();
+            providers.register(FakeProvider);
+            dispatch_pending(&mut runtime, &providers);
+            runtime.evaluate("(run)").unwrap();
+            assert!(runtime.rollback().is_err());
+            let snapshot = runtime.world().snapshot();
+            assert!(runtime.restore_snapshot(&snapshot).is_err());
+            assert_eq!(runtime.image().unwrap().len(), 6);
+        }
+        let (runtime, restored) = Runtime::open_image(&path).unwrap();
+        assert!(restored);
+        assert_eq!(runtime.world().binding("answer"), Some(&Value::Int(42)));
+        // The provider was never re-invoked: the recorded completion replays.
+        assert_eq!(
+            runtime
+                .world()
+                .binding("agent")
+                .and_then(|value| match value {
+                    Value::Agent(id) => runtime.world().agent_name(*id).map(str::to_owned),
+                    _ => None,
+                })
+                .as_deref(),
+            Some("model-agent")
+        );
+        let mut runtime = runtime;
+        assert_eq!(
+            runtime
+                .evaluate("(get (agent-info agent) 'heap)")
+                .unwrap()
+                .values[0]
+                .to_string(),
+            "\"fake answer to: hello\""
+        );
+        assert_eq!(runtime.image().unwrap().len(), 7);
+        assert!(ImageStore::new(&path).load().unwrap().is_some());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn proposals_are_verified_in_a_canary_and_promoted_atomically() {
+        let directory = temporary_path("proposal");
+        let directory = directory.parent().unwrap().to_path_buf();
+        let proposal_path = directory.join("upgrade.agel");
+        let mut runtime = Runtime::volatile();
+        runtime
+            .evaluate("(def transform (fn (x) (+ x 1)))")
+            .unwrap();
+
+        std::fs::write(
+            &proposal_path,
+            ";test (transform 9) => 10\n(def transform (fn (x) (/ x 0)))\n",
+        )
+        .unwrap();
+        let broken = read_proposal(runtime.world(), &proposal_path, &[]).unwrap();
+        assert_eq!(broken.tests.len(), 1);
+        assert!(Verifier::verify(runtime.world(), &broken).is_err());
+        assert_eq!(
+            runtime.evaluate("(transform 9)").unwrap().values[0],
+            Value::Int(10)
+        );
+
+        std::fs::write(
+            &proposal_path,
+            ";test (transform 9) => 10\n;test (transform -1) => 0\n;test (transform-list '(1)) => '(2)\n\
+             (def transform (fn (x) (+ 1 x)))\n(def transform-list (fn (xs) (list (transform (car xs)))))\n",
+        )
+        .unwrap();
+        let proposal = read_proposal(runtime.world(), &proposal_path, &[]).unwrap();
+        assert_eq!(proposal.tests.len(), 3);
+        let evidence = Verifier::verify(runtime.world(), &proposal).unwrap();
+        assert_eq!(evidence.tests_passed, 3);
+        // An intervening commit invalidates the evidence binding.
+        runtime.evaluate("(def intervening 1)").unwrap();
+        assert!(promote(&mut runtime, &proposal, &evidence).is_err());
+        let proposal = read_proposal(runtime.world(), &proposal_path, &[]).unwrap();
+        let evidence = Verifier::verify(runtime.world(), &proposal).unwrap();
+        let commit = promote(&mut runtime, &proposal, &evidence).unwrap();
+        assert_eq!(commit.values.len(), 2);
+        assert_eq!(
+            runtime.evaluate("(transform-list '(41))").unwrap().values[0],
+            Value::List(vec![Value::Int(42)])
+        );
+
+        std::fs::write(
+            &proposal_path,
+            ";effect model/infer\n(def ask (fn (self) (model-request 'claude \"x\" self)))\n",
+        )
+        .unwrap();
+        let effectful = read_proposal(runtime.world(), &proposal_path, &[]).unwrap();
+        assert!(effectful.declared_effects.contains("model/infer"));
+        let evidence = Verifier::verify(runtime.world(), &effectful).unwrap();
+        assert!(evidence.inferred_effects.contains("model/infer"));
+        let undeclared = read_proposal(runtime.world(), &proposal_path, &[]).map(|mut p| {
+            p.declared_effects.clear();
+            p
+        });
+        assert!(Verifier::verify(runtime.world(), &undeclared.unwrap()).is_err());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn promotion_in_image_mode_is_recorded_as_a_committed_input() {
+        let path = temporary_path("promotion");
+        let _ = std::fs::remove_file(&path);
+        let proposal_path = path.parent().unwrap().join("upgrade.agel");
+        std::fs::write(
+            &proposal_path,
+            ";test (square 9) => 81\n(def square (fn (x) (* x x)))\n",
+        )
+        .unwrap();
+        {
+            let (mut runtime, _) = Runtime::open_image(&path).unwrap();
+            let proposal = read_proposal(runtime.world(), &proposal_path, &[]).unwrap();
+            let evidence = Verifier::verify(runtime.world(), &proposal).unwrap();
+            promote(&mut runtime, &proposal, &evidence).unwrap();
+            assert_eq!(runtime.image().unwrap().len(), 1);
+        }
+        let (runtime, restored) = Runtime::open_image(&path).unwrap();
+        assert!(restored);
+        assert!(runtime.world().binding("square").is_some());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
