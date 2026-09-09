@@ -239,10 +239,14 @@ the BIOS stage reads before loading anything, and sectors 290 through 543 are
 a second kernel slot. `scripts/stage-kernel.py IMAGE KERNEL.bin` writes a
 candidate into whichever slot is not trusted and proposes it; the stage
 charges every boot of an unverified candidate before it runs and loads the
-trusted slot after three. The first successful evaluation after a candidate
-boot verifies it, `:kernel-promote` makes it trusted, and `:kernel-fault`
-gives it up. `:recovery` and `:kernel` show both records on the desktop.
-Details and the disk layout are in [`native-boot.md`](native-boot.md).
+trusted slot after three. Since v0.2.32 the stage loads a candidate only after
+the running kernel has admitted it by verifying its Ed25519 signature against
+the key the kernel was built with; an unsigned or wrongly signed candidate is
+refused and cleared at the next boot. The first successful evaluation after a
+candidate boot verifies it, `:kernel-promote` makes it trusted, and
+`:kernel-fault` gives it up. `:recovery` and `:kernel` show both records on
+the desktop. Details and the disk layout are in
+[`native-boot.md`](native-boot.md).
 
 ## v0.1.6 isolation boundary
 

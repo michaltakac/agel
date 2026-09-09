@@ -281,16 +281,21 @@ Each rung must be runnable and differentially testable against the rung below:
    charges each boot of an unverified candidate before the candidate runs,
    and loads the trusted slot after three boots that never reached a healthy
    state; the running kernel verifies itself by reaching one, and promotion
-   names the slot retained for rollback. Staging is a host tool and nothing
-   on the disk is signed.
-46. **Live system:** signed kernel images and workspace generations, so that
-   the boot stage and the recovery plane refuse what the operator's key did
-   not sign, and the same selection on the machines without a BIOS stage.
-47. **POSIX personality:** a Rust C library and the filesystem and process
+   names the slot retained for rollback. Staging is a host tool.
+46. **Signed admission (started at v0.2.32):** a staged candidate kernel is
+   loaded only after the running kernel has hashed the slot and verified an
+   Ed25519 signature against the public key it was built with, using the
+   project's own dependency-free implementation compiled `no_std`. The
+   trusted slot, the selector's own bytes and workspace generations are
+   still unsigned, and there is no root of trust before the BIOS stage.
+47. **Live system:** signed workspace generations, the trusted slot checked
+   before it runs, and the same selection on the machines without a BIOS
+   stage.
+48. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-48. **Local inference:** model inference in its own domain, over quantized
+49. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

@@ -22,7 +22,7 @@ use crate::native_session::{
     ReplayFailure,
 };
 #[cfg(target_arch = "x86_64")]
-use crate::recovery::{slot_name, BootPlan, KernelRecovery, LiveRecovery};
+use crate::recovery::{slot_name, Admission, BootPlan, KernelRecovery, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind, ServiceWriter};
 use crate::workspace::{Workspace, MAX_CELL_NAME};
 use crate::world::{shared, PAYLOAD_BYTES};
@@ -101,6 +101,35 @@ pub fn run() -> ! {
         &mut driver,
         b"Evaluator: unprivileged domain; output: restartable console domain; storage: unprivileged disk driver domain; source workspace: dual-slot disk image. Type :help.",
     );
+    #[cfg(target_arch = "x86_64")]
+    if let (Some(kernel), Some(storage)) = (kernel.as_mut(), storage.as_mut()) {
+        match kernel.admit(storage) {
+            Ok(Admission::Nothing) => {}
+            Ok(Admission::Admitted(slot)) => {
+                let mut out = ServiceWriter::new(&mut driver);
+                let _ = writeln!(
+                    out,
+                    "candidate kernel slot {} admitted: signature verified against the kernel's trust key; next boot tries it",
+                    slot_name(slot)
+                );
+                out.flush();
+            }
+            Ok(Admission::Refused(slot, reason)) => {
+                let mut out = ServiceWriter::new(&mut driver);
+                let _ = writeln!(
+                    out,
+                    "candidate kernel slot {} refused: {reason}; slot cleared",
+                    slot_name(slot)
+                );
+                out.flush();
+            }
+            Err(reason) => driver_text_error(
+                &mut driver,
+                b"candidate kernel could not be checked: ",
+                reason.as_bytes(),
+            ),
+        }
+    }
     #[cfg(target_arch = "x86_64")]
     kernel_status(&mut driver, kernel.as_ref(), true);
 
@@ -731,6 +760,12 @@ fn kernel_status(driver: &mut ServiceDomain, kernel: Option<&KernelRecovery>, bo
     );
     if selector.candidate == crate::workspace::NO_CANDIDATE {
         let _ = write!(out, "; no candidate");
+    } else if !selector.admitted {
+        let _ = write!(
+            out,
+            "; candidate slot {} (staged, not admitted)",
+            slot_name(selector.candidate)
+        );
     } else {
         let _ = write!(
             out,

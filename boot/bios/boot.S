@@ -42,10 +42,12 @@ _start:
 graphics_done:
 
     # Kernel slot selection. Sector 289 is the selector: "AGKS", version,
-    # trusted slot, candidate slot (0xff none), boot attempts, verified flag.
-    # An unverified candidate is charged one attempt here, before any of it
-    # runs, and after three it is skipped for the trusted slot. The chosen
-    # slot is left at 0x6fec behind a marker at 0x6fe8 for the kernel.
+    # trusted slot, candidate slot (0xff none), boot attempts, verified flag,
+    # admitted flag. A candidate the running kernel has not admitted (its
+    # signature checked) is never loaded. An unverified candidate is charged
+    # one attempt here, before any of it runs, and after three it is skipped
+    # for the trusted slot. The chosen slot is left at 0x6fec behind a marker
+    # at 0x6fe8 for the kernel.
     movw $disk_packet, %si
     movb boot_drive, %dl
     movb $0x42, %ah
@@ -57,6 +59,8 @@ graphics_done:
     movb 0x6005, %bl
     movb 0x6006, %al
     cmpb $0xff, %al
+    je select_done
+    cmpb $0, 0x6009
     je select_done
     cmpb $0, 0x6008
     jne select_candidate

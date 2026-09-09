@@ -33,15 +33,23 @@ const RECOVERY_MAGIC: &[u8; 8] = b"AGELRC1\0";
 #[cfg(target_arch = "x86_64")]
 const RECOVERY_VERSION: u16 = 1;
 /// The kernel slot selector follows the recovery record. The BIOS stage reads
-/// and updates it before any kernel runs, so it is nine plain bytes that
-/// 16-bit code can parse without a checksum: magic, version, trusted slot,
-/// candidate slot (`NO_CANDIDATE` for none), boot attempts, verified flag.
+/// and updates it before any kernel runs, so its first ten bytes are plain
+/// values 16-bit code can parse without a checksum: magic, version, trusted
+/// slot, candidate slot (`NO_CANDIDATE` for none), boot attempts, verified
+/// flag, admitted flag. Bytes 12-15 hold the candidate's signed length and
+/// bytes 64-127 its Ed25519 signature over the SHA-512 of those bytes; the
+/// stage never reads them, the running kernel checks them before admitting.
 #[cfg(target_arch = "x86_64")]
 pub const KERNEL_SELECTOR_SECTOR: u32 = 289;
 #[cfg(target_arch = "x86_64")]
 const KERNEL_SELECTOR_MAGIC: &[u8; 4] = b"AGKS";
 #[cfg(target_arch = "x86_64")]
-const KERNEL_SELECTOR_VERSION: u8 = 1;
+const KERNEL_SELECTOR_VERSION: u8 = 2;
+/// First sector of each kernel slot and the sectors a slot holds.
+#[cfg(target_arch = "x86_64")]
+pub const KERNEL_SLOT_BASE: [u32; 2] = [1, 290];
+#[cfg(target_arch = "x86_64")]
+pub const KERNEL_SLOT_SECTORS: u32 = 254;
 #[cfg(target_arch = "x86_64")]
 pub const NO_CANDIDATE: u8 = 0xff;
 #[cfg(target_arch = "x86_64")]
@@ -346,6 +354,12 @@ pub struct KernelSelector {
     pub candidate: u8,
     pub attempts: u8,
     pub verified: bool,
+    /// The running kernel checked the candidate's signature; until then the
+    /// boot stage does not load it.
+    pub admitted: bool,
+    /// Bytes of the candidate slot the signature covers.
+    pub length: u32,
+    pub signature: [u8; 64],
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -357,7 +371,20 @@ impl KernelSelector {
         candidate: NO_CANDIDATE,
         attempts: 0,
         verified: false,
+        admitted: false,
+        length: 0,
+        signature: [0; 64],
     };
+
+    /// Forget the candidate entirely.
+    pub fn clear_candidate(&mut self) {
+        self.candidate = NO_CANDIDATE;
+        self.attempts = 0;
+        self.verified = false;
+        self.admitted = false;
+        self.length = 0;
+        self.signature = [0; 64];
+    }
 }
 
 /// Read the kernel slot selector. Anything the boot stage would not act on
@@ -374,12 +401,35 @@ pub fn load_selector(storage: &mut ServiceDomain) -> Result<KernelSelector, &'st
     if trusted > 1 || (candidate > 1 && candidate != NO_CANDIDATE) {
         return Ok(KernelSelector::DEFAULT);
     }
+    let mut signature = [0_u8; 64];
+    signature.copy_from_slice(&sector[64..128]);
     Ok(KernelSelector {
         trusted,
         candidate,
         attempts: sector[7],
         verified: sector[8] != 0,
+        admitted: sector[9] != 0,
+        length: u32::from_le_bytes([sector[12], sector[13], sector[14], sector[15]]),
+        signature,
     })
+}
+
+/// One sector of a kernel slot, for hashing a candidate before admission.
+#[cfg(target_arch = "x86_64")]
+pub fn read_slot_sector(
+    storage: &mut ServiceDomain,
+    slot: u8,
+    index: u32,
+    sector: &mut [u8; 512],
+) -> Result<(), &'static str> {
+    if index >= KERNEL_SLOT_SECTORS {
+        return Err("sector is outside the kernel slot");
+    }
+    read_sector(
+        storage,
+        KERNEL_SLOT_BASE[usize::from(slot & 1)] + index,
+        sector,
+    )
 }
 
 /// Write and flush the selector, then read it back.
@@ -395,6 +445,9 @@ pub fn save_selector(
     sector[6] = selector.candidate;
     sector[7] = selector.attempts;
     sector[8] = u8::from(selector.verified);
+    sector[9] = u8::from(selector.admitted);
+    sector[12..16].copy_from_slice(&selector.length.to_le_bytes());
+    sector[64..128].copy_from_slice(&selector.signature);
     write_sector(storage, KERNEL_SELECTOR_SECTOR, &sector)?;
     flush(storage)?;
     if load_selector(storage)? != *selector {

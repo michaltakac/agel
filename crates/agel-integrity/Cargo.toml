@@ -5,5 +5,12 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["std"]
+# Without `std` the crate is `no_std`: SHA-512 and Ed25519 verification and
+# signing remain; hex encoding, SHA-256 digests and `std::error::Error` need
+# an allocator and are compiled out. The native kernel links it this way.
+std = []
+
 [lints]
 workspace = true

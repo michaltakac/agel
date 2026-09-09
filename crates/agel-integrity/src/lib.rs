@@ -1,11 +1,18 @@
 //! Minimal dependency-free integrity primitives used at Agel trust boundaries.
+//!
+//! With the default `std` feature this is the hosted crate. Without it the
+//! crate is `no_std`: SHA-512 and Ed25519 stay, and everything that needs an
+//! allocator (hex text, SHA-256 digests) is compiled out, which is how the
+//! native kernel links it to admit signed candidate kernels.
+#![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod ed25519;
 
-pub use ed25519::{
-    decode_hex, encode_hex, sha512, Signature, SignatureError, SigningKey, VerifyingKey,
-};
-use std::fmt;
+#[cfg(feature = "std")]
+use core::fmt;
+#[cfg(feature = "std")]
+pub use ed25519::{decode_hex, encode_hex};
+pub use ed25519::{sha512, Sha512, Signature, SignatureError, SigningKey, VerifyingKey};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Digest([u8; 32]);
@@ -21,6 +28,7 @@ impl Digest {
         &self.0
     }
 
+    #[cfg(feature = "std")]
     pub fn to_hex(self) -> String {
         let mut output = String::with_capacity(64);
         for byte in self.0 {
@@ -30,24 +38,28 @@ impl Digest {
         output
     }
 
+    #[cfg(feature = "std")]
     pub fn from_hex(text: &str) -> Option<Self> {
         let bytes = decode_hex(text.trim()).ok()?;
         bytes.as_slice().try_into().ok().map(Self)
     }
 }
 
+#[cfg(feature = "std")]
 impl fmt::Debug for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_hex())
     }
 }
 
+#[cfg(feature = "std")]
 impl fmt::Display for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_hex())
     }
 }
 
+#[cfg(feature = "std")]
 pub fn sha256(input: &[u8]) -> Digest {
     const INITIAL: [u32; 8] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,

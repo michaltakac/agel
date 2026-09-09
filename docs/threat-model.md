@@ -720,6 +720,34 @@ both are unverified Rust. The reference model is now the oracle rather than
 the thing behind the boundary; nothing checks the oracle except the frozen
 transcript and the hosted comparison.
 
+## v0.2.32
+
+- **A slot anyone can fill:** since v0.2.30 whoever could write the disk could
+  stage a kernel the boot stage would try. A staged candidate now carries a
+  signature over the SHA-512 of its bytes, and the running kernel verifies it
+  against the key it was built with before setting the admitted flag the
+  stage requires. An unsigned candidate, a signature by another key, or a
+  good signature over different bytes is refused and cleared, and CI stages
+  each of the three.
+- **Verification that reads the slot it is verifying:** the candidate is
+  hashed sector by sector through the storage driver domain, so a driver that
+  lies can only make a good candidate fail, never make a bad one pass: the
+  signature is over what the kernel hashed, and the stage loads from the same
+  disk.
+- **Cryptography in the kernel:** the Ed25519 verifier and SHA-512 are the
+  project's own dependency-free code, RFC-vector-tested on the host, compiled
+  `no_std` with no allocator and no `unsafe`; the kernel holds only the public
+  key. Field arithmetic is not constant-time, which matters for signing and
+  not for verifying a public signature.
+
+Not claimed: the trusted slot and the selector's own bytes are unsigned, so a
+disk that lies about slot A still chooses the kernel, and the boot stage runs
+what it loads without checking it; there is no root of trust before the BIOS
+stage. The checked-in key pair is a development key that anyone with the
+repository holds; it demonstrates the mechanism, and an operator who relies on
+it must build with their own public key. Workspace generations and the
+recovery record are still unsigned.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

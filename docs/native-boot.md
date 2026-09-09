@@ -35,16 +35,32 @@ that kernel is what boots, and preserves everything else.
 
 ## Kernel slots
 
-The selector is nine bytes the 16-bit stage parses without a checksum: magic
-`AGKS`, version, trusted slot, candidate slot (`0xff` for none), boot attempts
-and a verified flag. The stage loads the trusted slot unless a candidate is
-present and either verified or still within its budget of three boots; a boot
-of an unverified candidate is counted and flushed to disk before the
-candidate's first instruction runs, so a kernel that halts, faults or never
-reaches the serial console cannot avoid the charge.
+The selector's first ten bytes are what the 16-bit stage parses, without a
+checksum: magic `AGKS`, version, trusted slot, candidate slot (`0xff` for
+none), boot attempts, a verified flag and an admitted flag. The stage loads
+the trusted slot unless a candidate is present, admitted, and either verified
+or still within its budget of three boots; a boot of an unverified candidate
+is counted and flushed to disk before the candidate's first instruction runs,
+so a kernel that halts, faults or never reaches the serial console cannot
+avoid the charge.
+
+Admission is the running kernel's decision, since v0.2.32. The selector also
+carries the candidate's signed length (bytes 12-15) and an Ed25519 signature
+(bytes 64-127) over the SHA-512 of the slot's bytes. On every boot the kernel
+hashes a staged, unadmitted candidate sector by sector through the storage
+driver domain and verifies the signature against the public key it was built
+with, `bootstrap/kernel-signing.pub`. A valid signature sets the admitted
+flag; anything else clears the candidate, and the stage never loads it. The
+key pair in `bootstrap/` is a development key checked into the repository:
+anyone with the repository can sign for kernels built from it, so an operator
+who means it generates their own with
+`cargo run -p agel-integrity --example kernel-sign -- keygen KEY`, puts the
+public half in `bootstrap/kernel-signing.pub`, and rebuilds.
 
 ```sh
-./scripts/stage-kernel.py target/boot/agel-v1.img some-kernel.bin   # candidate into the untrusted slot
+./scripts/stage-kernel.py target/boot/agel-v1.img some-kernel.bin              # signed with bootstrap/kernel-signing.key
+./scripts/stage-kernel.py target/boot/agel-v1.img some-kernel.bin --key KEY    # signed with KEY
+./scripts/stage-kernel.py target/boot/agel-v1.img some-kernel.bin --unsigned   # refused at the next boot
 ./scripts/stage-kernel.py target/boot/agel-v1.img --status
 ```
 
@@ -59,8 +75,11 @@ booted trusted slot B`. `./scripts/test-kernel-rollback.sh` proves all of it,
 including three boots of a kernel that halts at its entry point.
 
 Staging is a host tool because the guest has no compiler for its own kernel.
-The selector and both slots are unsigned; a disk that lies chooses the
-kernel.
+The trusted slot and the selector's own bytes are not signed: a disk that
+lies about slot A chooses the kernel, and nothing checks the kernel before
+the BIOS stage runs it. What the signature settles is that no kernel reaches
+slot B, or replaces a trusted kernel, without the key the running kernel
+trusts.
 
 ## Recovery boundary
 

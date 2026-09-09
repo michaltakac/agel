@@ -9,7 +9,37 @@ fn main() {
     println!("cargo:rerun-if-changed=linker/aarch64.ld");
     println!("cargo:rerun-if-changed=linker/riscv64.ld");
     println!("cargo:rerun-if-changed=../desktop/native-desktop.agel");
+    println!("cargo:rerun-if-changed=../../bootstrap/kernel-signing.pub");
     compile_native_desktop();
+    embed_trust_key();
+}
+
+/// The public key a running kernel checks candidate kernels against, baked
+/// into the image at build time from `bootstrap/kernel-signing.pub`.
+fn embed_trust_key() {
+    let text = fs::read_to_string("../../bootstrap/kernel-signing.pub")
+        .expect("read bootstrap/kernel-signing.pub");
+    let hex: Vec<u8> = text.trim().bytes().collect();
+    assert_eq!(hex.len(), 64, "kernel-signing.pub must be 32 bytes of hex");
+    let digit = |byte: u8| -> u8 {
+        match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => panic!("kernel-signing.pub is not hexadecimal"),
+        }
+    };
+    let bytes: Vec<u8> = (0..32)
+        .map(|index| digit(hex[2 * index]) * 16 + digit(hex[2 * index + 1]))
+        .collect();
+    let mut source = String::from("pub const KERNEL_SIGNING_KEY: [u8; 32] = [");
+    for byte in bytes {
+        source.push_str(&format!("{byte:#04x}, "));
+    }
+    source.push_str("];\n");
+    let path =
+        PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR")).join("kernel-signing-key.rs");
+    fs::write(path, source).expect("write kernel trust key");
 }
 
 fn compile_native_desktop() {

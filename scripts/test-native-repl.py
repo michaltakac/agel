@@ -460,7 +460,26 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     broken_kernel = b"\xf4\xeb\xfd"
 
     def selector() -> dict[str, int]:
-        return stage_kernel.read_selector(image)
+        state = stage_kernel.read_selector(image)
+        return {key: state[key] for key in ("trusted", "candidate", "attempts", "verified", "admitted")}
+
+    good_signature = stage_kernel.sign(good_kernel)
+    broken_signature = stage_kernel.sign(broken_kernel)
+    def admission_boot(slot: str, trusted: str, running: str, revision: int = 0) -> None:
+        """A boot of the trusted kernel that finds a staged candidate."""
+        boot = Harness(image, persistent=True)
+        try:
+            boot.expect_until(b"AGEL_NATIVE_READY")
+            boot.expect_until(
+                f"candidate kernel slot {slot} admitted: signature verified against the kernel's trust key; next boot tries it".encode()
+            )
+            boot.expect_until(
+                f"kernel: running slot {running}; trusted slot {trusted}; candidate slot {slot} (unverified, boots 0)".encode()
+            )
+            boot.expect_until(f"agel-native[{revision}]> ".encode())
+            shutdown(boot)
+        finally:
+            boot.close()
 
     # No selector on disk: slot A, nothing proposed, nothing to promote.
     first = Harness(image, persistent=True)
@@ -474,9 +493,15 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     finally:
         first.close()
 
-    # The same kernel staged as candidate B: charged one boot by the stage,
-    # verified by its first successful evaluation, then promoted.
-    assert stage_kernel.stage(image, good_kernel) == 1
+    # The same kernel staged as candidate B with a good signature: the stage
+    # does not load it until the running kernel has admitted it.
+    assert stage_kernel.stage(image, good_kernel, good_signature) == 1
+    assert selector() == {"trusted": 0, "candidate": 1, "attempts": 0, "verified": 0, "admitted": 0}, selector()
+    admission_boot("B", "A", "A")
+    assert selector() == {"trusted": 0, "candidate": 1, "attempts": 0, "verified": 0, "admitted": 1}, selector()
+
+    # Now the stage loads it, charged one boot; its first successful
+    # evaluation verifies it, then it is promoted.
     second = Harness(image, persistent=True)
     try:
         second.expect_until(b"AGEL_NATIVE_READY")
@@ -500,7 +525,7 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
         shutdown(second)
     finally:
         second.close()
-    assert selector() == {"trusted": 1, "candidate": 0xFF, "attempts": 0, "verified": 0}
+    assert selector() == {"trusted": 1, "candidate": 0xFF, "attempts": 0, "verified": 0, "admitted": 0}, selector()
 
     # The stage now loads slot B by default.
     third = Harness(image, persistent=True)
@@ -512,9 +537,36 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     finally:
         third.close()
 
-    # A kernel that never comes up, staged as candidate A. Three boots reach
-    # nothing; each is charged by the boot stage before the candidate runs.
-    assert stage_kernel.stage(image, broken_kernel) == 0
+    # A candidate without a valid signature is refused by the running kernel
+    # and cleared, so the stage never loads it.
+    assert stage_kernel.stage(image, broken_kernel, bytes(64)) == 0
+    refused = Harness(image, persistent=True)
+    try:
+        refused.expect_until(b"AGEL_NATIVE_READY")
+        refused.expect_until(
+            b"candidate kernel slot A refused: signature does not verify against the kernel's trust key; slot cleared"
+        )
+        refused.expect_until(b"kernel: running slot B; trusted slot B; no candidate")
+        refused.expect_until(b"agel-native[0]> ")
+        shutdown(refused)
+    finally:
+        refused.close()
+    assert selector() == {"trusted": 1, "candidate": 0xFF, "attempts": 0, "verified": 0, "admitted": 0}, selector()
+    # A good signature over the wrong bytes is refused too.
+    assert stage_kernel.stage(image, broken_kernel, good_signature) == 0
+    mismatched = Harness(image, persistent=True)
+    try:
+        mismatched.expect_until(b"candidate kernel slot A refused: signature does not verify")
+        mismatched.expect_until(b"agel-native[0]> ")
+        shutdown(mismatched)
+    finally:
+        mismatched.close()
+
+    # A signed kernel that never comes up, staged as candidate A and admitted.
+    # Three boots reach nothing; each is charged by the boot stage before the
+    # candidate runs.
+    assert stage_kernel.stage(image, broken_kernel, broken_signature) == 0
+    admission_boot("A", "B", "B")
     for attempt in (1, 2, 3):
         hung = Harness(image, persistent=True)
         try:
@@ -526,7 +578,7 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
                 raise RuntimeError("the halted candidate kernel reached the console")
         finally:
             hung.close()
-        assert selector() == {"trusted": 1, "candidate": 0, "attempts": attempt, "verified": 0}, (
+        assert selector() == {"trusted": 1, "candidate": 0, "attempts": attempt, "verified": 0, "admitted": 1}, (
             attempt,
             selector(),
         )
@@ -552,10 +604,12 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
         shutdown(rolled)
     finally:
         rolled.close()
-    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0}
+    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0, "admitted": 1}, selector()
 
-    # A fresh candidate in slot A gets a fresh budget and verifies itself.
-    assert stage_kernel.stage(image, good_kernel) == 0
+    # A fresh signed candidate in slot A is admitted, gets a fresh budget and
+    # verifies itself.
+    assert stage_kernel.stage(image, good_kernel, good_signature) == 0
+    admission_boot("A", "B", "B")
     revived = Harness(image, persistent=True)
     try:
         revived.expect_until(b"AGEL_NATIVE_READY")
@@ -567,7 +621,7 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
         shutdown(revived)
     finally:
         revived.close()
-    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 0, "verified": 1}
+    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 0, "verified": 1, "admitted": 1}, selector()
 
 
 def send_kernel_healthy(

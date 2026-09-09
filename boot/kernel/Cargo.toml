@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 agel-kernel-abi = { path = "../../crates/agel-kernel-abi", default-features = false }
+agel-integrity = { path = "../../crates/agel-integrity", default-features = false }
 
 [features]
 selftest = []

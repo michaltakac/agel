@@ -110,6 +110,11 @@ promise.
   trap gate on all three research kernels and keeps the reference model in
   the supervisor as the live oracle of their isolation self-test. No
   contract, format or language change; the frozen transcript is unchanged.
+  `v0.2.32` signs candidate kernels: the selector becomes version 2 with an
+  admitted flag, a signed length and an Ed25519 signature, the running kernel
+  verifies a staged candidate against `bootstrap/kernel-signing.pub` before the
+  boot stage may load it, and `agel-integrity` gains a `no_std` mode with a
+  streaming SHA-512. Version 1 selectors read as absent.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

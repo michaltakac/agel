@@ -13,9 +13,12 @@
 
 use crate::service::ServiceDomain;
 use crate::workspace::{
-    load_record, load_selector, save_record, save_selector, KernelSelector, RecoveryRecord,
-    NO_CANDIDATE,
+    load_record, load_selector, read_slot_sector, save_record, save_selector, KernelSelector,
+    RecoveryRecord, KERNEL_SLOT_SECTORS, NO_CANDIDATE,
 };
+use agel_integrity::{Sha512, Signature, VerifyingKey};
+
+include!(concat!(env!("OUT_DIR"), "/kernel-signing-key.rs"));
 
 /// Boots a candidate may take without reaching a healthy state before the
 /// trusted generation is booted instead.
@@ -227,6 +230,34 @@ impl KernelRecovery {
         self.booted
     }
 
+    /// Check a staged candidate's signature and either admit it, so the boot
+    /// stage may load it, or clear it. Runs on every boot of any slot; a
+    /// candidate is only ever staged from the host, and only a kernel built
+    /// with the matching public key can let it run.
+    pub fn admit(&mut self, storage: &mut ServiceDomain) -> Result<Admission, &'static str> {
+        let selector = self.selector;
+        if selector.candidate == NO_CANDIDATE || selector.admitted {
+            return Ok(Admission::Nothing);
+        }
+        match verify_slot(
+            storage,
+            selector.candidate,
+            selector.length,
+            &selector.signature,
+        ) {
+            Ok(()) => {
+                self.selector.admitted = true;
+                save_selector(storage, &self.selector)?;
+                Ok(Admission::Admitted(selector.candidate))
+            }
+            Err(reason) => {
+                self.selector.clear_candidate();
+                save_selector(storage, &self.selector)?;
+                Ok(Admission::Refused(selector.candidate, reason))
+            }
+        }
+    }
+
     /// The stage loaded the trusted slot because the candidate exhausted its
     /// budget without a healthy boot.
     pub fn rolled_back(&self) -> bool {
@@ -262,9 +293,7 @@ impl KernelRecovery {
         }
         let previous = self.selector.trusted;
         self.selector.trusted = self.selector.candidate;
-        self.selector.candidate = NO_CANDIDATE;
-        self.selector.attempts = 0;
-        self.selector.verified = false;
+        self.selector.clear_candidate();
         save_selector(storage, &self.selector)?;
         Ok((self.selector.trusted, previous))
     }
@@ -281,4 +310,40 @@ impl KernelRecovery {
         save_selector(storage, &self.selector)?;
         Ok(self.selector.trusted)
     }
+}
+
+/// What checking a staged candidate decided.
+pub enum Admission {
+    /// No candidate, or one already admitted.
+    Nothing,
+    Admitted(u8),
+    Refused(u8, &'static str),
+}
+
+/// Hash the candidate slot sector by sector and verify the staged signature
+/// over that digest against the key this kernel was built with.
+fn verify_slot(
+    storage: &mut ServiceDomain,
+    slot: u8,
+    length: u32,
+    signature: &[u8; 64],
+) -> Result<(), &'static str> {
+    if length == 0 || length > KERNEL_SLOT_SECTORS * 512 {
+        return Err("signed length is outside the slot");
+    }
+    let key = VerifyingKey::from_bytes(KERNEL_SIGNING_KEY)
+        .map_err(|_| "the kernel's trust key is not a valid Ed25519 key")?;
+    let mut hasher = Sha512::new();
+    let mut sector = [0_u8; 512];
+    let mut remaining = length as usize;
+    let mut index = 0;
+    while remaining > 0 {
+        read_slot_sector(storage, slot, index, &mut sector)?;
+        let take = remaining.min(512);
+        hasher.update(&sector[..take]);
+        remaining -= take;
+        index += 1;
+    }
+    key.verify(&hasher.finish(), &Signature::from_bytes(*signature))
+        .map_err(|_| "signature does not verify against the kernel's trust key")
 }

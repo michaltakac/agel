@@ -8,7 +8,7 @@ use crate::arch;
 use crate::console;
 use crate::kprint;
 use crate::native_session::{replay as replay_workspace, request as evaluator_request};
-use crate::recovery::{slot_name, BootPlan, KernelRecovery, LiveRecovery};
+use crate::recovery::{slot_name, Admission, BootPlan, KernelRecovery, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};
@@ -721,6 +721,11 @@ fn report_kernel_slot(kernel: &KernelRecovery) {
     );
     if selector.candidate == crate::workspace::NO_CANDIDATE {
         kprint!("; no candidate\n");
+    } else if !selector.admitted {
+        kprint!(
+            "; candidate slot {} (staged, not admitted)\n",
+            slot_name(selector.candidate)
+        );
     } else {
         kprint!(
             "; candidate slot {} ({}, boots {})\n",
@@ -981,7 +986,10 @@ fn execute_workshop(
         status.push(slot_name(booted).as_bytes());
         status.push(b" TRUSTED ");
         status.push(slot_name(selector.trusted).as_bytes());
-        if selector.candidate != crate::workspace::NO_CANDIDATE {
+        if selector.candidate != crate::workspace::NO_CANDIDATE && !selector.admitted {
+            status.push(b" STAGED ");
+            status.push(slot_name(selector.candidate).as_bytes());
+        } else if selector.candidate != crate::workspace::NO_CANDIDATE {
             status.push(b" CANDIDATE ");
             status.push(slot_name(selector.candidate).as_bytes());
             status.push(b" BOOTS ");
@@ -1295,7 +1303,20 @@ fn interactive(
         }
     };
     let mut kernel = match KernelRecovery::load(&mut storage) {
-        Ok(kernel) => {
+        Ok(mut kernel) => {
+            match kernel.admit(&mut storage) {
+                Ok(Admission::Nothing) => {}
+                Ok(Admission::Admitted(slot)) => kprint!(
+                    "candidate kernel slot {} admitted: signature verified against the kernel's trust key; next boot tries it\n",
+                    slot_name(slot)
+                ),
+                Ok(Admission::Refused(slot, reason)) => kprint!(
+                    "candidate kernel slot {} refused: {}; slot cleared\n",
+                    slot_name(slot),
+                    reason
+                ),
+                Err(reason) => kprint!("candidate kernel could not be checked: {}\n", reason),
+            }
             report_kernel_slot(&kernel);
             Some(kernel)
         }

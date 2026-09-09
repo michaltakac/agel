@@ -6,9 +6,14 @@ version = 4
 name = "agel-boot"
 version = "0.1.7"
 dependencies = [
+ "agel-integrity",
  "agel-kernel-abi",
 ]
 
 [[package]]
+name = "agel-integrity"
+version = "0.2.32"
+
+[[package]]
 name = "agel-kernel-abi"
-version = "0.2.31"
+version = "0.2.32"
