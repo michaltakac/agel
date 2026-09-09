@@ -279,7 +279,9 @@ Each rung must be runnable and differentially testable against the rung below:
    cell evaluated in an isolated world is the explicit oracle, and promotion
    is an operator decision that names what is retained for rollback. The
    record is unsigned. Since v0.2.33 the same plane runs on the `virt`
-   machines over their virtio disks.
+   machines over their virtio disks, and since v0.2.34 a power cut injected
+   at every sector write of a save is proved to leave a whole generation on
+   each.
 45. **A/B kernel images (started at v0.2.30):** on x86-64 the BIOS stage
    selects between two kernel slots from a nine-byte selector on disk,
    charges each boot of an unverified candidate before the candidate runs,

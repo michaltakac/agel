@@ -109,6 +109,11 @@ pub struct ServiceDomain {
     generation: u32,
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     restarts: u32,
+    /// Fault injection for the persistence suite: how many more sector writes
+    /// this machine survives. The write the count lands on is torn, half of
+    /// it reaching the disk, and the machine halts as if power had failed.
+    #[cfg(feature = "isolated-repl")]
+    power_cut: Option<u32>,
 }
 
 impl ServiceDomain {
@@ -125,6 +130,8 @@ impl ServiceDomain {
             generation: 1,
             #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
             restarts: 0,
+            #[cfg(feature = "isolated-repl")]
+            power_cut: None,
         }
     }
 
@@ -187,6 +194,15 @@ impl ServiceDomain {
         Ok(())
     }
 
+    /// Arm a power cut: the `writes`-th sector write from now is torn and
+    /// the machine halts. A test hook, reachable only from the serial
+    /// workshop's `:cut-power`, so that every write in a save can be the one
+    /// the power fails on.
+    #[cfg(feature = "isolated-repl")]
+    pub fn cut_power_after(&mut self, writes: u32) {
+        self.power_cut = Some(writes.max(1));
+    }
+
     /// Ask the storage driver to write `sector` to sector `lba`.
     #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
     pub fn write_sector(
@@ -196,6 +212,24 @@ impl ServiceDomain {
         sector: &[u8; crate::world::BLOCK_BYTES],
     ) -> Result<(), ServiceError> {
         self.check(handle)?;
+        #[cfg(feature = "isolated-repl")]
+        if let Some(remaining) = self.power_cut {
+            if remaining <= 1 {
+                // The tear: the first half of the sector reaches the disk and
+                // the second half keeps what was there before. Then nothing.
+                let mut torn = [0_u8; crate::world::BLOCK_BYTES];
+                let _ = self.read_sector(handle, lba, &mut torn);
+                torn[..256].copy_from_slice(&sector[..256]);
+                for (offset, byte) in torn.iter().enumerate() {
+                    self.domain.core().write_block(offset, *byte);
+                }
+                let _ = self.block_request(handle, shared::COMMAND_WRITE_SECTOR, lba);
+                let _ = self.block_request(handle, shared::COMMAND_FLUSH_DISK, 0);
+                crate::kprint!("power cut injected: sector {} torn; halting\n", lba);
+                arch::exit(true);
+            }
+            self.power_cut = Some(remaining - 1);
+        }
         for (offset, byte) in sector.iter().enumerate() {
             self.domain.core().write_block(offset, *byte);
         }

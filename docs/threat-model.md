@@ -781,6 +781,36 @@ does not do. Only modern (version 2) transports are driven. Nothing on the
 virtio disk is signed, and the kernel image on these machines is an ELF QEMU
 loads, with no slot selection.
 
+## v0.2.34
+
+- **A crash the tests chose:** the persistence suite had modelled one torn
+  write, by hand, at the one place its author thought of. The supervisor's
+  storage service can now be told to tear the N-th sector write and halt,
+  and the suite sweeps N over every write of a save on every machine. The
+  model is a real tear: the first half of the sector lands and the second
+  half keeps its old bytes, then nothing further reaches the disk.
+- **The write after "committed":** the sweep found that the recovery record
+  is written after the generation's header is published and reported. A cut
+  there leaves a whole new generation and a record whose checksum fails, and
+  a record that fails its checksum reads as empty: nothing trusted, the
+  newest generation booted. That is the safe direction, and it is now
+  written down rather than discovered.
+- **Injection as an attack surface:** `:cut-power` is a serial-workshop
+  command in the supervisor; a world cannot reach it, and the graphics build
+  does not compile it.
+
+- **A wait that was too short for a real disk:** the storage domain's tick
+  budget was half a second, and the shared CI runner's disk took longer than
+  that to flush, so v0.2.33's own CI run failed on AArch64 with a timeout. The
+  budget is three seconds now on every machine; it is still a bound, and a
+  device that never answers exhausts it and is reported.
+
+Not claimed: the cut models a tear and an immediate stop. It does not model
+a write the device acknowledged and then lost, because QEMU writes through
+to the image; a drive with a volatile cache that lies about flushes is
+outside what this suite can show. The sweep covers workspace saves; kernel
+staging and the selector are host-side writes.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

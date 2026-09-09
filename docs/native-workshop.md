@@ -114,6 +114,7 @@ definition without rebooting the VM.
 :kernel-status     show which kernel slot booted, which is trusted, which is proposed
 :kernel-promote    make a kernel slot verified by a healthy boot the trusted one
 :kernel-fault      give the candidate kernel up; the next boot loads the trusted slot
+:cut-power N       fault injection: tear the N-th sector write from now and halt
 :shutdown          leave QEMU when the debug-exit device is present
 ```
 
@@ -220,6 +221,20 @@ carried by the storage driver domain; no language world can reach it.
   until an operator verifies the candidate or saves a new one.
 - `:recovery-status` reports the record and whether this boot is running the
   trusted generation after a rollback.
+
+Since v0.2.34 `:cut-power N` arms a power failure: the N-th sector write from
+then on is torn, its first half reaching the disk and its second half keeping
+what was there, and the machine halts before anything else happens.
+`./scripts/test-power-cut.sh [aarch64|riscv64]` sweeps N from 1 until a save
+completes without reaching the cut, rebooting after every cut and requiring
+the workspace to be a whole generation, the old or the new one, with its
+cell and its generation number agreeing. A save is eighteen writes: the
+invalidated header, fifteen payload sectors, the published header and the
+recovery record, each followed by the flushes the codec issues; the sweep
+cuts every one on every machine. A cut on the record itself, which is
+written after the generation is published, leaves the generation and a
+record that reads as empty, so the next boot trusts nothing and boots the
+newest generation.
 
 `./scripts/test-native-persistence.sh` proves the whole cycle on a temporary
 disk: a failing then passing `health` cell, promotion, a new candidate, three

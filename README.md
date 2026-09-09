@@ -4,7 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.33: the durable workspace and the recovery plane exist on all three
+The current repository is **v0.2.34: a power cut at every one of the eighteen sector writes of a
+workspace save, on every machine, leaves a whole generation, proved by a fault-injection command
+that tears the write and halts; the durable workspace and the recovery plane exist on all three
 research machines, with a virtio block device driven from an unprivileged domain on AArch64 and
 RISC-V, so the same edit, save, reboot, verify, promote and watchdog-rollback cycle is proved on
 each; a staged candidate kernel is loaded only after the running
@@ -539,6 +541,7 @@ kernel-contract transcript, and the isolation suite with:
 ./scripts/test-native-repl.sh aarch64    # the same session on the other machines
 ./scripts/test-native-repl.sh riscv64
 ./scripts/test-native-persistence.sh     # save, reboot, reject, recover (also: aarch64, riscv64)
+./scripts/test-power-cut.sh              # cut the power at every write of a save (also: aarch64, riscv64)
 ./scripts/test-kernel-rollback.sh        # A/B kernel slots: hung candidate rolled back by the boot stage
 ./scripts/test-kernel-contract.sh
 ./scripts/test-isolation.sh              # x86-64, AArch64 and RISC-V

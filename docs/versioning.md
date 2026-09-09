@@ -120,6 +120,9 @@ promise.
   dual-slot workspace and the disk-backed recovery plane exist on all three
   research machines and the persistence suite runs on each. The workspace and
   record formats are unchanged; the `virt` supervisor stack grows to 512 KiB.
+  `v0.2.34` adds power-cut injection: `:cut-power N` in the serial workshop
+  tears the N-th sector write and halts, and `scripts/test-power-cut.sh`
+  sweeps every write of a save on all three machines. No format change.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

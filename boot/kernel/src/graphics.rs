@@ -1292,8 +1292,15 @@ fn interactive(
         .unwrap_or_else(|reason| failed(reason));
     let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
     let mut storage = machine
-        .create_storage_world(storage_entry, 50)
-        .map(|domain| ServiceDomain::new(domain, ServiceKind::Storage, storage_entry, 50))
+        .create_storage_world(storage_entry, crate::world::STORAGE_TICKS)
+        .map(|domain| {
+            ServiceDomain::new(
+                domain,
+                ServiceKind::Storage,
+                storage_entry,
+                crate::world::STORAGE_TICKS,
+            )
+        })
         .unwrap_or_else(|reason| failed(reason));
     let mut recovery = match LiveRecovery::load(&mut storage) {
         Ok(recovery) => Some(recovery),

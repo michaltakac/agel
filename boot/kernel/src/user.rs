@@ -1018,7 +1018,11 @@ mod virtio {
     pub const DATA: u64 = 0x400;
     pub const STATUS_BYTE: u64 = 0x600;
 
-    pub const POLL_LIMIT: usize = 10_000_000;
+    /// Polls of the used ring before a request is reported timed out. Sized
+    /// to expire inside the driver's tick budget on an emulated machine, so a
+    /// flush that takes a slow host disk most of a second still completes and
+    /// a device that never answers is reported rather than the driver lost.
+    pub const POLL_LIMIT: usize = 200_000_000;
 }
 
 #[cfg(not(target_arch = "x86_64"))]

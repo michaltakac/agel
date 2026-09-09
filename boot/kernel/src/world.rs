@@ -356,6 +356,13 @@ impl DomainCore {
     }
 }
 
+/// Tick budget of a storage driver entry. A disk request is a wait on a
+/// device, and on an emulated machine with a slow host disk a flush can take
+/// most of a second; the driver's own poll bound is set to expire inside this
+/// budget, so a device that never answers costs one request's wait and a
+/// clean timeout status rather than the driver.
+pub const STORAGE_TICKS: u32 = 300;
+
 /// Byte offset in the shared page where console payload bytes begin.
 ///
 /// The handshake words occupy the start of the page; bytes a domain is asked to

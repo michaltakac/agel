@@ -98,7 +98,9 @@ Build and enter the Agel REPL with `./scripts/run-qemu.sh`; recovery operations
 are colon commands such as `:recovery-status`, `:verify`, and `:fault`.
 `./scripts/test-boot.sh`
 rebuilds the disk twice, requires byte equality, boots it, and checks a serial
-success token. `./scripts/test-monitor.sh` boots a deterministic monitor scenario
+success token. `./scripts/test-power-cut.sh [aarch64|riscv64]` cuts the
+power at every sector write of a workspace save and requires each reboot to
+find a whole generation. `./scripts/test-monitor.sh` boots a deterministic monitor scenario
 and asserts denial, verification, promotion, and rollback.
 
 ## Three machines, one contract
@@ -146,7 +148,8 @@ into the driver domain, and tells the driver the frame's physical address
 through the shared page. The driver acknowledges the device, negotiates the
 modern feature bit and flush, places one four-entry queue in its DMA frame, and
 moves single sectors through it by polling the used ring, bounded like every
-other wait in a driver. It holds no policy and reaches nothing else; a world
+other wait in a driver: the domain's three-second tick budget is the hard
+bound, and the driver's own poll count is sized to report a timeout inside it. It holds no policy and reaches nothing else; a world
 that was not granted the device page faults on it, and the isolation suite
 asserts that on both machines. QEMU exposes legacy transports unless started
 with `-global virtio-mmio.force-legacy=false`; the scripts pass it, and a

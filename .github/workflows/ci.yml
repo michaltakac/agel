@@ -44,6 +44,9 @@ jobs:
       - run: ./scripts/test-native-persistence.sh
       - run: ./scripts/test-native-persistence.sh aarch64
       - run: ./scripts/test-native-persistence.sh riscv64
+      - run: ./scripts/test-power-cut.sh
+      - run: ./scripts/test-power-cut.sh aarch64
+      - run: ./scripts/test-power-cut.sh riscv64
       - run: ./scripts/test-kernel-rollback.sh
       - run: ./scripts/test-graphics.sh
       - run: ./scripts/test-live-desktop.sh

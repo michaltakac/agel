@@ -742,8 +742,10 @@ is a capability rather than a convention, and CI asserts that on all three.
   not signed yet.
 - Prepare/commit/idempotency protocols with effect servers.
 - Crash injection at every persistence transition. → the native integration
-  test corrupts the newest committed payload and requires previous-slot replay;
-  interruption at every individual write remains future work.
+  test corrupts the newest committed payload and requires previous-slot
+  replay, and since v0.2.34 the workshop's `:cut-power` tears the N-th sector
+  write and halts, so CI cuts every one of a save's eighteen writes on all
+  three machines and requires each reboot to find a whole generation.
 
 ### Phase 5 — live replacement — **started (v0.2.29)**
 

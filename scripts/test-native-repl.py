@@ -171,6 +171,51 @@ class Harness:
         frame = f"\r\n{expected}\r\nagel-native[{revision}]> ".encode("ascii")
         self.expect_exact(frame)
 
+    def query(self, line: str) -> tuple[str, int]:
+        """Send a line and return the reply text and the revision the next
+        prompt shows, for answers the test cannot predict exactly."""
+        self.send_bytes(line)
+        assert self.process.stdin is not None
+        self.process.stdin.write(b"\n")
+        self.process.stdin.flush()
+        self.expect_exact(b"\r\n")
+        collected = bytearray()
+        marker = b"\r\nagel-native["
+        while not collected.endswith(marker):
+            byte = self.output.get(timeout=self.remaining(8.0))
+            if byte is None:
+                raise RuntimeError(f"QEMU exited while answering {line!r}")
+            collected.extend(byte)
+        reply = bytes(collected[: -len(marker)]).decode("ascii")
+        digits = bytearray()
+        while True:
+            byte = self.output.get(timeout=self.remaining(8.0))
+            if byte is None:
+                raise RuntimeError("QEMU exited inside a prompt")
+            if byte == b"]":
+                break
+            digits.extend(byte)
+        self.expect_exact(b"> ")
+        return reply, int(digits.decode("ascii"))
+
+    def expect_any(self, options: list[bytes], timeout: float = 8.0) -> int:
+        """Wait until one of `options` has been seen; return its index."""
+        deadline = time.monotonic() + self.remaining(timeout)
+        window = bytearray()
+        longest = max(len(option) for option in options)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"waiting for one of {options!r}")
+            byte = self.output.get(timeout=remaining)
+            if byte is None:
+                raise RuntimeError(f"QEMU exited while waiting for one of {options!r}")
+            window.extend(byte)
+            del window[:-longest]
+            for index, option in enumerate(options):
+                if window.endswith(option):
+                    return index
+
     def send_bytes(self, text: str) -> None:
         assert self.process.stdin is not None
         for byte in text.encode("ascii"):
@@ -652,6 +697,99 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     assert selector() == {"trusted": 1, "candidate": 0, "attempts": 0, "verified": 1, "admitted": 1}, selector()
 
 
+def power_cut_test(image: str, architecture: str, disk: str) -> None:
+    """Cut the power at every sector write of a save, one boot per write, and
+    require each reboot to land on a whole generation: the old one or the
+    new one, never a torn one. The sweep ends at the first save the cut
+    never reaches, which proves the cut was tried past the last write."""
+    seed = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        seed.expect_until(b"AGEL_NATIVE_READY")
+        seed.expect_until(b"workspace: no persisted image; starting empty")
+        seed.expect_until(b"agel-native[0]> ")
+        edit_cell(seed, "boot", "(def persisted-answer 42)", 0)
+        seed.send(
+            ":save",
+            "workspace generation 1 committed: 1 cells; evaluator rebuilt from cells; previous slot retained",
+            1,
+        )
+        shutdown(seed)
+    finally:
+        seed.close()
+
+    committed_value = 42
+    committed_generation = 1
+    attempted: tuple[int, int] | None = None
+    cuts = 0
+    write = 1
+    while True:
+        boot = Harness(image, persistent=True, architecture=architecture, disk=disk)
+        try:
+            boot.expect_until(b"AGEL_NATIVE_READY")
+            boot.expect_until(b"workspace generation ")
+            boot.expect_until(b"agel-native[")
+            boot.expect_until(b"]> ")
+            # The first evaluation after a boot may also verify a candidate
+            # generation and say so on a second line; the value is the first.
+            value = boot.query("persisted-answer")[0].split("\r\n")[0]
+            status, _ = boot.query(":workspace")
+            allowed = {committed_value: committed_generation}
+            if attempted is not None:
+                allowed[attempted[0]] = attempted[1]
+            if int(value) not in allowed:
+                raise RuntimeError(
+                    f"after a cut at write {write - 1} the workspace held {value}, not one of {sorted(allowed)}"
+                )
+            generation = allowed[int(value)]
+            if not status.startswith(f"workspace generation {generation}, 1 cells, clean"):
+                raise RuntimeError(f"generation and cell disagree: {status!r} for value {value}")
+            committed_value, committed_generation = int(value), generation
+            recovery, _ = boot.query(":recovery-status")
+            if not recovery.startswith("recovery: "):
+                raise RuntimeError(f"recovery record unreadable: {recovery!r}")
+            armed, revision = boot.query(f":cut-power {write}")
+            if armed != f"power cut armed: sector write {write} will be torn and the machine halted":
+                raise RuntimeError(armed)
+            new_value = 100 + write
+            edit_cell(boot, "boot", f"(def persisted-answer {new_value})", revision)
+            boot.send_bytes(":save")
+            assert boot.process.stdin is not None
+            boot.process.stdin.write(b"\n")
+            boot.process.stdin.flush()
+            outcome = boot.expect_any([b"power cut injected: sector ", b" committed: 1 cells"])
+            if outcome == 0:
+                boot.expect_until(b"torn; halting")
+                exit_code = boot.process.wait(timeout=boot.remaining(8.0))
+                if exit_code != EXPECTED_EXIT[architecture]:
+                    raise RuntimeError(f"QEMU exit status {exit_code} after the cut")
+                attempted = (new_value, committed_generation + 1)
+                cuts += 1
+                write += 1
+                continue
+            # The generation is published. The recovery record is written after
+            # that, so the cut may still land on it: then the new generation
+            # is the only acceptable one and the record reads as empty.
+            outcome = boot.expect_any([b"power cut injected: sector ", b"]> "])
+            if outcome == 0:
+                boot.expect_until(b"torn; halting")
+                exit_code = boot.process.wait(timeout=boot.remaining(8.0))
+                if exit_code != EXPECTED_EXIT[architecture]:
+                    raise RuntimeError(f"QEMU exit status {exit_code} after the cut")
+                committed_value, committed_generation = new_value, committed_generation + 1
+                attempted = None
+                cuts += 1
+                write += 1
+                continue
+            # The cut was never reached: the sweep covered every write of a save.
+            shutdown(boot)
+            break
+        finally:
+            boot.close()
+    if cuts < 18:
+        raise RuntimeError(f"only {cuts} writes were cut; a save has more")
+    print(f"  {cuts} sector writes cut, one boot each; every reboot found a whole generation")
+
+
 def send_kernel_healthy(
     harness: Harness, line: str, expected: str, slot: str, revision: int
 ) -> None:
@@ -740,10 +878,23 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--persistence | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
+    if len(arguments) == 2 and arguments[1] == "--power-cut":
+        if disk is None:
+            print("a power cut needs a disk; pass --disk", file=sys.stderr)
+            return 2
+        try:
+            power_cut_test(arguments[0], architecture, disk)
+        except Exception as error:
+            print(f"power cut test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print(f"Agel native workspace [{architecture}]: a power cut at every sector write of a save leaves a whole generation [ok]")
+        return 0
     if len(arguments) == 2:
         if arguments[1] != "--persistence":
             print("unknown test mode", file=sys.stderr)

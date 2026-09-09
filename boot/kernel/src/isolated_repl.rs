@@ -43,12 +43,12 @@ pub fn run() -> ! {
     // workspace and says so rather than pretending to persist.
     let mut storage = {
         let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
-        match machine.create_storage_world(storage_entry, 50) {
+        match machine.create_storage_world(storage_entry, crate::world::STORAGE_TICKS) {
             Ok(domain) => Some(ServiceDomain::new(
                 domain,
                 ServiceKind::Storage,
                 storage_entry,
-                50,
+                crate::world::STORAGE_TICKS,
             )),
             Err(reason) => {
                 driver_text_error(&mut driver, b"storage: ", reason.as_bytes());
@@ -186,7 +186,7 @@ pub fn run() -> ! {
         match source {
             b":help" => driver_line(
                 &mut driver,
-                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :shutdown",
+                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :cut-power N :shutdown",
             ),
             b":revision" => {
                 let mut out = ServiceWriter::new(&mut driver);
@@ -373,6 +373,24 @@ pub fn run() -> ! {
                 }
             }
             b":shutdown" => arch::exit(true),
+            _ if source.starts_with(b":cut-power ") => {
+                let count = command_argument(source, b":cut-power ")
+                    .and_then(|text| core::str::from_utf8(text).ok())
+                    .and_then(|text| text.parse::<u32>().ok());
+                match (count, storage.as_mut()) {
+                    (Some(count), Some(storage)) if count > 0 => {
+                        storage.cut_power_after(count);
+                        let mut out = ServiceWriter::new(&mut driver);
+                        let _ = writeln!(
+                            out,
+                            "power cut armed: sector write {count} will be torn and the machine halted"
+                        );
+                        out.flush();
+                    }
+                    (Some(_), None) => driver_line(&mut driver, b"denied: no storage device"),
+                    _ => driver_line(&mut driver, b"usage: :cut-power N (N >= 1)"),
+                }
+            }
             b"" => {}
             _ => {
                 if let Some(name) = command_argument(source, b":edit ") {

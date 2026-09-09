@@ -345,8 +345,9 @@ fn run_storage_driver(machine: &mut arch::Machine) {
     if !arch::user_text_range().contains(&entry) {
         failed("the storage driver entry point is not in user-executable text");
     }
-    let mut storage = match machine.create_storage_world(entry, 50) {
-        Ok(domain) => ServiceDomain::new(domain, ServiceKind::Storage, entry, 50),
+    let ticks = crate::world::STORAGE_TICKS;
+    let mut storage = match machine.create_storage_world(entry, ticks) {
+        Ok(domain) => ServiceDomain::new(domain, ServiceKind::Storage, entry, ticks),
         Err(reason) => failed(reason),
     };
     let mut sector = [0_u8; crate::world::BLOCK_BYTES];
