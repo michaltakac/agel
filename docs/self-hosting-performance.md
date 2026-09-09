@@ -1,5 +1,9 @@
 # Self-hosting without permanent interpreter overhead
 
+Current follow-up: [v0.2.19](native-code-upgrades.md) runs agent-proposed source
+composition and lowering in native Agel, followed by explicit host-authorized
+preview, code promotion and checked rollback without reinterpreting the proposal.
+
 Current follow-up: [v0.2.18](tail-collection.md) bounds dead-storage retention in
 eligible tail loops using metered compacting collection. Its benchmark measures
 retained arena slots separately from cumulative quotas and wall time.

@@ -1,5 +1,9 @@
 # Tail calls and compiled Agel agents — v0.2.17
 
+Update: [v0.2.19](native-code-upgrades.md) adds native source composition and
+revision-bound code upgrades to this isolated scheduler. It does not yet bridge
+these compiled actors into the hosted World or graphical OS.
+
 Update: [v0.2.18](tail-collection.md) reclaims dead arena storage at outermost
 tail boundaries. The no-reclamation description below is historical; nested
 calls and live captures still limit when and how much can be collected.

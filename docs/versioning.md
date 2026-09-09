@@ -52,6 +52,9 @@ promise.
   explicit peer permissions and revision-checked atomic batch commits.
   `v0.2.18` adds metered compacting collection at outermost tail boundaries,
   preserving cumulative quotas while reclaiming dead invocation-arena storage.
+  `v0.2.19` adds native Agel source composition and agent-proposed compiled
+  behavior upgrades with owner/revision-bound previews, code-only promotion,
+  and checked rollback against current state. This remains a hosted JIT library.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

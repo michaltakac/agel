@@ -2,6 +2,7 @@
 (module agel/native-agents
   (import agel/native)
   (import agel/native-agent-kernel)
+  (import agel/native-system-builder)
   (export native-empty native-spawn native-send native-system-source)
   (def require
     (fn (ok) (if ok #t (signal 'native/agents "invalid native actor construction"))))
@@ -26,20 +27,4 @@
           'pending (+ 1 (get world 'pending))))))
   (def native-system-source
     (fn (sources)
-      (let ((collect
-              (fn (self names)
-                (if (= (count names) 0) nil
-                    (let ((source (get sources (car names))))
-                      (begin
-                        (require (= (type-of (car names)) 'symbol))
-                        ; Compile each behavior alone: no free world/turns names
-                        ; can acquire ambient authority during later composition.
-                        (native-compile source)
-                        (require (= (count (car (cdr source))) 2))
-                        (cons (list 'quote (car names))
-                          (cons source (self self (cdr names))))))))))
-        (begin
-          (require (= (type-of sources) 'map))
-          (list 'fn '(world turns)
-            (list native-agent-kernel-source
-              (cons 'dict (collect collect (keys sources))) 'world 'turns)))))))
+      (native-system-builder native-compile native-agent-kernel-source sources))))

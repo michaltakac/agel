@@ -5,6 +5,7 @@ use agel_core::{Commit, EvaluationOptions, TransactionError, World};
 /// Closed Agel frontend, also used as input to its own native compilation.
 pub const NATIVE_COMPILER: &str = include_str!("../native-compiler.agel");
 pub const NATIVE_AGENT_KERNEL: &str = include_str!("../native-agent-kernel.agel");
+pub const NATIVE_SYSTEM_BUILDER: &str = include_str!("../native-system-builder.agel");
 
 pub const SOURCE: &str = concat!(
     include_str!("../stdlib.agel"),
@@ -17,6 +18,11 @@ pub const SOURCE: &str = concat!(
     include_str!("../native-agent-kernel.agel"),
     ") (def native-agent-kernel-source '",
     include_str!("../native-agent-kernel.agel"),
+    "))\n",
+    "(module agel/native-system-builder (export native-system-builder native-system-builder-source) (def native-system-builder ",
+    include_str!("../native-system-builder.agel"),
+    ") (def native-system-builder-source '",
+    include_str!("../native-system-builder.agel"),
     "))\n",
     include_str!("../native-agents.agel")
 );

@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.18: a self-compiling Agel frontend with validated
+The current repository is **v0.2.19: agent-proposed native behavior upgrades with
+revision-bound preview and code-only rollback, a self-compiling Agel frontend with validated
 tail calls and safe-boundary heap reclamation, an Agel-written compiled mailbox scheduler, native lexical closures,
 immutable collections and metered calls, plus the compact
 integer machine-code JIT, alongside reusable execution plans analyzed in Agel,
@@ -58,6 +59,18 @@ transaction, peer-permission and resource boundaries. This scheduler is not
 yet integrated into hosted `World` actors or the freestanding OS.
 See [tail-boundary collection](docs/tail-collection.md) for reclamation guarantees,
 remaining limitations, and paired retained-memory measurements.
+
+Try a compiled designer agent that proposes new code, previews it, and changes
+another actor's behavior without losing queued messages:
+
+```sh
+cargo run --release -q -p agel-jit --example live_upgrade
+```
+
+The counter switches from `+1` to `+10`, then back to `+1` without rewinding its
+state. Source composition and compiler lowering run in native Agel after
+bootstrap. Promotion remains an explicit host decision; a passing preview is
+not a proof. See [native code upgrades](docs/native-code-upgrades.md).
 
 It provides:
 

@@ -1,0 +1,19 @@
+; Closed source composer. Compiler and kernel are explicit inputs, not globals.
+(fn (compiler kernel sources)
+  (let ((require
+          (fn (ok) (if ok #t (signal 'native/agents "invalid native actor construction")))))
+    (let ((collect
+            (fn (self names)
+              (if (= (count names) 0) nil
+                  (let ((source (get sources (car names))))
+                    (begin
+                      (require (= (type-of (car names)) 'symbol))
+                      ; Independent compilation prevents ambient world capture.
+                      (compiler source)
+                      (require (= (count (car (cdr source))) 2))
+                      (cons (list 'quote (car names))
+                        (cons source (self self (cdr names))))))))))
+      (begin
+        (require (= (type-of sources) 'map))
+        (list 'fn '(world turns)
+          (list kernel (cons 'dict (collect collect (keys sources))) 'world 'turns))))))

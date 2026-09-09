@@ -1,0 +1,21 @@
+; A compiled designer proposes a new counter behavior as source data.
+(import agel/native-agents)
+(def evolution-sources
+  (dict
+    'designer '(fn (heap message)
+                 (dict 'state
+                   (list 'fn '(heap message)
+                     (list 'dict (list 'quote 'state) (list '+ 'heap message)
+                       (list 'quote 'outbox) nil))
+                   'outbox nil))
+    'counter '(fn (heap message) (dict 'state (+ heap 1) 'outbox nil))))
+(def evolution-world
+  (native-send
+    (native-send
+      (native-send
+        (native-spawn
+          (native-spawn (native-empty 8) 'designer 'designer nil nil)
+          'counter 'counter 0 nil)
+        'designer 10)
+      'counter 'tick)
+    'counter 'tick))

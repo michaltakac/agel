@@ -271,6 +271,7 @@ impl Program {
 
 /// Native code plus immutable constant pool. No raw code or heap handle escapes.
 pub struct Native {
+    ir: Value,
     _memory: ExecutableMemory,
     code: Vec<*const u8>,
     arities: Vec<usize>,
@@ -366,8 +367,14 @@ impl Native {
             code,
             arities: program.functions.iter().map(|f| f.arity).collect(),
             constants: program.constants,
+            ir: ir.clone(),
             options,
         })
+    }
+
+    /// Exact validated IR used to compile this immutable executable.
+    pub fn ir(&self) -> &Value {
+        &self.ir
     }
 
     pub fn invoke(&self, arguments: &[Value], limits: Limits) -> Result<Outcome, Fault> {
