@@ -1,5 +1,9 @@
 # Self-hosting without permanent interpreter overhead
 
+Current follow-up: [v0.2.20](native-reader.md) removes the seed reader from the
+post-bootstrap source-text pipeline. Native Agel reads and rebuilds its reader
+and compiler, then reads, compiles and runs a fresh program.
+
 Current follow-up: [v0.2.19](native-code-upgrades.md) runs agent-proposed source
 composition and lowering in native Agel, followed by explicit host-authorized
 preview, code promotion and checked rollback without reinterpreting the proposal.

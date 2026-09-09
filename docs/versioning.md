@@ -55,6 +55,9 @@ promise.
   `v0.2.19` adds native Agel source composition and agent-proposed compiled
   behavior upgrades with owner/revision-bound previews, code-only promotion,
   and checked rollback against current state. This remains a hosted JIT library.
+  `v0.2.20` adds an Agel-written native reader, self-reading/rebuilding reader
+  and compiler checks, and a source-text workshop independent of the seed
+  evaluator after bootstrap. Five bounded UTF-8 mechanisms support the reader.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -12,8 +12,31 @@ use crate::ExecutableMemory;
 mod collection;
 
 const PRIMITIVES: &[&str] = &[
-    "+", "-", "*", "/", "=", "<", "list", "cons", "car", "cdr", "dict", "get", "assoc", "dissoc",
-    "keys", "count", "has-key?", "type-of", "apply", "signal",
+    "+",
+    "-",
+    "*",
+    "/",
+    "=",
+    "<",
+    "list",
+    "cons",
+    "car",
+    "cdr",
+    "dict",
+    "get",
+    "assoc",
+    "dissoc",
+    "keys",
+    "count",
+    "has-key?",
+    "type-of",
+    "apply",
+    "signal",
+    "text-bytes",
+    "text-byte",
+    "text-slice",
+    "text-concat",
+    "text-symbol",
 ];
 const MAX_DEPTH: usize = 128;
 const MAX_IR: usize = 16_384;
@@ -1002,7 +1025,9 @@ impl Run<'_> {
         let arity = match op {
             "=" | "<" | "cons" | "get" | "has-key?" | "dissoc" | "apply" => Some(2),
             "car" | "cdr" | "keys" | "count" | "type-of" => Some(1),
-            "assoc" => Some(3),
+            "text-bytes" | "text-symbol" => Some(1),
+            "text-byte" | "text-concat" => Some(2),
+            "assoc" | "text-slice" => Some(3),
             _ => None,
         };
         if arity.is_some_and(|n| args.len() != n) {
@@ -1118,6 +1143,61 @@ impl Run<'_> {
                     _ => return Err(Fault::Type),
                 };
                 self.alloc(Datum::Int(i64::try_from(n).map_err(|_| Fault::Overflow)?))
+            }
+            "text-bytes" | "text-byte" | "text-slice" | "text-concat" | "text-symbol" => {
+                let text = |run: &Self, id| match run.datum(id)? {
+                    Datum::String(s) => Ok(s.len()),
+                    _ => Err(Fault::Type),
+                };
+                let size = text(self, args[0])?;
+                if op == "text-bytes" {
+                    return self.alloc(Datum::Int(size as i64));
+                }
+                let offset =
+                    |run: &Self, id| usize::try_from(run.integer(id)?).map_err(|_| Fault::Type);
+                if op == "text-byte" {
+                    let index = offset(self, args[1])?;
+                    let Datum::String(s) = self.datum(args[0])? else {
+                        return Err(Fault::Type);
+                    };
+                    let byte = *s.as_bytes().get(index).ok_or(Fault::Type)?;
+                    return self.alloc(Datum::Int(i64::from(byte)));
+                }
+                let (start, end) = if op == "text-slice" {
+                    (offset(self, args[1])?, offset(self, args[2])?)
+                } else {
+                    (0, size)
+                };
+                let Datum::String(s) = self.datum(args[0])? else {
+                    return Err(Fault::Type);
+                };
+                let length = s.get(start..end).ok_or(Fault::Type)?.len();
+                let suffix = if op == "text-concat" {
+                    text(self, args[1])?
+                } else {
+                    0
+                };
+                self.reserve(0, length.checked_add(suffix).ok_or(Fault::Heap)?)?;
+                let Datum::String(s) = self.datum(args[0])? else {
+                    return Err(Fault::Internal);
+                };
+                let mut result = String::with_capacity(length + suffix);
+                result.push_str(&s[start..end]);
+                if op == "text-concat" {
+                    let Datum::String(t) = self.datum(args[1])? else {
+                        return Err(Fault::Internal);
+                    };
+                    result.push_str(t);
+                }
+                self.values.push(if op == "text-symbol" {
+                    Datum::Symbol(result)
+                } else {
+                    Datum::String(result)
+                });
+                self.peak_arena_slots = self
+                    .peak_arena_slots
+                    .max(self.values.len() + self.frames.len());
+                Ok(self.values.len())
             }
             "type-of" => {
                 let kind = match self.datum(args[0])? {

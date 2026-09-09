@@ -1,0 +1,90 @@
+; Closed reader: byte offsets, UTF-8 text, inert syntax data. No eval/read primitive.
+; Explicit limits supplement runtime fuel, allocation and call-depth budgets.
+(fn (text max-bytes max-depth)
+  (let ((fail (fn () (signal 'reader/syntax "invalid or over-limit source")))
+        (size (text-bytes text))
+        (space (fn (b) (if (= b 32) #t (if (= b 9) #t
+                          (if (= b 10) #t (if (= b 12) #t (= b 13)))))))
+        (reverse (fn (self xs out)
+                   (if (= xs nil) out (self self (cdr xs) (cons (car xs) out))))))
+    (if (< max-bytes 0) (fail)
+      (if (< max-depth 0) (fail)
+        (if (< max-bytes size) (fail)
+          (let ((skip (fn (self i comment)
+                        (if (= i size) i
+                          (let ((b (text-byte text i)))
+                            (if comment (self self (+ i 1) (if (= b 10) #f #t))
+                              (if (= b 59) (self self (+ i 1) #t)
+                                (if (space b) (self self (+ i 1) #f) i)))))))
+                (end-atom (fn (self i)
+                            (if (= i size) i
+                              (let ((b (text-byte text i)))
+                                (if (space b) i (if (= b 40) i (if (= b 41) i
+                                  (if (= b 59) i (self self (+ i 1)))))))))))
+            (let ((atom (fn (start end)
+                          (let ((token (text-slice text start end)))
+                            (if (= token "nil") nil
+                              (if (= token "#t") #t
+                                (if (= token "#f") #f
+                                  (let ((first (text-byte text start)))
+                                    (let ((negative (= first 45))
+                                          (i (if (= first 45) (+ start 1)
+                                               (if (= first 43) (+ start 1) start))))
+                                      (let ((digits
+                                              (fn (self i acc)
+                                                (if (= i end) acc
+                                                  (let ((b (text-byte text i)))
+                                                    (if (< b 48) nil (if (< 57 b) nil
+                                                      (if (< acc -922337203685477580) nil
+                                                        (if (= acc -922337203685477580)
+                                                          (if (< (if negative 56 55) b) nil
+                                                            (self self (+ i 1) (- (* acc 10) (- b 48))))
+                                                          (self self (+ i 1) (- (* acc 10) (- b 48))))))))))))
+                                        (let ((number (if (= i end) nil (digits digits i 0))))
+                                          (if (= number nil) (text-symbol token)
+                                            (if negative number (- 0 number)))))))))))))
+                  (string-value
+                    (fn (self i segment out)
+                      (if (= i size) (fail)
+                        (let ((b (text-byte text i)))
+                          (if (= b 34)
+                            (list (text-concat out (text-slice text segment i)) (+ i 1))
+                            (if (= b 92)
+                              (if (= (+ i 1) size) (fail)
+                                (let ((escape (text-byte text (+ i 1))))
+                                  (let ((piece (if (= escape 110) "\n" (if (= escape 114) "\r"
+                                                (if (= escape 116) "\t" (if (= escape 34) "\""
+                                                  (if (= escape 92) "\\" (fail))))))))
+                                    (self self (+ i 2) (+ i 2)
+                                      (text-concat (text-concat out (text-slice text segment i)) piece)))))
+                              (self self (+ i 1) segment out))))))))
+              (let ((read-form
+                      (fn (self offset depth)
+                        (if (< max-depth depth) (fail)
+                          (let ((i (skip skip offset #f)))
+                            (if (= i size) (fail)
+                              (let ((b (text-byte text i)))
+                                (if (= b 41) (fail)
+                                  (if (= b 39)
+                                    (let ((part (self self (+ i 1) (+ depth 1))))
+                                      (list (list 'quote (car part)) (car (cdr part))))
+                                    (if (= b 34) (string-value string-value (+ i 1) (+ i 1) "")
+                                      (if (= b 40)
+                                        (if (= depth max-depth) (fail)
+                                          (let ((items
+                                                  (fn (items pos out)
+                                                    (let ((pos (skip skip pos #f)))
+                                                      (if (= pos size) (fail)
+                                                        (if (= (text-byte text pos) 41)
+                                                          (list (reverse reverse out nil) (+ pos 1))
+                                                          (let ((part (self self pos (+ depth 1))))
+                                                            (items items (car (cdr part)) (cons (car part) out)))))))))
+                                            (items items (+ i 1) nil)))
+                                        (let ((end (end-atom end-atom i)))
+                                          (list (atom i end) end)))))))))))))
+                (let ((all (fn (self pos out)
+                             (let ((pos (skip skip pos #f)))
+                               (if (= pos size) (reverse reverse out nil)
+                                 (let ((part (read-form read-form pos 0)))
+                                   (self self (car (cdr part)) (cons (car part) out))))))))
+                  (all all 0 nil))))))))))

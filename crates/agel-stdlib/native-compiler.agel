@@ -2,7 +2,8 @@
 ; source is installed as a function and exposed as data for bootstrap checks.
 (fn (source)
   (let ((primitives '(+ - * / = < list cons car cdr dict get assoc dissoc keys
-                       count has-key? type-of apply signal))
+                       count has-key? type-of apply signal
+                       text-bytes text-byte text-slice text-concat text-symbol))
         (fail (fn () (signal 'native/syntax "unsupported or malformed native source"))))
     (let ((member (fn (self x xs)
                     (if (= xs nil) #f

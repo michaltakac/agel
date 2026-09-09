@@ -750,6 +750,11 @@ fn apply_builtin(
         Builtin::Keys => keys(arguments, runtime),
         Builtin::Count => count(arguments),
         Builtin::TypeOf => type_of(arguments),
+        Builtin::TextBytes
+        | Builtin::TextByte
+        | Builtin::TextSlice
+        | Builtin::TextConcat
+        | Builtin::TextSymbol => text_operation(builtin, arguments, runtime),
         Builtin::Apply => apply_values(arguments, state, runtime),
         Builtin::Spawn => spawn(arguments, state, runtime),
         Builtin::Send => send(arguments, state, runtime),
@@ -948,6 +953,66 @@ fn count(arguments: Vec<Value>) -> Result<Value, Signal> {
     i64::try_from(length)
         .map(Value::Int)
         .map_err(|_| condition("arithmetic/overflow", "collection length does not fit i64"))
+}
+
+fn text_operation(
+    op: Builtin,
+    args: Vec<Value>,
+    runtime: &mut Runtime<'_>,
+) -> Result<Value, Signal> {
+    let arity = match op {
+        Builtin::TextByte | Builtin::TextConcat => 2,
+        Builtin::TextSlice => 3,
+        _ => 1,
+    };
+    expect_arity("text operation", args.len(), arity)?;
+    let Value::String(s) = &args[0] else {
+        return Err(condition("type", "expected text"));
+    };
+    let offset = |v: &Value| match v {
+        Value::Int(n) => {
+            usize::try_from(*n).map_err(|_| condition("text/range", "negative offset"))
+        }
+        _ => Err(condition("type", "expected byte offset")),
+    };
+    match op {
+        Builtin::TextBytes => Ok(Value::Int(s.len() as i64)),
+        Builtin::TextByte => s
+            .as_bytes()
+            .get(offset(&args[1])?)
+            .map(|n| Value::Int(i64::from(*n)))
+            .ok_or_else(|| condition("text/range", "byte out of range")),
+        _ => {
+            let (part, suffix) = match op {
+                Builtin::TextSlice => (
+                    s.get(offset(&args[1])?..offset(&args[2])?)
+                        .ok_or_else(|| condition("text/range", "invalid UTF-8 slice"))?,
+                    "",
+                ),
+                Builtin::TextConcat => {
+                    let Value::String(t) = &args[1] else {
+                        return Err(condition("type", "expected text"));
+                    };
+                    (s.as_str(), t.as_str())
+                }
+                _ => (s.as_str(), ""),
+            };
+            let size = part
+                .len()
+                .checked_add(suffix.len())
+                .ok_or_else(|| condition("text/range", "text too large"))?;
+            runtime.check_collection(size)?;
+            runtime.charge(size as u64)?;
+            let mut result = String::with_capacity(size);
+            result.push_str(part);
+            result.push_str(suffix);
+            Ok(if op == Builtin::TextSymbol {
+                Value::Symbol(result)
+            } else {
+                Value::String(result)
+            })
+        }
+    }
 }
 
 fn type_of(arguments: Vec<Value>) -> Result<Value, Signal> {

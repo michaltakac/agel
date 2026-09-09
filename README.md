@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.19: agent-proposed native behavior upgrades with
+The current repository is **v0.2.20: a native Agel reader that reads and rebuilds
+the reader and compiler from source text, agent-proposed native behavior upgrades with
 revision-bound preview and code-only rollback, a self-compiling Agel frontend with validated
 tail calls and safe-boundary heap reclamation, an Agel-written compiled mailbox scheduler, native lexical closures,
 immutable collections and metered calls, plus the compact
@@ -38,12 +39,16 @@ Try the compiler bootstrap and native closure workshop (Rust 1.86+):
 
 ```sh
 cargo run --release -q -p agel-jit --example self_host
+cargo run --release -q -p agel-jit --example text_workshop
 ```
 
 It checks identical IR across the seed and two native compiler stages, then
 runs captured, replaceable behaviors over immutable state. See
 [the managed JIT contract](docs/managed-jit.md). The frontend self-compiles;
 the whole language runtime and OS are **not** yet self-hosted.
+The [text workshop](docs/native-reader.md) drops the Rust evaluator after bootstrap,
+then reads, compiles and executes source text through native Agel. Pass a file
+containing one closed `(fn (n) ...)` to `text_workshop` to run it with `n = 10`.
 
 Try the isolated, compiled Agel scheduler and paired compiler benchmark:
 

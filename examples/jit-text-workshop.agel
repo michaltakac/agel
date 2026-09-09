@@ -1,0 +1,10 @@
+; Read and compiled by native Agel after the Rust evaluator is dropped.
+; Run: cargo run --release -q -p agel-jit --example text_workshop
+; The workshop passes 10 to this closed function.
+(fn (n)
+  (let ((step
+          (fn (self n acc)
+            (if (< n 2) acc
+              (self self (- n 1) (* acc n))))))
+    (dict 'answer (step step n 1)
+          'message "Ahoj z Agelu 👋")))
