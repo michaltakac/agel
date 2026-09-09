@@ -2395,13 +2395,16 @@ fn data_builtin(
             })
         }
         Builtin::Dict => {
-            if arguments.len() % 2 != 0 {
+            if arguments.len() & 1 != 0 {
                 return Err(Error("dict expects key/value pairs"));
             }
             let values = scalars(arguments)?;
             let mut map = NONE;
-            for pair in values[..arguments.len()].chunks_exact(2) {
-                map = map_insert(heap, map, pair[0], pair[1], fuel)?;
+            let mut index = 0;
+            // Pairs are complete: the length was checked to be even above.
+            while index < arguments.len() {
+                map = map_insert(heap, map, values[index], values[index + 1], fuel)?;
+                index += 2;
             }
             Scalar::Map(map)
         }
