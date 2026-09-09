@@ -598,6 +598,29 @@ x86-64 only, since it is the only backend with storage; and a driver that
 faults mid-write leaves the supervisor's slot protocol, not the driver, to
 recover. The frame pool still never reclaims a replaced domain's frames.
 
+## v0.2.27
+
+- **Input ports ambient to the supervisor:** the interactive workshops no
+  longer execute a single `in` on a serial or keyboard port from ring 0. The
+  console driver answers nonblocking reads, and an 8042 driver domain whose
+  bitmap clears exactly ports 0x60 and 0x64 delivers raw bytes with their
+  origin flag. A world that is not the driver reading the controller's status
+  port takes a general-protection fault, and CI asserts it.
+- **A driver that blocks on a human:** driver reads are nonblocking by
+  construction; the supervisor polls, so every driver entry stays inside its
+  tick budget whether or not anyone is typing.
+- **Decoding in the driver:** scan-code translation, modifier state, packet
+  assembly and command parsing stay in the supervisor. The drivers move bytes
+  and report a flag; a compromised driver can lie about bytes, not gain UI
+  authority.
+- **Echo through the supervisor's device path:** typed characters are echoed
+  through the console driver like every other line, so the supervisor's
+  last-resort console remains reserved for the recovery plane and panics.
+
+Timers, networking and model brokering are still the supervisor's. The input
+driver exists only on the x86-64 graphics build, and the frame pool still
+never reclaims a replaced domain's frames.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

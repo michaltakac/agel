@@ -145,6 +145,8 @@ run_architecture() {
     # ATA ports; it reads, is lost, is replaced, and refuses its old handle.
     grep -q "isolation\[$architecture\]: contained a world touching the disk it was not granted" \
       "$output_file"
+    grep -q "isolation\[$architecture\]: contained a world touching the keyboard controller it was not granted" \
+      "$output_file"
     grep -q "isolation\[$architecture\]: storage driver read the boot sector from an unprivileged domain, generation 1" \
       "$output_file"
     grep -q "isolation\[$architecture\]: the storage driver faulted" "$output_file"

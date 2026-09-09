@@ -211,6 +211,9 @@ into the driver.
 
 The next step is a language-owned graphical editor: multiline source cells,
 selectable transcript history, pointer focus through semantic hit-test requests,
-and preview/commit of a scene cell without leaving the desktop. Input
-normalization should move from the supervisor into a separately restartable
-domain rather than gaining ambient UI authority.
+and preview/commit of a scene cell without leaving the desktop. Since v0.2.27
+raw input already enters through restartable driver domains: serial bytes
+through the console driver and keyboard/pointer bytes through an 8042 driver
+granted only ports 0x60 and 0x64. Scan-code decoding, packet assembly and
+every policy about what a key means stay in the supervisor, and the drivers
+hold no UI authority.

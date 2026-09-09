@@ -1,6 +1,7 @@
 //! The interactive x86-64 workshop with the evaluator outside the supervisor.
 //!
-//! Serial input still enters through the recovery plane. Source then
+//! Since v0.2.27 serial input is read through the console driver domain as
+//! well, so the supervisor touches no serial port on this path. Source then
 //! crosses one bounded shared page into an unprivileged evaluator domain. The
 //! result crosses back as bytes and is printed by the separate console-driver
 //! domain introduced in v0.1.5. Neither mutable component owns the recovery
@@ -97,7 +98,7 @@ pub fn run() -> ! {
                 fatal("console driver failed while writing the prompt");
             }
         }
-        let length = read_form(&mut line);
+        let length = read_form(&mut driver, &mut line);
         let source = &line[..length];
         if source
             .iter()
@@ -371,7 +372,7 @@ fn edit_cell(
     {
         fatal("console driver stopped while opening the editor");
     }
-    let length = read_form(line);
+    let length = read_form(driver, line);
     match workspace.upsert(name, &line[..length]) {
         Ok(()) => {
             driver_line(
@@ -489,38 +490,56 @@ fn driver_line(driver: &mut ServiceDomain, bytes: &[u8]) {
     }
 }
 
-fn read_line(buffer: &mut [u8]) -> usize {
+/// Block until the console driver delivers a byte. The driver never blocks;
+/// the supervisor polls it, so each poll is one bounded domain entry.
+fn read_byte(driver: &mut ServiceDomain) -> u8 {
+    loop {
+        match driver.read_console(driver.handle()) {
+            Ok(Some(byte)) => return byte,
+            Ok(None) => {}
+            Err(_) => fatal("console driver stopped while reading input"),
+        }
+    }
+}
+
+fn echo(driver: &mut ServiceDomain, bytes: &[u8]) {
+    if driver.write_console(driver.handle(), bytes).is_err() {
+        fatal("console driver stopped while echoing input");
+    }
+}
+
+fn read_line(driver: &mut ServiceDomain, buffer: &mut [u8]) -> usize {
     let mut length = 0;
     loop {
-        match arch::console_read_byte() {
+        match read_byte(driver) {
             b'\r' | b'\n' => {
-                crate::console::write("\n");
+                echo(driver, b"\r\n");
                 return length;
             }
             8 | 127 if length > 0 => {
                 length -= 1;
-                crate::console::write("\x08 \x08");
+                echo(driver, b"\x08 \x08");
             }
             byte if (byte.is_ascii_graphic() || byte == b' ') && length < buffer.len() => {
                 buffer[length] = byte;
                 length += 1;
-                crate::console::write_byte(byte);
+                echo(driver, &[byte]);
             }
             _ => {}
         }
     }
 }
 
-fn read_form(buffer: &mut [u8]) -> usize {
+fn read_form(driver: &mut ServiceDomain, buffer: &mut [u8]) -> usize {
     let mut length = 0;
     loop {
-        length += read_line(&mut buffer[length..]);
+        length += read_line(driver, &mut buffer[length..]);
         if !needs_more_input(&buffer[..length]) || length == buffer.len() {
             return length;
         }
         buffer[length] = b'\n';
         length += 1;
-        crate::console::write("             ... ");
+        echo(driver, b"             ... ");
     }
 }
 

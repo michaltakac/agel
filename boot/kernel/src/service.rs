@@ -31,11 +31,13 @@ use core::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceKind {
     /// The console: COM1 on x86-64, the UART page elsewhere.
-    #[cfg(not(feature = "native-graphics"))]
     Console,
     /// The primary ATA disk, x86-64 only.
     #[cfg(target_arch = "x86_64")]
     Storage,
+    /// The 8042 keyboard controller, x86-64 graphics only.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    Input,
 }
 
 /// A capability-shaped reference to a service.
@@ -127,6 +129,51 @@ impl ServiceDomain {
             #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
             restarts: 0,
         }
+    }
+
+    /// Ask the console driver for one input byte, if one is waiting.
+    #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
+    pub fn read_console(&mut self, handle: ServiceHandle) -> Result<Option<u8>, ServiceError> {
+        self.check(handle)?;
+        match self.domain.provoke(shared::COMMAND_READ_CONSOLE) {
+            Stop::Replied => {}
+            _ => return Err(ServiceError::Faulted),
+        }
+        if self.domain.core().read_shared(shared::STATUS) == 0 {
+            return Ok(None);
+        }
+        Ok(Some(self.domain.core().read_shared(shared::VALUES) as u8))
+    }
+
+    /// Ask the input driver for one raw byte and whether the pointer sent it.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub fn read_input(
+        &mut self,
+        handle: ServiceHandle,
+    ) -> Result<Option<(bool, u8)>, ServiceError> {
+        self.check(handle)?;
+        match self.domain.provoke(shared::COMMAND_READ_INPUT) {
+            Stop::Replied => {}
+            _ => return Err(ServiceError::Faulted),
+        }
+        if self.domain.core().read_shared(shared::STATUS) == 0 {
+            return Ok(None);
+        }
+        let byte = self.domain.core().read_shared(shared::VALUES) as u8;
+        let auxiliary = self.domain.core().read_shared(shared::VALUES + 1) != 0;
+        Ok(Some((auxiliary, byte)))
+    }
+
+    /// Ask the input driver to enable the pointer; `false` when no pointer
+    /// acknowledged, which leaves the keyboard usable.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub fn enable_pointer(&mut self, handle: ServiceHandle) -> Result<bool, ServiceError> {
+        self.check(handle)?;
+        match self.domain.provoke(shared::COMMAND_ENABLE_POINTER) {
+            Stop::Replied => {}
+            _ => return Err(ServiceError::Faulted),
+        }
+        Ok(self.domain.core().read_shared(shared::STATUS) != 0)
     }
 
     /// Ask the storage driver to read sector `lba` into `sector`.
@@ -270,6 +317,8 @@ impl ServiceDomain {
             ServiceKind::Console => machine.create_console_world(self.entry, self.ticks)?,
             #[cfg(target_arch = "x86_64")]
             ServiceKind::Storage => machine.create_storage_world(self.entry, self.ticks)?,
+            #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+            ServiceKind::Input => machine.create_input_world(self.entry, self.ticks)?,
         };
         self.domain = replacement;
         self.generation = self

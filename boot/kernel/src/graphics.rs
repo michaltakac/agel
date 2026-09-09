@@ -1024,11 +1024,16 @@ enum Input {
     Pointer(bool),
 }
 
-fn next_input(keyboard: &mut Keyboard, pointer: &mut crate::pointer::Pointer) -> Option<Input> {
-    if let Some(byte) = arch::console_try_read_byte() {
+fn next_input(
+    console: &mut ServiceDomain,
+    input: &mut ServiceDomain,
+    keyboard: &mut Keyboard,
+    pointer: &mut crate::pointer::Pointer,
+) -> Option<Input> {
+    if let Ok(Some(byte)) = console.read_console(console.handle()) {
         return Some(Input::Byte(byte));
     }
-    let (auxiliary, byte) = arch::input_try_read()?;
+    let (auxiliary, byte) = input.read_input(input.handle()).ok()??;
     if auxiliary {
         pointer.feed(byte).map(Input::Pointer)
     } else {
@@ -1134,8 +1139,23 @@ fn interactive(
     let mut length = 0;
     let mut keyboard = Keyboard::new();
     let mut pointer = crate::pointer::Pointer::new();
-    if !arch::pointer_enable() {
-        console::write("pointer unavailable; keyboard remains active\n");
+    // Input leaves the supervisor: serial bytes come through the console
+    // driver domain and keyboard/pointer bytes through the 8042 driver domain,
+    // each granted only its own ports.
+    let console_entry = crate::user::agel_world_main as *const () as usize as u64;
+    let mut console_driver = machine
+        .create_console_world(console_entry, 8)
+        .map(|domain| ServiceDomain::new(domain, ServiceKind::Console, console_entry, 8))
+        .unwrap_or_else(|reason| failed(reason));
+    let input_entry = crate::user::agel_input_main as *const () as usize as u64;
+    let mut input_driver = machine
+        .create_input_world(input_entry, 50)
+        .map(|domain| ServiceDomain::new(domain, ServiceKind::Input, input_entry, 50))
+        .unwrap_or_else(|reason| failed(reason));
+    match input_driver.enable_pointer(input_driver.handle()) {
+        Ok(true) => {}
+        Ok(false) => console::write("pointer unavailable; keyboard remains active\n"),
+        Err(_) => failed("the input driver domain stopped during pointer enable"),
     }
     let mut status = if generation == 0 {
         StatusLine::new(b"AGEL READY - TYPE :HELP")
@@ -1150,7 +1170,12 @@ fn interactive(
     console::write("live-desktop> ");
 
     loop {
-        let Some(input) = next_input(&mut keyboard, &mut pointer) else {
+        let Some(input) = next_input(
+            &mut console_driver,
+            &mut input_driver,
+            &mut keyboard,
+            &mut pointer,
+        ) else {
             core::hint::spin_loop();
             continue;
         };

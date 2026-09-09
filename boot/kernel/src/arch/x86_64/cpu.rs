@@ -148,10 +148,12 @@ pub enum PortGrant {
     /// No port at all: every port instruction faults.
     None,
     /// The eight COM1 ports.
-    #[cfg(not(feature = "native-graphics"))]
     Console,
     /// The primary ATA command block and its alternate status port.
     Storage,
+    /// The two 8042 keyboard-controller ports.
+    #[cfg(feature = "native-graphics")]
+    Input,
 }
 
 /// Grant or withhold a device for the next ring-3 entry.
@@ -173,8 +175,12 @@ pub unsafe fn grant_ports(grant: PortGrant) {
                 (*tss).iomap_base = (core::mem::size_of::<TaskStateSegment>() + 1) as u16;
                 return;
             }
-            #[cfg(not(feature = "native-graphics"))]
             PortGrant::Console => (*tss).io_bitmap[0x3f8 / 8] = 0x00,
+            #[cfg(feature = "native-graphics")]
+            PortGrant::Input => {
+                (*tss).io_bitmap[0x60 / 8] &= !(1 << (0x60 % 8));
+                (*tss).io_bitmap[0x64 / 8] &= !(1 << (0x64 % 8));
+            }
             PortGrant::Storage => {
                 (*tss).io_bitmap[0x1f0 / 8] = 0x00;
                 (*tss).io_bitmap[0x3f6 / 8] &= !(1 << (0x3f6 % 8));

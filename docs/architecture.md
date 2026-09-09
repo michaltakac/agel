@@ -126,8 +126,9 @@ Each rung must be runnable and differentially testable against the rung below:
    holding the device by whatever mechanism the architecture uses to grant one.
    The supervisor prints through it, can lose it, replaces it at a new
    generation, and refuses handles issued before the restart. v0.2.26 moves
-   the x86-64 disk driver into the same kind of domain. Timers, serial input,
-   networking and model brokering are still the supervisor's.
+   the x86-64 disk driver into the same kind of domain and v0.2.27 moves
+   serial, keyboard and pointer input. Timers, networking and model brokering
+   are still the supervisor's.
 16. **Complete self-host (in progress):** reader, hygienic expander, agent
    runtime, image codec, and compiler in Agel; extend diverse comparison to
    every kernel semantic. Rungs 32 through 36 supply the reader, a restricted
@@ -253,13 +254,19 @@ Each rung must be runnable and differentially testable against the rung below:
    policy and codec, checks a generation on every request, and CI proves a
    non-driver world touching the disk faults, the driver can be lost and
    replaced, and its old handle is refused.
-42. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
+42. **Input driver domains (complete at v0.2.27):** the console driver answers
+   nonblocking reads as well as writes, so the serial workshop polls it instead
+   of a port; an 8042 driver domain granted only ports 0x60 and 0x64 delivers
+   raw keyboard and pointer bytes and performs the pointer-enable handshake.
+   Decoding and policy stay in the supervisor; an ungranted world touching the
+   controller faults, and CI asserts it.
+43. **Live system:** boot-selector-backed A/B worlds, health oracles, signed
    promotion, and watchdog-triggered rollback managed by the recovery monitor.
-43. **POSIX personality:** a Rust C library and the filesystem and process
+44. **POSIX personality:** a Rust C library and the filesystem and process
    services beneath it, running unprivileged above the contract, so that
    Unix-like software builds and runs on Agel. A path resolves through a
    namespace capability; there is no ambient root.
-44. **Local inference:** model inference in its own domain, over quantized
+45. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
 

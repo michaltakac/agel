@@ -706,7 +706,9 @@ phase quietly claims.
   work, the transcript does not appear and the frozen-transcript diff fails.
   v0.1.7 adds a bounded ATA-backed source workspace, and v0.2.26 moves its ATA
   driver into an unprivileged, restartable domain granted only the disk's nine
-  ports; the supervisor keeps slot policy and the codec. Timers are
+  ports; the supervisor keeps slot policy and the codec. v0.2.27 moves serial
+  input into the console driver and keyboard/pointer input into an 8042
+  driver domain granted only its two ports. Timers are
   not split — preemption is the supervisor's own mechanism for
   containing a world, so moving it out is a later question rather than an
   obvious next step. Networking and model/tool brokering are untouched.

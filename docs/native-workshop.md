@@ -193,7 +193,8 @@ ambient supervisor authority. `.user_text` is read/execute, immutable constants
 are read-only, stacks and the shared page are read/write, and no mapping is both
 writable and executable.
 
-The interactive serial reader and recovery commands remain supervisor code.
+Since v0.2.27 the serial reader polls the console driver domain rather than
+the port; the recovery commands remain supervisor code.
 The AArch64 and RISC-V isolation images run the same evaluator corpus but do not
 yet expose an interactive UART workshop. This is a protected language workshop,
 not yet the full hosted agent runtime or a durable self-hosted environment.

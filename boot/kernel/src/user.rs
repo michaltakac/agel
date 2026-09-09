@@ -548,6 +548,15 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
                 unsafe { console_byte(byte) };
                 offset += 1;
             }
+        } else if command == shared::COMMAND_READ_CONSOLE {
+            // Nonblocking: the supervisor polls, so a driver entry never waits
+            // on a human and its tick budget still means something.
+            let (available, byte) = unsafe { console_try_byte() };
+            unsafe {
+                page.add(shared::STATUS)
+                    .write_volatile(u64::from(available));
+                page.add(shared::VALUES).write_volatile(u64::from(byte));
+            }
         } else if command == shared::COMMAND_FAULT_DEVICE {
             // The same instruction the driver domain runs, in a world that was
             // never granted the device.
@@ -569,9 +578,141 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
                 // that was never granted the disk.
                 let _ = unsafe { port_in8(0x1f7) };
             }
+            #[cfg(target_arch = "x86_64")]
+            if command == shared::COMMAND_FAULT_INPUT_DEVICE {
+                // The same status read the input driver performs, in a world
+                // that was never granted the keyboard controller.
+                let _ = unsafe { port_in8(0x64) };
+            }
         }
         unsafe { yield_to_supervisor() };
     }
+}
+
+/// Read one byte from the console device if one is waiting.
+///
+/// # Safety
+/// Faults unless this domain was granted the console device.
+#[inline(always)]
+unsafe fn console_try_byte() -> (bool, u8) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        let mut status: u8;
+        asm!("in al, dx", in("dx") 0x3fd_u16, out("al") status, options(nomem, nostack));
+        if status & 1 == 0 {
+            return (false, 0);
+        }
+        let byte: u8;
+        asm!("in al, dx", in("dx") 0x3f8_u16, out("al") byte, options(nomem, nostack));
+        (true, byte)
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        let base = crate::arch::CONSOLE_DEVICE_VADDR;
+        if ((base + 0x18) as *const u32).read_volatile() & (1 << 4) != 0 {
+            return (false, 0);
+        }
+        (true, (base as *const u32).read_volatile() as u8)
+    }
+    #[cfg(target_arch = "riscv64")]
+    unsafe {
+        let base = crate::arch::CONSOLE_DEVICE_VADDR;
+        if ((base + 5) as *const u8).read_volatile() & 1 == 0 {
+            return (false, 0);
+        }
+        (true, (base as *const u8).read_volatile())
+    }
+}
+
+/// The keyboard and pointer driver: the one domain granted the 8042 ports.
+///
+/// It reports raw bytes with their origin flag and performs the pointer
+/// enable handshake on request. Scan-code decoding, packet assembly and every
+/// policy about what a key means stay in the supervisor.
+///
+/// # Safety
+/// Entered by the architecture's return-from-exception instruction with a
+/// private stack, a valid shared page, and the 8042 ports granted.
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[no_mangle]
+#[link_section = ".user_text"]
+pub unsafe extern "C" fn agel_input_main(shared_page: u64) -> ! {
+    let page = shared_page as *mut u64;
+    loop {
+        let command = unsafe { page.add(shared::COMMAND).read_volatile() };
+        if command == shared::COMMAND_READ_INPUT {
+            let status = unsafe { port_in8(0x64) };
+            if status & 1 == 0 {
+                unsafe { page.add(shared::STATUS).write_volatile(0) };
+            } else {
+                let byte = unsafe { port_in8(0x60) };
+                unsafe {
+                    page.add(shared::STATUS).write_volatile(1);
+                    page.add(shared::VALUES).write_volatile(u64::from(byte));
+                    page.add(shared::VALUES + 1)
+                        .write_volatile(u64::from(status & 0x20 != 0));
+                }
+            }
+        } else if command == shared::COMMAND_ENABLE_POINTER {
+            let enabled = unsafe { enable_pointer() };
+            unsafe { page.add(shared::STATUS).write_volatile(u64::from(enabled)) };
+        } else if command == shared::COMMAND_FAULT_WRITE {
+            unsafe { (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead) };
+        } else {
+            unsafe { page.add(shared::STATUS).write_volatile(0) };
+        }
+        unsafe { yield_to_supervisor() };
+    }
+}
+
+/// Write a byte to the 8042 once its input buffer is empty, within a bound.
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[inline(always)]
+unsafe fn controller_write(port: u16, byte: u8) -> bool {
+    let mut polls = 0;
+    while polls < 100_000 {
+        if unsafe { port_in8(0x64) } & 2 == 0 {
+            unsafe { port_out8(port, byte) };
+            return true;
+        }
+        polls += 1;
+    }
+    false
+}
+
+/// Enable the auxiliary device and ask it to stream packets, with bounded
+/// waits so a missing pointer leaves the keyboard usable.
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[inline(always)]
+unsafe fn enable_pointer() -> bool {
+    if !unsafe { controller_write(0x64, 0xa8) } {
+        return false;
+    }
+    let mut step = 0;
+    while step < 2 {
+        let command = if step == 0 { 0xf6 } else { 0xf4 };
+        if !unsafe { controller_write(0x64, 0xd4) } || !unsafe { controller_write(0x60, command) } {
+            return false;
+        }
+        let mut acknowledged = false;
+        let mut polls = 0;
+        while polls < 100_000 {
+            let status = unsafe { port_in8(0x64) };
+            if status & 1 != 0 {
+                let byte = unsafe { port_in8(0x60) };
+                if status & 0x20 != 0 {
+                    acknowledged = byte == 0xfa;
+                    break;
+                }
+            }
+            polls += 1;
+        }
+        if !acknowledged {
+            return false;
+        }
+        step += 1;
+    }
+    true
 }
 
 /// One byte in from a port. Faults unless this domain was granted the port.

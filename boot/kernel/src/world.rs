@@ -81,6 +81,19 @@ pub mod shared {
     pub const COMMAND_WRITE_CONSOLE: u64 = 0x6000;
     /// Touch the console device without having been granted it.
     pub const COMMAND_FAULT_DEVICE: u64 = 0x7000;
+    /// Read one byte from the console device if one is waiting; the driver
+    /// answers status 1 with the byte in the first value word, or status 0.
+    pub const COMMAND_READ_CONSOLE: u64 = 0x6100;
+    /// Read one byte from the 8042 controller if one is waiting; the second
+    /// value word says whether it came from the auxiliary (pointer) device.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const COMMAND_READ_INPUT: u64 = 0x6200;
+    /// Enable the PS/2 pointer; status 1 when the device acknowledged.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const COMMAND_ENABLE_POINTER: u64 = 0x6300;
+    /// Touch the 8042 controller without having been granted it.
+    #[cfg(target_arch = "x86_64")]
+    pub const COMMAND_FAULT_INPUT_DEVICE: u64 = 0x6400;
     /// Read the sector named by the first argument word into the block area.
     #[cfg(target_arch = "x86_64")]
     pub const COMMAND_READ_SECTOR: u64 = 0xa000;

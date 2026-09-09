@@ -86,6 +86,10 @@ promise.
   unprivileged, restartable domain granted exactly the disk's ports, with
   generation-checked handles and a stale-handle refusal in CI. The workspace
   format, slot layout and every language surface are unchanged.
+  `v0.2.27` moves serial input into the console driver domain and keyboard and
+  pointer input into an 8042 driver domain granted only its two ports; the
+  supervisor no longer touches an input port on any interactive path. Decoding
+  and policy are unchanged.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

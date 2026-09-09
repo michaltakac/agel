@@ -62,76 +62,18 @@ pub fn console_write_byte(byte: u8) {
     unsafe { hal::out8(COM1, byte) };
 }
 
-/// Block until COM1 delivers a byte.
-#[cfg(any(
-    feature = "isolated-repl",
-    not(any(
-        feature = "selftest",
-        feature = "monitor-selftest",
-        feature = "native-selftest",
-        feature = "isolation-selftest"
-    ))
-))]
+/// Block until COM1 delivers a byte. Only the legacy privileged REPL reads
+/// the console from the supervisor; the isolated workshops read through the
+/// console driver domain.
+#[cfg(not(any(
+    feature = "selftest",
+    feature = "monitor-selftest",
+    feature = "native-selftest",
+    feature = "isolation-selftest"
+)))]
 pub fn console_read_byte() -> u8 {
     while unsafe { hal::in8(COM1 + 5) } & 1 == 0 {}
     unsafe { hal::in8(COM1) }
-}
-
-/// Return one serial byte when available without blocking the graphical shell.
-#[cfg(feature = "native-graphics")]
-pub fn console_try_read_byte() -> Option<u8> {
-    if unsafe { hal::in8(COM1 + 5) } & 1 == 0 {
-        None
-    } else {
-        Some(unsafe { hal::in8(COM1) })
-    }
-}
-
-/// Return one byte from the legacy keyboard controller when its output buffer
-/// is ready. Decoding and policy stay outside the machine adapter.
-#[cfg(feature = "native-graphics")]
-pub fn input_try_read() -> Option<(bool, u8)> {
-    let status = unsafe { hal::in8(0x64) };
-    if status & 1 == 0 {
-        None
-    } else {
-        let byte = unsafe { hal::in8(0x60) };
-        Some((status & 0x20 != 0, byte))
-    }
-}
-
-/// Enable the emulated PS/2 pointer with bounded controller waits. Missing
-/// devices leave keyboard/serial usable rather than hanging native startup.
-#[cfg(feature = "native-graphics")]
-pub fn pointer_enable() -> bool {
-    fn write(port: u16, byte: u8) -> bool {
-        for _ in 0..100_000 {
-            if unsafe { hal::in8(0x64) } & 2 == 0 {
-                unsafe { hal::out8(port, byte) };
-                return true;
-            }
-        }
-        false
-    }
-    if !write(0x64, 0xa8) {
-        return false;
-    }
-    for command in [0xf6, 0xf4] {
-        if !write(0x64, 0xd4) || !write(0x60, command) {
-            return false;
-        }
-        let mut acknowledged = false;
-        for _ in 0..100_000 {
-            if let Some((true, byte)) = input_try_read() {
-                acknowledged = byte == 0xfa;
-                break;
-            }
-        }
-        if !acknowledged {
-            return false;
-        }
-    }
-    true
 }
 
 /// Leave QEMU through the debug-exit device.
@@ -218,6 +160,11 @@ pub const PROVOCATIONS: &[Provocation] = &[
         command: crate::world::shared::COMMAND_FAULT_STORAGE_DEVICE,
         expected: Some("general-protection"),
         description: "touching the disk it was not granted",
+    },
+    Provocation {
+        command: crate::world::shared::COMMAND_FAULT_INPUT_DEVICE,
+        expected: Some("general-protection"),
+        description: "touching the keyboard controller it was not granted",
     },
     Provocation {
         command: crate::world::shared::COMMAND_SPIN,
@@ -315,7 +262,6 @@ impl Machine {
 
     /// Build a protection domain that is additionally granted the console
     /// device: on x86-64, eight I/O ports and nothing else.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn create_console_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
         Domain::new(
             &mut self.pool,
@@ -323,6 +269,21 @@ impl Machine {
             entry,
             ticks,
             cpu::PortGrant::Console,
+            crate::world::STACK_PAGES,
+        )
+        .map_err(|error| error.name())
+    }
+
+    /// Build a protection domain granted the 8042 keyboard controller's two
+    /// ports and nothing else: the keyboard and pointer driver.
+    #[cfg(feature = "native-graphics")]
+    pub fn create_input_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            cpu::PortGrant::Input,
             crate::world::STACK_PAGES,
         )
         .map_err(|error| error.name())
