@@ -908,6 +908,39 @@ workshop, and has no disk, no workspace and no recovery record. The
 evaluator's bounds are the same as everywhere else and are not enforced by
 seL4; they are the program's own.
 
+## v0.2.39
+
+- **A group declared and never specified:** the contract had named
+  `frame.*` and `as.*` since v1.0 and defined nothing about them, so every
+  backend refused them and nothing said what an answer would have meant.
+  Contract v1.1 specifies the memory group over a numbered frame budget and
+  a page-indexed frame window, and both hosted implementations answer 35 new
+  corpus steps identically: a mapping cannot carry a right its capability
+  lacks, a mapping can only lose rights in place, a share cannot widen, the
+  budget pushes back, reclaiming revokes every share and the share fails
+  closed, and a shared handle or the domain's own frame cannot be reclaimed.
+- **A profile a backend cannot make real:** the research kernels' frame
+  window is not yet backed by their page tables, and under Microkit's static
+  system description a server domain cannot change another domain's
+  mappings at all. Both therefore publish the v1.0 profile and refuse the
+  memory group, which the corpus records as their transcript. The frozen
+  transcript is now one per published profile, and the claim is stated per
+  profile rather than stretched.
+- **A step that answers differently under each profile:** the corpus is one
+  list, so the invariants that concern memory accept `invalid-operation`
+  where the group is not published and require the specified refusal where
+  it is.
+
+- **A right the machines never grant:** a mapping that is both writable and
+  executable is refused as `not-permitted` after the capability has been
+  found sufficient, so the contract cannot promise a page the research
+  kernels' page tables would refuse to build.
+
+Not claimed: no backend maps memory yet; the memory group is specified
+semantics with two agreeing hosted implementations, compiled out of the
+x86-64 workshop images to keep their budget. The seL4 backend will not
+publish it under Microkit as it stands.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

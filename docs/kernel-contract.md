@@ -89,8 +89,49 @@ backend implements. Anything outside the published profile answers
 something a caller discovers by being refused in an undocumented way.
 
 The v1.0 profile is `core | capability | endpoint | notification | clock`.
-Memory, domain, and interrupt groups are declared in the contract and are not
-yet in any backend's profile.
+The v1.1 profile, since contract v1.1, adds `memory`: `frame.*` and `as.*`.
+The domain and interrupt groups are declared in the contract and are not yet
+in any backend's profile.
+
+The corpus is one and the profile decides the transcript: a backend that
+publishes v1.0 answers every memory step with `invalid-operation`, and its
+transcript is frozen in `bootstrap/kernel-contract-v1.0.trace`; a backend
+that publishes v1.1 answers them, and its transcript is
+`bootstrap/kernel-contract.trace`. Both hosted implementations reproduce both.
+The three research kernels and the seL4 broker publish v1.0 today: on the
+research kernels the frame window is not yet backed by the machine's page
+tables, and on seL4 a server domain cannot change another domain's mappings
+under Microkit's static system description, so neither claims a group it
+cannot make real. The group is a crate feature, on for the hosted crate and
+the isolation builds and off in the x86-64 workshop images, which publish
+v1.0 and would otherwise exceed their 254-sector budget.
+
+## The memory group
+
+A conformance domain is built with one frame and one address space, the
+frame window of `CONFORMANCE_FRAME_WINDOW` pages, and a budget of
+`CONFORMANCE_FRAME_BUDGET` more frames. Pages are named by their index in
+the window, never by an address; frames are numbered, 0 for the one the
+domain is built with and then in allocation order, lowest free number first.
+
+| Operation | Subject | Arguments | Answer |
+|---|---|---|---|
+| `frame.allocate` | cnode, `control` | destination slot, rights ⊆ `read write execute grant` | derivation id of the new root frame capability; `resource-exhausted` when the budget is spent |
+| `frame.map` | a frame | page, rights ⊆ `read write execute` | the page; `insufficient-rights` if the capability lacks a requested right, `not-permitted` for `write` with `execute`, `already-exists` if the page is mapped |
+| `frame.share` | a frame, `grant` | destination slot, rights, badge | derivation id of the child; it may not widen |
+| `frame.reclaim` | a frame's root capability | none | pages unmapped, capabilities revoked; `not-permitted` through a shared handle or for the domain's own frame |
+| `as.map` | address space, `control` | frame slot, page, rights | as `frame.map`, naming the frame by slot |
+| `as.unmap` | address space, `control` | page | the frame number; `not-found` if unmapped |
+| `as.protect` | address space, `control` | page, rights | the rights; a mapping can only lose rights in place |
+| `as.query` | address space, `control` | page | the frame number and the mapping's rights; `not-found` if unmapped |
+
+A mapping belongs to the address space, not to the capability it was made
+through: revoking the capability does not unmap, `as.unmap` and
+`frame.reclaim` do. Reclaiming unmaps every page the frame occupies, revokes
+every capability derived from the reclaimed root, returns the frame to the
+budget, and empties the root's slot. Checks are made in the same order as
+everywhere else: the subject's existence, its type, its rights, reserved
+words, then the arguments.
 
 ## The conformance domain
 
@@ -104,7 +145,8 @@ Every backend constructs the same starting capability space before a corpus run:
 | 3 | `Notification` | `send receive` | 1 |
 | 4 | `Frame` | `read write` (deliberately no `execute`) | 0 |
 | 5 | `Clock` | `read` | 0 |
-| 6–31 | *(empty)* | — | — |
+| 6 | `AddressSpace` (since v1.1) | `control` | 0 |
+| 7–31 | *(empty)* | — | — |
 
 Two harness properties make a run reproducible on any backend. Derivation
 identifiers come from a monotonic counter starting at 1, allocated in the order
@@ -120,7 +162,7 @@ has nobody to block on. `endpoint.call` answers `would-block`,
 
 ## The corpus
 
-`agel_kernel_abi::conformance::CORPUS` is 81 ordered, stateful steps. Most of
+`agel_kernel_abi::conformance::CORPUS` is 118 ordered, stateful steps. Most of
 them are refusals, on purpose: an interface is defined by what it declines, in
 what words, and in what order it checks. Two kernels that agree on the happy
 path and disagree about whether a bad call earns `invalid-capability`,
@@ -131,8 +173,10 @@ unimplemented group, naming an empty or out-of-range slot, type checking before
 rights checking, non-zero reserved argument words, monotonic derivation,
 copy/mint/attenuate/move semantics, transitive revocation and fail-closed stale
 handles, the bounded endpoint queue reaching backpressure and draining in order,
-badge delivery, notification coalescing, clock monotonicity, and a capability
-space irreversibly attenuating itself.
+badge delivery, notification coalescing, clock monotonicity, the memory
+group (mapping the domain's frame, protecting a mapping downward, allocating
+to the budget's edge, sharing without widening, reclaiming and the share
+failing closed), and a capability space irreversibly attenuating itself.
 
 Steps are ordered and stateful. Inserting one in the middle changes every later
 derivation identifier, so it is a contract change: bump the minor version and
@@ -148,13 +192,14 @@ cargo test -p agel-kernel-abi        # reference model = frozen transcript
 ./scripts/test-sel4.sh               # an unmodified seL4 kernel
 ```
 
-`bootstrap/kernel-contract.trace` is the frozen canonical transcript. Six
-artifacts share one set of bytes: the hosted reference model, the checked-in
-freeze, an unprivileged protection domain on each of x86-64, AArch64, and
-RISC-V talking to its kernel through that machine's trap gate, and a protection
-domain on seL4 talking to a *server* through a protected procedure. This is the
-same comparison discipline the Common Lisp reference uses for the language
-kernel.
+`bootstrap/kernel-contract.trace` is the frozen canonical transcript of the
+v1.1 profile and `bootstrap/kernel-contract-v1.0.trace` of the v1.0 profile.
+The hosted reference model and the independent implementation reproduce both.
+An unprivileged protection domain on each of x86-64, AArch64, and RISC-V
+talking to its kernel through that machine's trap gate, and a protection domain
+on seL4 talking to a *server* through a protected procedure, reproduce the v1.0
+transcript, the profile they publish. This is the same comparison discipline
+the Common Lisp reference uses for the language kernel.
 
 The host test also stands up a deliberately non-conformant backend — one that
 widens rights on `cap.mint` — and requires the corpus to catch it at
@@ -169,10 +214,13 @@ the reference model before that), and adds the part a hosted implementation
 cannot have: the object table lives in supervisor-only memory, the caller holds
 slot numbers rather than references, and the only path to any of it from an
 unprivileged world is a trap gate. The isolation self-test keeps the reference
-model in the supervisor and checks every one of the world's 81 answers against
+model in the supervisor and checks every one of the world's 118 answers against
 it, so on each machine the frozen transcript is two implementations agreeing
 live across a hardware privilege boundary. The seL4 broker answers with the
-same independent implementation; see the seL4 notes below.
+same independent implementation; see the seL4 notes below. Both publish the
+v1.0 profile: the memory group exists in the implementation they link and is
+switched off until the research kernels back the frame window with real
+mappings, which is the next rung.
 
 It builds for three architectures from one source. The shared driver, the
 capability space, the shared handshake page, the tick budget, and the rule that
@@ -205,8 +253,9 @@ the corpus touches, so the corpus never observes that it exists.
 is a second implementation written from this document, the crate's type
 definitions, the corpus and its frozen transcript, and deliberately not from
 the model's source. They share only the contract types and the well-known slot
-and profile constants. Both reproduce `bootstrap/kernel-contract.trace` byte
-for byte; `conformance::compare` requires them to agree on all 81 steps; and
+and profile constants. Both reproduce both frozen transcripts byte for byte;
+`conformance::compare` requires them to agree on all 118 steps under either
+profile; and
 the hosted test suite checks that a widening variant of the independent
 implementation is still caught at `derive/mint-cannot-widen`.
 `./scripts/test-kernel-contract.sh` diffs both hosted transcripts against the

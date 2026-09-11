@@ -177,8 +177,9 @@ under `--features isolation-selftest`:
   entering ring 3 with a frame whose flags set `IF`.
 
 `./scripts/test-isolation.sh` boots each architecture and requires that an
-unprivileged world answers all 81 steps of the kernel-contract corpus with a
-transcript byte-identical to `bootstrap/kernel-contract.trace`; that a world
+unprivileged world answers all 118 steps of the kernel-contract corpus with a
+transcript byte-identical to `bootstrap/kernel-contract-v1.0.trace`, the
+profile the research kernels publish; that a world
 writing to kernel memory, a world executing something it is not allowed to, and
 a world that never yields are each contained with the fault that machine
 actually produces; that the native evaluator performs persistent definitions,

@@ -6,6 +6,8 @@ rust-version = "1.88"
 publish = false
 
 [dependencies]
+# Without the crate's `memory` feature the workshop images stay inside the
+# 254-sector budget; the isolation build turns it on with `contract-memory`.
 agel-kernel-abi = { path = "../../crates/agel-kernel-abi", default-features = false }
 agel-integrity = { path = "../../crates/agel-integrity", default-features = false }
 
@@ -14,6 +16,7 @@ selftest = []
 monitor-selftest = []
 native-selftest = []
 isolation-selftest = []
+contract-memory = ["agel-kernel-abi/memory"]
 isolated-repl = ["isolation-selftest"]
 native-graphics = ["isolation-selftest"]
 graphics-selftest = ["native-graphics"]

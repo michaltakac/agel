@@ -18,7 +18,7 @@ kernel_dir=$(CDPATH= cd -- "$(dirname "$0")/../boot/kernel" && pwd)
 
 case "$architecture" in
   x86_64)
-    exec "$(dirname "$0")/build-boot.sh" --features isolation-selftest "$@"
+    exec "$(dirname "$0")/build-boot.sh" --features isolation-selftest,contract-memory "$@"
     ;;
   aarch64) target=aarch64-unknown-none-softfloat ;;
   riscv64) target=riscv64imac-unknown-none-elf ;;
@@ -31,5 +31,5 @@ esac
 rustup target add "$target" >/dev/null
 # Cargo resolves `.cargo/config.toml` from the working directory rather than
 # from the manifest, and that file is where each target's linker script lives.
-(cd "$kernel_dir" && cargo build --release --target "$target" --features isolation-selftest "$@")
+(cd "$kernel_dir" && cargo build --release --target "$target" --features isolation-selftest,contract-memory "$@")
 printf '%s\n' "$kernel_dir/target/$target/release/agel-boot"

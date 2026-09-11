@@ -634,10 +634,11 @@ Agel's user-level policy or evaluator is correct.
 - Write the versioned kernel contract and threat model. →
   `crates/agel-kernel-abi`, [`kernel-contract.md`](kernel-contract.md), and the
   v0.1.2 section of [`threat-model.md`](threat-model.md).
-- Add conformance traces independent of either backend. → an 81-step corpus and
+- Add conformance traces independent of either backend. → a 118-step corpus (v1.1) and
   an executable reference model, both `no_std` and allocation-free so the same
   bytes link into a hosted binary and a freestanding kernel image. The canonical
-  transcript is frozen in `bootstrap/kernel-contract.trace` and diffed by
+  transcript is frozen in `bootstrap/kernel-contract.trace` (v1.1 profile)
+  and `bootstrap/kernel-contract-v1.0.trace` (v1.0) and diffed by
   `./scripts/test-kernel-contract.sh`.
 - Mark today's ring-0 native evaluator as a bootstrap implementation, not a
   security boundary. → stated in [`native-boot.md`](native-boot.md),

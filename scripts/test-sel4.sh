@@ -62,12 +62,14 @@ fi
 tr -d '\r' < "$output_file" \
   | sed -n '/^---BEGIN AGEL CONTRACT TRANSCRIPT---$/,/^---END AGEL CONTRACT TRANSCRIPT---$/p' \
   | sed '1d;$d' > "$transcript_file"
-diff -u bootstrap/kernel-contract.trace "$transcript_file"
+# The broker publishes the v1.0 profile: Microkit's mappings are static, so
+# the memory group is not something a server domain can answer honestly.
+diff -u bootstrap/kernel-contract-v1.0.trace "$transcript_file"
 
-grep -q 'world: 81 invocations answered by the broker' "$output_file"
+grep -q 'world: 118 invocations answered by the broker' "$output_file"
 grep -q 'world: contract invariants hold across the boundary' "$output_file"
 grep -q 'world: native Agel evaluated factorial with transactional rollback in an unprivileged protection domain' "$output_file"
 grep -q 'recovery: contained it without replying; the world is not resumed' "$output_file"
 
 printf '%s\n' \
-  "Agel on seL4: 81 contract steps and the native evaluator from an unprivileged protection domain, fault contained by its parent [ok]"
+  "Agel on seL4: 118 contract steps and the native evaluator from an unprivileged protection domain, fault contained by its parent [ok]"

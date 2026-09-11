@@ -21,10 +21,25 @@ use crate::{
 
 const SLOTS: usize = CONFORMANCE_SLOTS as usize;
 const QUEUE: usize = CONFORMANCE_ENDPOINT_CAPACITY as usize;
-/// Objects in the conformance domain: cnode, endpoint, notification, frame,
-/// clock. The contract's other object types are declared but outside the v1
-/// profile, so no operation can reach one.
-const OBJECTS: usize = 5;
+/// Pages in the frame window and frames the domain may hold: the frame it is
+/// built with plus its allocation budget.
+#[cfg(feature = "memory")]
+const PAGES: usize = crate::CONFORMANCE_FRAME_WINDOW as usize;
+#[cfg(feature = "memory")]
+const FRAME_BUDGET: usize = crate::CONFORMANCE_FRAME_BUDGET as usize;
+/// Objects in the conformance domain: cnode, endpoint, notification, the
+/// frame the domain is built with, clock, address space, then one object per
+/// frame of the allocation budget, unallocated until `frame.allocate`.
+#[cfg(feature = "memory")]
+const OBJECTS: usize = 6 + FRAME_BUDGET;
+#[cfg(not(feature = "memory"))]
+const OBJECTS: usize = 6;
+/// Object indices of the fixed objects; the budget frames follow the address
+/// space in frame-number order.
+const OBJECT_FRAME_0: usize = 3;
+const OBJECT_ADDRESS_SPACE: usize = 5;
+#[cfg(feature = "memory")]
+const OBJECT_FIRST_BUDGET_FRAME: usize = 6;
 
 /// One queued endpoint message: the sending capability's badge and three words.
 #[derive(Clone, Copy, Default)]
@@ -46,13 +61,40 @@ struct Notification {
     badges: u64,
 }
 
+/// One page of the frame window: the object index of the frame mapped there
+/// and the rights of the mapping, or nothing.
+#[cfg(feature = "memory")]
+#[derive(Clone, Copy, Default)]
+struct Page {
+    frame: Option<usize>,
+    rights: Rights,
+}
+
+/// The domain's address space: its frame window. Without the memory group
+/// there is nothing to record, and the object is a marker.
+#[derive(Clone, Copy)]
+struct AddressSpace {
+    #[cfg(feature = "memory")]
+    pages: [Page; PAGES],
+}
+
 #[derive(Clone, Copy)]
 enum Object {
     CNode,
     Endpoint(Endpoint),
     Notification(Notification),
-    Frame,
-    Clock { ticks: u64 },
+    /// A frame; `number` is what `as.query` reports, 0 for the frame the
+    /// domain is built with. A budget frame exists only while `live`.
+    Frame {
+        #[cfg_attr(not(feature = "memory"), allow(dead_code))]
+        number: u8,
+        #[cfg_attr(not(feature = "memory"), allow(dead_code))]
+        live: bool,
+    },
+    Clock {
+        ticks: u64,
+    },
+    AddressSpace(AddressSpace),
 }
 
 impl Object {
@@ -61,8 +103,9 @@ impl Object {
             Self::CNode => ObjectType::CNode,
             Self::Endpoint(_) => ObjectType::Endpoint,
             Self::Notification(_) => ObjectType::Notification,
-            Self::Frame => ObjectType::Frame,
+            Self::Frame { .. } => ObjectType::Frame,
             Self::Clock { .. } => ObjectType::Clock,
+            Self::AddressSpace(_) => ObjectType::AddressSpace,
         }
     }
 }
@@ -96,6 +139,11 @@ pub struct IndependentKernel {
     objects: [Object; OBJECTS],
     slots: [Slot; SLOTS],
     next_id: u64,
+    /// The groups this instance publishes; anything else is
+    /// `invalid-operation`, whatever the request. Without the memory group
+    /// compiled in the profile is v1.0 by construction and needs no field.
+    #[cfg(feature = "memory")]
+    profile: u64,
 }
 
 impl Default for IndependentKernel {
@@ -105,15 +153,123 @@ impl Default for IndependentKernel {
 }
 
 impl IndependentKernel {
-    /// A kernel holding the conformance domain.
+    /// A kernel holding the conformance domain and publishing the v1.1
+    /// profile.
     pub fn new() -> Self {
+        Self::with_profile(group::V1_1_PROFILE)
+    }
+
+    /// A kernel publishing exactly `profile`, which must include the v1.0
+    /// groups: what a backend that implements less would answer.
+    pub fn with_profile(profile: u64) -> Self {
+        debug_assert!(
+            profile & group::V1_PROFILE == group::V1_PROFILE,
+            "every profile includes the v1.0 groups"
+        );
+        #[cfg(not(feature = "memory"))]
+        debug_assert!(
+            profile == group::V1_PROFILE,
+            "without the memory group only the v1.0 profile can be published"
+        );
         let mut kernel = Self {
             objects: [Object::CNode; OBJECTS],
             slots: [Slot::Empty; SLOTS],
             next_id: 1,
+            #[cfg(feature = "memory")]
+            profile,
         };
         kernel.reset_to_conformance_domain();
         kernel
+    }
+
+    /// The profile `boot.info` reports.
+    fn published_profile(&self) -> u64 {
+        #[cfg(feature = "memory")]
+        {
+            self.profile
+        }
+        #[cfg(not(feature = "memory"))]
+        {
+            group::V1_PROFILE
+        }
+    }
+
+    // -- memory helpers -----------------------------------------------------
+
+    #[cfg(feature = "memory")]
+    /// A page index inside the frame window; anything else is an argument
+    /// error, since the window is the only thing a page can name.
+    fn page(word: u64) -> Result<usize, Status> {
+        match usize::try_from(word) {
+            Ok(page) if page < PAGES => Ok(page),
+            _ => Err(Status::InvalidArgument),
+        }
+    }
+
+    #[cfg(feature = "memory")]
+    /// Rights a mapping may carry: some of read, write, execute, and at
+    /// least one of them, since a mapping with no rights maps nothing.
+    fn mapping_rights(word: u64) -> Result<Rights, Status> {
+        let rights = Self::defined_rights(word)?;
+        let memory = Rights(Rights::READ.0 | Rights::WRITE.0 | Rights::EXECUTE.0);
+        if rights.0 == 0 || !rights.is_attenuation_of(memory) {
+            return Err(Status::InvalidArgument);
+        }
+        Ok(rights)
+    }
+
+    /// Writable and executable at once is refused as policy, after the
+    /// capability has been found sufficient: the rights are defined and
+    /// held, the machines will not grant them together.
+    #[cfg(feature = "memory")]
+    fn permitted_together(rights: Rights) -> Result<(), Status> {
+        if rights.contains(Rights::WRITE) && rights.contains(Rights::EXECUTE) {
+            return Err(Status::NotPermitted);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "memory")]
+    fn address_space(&mut self, capability: u32) -> Result<&mut AddressSpace, Status> {
+        let subject = self.typed(capability, ObjectType::AddressSpace)?;
+        Self::require(&subject, Rights::CONTROL)?;
+        match &mut self.objects[subject.object] {
+            Object::AddressSpace(space) => Ok(space),
+            _ => Err(Status::WrongObjectType),
+        }
+    }
+
+    #[cfg(feature = "memory")]
+    /// Map `frame` (a live frame capability) at `page` with `rights`, the
+    /// shared tail of `frame.map` and `as.map`: the page must be in the
+    /// window, the rights defined, the capability sufficient for them, and
+    /// the page free.
+    fn map(&mut self, frame: Capability, page: u64, rights: u64) -> Result<[u64; WORDS], Status> {
+        let page = Self::page(page)?;
+        let rights = Self::mapping_rights(rights)?;
+        if !rights.is_attenuation_of(frame.rights) {
+            return Err(Status::InsufficientRights);
+        }
+        Self::permitted_together(rights)?;
+        let Object::AddressSpace(space) = &mut self.objects[OBJECT_ADDRESS_SPACE] else {
+            return Err(Status::WrongObjectType);
+        };
+        if space.pages[page].frame.is_some() {
+            return Err(Status::AlreadyExists);
+        }
+        space.pages[page] = Page {
+            frame: Some(frame.object),
+            rights,
+        };
+        Ok([page as u64, 0, 0, 0])
+    }
+
+    #[cfg(feature = "memory")]
+    fn frame_number(&self, object: usize) -> u64 {
+        match self.objects[object] {
+            Object::Frame { number, .. } => u64::from(number),
+            _ => 0,
+        }
     }
 
     fn root(&mut self, slot: u32, object: usize, rights: Rights, badge: u64) {
@@ -215,6 +371,15 @@ impl IndependentKernel {
 
     fn invoke_checked(&mut self, request: &Request) -> Result<[u64; WORDS], Status> {
         let arguments = request.arguments;
+        // The profile is checked before anything else: an operation outside
+        // it is unknown to this backend, whatever slot or words it names.
+        // Without the memory group compiled in, the v1.0 groups are all the
+        // implementation can answer and the final arm refuses the rest, so
+        // the check would only cost the workshop images their budget.
+        #[cfg(feature = "memory")]
+        if request.operation.group() & self.profile == 0 {
+            return Err(Status::InvalidOperation);
+        }
         match request.operation {
             // -- core -------------------------------------------------------
             Operation::Nop => {
@@ -231,8 +396,174 @@ impl IndependentKernel {
                     version_word(),
                     u64::from(CONFORMANCE_SLOTS),
                     CONFORMANCE_ENDPOINT_CAPACITY,
-                    group::V1_PROFILE,
+                    self.published_profile(),
                 ])
+            }
+
+            // -- memory: frames and the frame window ---------------------
+            #[cfg(feature = "memory")]
+            Operation::FrameAllocate => {
+                // Allocation is an act of the capability space, like
+                // derivation: the caller must hold its cnode with `control`.
+                let cnode = self.typed(request.capability, ObjectType::CNode)?;
+                Self::require(&cnode, Rights::CONTROL)?;
+                if arguments[2] != 0 || arguments[3] != 0 {
+                    return Err(Status::InvalidArgument);
+                }
+                let rights = Self::defined_rights(arguments[1])?;
+                let holdable =
+                    Rights(Rights::READ.0 | Rights::WRITE.0 | Rights::EXECUTE.0 | Rights::GRANT.0);
+                if rights.0 == 0 || !rights.is_attenuation_of(holdable) {
+                    return Err(Status::InvalidArgument);
+                }
+                let destination = self.destination(arguments[0])?;
+                // Lowest free frame number first, so the number a frame gets
+                // is a function of the history the corpus fixes.
+                let object = (OBJECT_FIRST_BUDGET_FRAME..OBJECTS)
+                    .find(|index| matches!(self.objects[*index], Object::Frame { live: false, .. }))
+                    .ok_or(Status::ResourceExhausted)?;
+                let number = (object - OBJECT_FIRST_BUDGET_FRAME + 1) as u8;
+                self.objects[object] = Object::Frame { number, live: true };
+                let id = self.allocate_id();
+                self.slots[destination] = Slot::Live(Capability {
+                    object,
+                    rights,
+                    badge: 0,
+                    id,
+                    parent: 0,
+                });
+                Ok([id, 0, 0, 0])
+            }
+            #[cfg(feature = "memory")]
+            Operation::FrameMap => {
+                let frame = self.typed(request.capability, ObjectType::Frame)?;
+                if arguments[2] != 0 || arguments[3] != 0 {
+                    return Err(Status::InvalidArgument);
+                }
+                self.map(frame, arguments[0], arguments[1])
+            }
+            #[cfg(feature = "memory")]
+            Operation::FrameShare => {
+                // Sharing is derivation without the cnode: the frame
+                // capability itself must carry `grant`.
+                let frame = self.typed(request.capability, ObjectType::Frame)?;
+                Self::require(&frame, Rights::GRANT)?;
+                if arguments[3] != 0 {
+                    return Err(Status::InvalidArgument);
+                }
+                let rights = Self::defined_rights(arguments[1])?;
+                if !rights.is_attenuation_of(frame.rights) {
+                    return Err(Status::InsufficientRights);
+                }
+                let destination = self.destination(arguments[0])?;
+                let id = self.allocate_id();
+                self.slots[destination] = Slot::Live(Capability {
+                    object: frame.object,
+                    rights,
+                    badge: arguments[2],
+                    id,
+                    parent: frame.id,
+                });
+                Ok([id, 0, 0, 0])
+            }
+            #[cfg(feature = "memory")]
+            Operation::FrameReclaim => {
+                let frame = self.typed(request.capability, ObjectType::Frame)?;
+                if arguments != [0; WORDS] {
+                    return Err(Status::InvalidArgument);
+                }
+                // A derived handle is not the frame's owner, and the frame
+                // the domain was built with was never the caller's to free.
+                if frame.parent != 0 || frame.object == OBJECT_FRAME_0 {
+                    return Err(Status::NotPermitted);
+                }
+                let mut unmapped = 0;
+                if let Object::AddressSpace(space) = &mut self.objects[OBJECT_ADDRESS_SPACE] {
+                    for page in space.pages.iter_mut() {
+                        if page.frame == Some(frame.object) {
+                            *page = Page::default();
+                            unmapped += 1;
+                        }
+                    }
+                }
+                let before = self.slots;
+                let mut revoked = 0;
+                for index in 0..SLOTS {
+                    let descendant = match before[index] {
+                        Slot::Live(capability) => {
+                            capability.id != frame.id
+                                && Self::descends(&before, capability.id, frame.id)
+                        }
+                        _ => false,
+                    };
+                    if descendant {
+                        self.slots[index] = Slot::Tombstone;
+                        revoked += 1;
+                    }
+                }
+                if let Object::Frame { number, .. } = self.objects[frame.object] {
+                    self.objects[frame.object] = Object::Frame {
+                        number,
+                        live: false,
+                    };
+                }
+                self.slots[request.capability as usize] = Slot::Empty;
+                Ok([unmapped, revoked, 0, 0])
+            }
+            #[cfg(feature = "memory")]
+            Operation::AsMap => {
+                self.address_space(request.capability)?;
+                if arguments[3] != 0 {
+                    return Err(Status::InvalidArgument);
+                }
+                let slot = u32::try_from(arguments[0]).map_err(|_| Status::InvalidArgument)?;
+                let frame = self.typed(slot, ObjectType::Frame)?;
+                self.map(frame, arguments[1], arguments[2])
+            }
+            #[cfg(feature = "memory")]
+            Operation::AsUnmap => {
+                let space = self.address_space(request.capability)?;
+                if arguments[1] != 0 || arguments[2] != 0 || arguments[3] != 0 {
+                    return Err(Status::InvalidArgument);
+                }
+                let page = Self::page(arguments[0])?;
+                let Some(object) = space.pages[page].frame else {
+                    return Err(Status::NotFound);
+                };
+                space.pages[page] = Page::default();
+                Ok([self.frame_number(object), 0, 0, 0])
+            }
+            #[cfg(feature = "memory")]
+            Operation::AsProtect => {
+                let space = self.address_space(request.capability)?;
+                if arguments[2] != 0 || arguments[3] != 0 {
+                    return Err(Status::InvalidArgument);
+                }
+                let page = Self::page(arguments[0])?;
+                let rights = Self::mapping_rights(arguments[1])?;
+                if space.pages[page].frame.is_none() {
+                    return Err(Status::NotFound);
+                }
+                // A mapping can only lose rights in place, like a capability.
+                if !rights.is_attenuation_of(space.pages[page].rights) {
+                    return Err(Status::InsufficientRights);
+                }
+                Self::permitted_together(rights)?;
+                space.pages[page].rights = rights;
+                Ok([u64::from(rights.0), 0, 0, 0])
+            }
+            #[cfg(feature = "memory")]
+            Operation::AsQuery => {
+                let space = self.address_space(request.capability)?;
+                if arguments[1] != 0 || arguments[2] != 0 || arguments[3] != 0 {
+                    return Err(Status::InvalidArgument);
+                }
+                let page = Self::page(arguments[0])?;
+                let mapping = space.pages[page];
+                let Some(object) = mapping.frame else {
+                    return Err(Status::NotFound);
+                };
+                Ok([self.frame_number(object), u64::from(mapping.rights.0), 0, 0])
             }
 
             // -- capability derivation: the cnode is the subject -----------
@@ -432,7 +763,7 @@ impl IndependentKernel {
                 Ok([now, 0, 0, 0])
             }
 
-            // -- everything outside the v1.0 profile answers, it does not guess
+            // -- declared by the contract, in no published profile yet ------
             _ => Err(Status::InvalidOperation),
         }
     }
@@ -449,20 +780,35 @@ impl Kernel for IndependentKernel {
     fn reset_to_conformance_domain(&mut self) {
         self.slots = [Slot::Empty; SLOTS];
         self.next_id = 1;
-        self.objects = [
-            Object::CNode,
-            Object::Endpoint(Endpoint {
-                queue: [Message::default(); QUEUE],
-                head: 0,
-                length: 0,
-            }),
-            Object::Notification(Notification {
-                pending: false,
-                badges: 0,
-            }),
-            Object::Frame,
-            Object::Clock { ticks: 0 },
-        ];
+        self.objects = [Object::CNode; OBJECTS];
+        self.objects[1] = Object::Endpoint(Endpoint {
+            queue: [Message::default(); QUEUE],
+            head: 0,
+            length: 0,
+        });
+        self.objects[2] = Object::Notification(Notification {
+            pending: false,
+            badges: 0,
+        });
+        self.objects[OBJECT_FRAME_0] = Object::Frame {
+            number: 0,
+            live: true,
+        };
+        self.objects[4] = Object::Clock { ticks: 0 };
+        self.objects[OBJECT_ADDRESS_SPACE] = Object::AddressSpace(AddressSpace {
+            #[cfg(feature = "memory")]
+            pages: [Page::default(); PAGES],
+        });
+        #[cfg(feature = "memory")]
+        for (offset, object) in self.objects[OBJECT_FIRST_BUDGET_FRAME..]
+            .iter_mut()
+            .enumerate()
+        {
+            *object = Object::Frame {
+                number: offset as u8 + 1,
+                live: false,
+            };
+        }
         // Derivation identifiers are allocated in construction order, which
         // the corpus asserts; the badge on the notification is part of the
         // specified domain.
@@ -481,6 +827,12 @@ impl Kernel for IndependentKernel {
         );
         self.root(slot::FRAME, 3, Rights(Rights::READ.0 | Rights::WRITE.0), 0);
         self.root(slot::CLOCK, 4, Rights::READ, 0);
+        self.root(
+            slot::ADDRESS_SPACE,
+            OBJECT_ADDRESS_SPACE,
+            Rights::CONTROL,
+            0,
+        );
     }
 }
 
@@ -520,6 +872,36 @@ mod tests {
             conformance::compare(&mut ModelKernel::new(), &mut IndependentKernel::new()).unwrap();
         assert_eq!(agreed, conformance::CORPUS.len());
         conformance::check_invariants(&mut IndependentKernel::new()).unwrap();
+    }
+
+    #[test]
+    fn both_implementations_agree_under_the_v1_profile_too() {
+        use crate::model::group;
+        let agreed = conformance::compare(
+            &mut ModelKernel::with_profile(group::V1_PROFILE),
+            &mut IndependentKernel::with_profile(group::V1_PROFILE),
+        )
+        .unwrap();
+        assert_eq!(agreed, conformance::CORPUS.len());
+        let mut transcript = String::new();
+        writeln!(
+            transcript,
+            "agel-kernel-contract v{}.{}.{} corpus={} steps",
+            crate::VERSION_MAJOR,
+            crate::VERSION_MINOR,
+            crate::VERSION_PATCH,
+            conformance::CORPUS.len()
+        )
+        .unwrap();
+        conformance::transcribe(
+            &mut IndependentKernel::with_profile(group::V1_PROFILE),
+            &mut transcript,
+        )
+        .unwrap();
+        assert_eq!(
+            transcript,
+            include_str!("../../../bootstrap/kernel-contract-v1.0.trace")
+        );
     }
 
     #[test]

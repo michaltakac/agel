@@ -38,7 +38,9 @@ impl DomainObjects {
     /// A domain holding the conformance capability space.
     pub fn new() -> Self {
         Self {
-            objects: IndependentKernel::new(),
+            // The v1.0 profile: the memory group's frame window is not yet
+            // backed by real mappings on this backend, so it is not published.
+            objects: IndependentKernel::with_profile(agel_kernel_abi::model::group::V1_PROFILE),
         }
     }
 

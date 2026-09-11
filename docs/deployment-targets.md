@@ -172,7 +172,7 @@ Exact, because the gap is large:
   tamper-evident log, and a standard library written in Agel.
 - **Model access:** external providers, through a typed and audited effect
   boundary.
-- **The kernel contract:** frozen at v1.0, with a reference model, an 81-step
+- **The kernel contract:** frozen at v1.1, with a reference model, a 118-step
   conformance corpus, and four backends producing byte-identical transcripts —
   three research kernels on x86-64, AArch64 and RISC-V, and one on an unmodified
   seL4 kernel under Microkit.

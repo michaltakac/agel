@@ -7,5 +7,12 @@ rust-version.workspace = true
 publish = false
 description = "Versioned, backend-neutral kernel contract and conformance corpus for Agel native backends."
 
+[features]
+default = ["memory"]
+# The memory group's implementation. Off, both implementations still answer
+# the corpus, refusing the group as a v1.0 backend does; the x86-64 workshop
+# images link the crate this way to stay inside their 254-sector budget.
+memory = []
+
 [lints]
 workspace = true

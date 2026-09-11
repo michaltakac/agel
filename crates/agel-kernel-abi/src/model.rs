@@ -46,6 +46,10 @@ pub mod group {
 
     /// The groups every v1.0-conformant backend must implement.
     pub const V1_PROFILE: u64 = CORE | CAPABILITY | ENDPOINT | NOTIFICATION | CLOCK;
+    /// The v1.1 profile: v1.0 plus the memory group. A backend publishes the
+    /// profile it implements; the corpus is one, and the transcript it
+    /// produces depends on the profile, so each profile has a frozen one.
+    pub const V1_1_PROFILE: u64 = V1_PROFILE | MEMORY;
 }
 
 /// Well-known slots of the conformance domain. A backend constructs exactly
@@ -63,8 +67,10 @@ pub mod slot {
     pub const FRAME: u32 = 4;
     /// A monotonic clock with `read`.
     pub const CLOCK: u32 = 5;
+    /// The domain's own address space with `control`, since v1.1.
+    pub const ADDRESS_SPACE: u32 = 6;
     /// The first slot left empty for the corpus to derive into.
-    pub const FIRST_FREE: u32 = 6;
+    pub const FIRST_FREE: u32 = 7;
 }
 
 #[derive(Clone, Copy)]
@@ -126,10 +132,66 @@ pub struct ModelKernel {
     /// counter so that a corpus run is reproducible on every backend; a real
     /// deployment binds this capability to a hardware time source.
     clock: u64,
+    /// The operation groups this instance publishes and answers.
+    profile: u64,
+    /// Frame `n` exists: 0 is the frame the domain is constructed with, the
+    /// rest are the allocation budget, handed out lowest number first.
+    frames: [bool; FRAMES],
+    /// The frame window: which frame is mapped at each page index, with what
+    /// rights. A mapping belongs to the address space, not to the capability
+    /// it was made through; revoking the capability does not unmap.
+    window: [Mapping; WINDOW],
+}
+
+const FRAMES: usize = crate::CONFORMANCE_FRAME_BUDGET as usize + 1;
+const WINDOW: usize = crate::CONFORMANCE_FRAME_WINDOW as usize;
+/// Rights a frame may carry: the memory rights plus `grant`, which is what
+/// lets its holder share it without the capability space's `control`.
+#[cfg(feature = "memory")]
+const FRAME_RIGHTS: Rights =
+    Rights(Rights::READ.0 | Rights::WRITE.0 | Rights::EXECUTE.0 | Rights::GRANT.0);
+/// Rights a mapping may carry.
+#[cfg(feature = "memory")]
+const MAPPING_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::WRITE.0 | Rights::EXECUTE.0);
+
+#[derive(Clone, Copy)]
+#[cfg_attr(not(feature = "memory"), allow(dead_code))]
+struct Mapping {
+    mapped: bool,
+    frame: u8,
+    rights: Rights,
+}
+
+impl Mapping {
+    const EMPTY: Self = Self {
+        mapped: false,
+        frame: 0,
+        rights: Rights::NONE,
+    };
 }
 
 impl Default for ModelKernel {
     fn default() -> Self {
+        Self::with_profile(group::V1_1_PROFILE)
+    }
+}
+
+impl ModelKernel {
+    /// A model kernel holding the conformance domain's capability space and
+    /// publishing the full v1.1 profile.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A model kernel publishing exactly `profile`, which must include the
+    /// v1.0 groups. Operations outside it answer `invalid-operation`, so the
+    /// model can stand in for a backend that implements less, and produce
+    /// that backend's transcript.
+    pub fn with_profile(profile: u64) -> Self {
+        debug_assert!(
+            profile & group::V1_PROFILE == group::V1_PROFILE,
+            "every profile includes the v1.0 groups"
+        );
         let mut kernel = Self {
             slots: [Slot::EMPTY; SLOTS],
             next_id: 1,
@@ -138,16 +200,12 @@ impl Default for ModelKernel {
             notification_pending: false,
             notification_badge: 0,
             clock: 0,
+            profile,
+            frames: [false; FRAMES],
+            window: [Mapping::EMPTY; WINDOW],
         };
         kernel.reset_to_conformance_domain();
         kernel
-    }
-}
-
-impl ModelKernel {
-    /// A model kernel holding the conformance domain's capability space.
-    pub fn new() -> Self {
-        Self::default()
     }
 
     fn allocate_id(&mut self) -> Option<u32> {
@@ -233,8 +291,304 @@ impl ModelKernel {
             version_word(),
             u64::from(CONFORMANCE_SLOTS),
             CONFORMANCE_ENDPOINT_CAPACITY,
-            group::V1_PROFILE,
+            self.profile,
         ])
+    }
+
+    // -- memory: frames and the frame window ---------------------------------
+
+    /// A page index inside the frame window.
+    #[cfg(feature = "memory")]
+    fn page(word: u64) -> Result<usize, Status> {
+        match usize::try_from(word) {
+            Ok(index) if index < WINDOW => Ok(index),
+            _ => Err(Status::InvalidArgument),
+        }
+    }
+
+    #[cfg(feature = "memory")]
+    /// Rights a mapping may carry: defined, non-empty memory rights.
+    fn mapping_rights(word: u64) -> Result<Rights, Status> {
+        match u32::try_from(word) {
+            Ok(bits) if bits != 0 && Rights(bits).is_attenuation_of(MAPPING_RIGHTS) => {
+                Ok(Rights(bits))
+            }
+            _ => Err(Status::InvalidArgument),
+        }
+    }
+
+    #[cfg(feature = "memory")]
+    /// Policy, checked after the capability has been found sufficient: no
+    /// backend's page tables grant `write` together with `execute`, and a
+    /// contract that allowed it would promise something the machines refuse.
+    fn writable_and_executable(rights: Rights) -> Result<(), Status> {
+        if rights.contains(Rights::WRITE) && rights.contains(Rights::EXECUTE) {
+            return Err(Status::NotPermitted);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "memory")]
+    fn map_into_window(&mut self, frame: Slot, page: u64, rights: u64) -> Response {
+        let page = match Self::page(page) {
+            Ok(page) => page,
+            Err(status) => return Response::fail(status),
+        };
+        let rights = match Self::mapping_rights(rights) {
+            Ok(rights) => rights,
+            Err(status) => return Response::fail(status),
+        };
+        if !rights.is_attenuation_of(frame.rights) {
+            return Response::fail(Status::InsufficientRights);
+        }
+        if let Err(status) = Self::writable_and_executable(rights) {
+            return Response::fail(status);
+        }
+        if self.window[page].mapped {
+            return Response::fail(Status::AlreadyExists);
+        }
+        self.window[page] = Mapping {
+            mapped: true,
+            frame: frame.target,
+            rights,
+        };
+        Response::ok1(page as u64)
+    }
+
+    #[cfg(feature = "memory")]
+    fn frame_allocate(&mut self, request: &Request) -> Response {
+        if let Err(status) =
+            self.resolve_typed(request.capability, ObjectType::CNode, Rights::CONTROL)
+        {
+            return Response::fail(status);
+        }
+        if let Err(status) = Self::reserved(&request.arguments, 2) {
+            return Response::fail(status);
+        }
+        let rights = match u32::try_from(request.arguments[1]) {
+            Ok(bits) if bits != 0 && Rights(bits).is_attenuation_of(FRAME_RIGHTS) => Rights(bits),
+            _ => return Response::fail(Status::InvalidArgument),
+        };
+        let destination = match self.destination(request.arguments[0]) {
+            Ok(index) => index,
+            Err(status) => return Response::fail(status),
+        };
+        let Some(number) = self.frames.iter().position(|live| !*live) else {
+            return Response::fail(Status::ResourceExhausted);
+        };
+        let Some(id) = self.allocate_id() else {
+            return Response::fail(Status::ResourceExhausted);
+        };
+        self.frames[number] = true;
+        self.slots[destination] = Slot {
+            kind: ObjectType::Frame,
+            target: number as u8,
+            rights,
+            badge: 0,
+            id,
+            parent: 0,
+            revoked: false,
+        };
+        Response::ok1(u64::from(id))
+    }
+
+    #[cfg(feature = "memory")]
+    fn frame_map(&mut self, request: &Request) -> Response {
+        let frame = match self.resolve_typed(request.capability, ObjectType::Frame, Rights::NONE) {
+            Ok(slot) => slot,
+            Err(status) => return Response::fail(status),
+        };
+        if let Err(status) = Self::reserved(&request.arguments, 2) {
+            return Response::fail(status);
+        }
+        self.map_into_window(frame, request.arguments[0], request.arguments[1])
+    }
+
+    #[cfg(feature = "memory")]
+    fn frame_share(&mut self, request: &Request) -> Response {
+        let frame = match self.resolve_typed(request.capability, ObjectType::Frame, Rights::GRANT) {
+            Ok(slot) => slot,
+            Err(status) => return Response::fail(status),
+        };
+        if let Err(status) = Self::reserved(&request.arguments, 3) {
+            return Response::fail(status);
+        }
+        let rights = match u32::try_from(request.arguments[1]) {
+            Ok(bits) if Rights(bits).is_attenuation_of(Rights::ALL) => Rights(bits),
+            _ => return Response::fail(Status::InvalidArgument),
+        };
+        if !rights.is_attenuation_of(frame.rights) {
+            return Response::fail(Status::InsufficientRights);
+        }
+        let destination = match self.destination(request.arguments[0]) {
+            Ok(index) => index,
+            Err(status) => return Response::fail(status),
+        };
+        let Some(id) = self.allocate_id() else {
+            return Response::fail(Status::ResourceExhausted);
+        };
+        self.slots[destination] = Slot {
+            kind: ObjectType::Frame,
+            target: frame.target,
+            rights,
+            badge: request.arguments[2],
+            id,
+            parent: frame.id,
+            revoked: false,
+        };
+        Response::ok1(u64::from(id))
+    }
+
+    #[cfg(feature = "memory")]
+    fn frame_reclaim(&mut self, request: &Request) -> Response {
+        let frame = match self.resolve_typed(request.capability, ObjectType::Frame, Rights::NONE) {
+            Ok(slot) => slot,
+            Err(status) => return Response::fail(status),
+        };
+        if let Err(status) = Self::reserved(&request.arguments, 0) {
+            return Response::fail(status);
+        }
+        // Only the root capability of a frame the domain allocated may give
+        // it back: a shared handle, and the frame the domain was built with,
+        // are not the holder's to reclaim.
+        if frame.parent != 0 || frame.target == 0 {
+            return Response::fail(Status::NotPermitted);
+        }
+        let mut unmapped = 0_u64;
+        for mapping in self.window.iter_mut() {
+            if mapping.mapped && mapping.frame == frame.target {
+                *mapping = Mapping::EMPTY;
+                unmapped += 1;
+            }
+        }
+        let revoked = self.revoke_descendants(frame.id);
+        self.frames[usize::from(frame.target)] = false;
+        self.slots[request.capability as usize] = Slot::EMPTY;
+        Response::ok([unmapped, revoked, 0, 0])
+    }
+
+    #[cfg(feature = "memory")]
+    /// Tombstone every capability that descends from `root_id`, to a fixed
+    /// point; the same walk `cap.revoke` performs.
+    fn revoke_descendants(&mut self, root_id: u32) -> u64 {
+        let mut revoked = 0_u64;
+        loop {
+            let mut changed = false;
+            for position in 0..SLOTS {
+                let slot = self.slots[position];
+                if slot.is_empty() || slot.parent == 0 {
+                    continue;
+                }
+                let parent_alive = self
+                    .slots
+                    .iter()
+                    .any(|candidate| !candidate.is_empty() && candidate.id == slot.parent);
+                if slot.parent == root_id || !parent_alive {
+                    self.slots[position] = Slot {
+                        revoked: true,
+                        ..Slot::EMPTY
+                    };
+                    revoked += 1;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        revoked
+    }
+
+    #[cfg(feature = "memory")]
+    fn address_space(&self, capability: u32) -> Result<Slot, Status> {
+        self.resolve_typed(capability, ObjectType::AddressSpace, Rights::CONTROL)
+    }
+
+    #[cfg(feature = "memory")]
+    fn as_map(&mut self, request: &Request) -> Response {
+        if let Err(status) = self.address_space(request.capability) {
+            return Response::fail(status);
+        }
+        if let Err(status) = Self::reserved(&request.arguments, 3) {
+            return Response::fail(status);
+        }
+        let frame_slot = match u32::try_from(request.arguments[0]) {
+            Ok(index) => index,
+            Err(_) => return Response::fail(Status::InvalidArgument),
+        };
+        let frame = match self.resolve_typed(frame_slot, ObjectType::Frame, Rights::NONE) {
+            Ok(slot) => slot,
+            Err(status) => return Response::fail(status),
+        };
+        self.map_into_window(frame, request.arguments[1], request.arguments[2])
+    }
+
+    #[cfg(feature = "memory")]
+    fn as_unmap(&mut self, request: &Request) -> Response {
+        if let Err(status) = self.address_space(request.capability) {
+            return Response::fail(status);
+        }
+        if let Err(status) = Self::reserved(&request.arguments, 1) {
+            return Response::fail(status);
+        }
+        let page = match Self::page(request.arguments[0]) {
+            Ok(page) => page,
+            Err(status) => return Response::fail(status),
+        };
+        if !self.window[page].mapped {
+            return Response::fail(Status::NotFound);
+        }
+        let frame = self.window[page].frame;
+        self.window[page] = Mapping::EMPTY;
+        Response::ok1(u64::from(frame))
+    }
+
+    #[cfg(feature = "memory")]
+    fn as_protect(&mut self, request: &Request) -> Response {
+        if let Err(status) = self.address_space(request.capability) {
+            return Response::fail(status);
+        }
+        if let Err(status) = Self::reserved(&request.arguments, 2) {
+            return Response::fail(status);
+        }
+        let page = match Self::page(request.arguments[0]) {
+            Ok(page) => page,
+            Err(status) => return Response::fail(status),
+        };
+        let rights = match Self::mapping_rights(request.arguments[1]) {
+            Ok(rights) => rights,
+            Err(status) => return Response::fail(status),
+        };
+        if !self.window[page].mapped {
+            return Response::fail(Status::NotFound);
+        }
+        if !rights.is_attenuation_of(self.window[page].rights) {
+            return Response::fail(Status::InsufficientRights);
+        }
+        if let Err(status) = Self::writable_and_executable(rights) {
+            return Response::fail(status);
+        }
+        self.window[page].rights = rights;
+        Response::ok1(u64::from(rights.0))
+    }
+
+    #[cfg(feature = "memory")]
+    fn as_query(&self, request: &Request) -> Response {
+        if let Err(status) = self.address_space(request.capability) {
+            return Response::fail(status);
+        }
+        if let Err(status) = Self::reserved(&request.arguments, 1) {
+            return Response::fail(status);
+        }
+        let page = match Self::page(request.arguments[0]) {
+            Ok(page) => page,
+            Err(status) => return Response::fail(status),
+        };
+        let mapping = self.window[page];
+        if !mapping.mapped {
+            return Response::fail(Status::NotFound);
+        }
+        Response::ok([u64::from(mapping.frame), u64::from(mapping.rights.0), 0, 0])
     }
 
     fn cap_copy(&mut self, request: &Request) -> Response {
@@ -569,9 +923,27 @@ impl Kernel for ModelKernel {
             0,
         );
         self.install(slot::CLOCK, ObjectType::Clock, Rights::READ, 0);
+        self.install(
+            slot::ADDRESS_SPACE,
+            ObjectType::AddressSpace,
+            Rights::CONTROL,
+            0,
+        );
+        // The frame the domain is built with is frame 0; the budget is free.
+        self.slots[slot::FRAME as usize].target = 0;
+        self.frames = [false; FRAMES];
+        self.frames[0] = true;
+        self.window = [Mapping::EMPTY; WINDOW];
     }
 
     fn invoke(&mut self, request: &Request) -> Response {
+        // Outside this backend's published profile. It says so, it does not
+        // guess. Without the memory group compiled in the final arm refuses
+        // everything outside v1.0 already.
+        #[cfg(feature = "memory")]
+        if request.operation.group() & self.profile == 0 {
+            return Response::fail(Status::InvalidOperation);
+        }
         match request.operation {
             Operation::Nop => {
                 if request.capability != slot::NULL {
@@ -599,7 +971,25 @@ impl Kernel for ModelKernel {
 
             Operation::ClockMonotonicNow => self.clock_now(request),
 
-            // Outside the v1.0 profile. A backend must say so, not guess.
+            #[cfg(feature = "memory")]
+            Operation::FrameAllocate => self.frame_allocate(request),
+            #[cfg(feature = "memory")]
+            Operation::FrameMap => self.frame_map(request),
+            #[cfg(feature = "memory")]
+            Operation::FrameShare => self.frame_share(request),
+            #[cfg(feature = "memory")]
+            Operation::FrameReclaim => self.frame_reclaim(request),
+            #[cfg(feature = "memory")]
+            Operation::AsMap => self.as_map(request),
+            #[cfg(feature = "memory")]
+            Operation::AsUnmap => self.as_unmap(request),
+            #[cfg(feature = "memory")]
+            Operation::AsProtect => self.as_protect(request),
+            #[cfg(feature = "memory")]
+            Operation::AsQuery => self.as_query(request),
+
+            // Declared by the contract, in no published profile yet. A
+            // backend must say so, not guess.
             _ => Response::fail(Status::InvalidOperation),
         }
     }
@@ -618,8 +1008,97 @@ mod tests {
         let response = kernel().invoke(&Request::new(Operation::BootInfo, slot::NULL));
         assert_eq!(response.status, Status::Ok);
         assert_eq!(response.values[0], version_word());
-        assert_eq!(response.values[3], group::V1_PROFILE);
-        assert_eq!(response.values[3] & group::MEMORY, 0);
+        assert_eq!(response.values[3], group::V1_1_PROFILE);
+        let narrow = ModelKernel::with_profile(group::V1_PROFILE)
+            .invoke(&Request::new(Operation::BootInfo, slot::NULL));
+        assert_eq!(narrow.values[3], group::V1_PROFILE);
+        assert_eq!(narrow.values[3] & group::MEMORY, 0);
+    }
+
+    #[test]
+    fn a_narrower_profile_answers_memory_with_invalid_operation() {
+        let mut narrow = ModelKernel::with_profile(group::V1_PROFILE);
+        assert_eq!(
+            narrow
+                .invoke(&Request::with(
+                    Operation::FrameMap,
+                    slot::FRAME,
+                    [0, 1, 0, 0]
+                ))
+                .status,
+            Status::InvalidOperation
+        );
+        let mut full = kernel();
+        assert_eq!(
+            full.invoke(&Request::with(
+                Operation::FrameMap,
+                slot::FRAME,
+                [0, 1, 0, 0]
+            ))
+            .status,
+            Status::Ok
+        );
+    }
+
+    #[test]
+    fn reclaiming_a_frame_unmaps_it_and_revokes_its_shares() {
+        let mut kernel = kernel();
+        let grant = u64::from(Rights::READ.0 | Rights::WRITE.0 | Rights::GRANT.0);
+        let first = slot::FIRST_FREE as u64;
+        let shared = first + 1;
+        assert_eq!(
+            kernel
+                .invoke(&Request::with(
+                    Operation::FrameAllocate,
+                    slot::CNODE,
+                    [first, grant, 0, 0]
+                ))
+                .status,
+            Status::Ok
+        );
+        assert_eq!(
+            kernel
+                .invoke(&Request::with(
+                    Operation::FrameShare,
+                    first as u32,
+                    [shared, u64::from(Rights::READ.0), 9, 0]
+                ))
+                .status,
+            Status::Ok
+        );
+        assert_eq!(
+            kernel
+                .invoke(&Request::with(
+                    Operation::FrameMap,
+                    shared as u32,
+                    [3, 1, 0, 0]
+                ))
+                .status,
+            Status::Ok
+        );
+        let reclaimed = kernel.invoke(&Request::new(Operation::FrameReclaim, first as u32));
+        assert_eq!(reclaimed.status, Status::Ok);
+        assert_eq!(reclaimed.values, [1, 1, 0, 0]);
+        assert_eq!(
+            kernel
+                .invoke(&Request::with(
+                    Operation::FrameMap,
+                    shared as u32,
+                    [4, 1, 0, 0]
+                ))
+                .status,
+            Status::Revoked
+        );
+        assert_eq!(
+            kernel
+                .invoke(&Request::with(
+                    Operation::AsQuery,
+                    slot::ADDRESS_SPACE,
+                    [3, 0, 0, 0]
+                ))
+                .status,
+            Status::NotFound
+        );
     }
 
     #[test]
@@ -819,10 +1298,10 @@ mod tests {
         let mut kernel = kernel();
         for operation in [
             Operation::PdCreate,
-            Operation::AsMap,
-            Operation::FrameAllocate,
+            Operation::ThreadConfigure,
             Operation::IrqBind,
             Operation::SchedBudget,
+            Operation::ClockDeadline,
         ] {
             assert_eq!(
                 kernel.invoke(&Request::new(operation, slot::NULL)).status,

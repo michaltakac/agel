@@ -34,7 +34,7 @@ use core::fmt;
 /// reserved position. Patch changes clarify wording without changing bytes.
 pub const VERSION_MAJOR: u16 = 1;
 /// See [`VERSION_MAJOR`].
-pub const VERSION_MINOR: u16 = 0;
+pub const VERSION_MINOR: u16 = 1;
 /// See [`VERSION_MAJOR`].
 pub const VERSION_PATCH: u16 = 0;
 
@@ -55,6 +55,14 @@ pub const CONFORMANCE_SLOTS: u32 = 32;
 /// [`Status::QueueFull`] rather than growing. Four is small enough that a
 /// conformance trace can actually reach the backpressure edge.
 pub const CONFORMANCE_ENDPOINT_CAPACITY: u64 = 4;
+
+/// Frames a conformance domain may obtain with `frame.allocate`, beyond the
+/// one it is constructed with. Small enough that the corpus reaches
+/// [`Status::ResourceExhausted`] and gets a frame back by reclaiming.
+pub const CONFORMANCE_FRAME_BUDGET: u64 = 4;
+/// Pages in a conformance domain's frame window: `frame.map` and `as.map`
+/// name a page by its index in this window, never by an address.
+pub const CONFORMANCE_FRAME_WINDOW: u64 = 8;
 
 /// Fixed on-wire size of a [`Request`] or a [`Response`], in bytes.
 pub const FRAME_BYTES: usize = 40;
@@ -144,6 +152,12 @@ impl ObjectType {
 /// [`Rights::is_attenuation_of`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Rights(pub u32);
+
+impl Default for Rights {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
 
 impl Rights {
     /// No authority at all.
@@ -290,6 +304,23 @@ pub enum Operation {
 }
 
 impl Operation {
+    /// The profile group this operation belongs to, as a
+    /// [`model::group`] bit. A backend answers an operation only when the
+    /// group is in the profile it publishes. Operations are numbered by
+    /// group, so the group is the high byte of the wire code.
+    pub const fn group(self) -> u64 {
+        match self.code() >> 8 {
+            0x00 | 0x0b => model::group::CORE,
+            0x01 | 0x03 | 0x09 => model::group::DOMAIN,
+            0x02 | 0x07 => model::group::MEMORY,
+            0x04 => model::group::ENDPOINT,
+            0x05 => model::group::NOTIFICATION,
+            0x06 => model::group::CAPABILITY,
+            0x08 => model::group::INTERRUPT,
+            _ => model::group::CLOCK,
+        }
+    }
+
     /// The stable wire code for this operation.
     pub const fn code(self) -> u16 {
         match self {
@@ -814,6 +845,6 @@ mod tests {
 
     #[test]
     fn version_word_is_packed_as_documented() {
-        assert_eq!(version_word(), (1_u64 << 32));
+        assert_eq!(version_word(), (1_u64 << 32) | (1_u64 << 16));
     }
 }

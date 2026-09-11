@@ -4,7 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.38: the native evaluator runs inside the seL4 world protection
+The current repository is **v0.2.39: kernel contract v1.1 specifies the memory group, both hosted
+implementations answer it identically across 118 corpus steps, and every native backend publishes
+the profile it can make real, with a frozen transcript for each profile; the native evaluator runs inside the seL4 world protection
 domain too, so the language has evaluated the same forms unprivileged on all four backends; stored native functions carry their captured scalars, so a closure
 made inside a lexical call can be defined and a lambda escaping a stored function is kept rather than
 refused; native actor slots can be given back, with generation-checked
@@ -233,7 +235,7 @@ It provides:
 - native transactional definitions, functions, recursion, quote/eval, monotonic
   revisions, and one-step world rollback;
 - a versioned, backend-neutral kernel contract with an executable reference
-  model and an 81-step conformance corpus frozen as a canonical transcript;
+  model and a 118-step conformance corpus frozen as one canonical transcript per published profile;
 - kernel-built page tables, per-domain address spaces, write-xor-execute, trap
   entry, and a 100 Hz preemption timer;
 - protection domains on x86-64, AArch64, and RISC-V that answer the whole
@@ -558,7 +560,7 @@ kernel-contract transcript, and the isolation suite with:
 ```
 
 For each architecture the isolation suite boots a protection domain that answers
-all 81 steps of the kernel contract from the machine's lowest privilege level,
+all 118 steps of the kernel contract from the machine's lowest privilege level,
 requires the transcript to match the frozen reference byte for byte, then
 deliberately makes worlds misbehave and requires each to be contained without
 losing the recovery monitor.

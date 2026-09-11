@@ -2,8 +2,9 @@
 # One contract, one corpus, one frozen transcript, three machines.
 #
 # For each architecture this boots the research kernel under QEMU and requires
-# that an unprivileged world answers all 81 kernel-contract steps with a
-# transcript byte-identical to bootstrap/kernel-contract.trace, that every way
+# that an unprivileged world answers all 118 kernel-contract steps with a
+# transcript byte-identical to the frozen one for the profile the research
+# kernels publish (v1.0 until their frame window is real), that every way
 # that architecture lets a world misbehave is contained, and that the recovery
 # monitor still works afterwards.
 #
@@ -131,13 +132,13 @@ run_architecture() {
   tr -d '\r' < "$output_file" \
     | sed -n '/^---BEGIN AGEL CONTRACT TRANSCRIPT---$/,/^---END AGEL CONTRACT TRANSCRIPT---$/p' \
     | sed '1d;$d' > "$transcript_file"
-  diff -u bootstrap/kernel-contract.trace "$transcript_file"
+  diff -u bootstrap/kernel-contract-v1.0.trace "$transcript_file"
 
   # Every architecture must contain a world that writes to kernel memory, a
   # world that executes something it is not allowed to, and a world that never
   # yields. The exact fault names differ, and the report says which.
   grep -q "isolation\[$architecture\]: unprivileged corpus matches the reference model" "$output_file"
-  grep -q "isolation\[$architecture\]: the world answered with the independent implementation behind a trap gate; the supervisor checked all 81 steps against the reference model" \
+  grep -q "isolation\[$architecture\]: the world answered with the independent implementation behind a trap gate; the supervisor checked all 118 steps against the reference model" \
     "$output_file"
   grep -q "isolation\[$architecture\]: native Agel evaluated factorial with transactional rollback in an unprivileged domain" "$output_file"
   grep -q "isolation\[$architecture\]: contained a world writing to kernel memory: page-fault" "$output_file"
@@ -192,7 +193,7 @@ run_architecture() {
     exit 1
   fi
 
-  printf '%s\n' "  $architecture: 81 contract steps printed by an unprivileged driver, $contained faults contained, 1 preemption, 1 driver restart [ok]"
+  printf '%s\n' "  $architecture: 118 contract steps printed by an unprivileged driver, $contained faults contained, 1 preemption, 1 driver restart [ok]"
   rm -f "$output_file" "$transcript_file"
 }
 

@@ -10,7 +10,14 @@ use agel_kernel_abi::model::ModelKernel;
 use std::fmt::Write as _;
 
 fn main() {
-    let mut kernel = ModelKernel::new();
+    // `--profile v1.0` prints the transcript a backend publishing only the
+    // v1.0 profile produces; the default is the full v1.1 profile.
+    let profile = match std::env::args().nth(2).as_deref() {
+        Some("v1.0") => agel_kernel_abi::model::group::V1_PROFILE,
+        Some("v1.1") | None => agel_kernel_abi::model::group::V1_1_PROFILE,
+        Some(other) => panic!("unknown profile {other}; use v1.0 or v1.1"),
+    };
+    let mut kernel = ModelKernel::with_profile(profile);
 
     conformance::check_invariants(&mut kernel)
         .unwrap_or_else(|failure| panic!("reference model violates the contract: {failure}"));

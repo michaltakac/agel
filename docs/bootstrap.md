@@ -76,4 +76,7 @@ kernel, not all Agel semantics. v0.1.0 added a bootable recovery path and v0.1.1
 added a fixed-memory native evaluator. The next trust steps are native persistent
 images, expanding cross-implementation conformance, and moving the agent runtime
 and compiler into the VM. The Rust seed has not disappeared, and the A/B
-selector does not yet survive a hostile disk controller.
+selector does not yet survive a hostile disk controller. (Update: v0.2.29
+through v0.2.32 put the recovery record and a kernel-slot selector on disk,
+with budgeted boots and signed candidate kernels; the disk itself is still
+trusted to return what was written, and the trusted slot is unsigned.)

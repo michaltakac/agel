@@ -26,8 +26,9 @@ Agel v0.2.3 adds that first native framebuffer boundary. A VBE handoff maps the
 display only into a dedicated ring-3 compositor. Its input is a bounded vector
 frame authored in Agel syntax, build-validated, and revalidated inside the
 domain. Since v0.2.4, keyboard and serial input can commit and roll back bounded
-native scene edits while QEMU runs. Pointer input and the full hosted agent
-runtime are not yet native.
+native scene edits while QEMU runs; since v0.2.7 pointer events reach native
+scenes, and since v0.2.27 keyboard and pointer bytes arrive through an 8042
+driver domain. The full hosted agent runtime is not yet native.
 
 ## Design
 

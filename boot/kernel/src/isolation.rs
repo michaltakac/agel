@@ -208,7 +208,9 @@ fn run_conformance(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
             Ok(world) => world,
             Err(reason) => failed(reason),
         };
-    let mut reference = ModelKernel::new();
+    // The research kernels publish the v1.0 profile until their frame window
+    // is backed by real mappings; the oracle publishes the same.
+    let mut reference = ModelKernel::with_profile(agel_kernel_abi::model::group::V1_PROFILE);
     reference.reset_to_conformance_domain();
 
     let mut agreed = 0_usize;

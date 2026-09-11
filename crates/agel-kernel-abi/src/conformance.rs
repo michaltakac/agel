@@ -3,7 +3,10 @@
 //! Phase 0 of the native roadmap is "freeze the boundary". This corpus is that
 //! freeze in executable form: a fixed sequence of invocations, against a fixed
 //! initial capability space, whose rendered transcript must be byte-identical
-//! on every backend that claims to implement contract v1.0.
+//! on every backend that publishes the same profile. The corpus is one; a
+//! backend publishing the v1.0 profile answers the memory steps with
+//! `invalid-operation` and produces the v1.0 transcript, a backend publishing
+//! v1.1 produces the v1.1 transcript, and both are frozen.
 //!
 //! The corpus deliberately spends most of its steps on *refusals*. An interface
 //! is defined by what it declines, in what words, and in what order it checks;
@@ -53,25 +56,40 @@ const EP: u32 = slot::ENDPOINT;
 const NOTE: u32 = slot::NOTIFICATION;
 const FRAME: u32 = slot::FRAME;
 const CLOCK: u32 = slot::CLOCK;
+const AS: u32 = slot::ADDRESS_SPACE;
 
 // Scratch slots the corpus derives into. Keeping them named makes the
 // derivation and revocation steps readable.
-const FRAME_READ: u32 = 6;
-const EP_COPY: u32 = 7;
-const EP_RECEIVE_ONLY: u32 = 8;
-const EP_BADGED: u32 = 9;
-const NOTE_BADGED: u32 = 10;
-const EP_CHAIN_PARENT: u32 = 11;
-const EP_CHAIN_CHILD: u32 = 12;
-const FRAME_MOVED: u32 = 13;
-const CLOCK_POWERLESS: u32 = 14;
+const FRAME_READ: u32 = 7;
+const EP_COPY: u32 = 8;
+const EP_RECEIVE_ONLY: u32 = 9;
+const EP_BADGED: u32 = 10;
+const NOTE_BADGED: u32 = 11;
+const EP_CHAIN_PARENT: u32 = 12;
+const EP_CHAIN_CHILD: u32 = 13;
+const FRAME_MOVED: u32 = 14;
+const CLOCK_POWERLESS: u32 = 15;
+// Slots the memory steps allocate and share into.
+const F1: u32 = 16;
+const F1_SHARED: u32 = 17;
+const F2: u32 = 18;
+const F3: u32 = 19;
+const F4: u32 = 20;
+const F5: u32 = 21;
 
 const READ: u64 = Rights::READ.0 as u64;
+const WRITE: u64 = Rights::WRITE.0 as u64;
+const EXECUTE: u64 = Rights::EXECUTE.0 as u64;
+const GRANT: u64 = Rights::GRANT.0 as u64;
 const SEND: u64 = Rights::SEND.0 as u64;
 const RECEIVE: u64 = Rights::RECEIVE.0 as u64;
 const CONTROL: u64 = Rights::CONTROL.0 as u64;
 const ALL: u64 = Rights::ALL.0 as u64;
 const NO_RIGHTS: u64 = 0;
+const READ_WRITE: u64 = READ | WRITE;
+const READ_WRITE_EXECUTE: u64 = READ | WRITE | EXECUTE;
+/// One past the last page of the frame window.
+const OUTSIDE_WINDOW: u64 = crate::CONFORMANCE_FRAME_WINDOW;
 /// A bit pattern outside [`Rights::ALL`]; reserved rights must be rejected.
 const UNDEFINED_RIGHTS: u64 = 0x8000_0000;
 
@@ -435,6 +453,175 @@ pub const CORPUS: &[Step] = &[
         "clock/powerless-handle-cannot-read",
         Request::new(Operation::ClockMonotonicNow, CLOCK_POWERLESS),
     ),
+    // -- Memory: frames, the frame window, sharing and reclaiming ----------
+    // Outside the v1.0 profile every step here answers invalid-operation;
+    // a v1.1 backend answers them, and its transcript is frozen separately.
+    Step::new(
+        "memory/query-unmapped",
+        Request::with(Operation::AsQuery, AS, [0, 0, 0, 0]),
+    ),
+    Step::new(
+        "memory/unmap-unmapped",
+        Request::with(Operation::AsUnmap, AS, [0, 0, 0, 0]),
+    ),
+    Step::new(
+        "memory/map-outside-the-window",
+        Request::with(
+            Operation::FrameMap,
+            FRAME,
+            [OUTSIDE_WINDOW, READ_WRITE, 0, 0],
+        ),
+    ),
+    Step::new(
+        "memory/map-with-no-rights",
+        Request::with(Operation::FrameMap, FRAME, [0, NO_RIGHTS, 0, 0]),
+    ),
+    Step::new(
+        "memory/map-cannot-widen",
+        Request::with(Operation::FrameMap, FRAME, [0, READ_WRITE_EXECUTE, 0, 0]),
+    ),
+    Step::new(
+        "memory/map-the-domain-frame",
+        Request::with(Operation::FrameMap, FRAME, [0, READ_WRITE, 0, 0]),
+    ),
+    Step::new(
+        "memory/map-an-occupied-page",
+        Request::with(Operation::FrameMap, FRAME, [0, READ, 0, 0]),
+    ),
+    Step::new(
+        "memory/query-the-mapping",
+        Request::with(Operation::AsQuery, AS, [0, 0, 0, 0]),
+    ),
+    Step::new(
+        "memory/protect-cannot-widen",
+        Request::with(Operation::AsProtect, AS, [0, READ_WRITE_EXECUTE, 0, 0]),
+    ),
+    Step::new(
+        "memory/protect-to-read-only",
+        Request::with(Operation::AsProtect, AS, [0, READ, 0, 0]),
+    ),
+    Step::new(
+        "memory/query-shows-read-only",
+        Request::with(Operation::AsQuery, AS, [0, 0, 0, 0]),
+    ),
+    Step::new(
+        "memory/allocate-requires-the-cnode",
+        Request::with(
+            Operation::FrameAllocate,
+            FRAME,
+            [F1 as u64, READ_WRITE, 0, 0],
+        ),
+    ),
+    Step::new(
+        "memory/allocate-with-an-undefined-right",
+        cnode(Operation::FrameAllocate, [F1 as u64, SEND, 0, 0]),
+    ),
+    Step::new(
+        "memory/allocate-1",
+        cnode(
+            Operation::FrameAllocate,
+            [F1 as u64, READ_WRITE | GRANT, 0, 0],
+        ),
+    ),
+    Step::new(
+        "memory/allocate-2",
+        cnode(Operation::FrameAllocate, [F2 as u64, READ_WRITE, 0, 0]),
+    ),
+    Step::new(
+        "memory/allocate-3",
+        cnode(Operation::FrameAllocate, [F3 as u64, READ, 0, 0]),
+    ),
+    Step::new(
+        "memory/allocate-4",
+        cnode(
+            Operation::FrameAllocate,
+            [F4 as u64, READ_WRITE_EXECUTE, 0, 0],
+        ),
+    ),
+    Step::new(
+        "memory/map-writable-and-executable-is-not-permitted",
+        Request::with(Operation::FrameMap, F4, [3, READ_WRITE_EXECUTE, 0, 0]),
+    ),
+    Step::new(
+        "memory/map-executable-only",
+        Request::with(Operation::FrameMap, F4, [3, EXECUTE, 0, 0]),
+    ),
+    Step::new(
+        "memory/allocate-5-exhausts-the-budget",
+        cnode(Operation::FrameAllocate, [F5 as u64, READ, 0, 0]),
+    ),
+    Step::new(
+        "memory/share-requires-grant",
+        Request::with(Operation::FrameShare, FRAME, [F1_SHARED as u64, READ, 0, 0]),
+    ),
+    Step::new(
+        "memory/share-cannot-widen",
+        Request::with(
+            Operation::FrameShare,
+            F1,
+            [F1_SHARED as u64, READ_WRITE_EXECUTE, 0, 0],
+        ),
+    ),
+    Step::new(
+        "memory/share-narrows",
+        Request::with(Operation::FrameShare, F1, [F1_SHARED as u64, READ, 7, 0]),
+    ),
+    Step::new(
+        "memory/map-the-shared-frame-read-only",
+        Request::with(Operation::FrameMap, F1_SHARED, [1, READ, 0, 0]),
+    ),
+    Step::new(
+        "memory/the-shared-frame-cannot-be-mapped-writable",
+        Request::with(Operation::FrameMap, F1_SHARED, [2, WRITE, 0, 0]),
+    ),
+    Step::new(
+        "memory/as-map-frame-2",
+        Request::with(Operation::AsMap, AS, [F2 as u64, 2, READ_WRITE, 0]),
+    ),
+    Step::new(
+        "memory/as-map-something-that-is-not-a-frame",
+        Request::with(Operation::AsMap, AS, [EP as u64, 3, READ, 0]),
+    ),
+    Step::new(
+        "memory/as-map-requires-an-address-space",
+        Request::with(Operation::AsMap, FRAME, [F2 as u64, 3, READ, 0]),
+    ),
+    Step::new(
+        "memory/unmap-page-2",
+        Request::with(Operation::AsUnmap, AS, [2, 0, 0, 0]),
+    ),
+    Step::new(
+        "memory/unmap-page-2-again",
+        Request::with(Operation::AsUnmap, AS, [2, 0, 0, 0]),
+    ),
+    Step::new(
+        "memory/reclaim-through-a-shared-handle-is-not-permitted",
+        Request::new(Operation::FrameReclaim, F1_SHARED),
+    ),
+    Step::new(
+        "memory/reclaim-the-domain-frame-is-not-permitted",
+        Request::new(Operation::FrameReclaim, FRAME),
+    ),
+    Step::new(
+        "memory/reclaim-frame-1",
+        Request::new(Operation::FrameReclaim, F1),
+    ),
+    Step::new(
+        "memory/the-shared-handle-fails-closed",
+        Request::with(Operation::FrameMap, F1_SHARED, [3, READ, 0, 0]),
+    ),
+    Step::new(
+        "memory/query-page-1-after-reclaim",
+        Request::with(Operation::AsQuery, AS, [1, 0, 0, 0]),
+    ),
+    Step::new(
+        "memory/allocate-after-reclaim",
+        cnode(Operation::FrameAllocate, [F5 as u64, READ, 0, 0]),
+    ),
+    Step::new(
+        "memory/the-budget-is-full-again",
+        cnode(Operation::FrameAllocate, [F1 as u64, READ, 0, 0]),
+    ),
     // -- The capability space can weaken itself, and cannot restore itself --
     Step::new(
         "cnode/attenuate-itself",
@@ -535,6 +722,43 @@ fn invariant_failure(step: &Step, response: &Response) -> Option<&'static str> {
                 return Some("authority was widened by derivation");
             }
         }
+        // The memory steps are checked only where the memory group is
+        // published; elsewhere they are refusals like every other group
+        // outside the profile, and `profile/*` covers that.
+        "memory/map-cannot-widen"
+        | "memory/share-cannot-widen"
+        | "memory/protect-cannot-widen"
+        | "memory/the-shared-frame-cannot-be-mapped-writable" => {
+            if !matches!(
+                response.status,
+                Status::InsufficientRights | Status::InvalidOperation
+            ) {
+                return Some("a mapping or a share widened a frame's rights");
+            }
+        }
+        "memory/allocate-5-exhausts-the-budget" | "memory/the-budget-is-full-again" => {
+            if !matches!(
+                response.status,
+                Status::ResourceExhausted | Status::InvalidOperation
+            ) {
+                return Some("the frame budget did not push back");
+            }
+        }
+        "memory/the-shared-handle-fails-closed" => {
+            if !matches!(response.status, Status::Revoked | Status::InvalidOperation) {
+                return Some("a share of a reclaimed frame did not fail closed");
+            }
+        }
+        "memory/reclaim-through-a-shared-handle-is-not-permitted"
+        | "memory/reclaim-the-domain-frame-is-not-permitted"
+        | "memory/map-writable-and-executable-is-not-permitted" => {
+            if !matches!(
+                response.status,
+                Status::NotPermitted | Status::InvalidOperation
+            ) {
+                return Some("a frame was reclaimed by something other than its owner, or mapped writable and executable");
+            }
+        }
         "endpoint/send-5-is-backpressure" => {
             if response.status != Status::QueueFull {
                 return Some("a bounded queue did not push back at capacity");
@@ -590,7 +814,30 @@ mod tests {
     }
 
     #[test]
-    fn the_corpus_reaches_every_v1_profile_operation() {
+    fn the_v1_profile_transcript_is_frozen_too() {
+        extern crate std;
+        use core::fmt::Write as _;
+        let mut narrow = ModelKernel::with_profile(group::V1_PROFILE);
+        check_invariants(&mut narrow).expect("the v1.0 profile is conformant");
+        let mut transcript = std::string::String::new();
+        writeln!(
+            transcript,
+            "agel-kernel-contract v{}.{}.{} corpus={} steps",
+            crate::VERSION_MAJOR,
+            crate::VERSION_MINOR,
+            crate::VERSION_PATCH,
+            CORPUS.len()
+        )
+        .unwrap();
+        transcribe(&mut narrow, &mut transcript).unwrap();
+        assert_eq!(
+            transcript,
+            include_str!("../../../bootstrap/kernel-contract-v1.0.trace")
+        );
+    }
+
+    #[test]
+    fn the_corpus_reaches_every_v1_1_profile_operation() {
         for operation in [
             Operation::Nop,
             Operation::BootInfo,
@@ -607,6 +854,14 @@ mod tests {
             Operation::NotificationWait,
             Operation::NotificationPoll,
             Operation::ClockMonotonicNow,
+            Operation::FrameAllocate,
+            Operation::FrameMap,
+            Operation::FrameShare,
+            Operation::FrameReclaim,
+            Operation::AsMap,
+            Operation::AsUnmap,
+            Operation::AsProtect,
+            Operation::AsQuery,
         ] {
             assert!(
                 CORPUS

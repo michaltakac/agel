@@ -140,6 +140,12 @@ promise.
   over the forms the research kernels' isolation self-test checks, with the
   world domain given a 512 KiB stack. The contract and the transcript are
   unchanged.
+  `v0.2.39` is kernel contract v1.1: the memory group (`frame.allocate`,
+  `frame.map`, `frame.share`, `frame.reclaim`, `as.map`, `as.unmap`,
+  `as.protect`, `as.query`) is specified, implemented by both hosted
+  implementations, and covered by 37 new corpus steps. The corpus is 118
+  steps with two frozen transcripts, one per published profile; the research
+  kernels and the seL4 broker publish v1.0 until the frame window is real.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
