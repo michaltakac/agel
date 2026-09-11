@@ -197,6 +197,13 @@ promise.
   restyled with COSMIC's dark palette, radii and spacing: a top panel, a
   workshop window with a sidebar and cards, a floating dock and a command
   field. The image grows to 6,144 sectors; the frame budget to 160 records.
+  `v0.2.48` puts the desktop at its native resolution: the supervisor sets
+  1920×1080×32 through the Bochs display interface and keeps the BIOS mode
+  as the fallback; a sprite sheet in the asset region gives the desktop an
+  arrow cursor, dock icons and window controls through a sprite record; the
+  scene is laid out at 1080p and the language's drawing region is 1920×1000;
+  painting drains the input driver between records so a slow frame loses
+  no keystrokes.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

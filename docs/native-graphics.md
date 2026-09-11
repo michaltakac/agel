@@ -1,6 +1,7 @@
 # Native Agel graphics
 
-Agel v0.2.10 boots to an actual 1024×768×32 live graphical workshop in QEMU. The path
+Agel boots to a live graphical workshop in QEMU, at 1920×1080×32 since
+v0.2.48 (1024×768 before it, and still when the display cannot be set). The path
 is deliberately split so that visual meaning remains language data and display
 authority remains a narrow replaceable service:
 
@@ -45,9 +46,9 @@ isolated evaluator, with 256 UTF-8 bytes per input. Source and the host
 transcript preserve Unicode; the seed framebuffer font uses `?` for unsupported
 bytes. Characters such as `≤` are not automatically new language operators.
 
-## Typography, surfaces and assets (v0.2.47)
+## Typography, surfaces and assets (v0.2.47), native resolution and sprites (v0.2.48)
 
-![The native desktop at v0.2.47](images/native-desktop-v0.2.47.png)
+![The native desktop at v0.2.48](images/native-desktop-v0.2.48.png)
 
 The compositor draws from three more record operations, each validated
 like the others:
@@ -57,6 +58,7 @@ like the others:
 | `label` (6) | x, y, face, size, colour, alpha, length; text at byte 36 | anti-aliased text from a font atlas, blended over what is below |
 | `surface` (7) | x, y, width, height, radius, colour, alpha | a rounded box blended with an alpha, its corners anti-aliased |
 | `shadow` (8) | x, y, width, height, radius, blur, alpha | a linear falloff around a box, drawn as rings, the box itself left alone |
+| `sprite` (9) | x, y, sprite, tint, alpha | a sprite from the sheet, blended by its own alpha; in `tint` when that is not black, so one white glyph serves every colour |
 
 The faces are font atlases in the disk's **asset region** (sectors 3072
 through 6143, a table like the program region's). `scripts/build-font-atlas.py`
@@ -69,7 +71,21 @@ through the storage driver domain, checks its CRC-32, maps it read-only
 into the compositor's asset window, and keeps the metrics it needs to lay
 text out; the compositor checks every offset an atlas names against the
 length it was told before reading it. The graphics image refuses to boot
-without its faces.
+without its faces. The sprite sheet (`AGI1`, RGBA8) is drawn by
+`scripts/build-sprites.py` with Pillow at four times its size and scaled
+down: the arrow cursor, seven dock icons, the three window controls and a
+search glyph.
+
+Since v0.2.48 the supervisor sets the display to 1920×1080×32 through the
+Bochs display interface QEMU's standard VGA exposes (two I/O ports), keeping
+the linear framebuffer the BIOS mode reported; where the interface is absent
+the BIOS mode stays and the scene is scaled into it, with text unscaled,
+which is a limit of that fallback rather than the design. The scene is laid
+out at 1920×1080; the language's drawing region is 1920×1000, above the
+command field. The pointer is the cursor sprite. Painting drains the input
+driver between records into a queue the session reads first, so keys typed
+while a frame is painted are kept: a frame of blended surfaces is slow
+under emulation, and before this the controller's buffer overran.
 
 The scene in `boot/desktop/native-desktop.agel` uses COSMIC's tokens: its
 dark palette (`#1b1b1b`, `#262626`, `#333333`, text `#dedede` and
@@ -84,9 +100,8 @@ shared page: a keystroke redraws the command field, a pointer that moved
 redraws the union of where it was and where it is, and only a committed
 scene change redraws the screen, so input is not lost to painting.
 
-What this is not yet: the display is 1024×768; there are no icons beyond
-drawn shapes, no windows a process owns, no pointer cursor beyond a square,
-and the shadow is a linear falloff, not a blur.
+What this is not yet: no windows a process owns, no launcher behind the
+panel's words, no clock, and the shadow is a linear falloff, not a blur.
 
 ## Live Agel forms
 

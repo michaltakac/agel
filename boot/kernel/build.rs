@@ -115,6 +115,16 @@ fn compile_native_desktop() {
                 put(&mut record, 6, color(&tokens, &mut cursor));
                 put(&mut record, 7, number(&tokens, &mut cursor));
             }
+            "sprite" => {
+                // x y index tint alpha: a sprite from the sheet, in its own
+                // colours when tint is #000000, else in the tint.
+                put(&mut record, 0, 9);
+                put(&mut record, 1, number(&tokens, &mut cursor));
+                put(&mut record, 2, number(&tokens, &mut cursor));
+                put(&mut record, 3, number(&tokens, &mut cursor));
+                put(&mut record, 4, color(&tokens, &mut cursor));
+                put(&mut record, 5, number(&tokens, &mut cursor));
+            }
             "shadow" => {
                 // x y width height radius blur alpha: a soft shadow around
                 // a box, drawn before the box.

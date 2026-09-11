@@ -159,23 +159,26 @@ pub mod shared {
     pub const DISPLAY_LOGICAL_WIDTH: usize = 52;
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
     pub const DISPLAY_LOGICAL_HEIGHT: usize = 53;
-    /// The compositor's font faces: for face `i` in 0..3, the address the
-    /// atlas is mapped at and its length in bytes, zero for no face. Words
-    /// 54 to 59.
+    /// The compositor's assets: for slot `i` in 0..4, the address the asset
+    /// is mapped at and its length in bytes, zero for none. Slots 0 to 2
+    /// are font faces (regular sans, medium sans, mono), slot 3 the sprite
+    /// sheet. Words 54 to 61.
     #[cfg(feature = "native-graphics")]
-    pub const FACE_WORDS: usize = 54;
+    pub const ASSET_WORDS: usize = 54;
     #[cfg(feature = "native-graphics")]
-    pub const FACES: usize = 3;
+    pub const ASSET_SLOTS: usize = 4;
+    #[cfg(feature = "native-graphics")]
+    pub const SPRITE_SLOT: usize = 3;
     /// A clip rectangle for drawing: x, y, width, height in physical pixels;
-    /// a zero width means the whole surface. Words 60 to 63.
+    /// a zero width means the whole surface. Words 62 to 65.
     #[cfg(feature = "native-graphics")]
-    pub const CLIP_X: usize = 60;
+    pub const CLIP_X: usize = 62;
     #[cfg(feature = "native-graphics")]
-    pub const CLIP_Y: usize = 61;
+    pub const CLIP_Y: usize = 63;
     #[cfg(feature = "native-graphics")]
-    pub const CLIP_WIDTH: usize = 62;
+    pub const CLIP_WIDTH: usize = 64;
     #[cfg(feature = "native-graphics")]
-    pub const CLIP_HEIGHT: usize = 63;
+    pub const CLIP_HEIGHT: usize = 65;
     /// Divide by zero. Only x86-64 traps on this; RISC-V defines a result and
     /// AArch64 has no integer divide exception at all, so the command exists
     /// only where a machine can actually be provoked by it.
@@ -531,6 +534,13 @@ pub mod fs {
     /// several sectors.
     pub const TICKS: u32 = 300;
 }
+
+/// The native scene's geometry, as the evaluator world defines it (it
+/// validates language-drawn rectangles first) and the screen's height.
+#[cfg(feature = "native-graphics")]
+pub use crate::native::{SCENE_DRAWABLE_HEIGHT, SCENE_WIDTH};
+#[cfg(feature = "native-graphics")]
+pub const SCENE_HEIGHT: u32 = 1080;
 
 /// Byte offset in the shared page where console payload bytes begin.
 ///

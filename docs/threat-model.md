@@ -1159,6 +1159,25 @@ beyond drawn shapes, no windows a process owns, and no pointer cursor that
 is more than a square; the look is a first pass at COSMIC's, not a port of
 it.
 
+## v0.2.48
+
+- **Setting the display is the supervisor's, through two ports:** the
+  Bochs interface is probed by its identifier and, when present, given the
+  scene's size; the framebuffer address is the one the BIOS mode reported
+  and the mapping is the same device grant to the same compositor, checked
+  against the same 16 MiB limit. Without the interface nothing is written
+  and the BIOS mode stays.
+- **Sprites are bounded like glyphs:** the sheet is an asset the
+  compositor checks by magic, count, and every sprite's offset and size
+  against the sheet's length; a tint is a colour like any other record's.
+- **Input outlives painting:** the queue between the input driver and the
+  session holds 256 bytes and is drained between records, so a frame that
+  takes long under emulation drops nothing the controller held; a burst
+  larger than the queue is dropped by the queue, not misread.
+
+Not claimed: the fallback mode scales geometry but not text; the sprites
+are the project's own drawings, not COSMIC's icon theme.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

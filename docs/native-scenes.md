@@ -16,8 +16,8 @@ bridge. Neither mode runs the kernel in JavaScript.
 `scene-rect` takes integer `x y width height radius rgb`; RGB is a decimal
 24-bit color. It appends a rounded rectangle to a retained overlay and returns
 the new count. `scene-clear` empties that overlay. There are at most 12 records;
-all rectangles must fit the 1024×684 logical drawing region above the reserved
-command bar. Radius is at most half either dimension. No arbitrary drawing
+all rectangles must fit the 1920×1000 logical drawing region above the
+command field (1024×684 before v0.2.48). Radius is at most half either dimension. No arbitrary drawing
 opcode, memory address, or device capability is exposed to Agel source.
 
 [`boot/desktop/dock.agel`](../boot/desktop/dock.agel) builds a dock from these

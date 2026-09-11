@@ -564,10 +564,10 @@ unsafe fn label(surface: Surface, page: *mut u64, record: *const u8, style: Labe
         alpha,
         length,
     } = style;
-    if face as usize >= shared::FACES {
+    if face as usize >= shared::SPRITE_SLOT {
         return false;
     }
-    let slot = shared::FACE_WORDS + 2 * face as usize;
+    let slot = shared::ASSET_WORDS + 2 * face as usize;
     let address = unsafe { page.add(slot).read_volatile() } as usize;
     let bytes = unsafe { page.add(slot + 1).read_volatile() } as usize;
     if address == 0 || bytes < 12 {
@@ -668,6 +668,86 @@ unsafe fn label(surface: Surface, page: *mut u64, record: *const u8, style: Labe
         }
         pen += i32::from(advance);
         index += 1;
+    }
+    true
+}
+
+/// A sprite from the sheet the supervisor mapped, blended by its own alpha
+/// and, when `tint` is not black, drawn in that colour rather than its own:
+/// how a white glyph becomes a grey control or an accent icon. Every
+/// offset is checked against the sheet's length.
+#[inline(always)]
+unsafe fn sprite(
+    surface: Surface,
+    page: *mut u64,
+    x: u32,
+    y: u32,
+    index: u32,
+    tint: u32,
+    alpha: u32,
+) -> bool {
+    let slot = shared::ASSET_WORDS + 2 * shared::SPRITE_SLOT;
+    let address = unsafe { page.add(slot).read_volatile() } as usize;
+    let bytes = unsafe { page.add(slot + 1).read_volatile() } as usize;
+    if address == 0 || bytes < 8 {
+        return false;
+    }
+    let magic = [
+        unsafe { asset_byte(address, bytes, 0) },
+        unsafe { asset_byte(address, bytes, 1) },
+        unsafe { asset_byte(address, bytes, 2) },
+        unsafe { asset_byte(address, bytes, 3) },
+    ];
+    if magic != [Some(b'A'), Some(b'G'), Some(b'I'), Some(b'1')] {
+        return false;
+    }
+    let Some(count) = (unsafe { asset_u16(address, bytes, 4) }) else {
+        return false;
+    };
+    if index >= u32::from(count) {
+        return false;
+    }
+    let row = 8 + index as usize * 16;
+    let (Some(width), Some(height), Some(offset)) = (
+        unsafe { asset_u16(address, bytes, row) },
+        unsafe { asset_u16(address, bytes, row + 2) },
+        unsafe { asset_u32(address, bytes, row + 4) },
+    ) else {
+        return false;
+    };
+    let (width, height, offset) = (usize::from(width), usize::from(height), offset as usize);
+    if offset.saturating_add(width * height * 4) > bytes {
+        return false;
+    }
+    let clip = surface.clip;
+    if x >= clip.x + clip.width
+        || y >= clip.y + clip.height
+        || x + width as u32 <= clip.x
+        || y + height as u32 <= clip.y
+    {
+        return true;
+    }
+    let mut sy = 0;
+    while sy < height {
+        let mut sx = 0;
+        while sx < width {
+            let at = address + offset + (sy * width + sx) * 4;
+            let r = unsafe { (at as *const u8).read_volatile() };
+            let g = unsafe { ((at + 1) as *const u8).read_volatile() };
+            let b = unsafe { ((at + 2) as *const u8).read_volatile() };
+            let a = unsafe { ((at + 3) as *const u8).read_volatile() };
+            if a != 0 {
+                let color = if tint != 0 {
+                    tint
+                } else {
+                    (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
+                };
+                let mixed = (u32::from(a) + 1) * alpha / 256;
+                unsafe { blend(surface, x + sx as u32, y + sy as u32, color, mixed) };
+            }
+            sx += 1;
+        }
+        sy += 1;
     }
     true
 }
@@ -826,6 +906,25 @@ unsafe fn draw(surface: Surface, page: *mut u64, record: *const u8, bytes: usize
             }
         }
         true
+    } else if operation == 9 {
+        let index = unsafe { record_word(record, 3) };
+        let tint = unsafe { record_word(record, 4) };
+        let alpha = unsafe { record_word(record, 5) };
+        if !valid_color(tint) || alpha > 255 {
+            return false;
+        }
+        let alpha = if alpha == 0 { 256 } else { alpha + 1 };
+        unsafe {
+            sprite(
+                surface,
+                page,
+                surface.x(lx),
+                surface.y(ly),
+                index,
+                tint,
+                alpha,
+            )
+        }
     } else if operation == 5 {
         let scale = unsafe { record_word(record, 3) };
         let color = unsafe { record_word(record, 4) };

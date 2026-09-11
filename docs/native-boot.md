@@ -41,7 +41,7 @@ sector 1024 to 3071 in the same place.
 | 1057 | the v0.2.30 kernel slot selector |
 | 1536–2047 | reserved for the filesystem the POSIX personality's next stratum adds |
 | 2048–3071 | the v0.2.41 program region: a table sector and static ELF images |
-| 3072–6143 | the v0.2.47 asset region: a table sector and the compositor's font atlases; the x86-64 image is 6,144 sectors (3 MiB) to hold it |
+| 3072–6143 | the v0.2.47 asset region: a table sector, the compositor's font atlases and, since v0.2.48, its sprite sheet; the x86-64 image is 6,144 sectors (3 MiB) to hold it |
 
 Rebuilding installs the new kernel as slot A, clears the selector so that
 kernel is what boots, and preserves everything else. Before v0.2.42 a kernel

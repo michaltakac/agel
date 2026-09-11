@@ -16,6 +16,28 @@ pub unsafe fn out8(port: u16, value: u8) {
     unsafe { asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack)) };
 }
 
+/// Write a word to an I/O port.
+///
+/// # Safety
+/// See [`out8`].
+#[cfg(feature = "native-graphics")]
+#[inline]
+pub unsafe fn out16(port: u16, value: u16) {
+    unsafe { asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack)) };
+}
+
+/// Read a word from an I/O port.
+///
+/// # Safety
+/// See [`in8`].
+#[cfg(feature = "native-graphics")]
+#[inline]
+pub unsafe fn in16(port: u16) -> u16 {
+    let value: u16;
+    unsafe { asm!("in ax, dx", in("dx") port, out("ax") value, options(nomem, nostack)) };
+    value
+}
+
 /// Write a doubleword to an I/O port.
 ///
 /// # Safety

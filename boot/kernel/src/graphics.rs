@@ -31,22 +31,26 @@ const DISPLAY_LINE_BYTES: usize = 26;
 
 /// The faces the compositor was given, by slot: regular sans, medium sans,
 /// mono. The supervisor lays text out from their metrics.
-static mut FACES: [crate::assets::Face; shared::FACES] =
-    [crate::assets::Face::EMPTY; shared::FACES];
-const FACE_NAMES: [&[u8]; shared::FACES] = [b"fira-sans", b"fira-sans-medium", b"fira-mono"];
+const FACE_COUNT: usize = shared::SPRITE_SLOT;
+static mut FACES: [crate::assets::Face; FACE_COUNT] = [crate::assets::Face::EMPTY; FACE_COUNT];
+const FACE_NAMES: [&[u8]; FACE_COUNT] = [b"fira-sans", b"fira-sans-medium", b"fira-mono"];
+const SPRITE_SHEET: &[u8] = b"sprites";
+/// Sprite ids in the sheet `scripts/build-sprites.py` draws.
+const SPRITE_CURSOR: u32 = 0;
 pub const FACE_SANS: u32 = 0;
 pub const FACE_SANS_MEDIUM: u32 = 1;
 pub const FACE_MONO: u32 = 2;
 
-fn faces() -> &'static [crate::assets::Face; shared::FACES] {
+fn faces() -> &'static [crate::assets::Face; FACE_COUNT] {
     // Safety: the supervisor is single-threaded; the faces are written once
     // at boot before any layout reads them.
     unsafe { &*core::ptr::addr_of!(FACES) }
 }
 
-/// Map every face into `compositor` and remember its metrics. An absent
-/// or broken atlas is a boot failure: the desktop's text is set in it.
-fn load_faces(
+/// Map every face and the sprite sheet into `compositor` and remember the
+/// faces' metrics. An absent or broken asset is a boot failure: the
+/// desktop's text is set in the faces and its icons drawn from the sheet.
+fn load_assets(
     machine: &mut arch::Machine,
     storage: &mut ServiceDomain,
     compositor: &mut arch::Domain,
@@ -72,6 +76,23 @@ fn load_faces(
             }
         }
     }
+    match crate::assets::load_sprites(machine, storage, compositor, SPRITE_SHEET) {
+        Ok(count) => kprint!("assets: sprites {count} sprites\n"),
+        Err(reason) => {
+            kprint!("assets: sprites unavailable: {reason}\n");
+            failed("the sprite sheet the desktop needs is missing from the asset region");
+        }
+    }
+}
+
+/// A sprite from the sheet at (x, y), in its own colours when `tint` is
+/// zero.
+fn sprite_record(x: u32, y: u32, index: u32, tint: u32) -> [u8; RECORD_BYTES] {
+    let mut record = [0; RECORD_BYTES];
+    for (field, word) in [9, x, y, index, tint, 255].iter().enumerate() {
+        put_u32(&mut record, field, *word);
+    }
+    record
 }
 
 /// The width of `text` in `face` at `size`, for layout.
@@ -399,7 +420,71 @@ struct Framebuffer {
     bytes: u64,
 }
 
+/// The Bochs display interface QEMU's standard VGA exposes: an index port
+/// and a data port through which the resolution can be set directly, with
+/// the linear framebuffer staying where the BIOS mode put it.
+const DISPI_INDEX: u16 = 0x1ce;
+const DISPI_DATA: u16 = 0x1cf;
+const DISPI_ID: u16 = 0;
+const DISPI_XRES: u16 = 1;
+const DISPI_YRES: u16 = 2;
+const DISPI_BPP: u16 = 3;
+const DISPI_ENABLE: u16 = 4;
+const DISPI_VIRT_WIDTH: u16 = 6;
+const DISPI_ENABLED_LFB: u16 = 0x41;
+
+fn dispi_write(index: u16, value: u16) {
+    // Safety: the Bochs interface's two ports; writing them configures the
+    // emulated display and nothing else.
+    unsafe {
+        arch::hal::out16(DISPI_INDEX, index);
+        arch::hal::out16(DISPI_DATA, value);
+    }
+}
+
+fn dispi_read(index: u16) -> u16 {
+    // Safety: as in `dispi_write`; reading has no side effect.
+    unsafe {
+        arch::hal::out16(DISPI_INDEX, index);
+        arch::hal::in16(DISPI_DATA)
+    }
+}
+
 impl Framebuffer {
+    /// The display at the scene's native size, when the Bochs interface is
+    /// there to set it: the mode the BIOS stage chose is replaced by
+    /// 1920×1080×32 at the same linear framebuffer. Without the interface
+    /// (real firmware, another card) the BIOS mode stays and the scene is
+    /// scaled into it.
+    fn native(self) -> Option<Self> {
+        if !(0xb0c0..=0xb0cf).contains(&dispi_read(DISPI_ID)) {
+            return None;
+        }
+        let width = crate::world::SCENE_WIDTH;
+        let height = crate::world::SCENE_HEIGHT;
+        dispi_write(DISPI_ENABLE, 0);
+        dispi_write(DISPI_XRES, width as u16);
+        dispi_write(DISPI_YRES, height as u16);
+        dispi_write(DISPI_BPP, 32);
+        dispi_write(DISPI_VIRT_WIDTH, width as u16);
+        dispi_write(DISPI_ENABLE, DISPI_ENABLED_LFB);
+        if dispi_read(DISPI_XRES) != width as u16 || dispi_read(DISPI_YRES) != height as u16 {
+            return None;
+        }
+        let pitch = width * 4;
+        let bytes = u64::from(pitch) * u64::from(height);
+        if bytes > MAX_FRAMEBUFFER_BYTES {
+            return None;
+        }
+        Some(Self {
+            physical: self.physical,
+            width,
+            height,
+            pitch,
+            bytes,
+        })
+    }
+
     fn discover() -> Option<Self> {
         // Safety: the 512-byte BIOS stage owns this fixed low-memory handoff.
         if unsafe { BOOT_GRAPHICS_MARKER.read_volatile() } != BOOT_GRAPHICS_MAGIC {
@@ -480,7 +565,7 @@ fn put_u32(record: &mut [u8; RECORD_BYTES], word: usize, value: u32) {
 
 fn panel_record() -> [u8; RECORD_BYTES] {
     // Opaque: keystrokes redraw only this field and what is on it.
-    surface_record(24, 692, 976, 64, 12, 0x26_26_26, 255)
+    surface_record(60, 1012, 1800, 60, 12, 0x26_26_26, 255)
 }
 
 fn palette(accent: u8) -> [u32; 3] {
@@ -537,14 +622,18 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         replace_accent(&mut record, accent);
         if record_text(&record) == b"Workspace 1" {
             record[46] = b'0' + scene.workspace;
-            if record_u32(&record, 0) == 6 && record_u32(&record, 1) == 458 {
+            if record_u32(&record, 0) == 6 && record_u32(&record, 2) < 40 {
                 // The panel's label is centred on the screen.
                 let width = measure(
                     record_u32(&record, 3),
                     record_u32(&record, 4),
                     record_text(&record),
                 );
-                put_u32(&mut record, 1, (1024_u32.saturating_sub(width)) / 2);
+                put_u32(
+                    &mut record,
+                    1,
+                    (crate::world::SCENE_WIDTH.saturating_sub(width)) / 2,
+                );
             }
         } else if record_text(&record) == b"MOLD THE SYSTEM AS IT RUNS" {
             replace_text(&mut record, &scene.title[..scene.title_len as usize]);
@@ -559,30 +648,30 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         frame.push(record)?;
     }
     if let Some(text) = scene.inspector {
-        frame.push(surface_record(270, 280, 720, 300, 16, 0x1b_1b_1b, 246))?;
+        frame.push(surface_record(560, 300, 800, 400, 16, 0x1b_1b_1b, 250))?;
         frame.push(label_record(
-            292,
-            296,
+            588,
+            320,
             FACE_SANS_MEDIUM,
-            16,
+            20,
             0xde_de_de,
             b"Agent source",
         ))?;
         frame.push(label_record(
-            420,
-            298,
+            740,
+            325,
             FACE_SANS,
             14,
             0x80_80_80,
             b"Esc closes",
         ))?;
-        let spacing = line_height(FACE_MONO, 14);
+        let spacing = line_height(FACE_MONO, 16);
         for (index, chunk) in text.get().chunks(28).enumerate() {
             frame.push(label_record(
-                292,
-                330 + index as u32 * spacing,
+                588,
+                364 + index as u32 * spacing,
                 FACE_MONO,
-                14,
+                16,
                 0x9e_9e_9e,
                 chunk,
             ))?;
@@ -600,16 +689,16 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         prompt[2..2 + length].copy_from_slice(shown);
         frame.push(panel_record())?;
         frame.push(label_record(
-            44,
-            centred_top(FACE_MONO, 16, 692, 34),
+            84,
+            centred_top(FACE_MONO, 16, 1012, 32),
             FACE_MONO,
             16,
             accent[2],
             &prompt[..2 + length],
         ))?;
         frame.push(label_record(
-            44,
-            centred_top(FACE_SANS, 14, 724, 30),
+            84,
+            centred_top(FACE_SANS, 14, 1042, 28),
             FACE_SANS,
             14,
             0x9e_9e_9e,
@@ -617,14 +706,12 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         ))?;
     }
     if let Some((x, y)) = scene.pointer {
-        let mut cursor = [0; RECORD_BYTES];
-        for (index, word) in [2, x.min(1018), y.min(762), 6, 6, 2, 0xffffff]
-            .iter()
-            .enumerate()
-        {
-            put_u32(&mut cursor, index, *word);
-        }
-        frame.push(cursor)?;
+        frame.push(sprite_record(
+            x.min(crate::world::SCENE_WIDTH - 1),
+            y.min(crate::world::SCENE_HEIGHT - 1),
+            SPRITE_CURSOR,
+            0,
+        ))?;
     }
     Ok(frame)
 }
@@ -735,7 +822,11 @@ fn checksum(domain: &mut arch::Domain) -> Result<u64, &'static str> {
     Ok(domain.core().read_shared(shared::VALUES))
 }
 
-fn render(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'static str> {
+fn render(
+    domain: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
+    frame: &Frame,
+) -> Result<(), &'static str> {
     for command in &frame.records[..frame.count] {
         for (offset, byte) in command.iter().enumerate() {
             domain.core().write_payload(offset, *byte);
@@ -744,6 +835,9 @@ fn render(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'static str> 
             .core()
             .write_shared(shared::ARGUMENTS, RECORD_BYTES as u64);
         request(domain, shared::COMMAND_DISPLAY_DRAW)?;
+        if let Some(inputs) = inputs.as_deref_mut() {
+            inputs.drain();
+        }
     }
     Ok(())
 }
@@ -753,6 +847,7 @@ fn render(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'static str> 
 /// area rather than the screen.
 fn render_region(
     domain: &mut arch::Domain,
+    inputs: Option<&mut Inputs<'_>>,
     frame: &Frame,
     region: (u32, u32, u32, u32),
 ) -> Result<(), &'static str> {
@@ -762,14 +857,18 @@ fn render_region(
     core.write_shared(shared::CLIP_Y, u64::from(y));
     core.write_shared(shared::CLIP_WIDTH, u64::from(width.max(1)));
     core.write_shared(shared::CLIP_HEIGHT, u64::from(height.max(1)));
-    let outcome = render(domain, frame);
+    let outcome = render(domain, inputs, frame);
     domain.core().write_shared(shared::CLIP_WIDTH, 0);
     outcome
 }
 
-fn render_overlay(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'static str> {
+fn render_overlay(
+    domain: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
+    frame: &Frame,
+) -> Result<(), &'static str> {
     // A pointer, when visible, follows the three command-bar records.
-    let has_pointer = frame.count > 0 && record_u32(&frame.records[frame.count - 1], 0) == 2;
+    let has_pointer = frame.count > 0 && record_u32(&frame.records[frame.count - 1], 0) == 9;
     let start = frame.count.saturating_sub(if has_pointer { 4 } else { 3 });
     for command in &frame.records[start..frame.count] {
         for (offset, byte) in command.iter().enumerate() {
@@ -779,6 +878,9 @@ fn render_overlay(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'stat
             .core()
             .write_shared(shared::ARGUMENTS, RECORD_BYTES as u64);
         request(domain, shared::COMMAND_DISPLAY_DRAW)?;
+        if let Some(inputs) = inputs.as_deref_mut() {
+            inputs.drain();
+        }
     }
     Ok(())
 }
@@ -954,6 +1056,7 @@ fn scene_command(line: &[u8]) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn execute_workshop(
     compositor: &mut arch::Domain,
+    inputs: Option<&mut Inputs<'_>>,
     evaluator: &mut arch::Domain,
     storage: &mut ServiceDomain,
     recovery: &mut Option<LiveRecovery>,
@@ -973,7 +1076,7 @@ fn execute_workshop(
         return StatusLine::new(b"READY");
     }
     if scene_command(line) {
-        return execute(compositor, current, previous, scene_revision, line);
+        return execute(compositor, inputs, current, previous, scene_revision, line);
     }
     if line == b":shutdown" {
         arch::exit(true);
@@ -1264,13 +1367,14 @@ fn inspect_status(scene: Scene, revision: u8) -> StatusLine {
 
 fn commit_scene(
     compositor: &mut arch::Domain,
+    inputs: Option<&mut Inputs<'_>>,
     current: &mut Scene,
     previous: &mut Scene,
     revision: &mut u8,
     candidate: Scene,
 ) -> Result<u64, &'static str> {
     let frame = materialize(candidate, None, b"")?;
-    render(compositor, &frame)?;
+    render(compositor, inputs, &frame)?;
     let digest = checksum(compositor)?;
     if digest == 0 {
         return Err("candidate rendered an empty digest");
@@ -1283,6 +1387,7 @@ fn commit_scene(
 
 fn execute(
     compositor: &mut arch::Domain,
+    inputs: Option<&mut Inputs<'_>>,
     current: &mut Scene,
     previous: &mut Scene,
     revision: &mut u8,
@@ -1309,7 +1414,7 @@ fn execute(
         Intent::Rollback => candidate = *previous,
         Intent::Inspect | Intent::Help => unreachable!(),
     }
-    match commit_scene(compositor, current, previous, revision, candidate) {
+    match commit_scene(compositor, inputs, current, previous, revision, candidate) {
         Ok(_) => {
             let mut status = StatusLine::new(b"COMMITTED REV ");
             status.number(*revision);
@@ -1324,16 +1429,71 @@ enum Input {
     Pointer(bool),
 }
 
+/// The input driver, and a queue of what it produced while the compositor
+/// was painting. A frame takes long enough under emulation that keys typed
+/// meanwhile would overrun the controller's buffer if nobody read them, so
+/// painting drains the driver between records and the session reads the
+/// queue first.
+const INPUT_QUEUE: usize = 256;
+
+struct Inputs<'a> {
+    driver: &'a mut ServiceDomain,
+    queue: [(bool, u8); INPUT_QUEUE],
+    head: usize,
+    length: usize,
+}
+
+impl<'a> Inputs<'a> {
+    fn new(driver: &'a mut ServiceDomain) -> Self {
+        Self {
+            driver,
+            queue: [(false, 0); INPUT_QUEUE],
+            head: 0,
+            length: 0,
+        }
+    }
+
+    /// Read whatever the driver has, up to a bounded burst, into the queue.
+    fn drain(&mut self) {
+        for _ in 0..32 {
+            let handle = self.driver.handle();
+            match self.driver.read_input(handle) {
+                Ok(Some(pair)) => {
+                    if self.length == INPUT_QUEUE {
+                        return;
+                    }
+                    self.queue[(self.head + self.length) % INPUT_QUEUE] = pair;
+                    self.length += 1;
+                }
+                _ => return,
+            }
+        }
+    }
+
+    fn pop(&mut self) -> Option<(bool, u8)> {
+        if self.length == 0 {
+            return None;
+        }
+        let pair = self.queue[self.head];
+        self.head = (self.head + 1) % INPUT_QUEUE;
+        self.length -= 1;
+        Some(pair)
+    }
+}
+
 fn next_input(
     console: &mut ServiceDomain,
-    input: &mut ServiceDomain,
+    inputs: &mut Inputs<'_>,
     keyboard: &mut Keyboard,
     pointer: &mut crate::pointer::Pointer,
 ) -> Option<Input> {
     if let Ok(Some(byte)) = console.read_console(console.handle()) {
         return Some(Input::Byte(byte));
     }
-    let (auxiliary, byte) = input.read_input(input.handle()).ok()??;
+    if inputs.length == 0 {
+        inputs.drain();
+    }
+    let (auxiliary, byte) = inputs.pop()?;
     if auxiliary {
         pointer.feed(byte).map(Input::Pointer)
     } else {
@@ -1346,6 +1506,7 @@ fn next_input(
 fn synchronize_language_scene(
     evaluator: &mut arch::Domain,
     compositor: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
     current: &mut Scene,
 ) -> Result<(), &'static str> {
     let mut candidate = *current;
@@ -1382,12 +1543,12 @@ fn synchronize_language_scene(
         }
         let [opcode, x, y, width, height, radius, rgb] = rect;
         if opcode != 2
-            || x > 1024
-            || y > 684
+            || x > crate::world::SCENE_WIDTH
+            || y > crate::world::SCENE_DRAWABLE_HEIGHT
             || width == 0
             || height == 0
-            || width > 1024 - x
-            || height > 684 - y
+            || width > crate::world::SCENE_WIDTH - x
+            || height > crate::world::SCENE_DRAWABLE_HEIGHT - y
             || radius > width / 2
             || radius > height / 2
             || rgb > 0xffffff
@@ -1404,9 +1565,9 @@ fn synchronize_language_scene(
         return Ok(());
     }
     let frame = materialize(candidate, None, b"")?;
-    if let Err(reason) = render(compositor, &frame) {
+    if let Err(reason) = render(compositor, inputs.as_deref_mut(), &frame) {
         let old = materialize(*current, None, b"")?;
-        let _ = render(compositor, &old);
+        let _ = render(compositor, inputs, &old);
         return Err(reason);
     }
     *current = candidate;
@@ -1460,15 +1621,10 @@ fn interactive(
     let mut committed_workspace = workspace;
     let mut dirty = false;
     let mut scene_revision = 0_u8;
-    synchronize_language_scene(&mut evaluator, compositor, &mut current)
-        .unwrap_or_else(|reason| failed(reason));
-    let mut line = [0; INPUT_BYTES];
-    let mut length = 0;
-    let mut keyboard = Keyboard::new();
-    let mut pointer = crate::pointer::Pointer::new();
     // Input leaves the supervisor: serial bytes come through the console
     // driver domain and keyboard/pointer bytes through the 8042 driver domain,
-    // each granted only its own ports.
+    // each granted only its own ports. The input driver comes before the
+    // first frame is painted, so painting can drain it.
     let console_entry = crate::user::agel_world_main as *const () as usize as u64;
     let mut console_driver = machine
         .create_console_world(console_entry, 8)
@@ -1484,6 +1640,16 @@ fn interactive(
         Ok(false) => console::write("pointer unavailable; keyboard remains active\n"),
         Err(_) => failed("the input driver domain stopped during pointer enable"),
     }
+    let mut inputs = Inputs::new(&mut input_driver);
+    synchronize_language_scene(&mut evaluator, compositor, Some(&mut inputs), &mut current)
+        .unwrap_or_else(|reason| failed(reason));
+    let mut line = [0; INPUT_BYTES];
+    let mut length = 0;
+    let mut keyboard = Keyboard::new();
+    let mut pointer = crate::pointer::Pointer::new(
+        crate::world::SCENE_WIDTH as i32,
+        crate::world::SCENE_HEIGHT as i32,
+    );
     let mut status = if generation == 0 {
         StatusLine::new(b"AGEL READY - TYPE :HELP")
     } else {
@@ -1493,13 +1659,13 @@ fn interactive(
     };
     let frame = materialize(current, Some(&line[..length]), status.get())
         .unwrap_or_else(|reason| failed(reason));
-    render_overlay(compositor, &frame).unwrap_or_else(|reason| failed(reason));
+    render_overlay(compositor, Some(&mut inputs), &frame).unwrap_or_else(|reason| failed(reason));
     console::write("live-desktop> ");
 
     loop {
         let Some(input) = next_input(
             &mut console_driver,
-            &mut input_driver,
+            &mut inputs,
             &mut keyboard,
             &mut pointer,
         ) else {
@@ -1511,7 +1677,11 @@ fn interactive(
             Input::Pointer(pressed) => {
                 let before = current.pointer;
                 current.pointer = Some((pointer.x as u32, pointer.y as u32));
-                if pressed && pointer.y < 684 && current.inspector.is_none() && length == 0 {
+                if pressed
+                    && (pointer.y as u32) < crate::world::SCENE_DRAWABLE_HEIGHT
+                    && current.inspector.is_none()
+                    && length == 0
+                {
                     let mut command = StatusLine::new(b"(point ");
                     command.number_u64(pointer.x as u64);
                     command.push(b" ");
@@ -1528,10 +1698,15 @@ fn interactive(
                     let (ox, oy) = before.unwrap_or((nx, ny));
                     let left = nx.min(ox).saturating_sub(2);
                     let top = ny.min(oy).saturating_sub(2);
-                    let right = nx.max(ox) + 10;
-                    let bottom = ny.max(oy) + 10;
-                    render_region(compositor, &frame, (left, top, right - left, bottom - top))
-                        .unwrap_or_else(|reason| failed(reason));
+                    let right = nx.max(ox) + 26;
+                    let bottom = ny.max(oy) + 34;
+                    render_region(
+                        compositor,
+                        Some(&mut inputs),
+                        &frame,
+                        (left, top, right - left, bottom - top),
+                    )
+                    .unwrap_or_else(|reason| failed(reason));
                     continue;
                 }
             }
@@ -1546,9 +1721,12 @@ fn interactive(
                     b"(focus-next)",
                 );
                 current.previewing = false;
-                if let Err(reason) =
-                    synchronize_language_scene(&mut evaluator, compositor, &mut current)
-                {
+                if let Err(reason) = synchronize_language_scene(
+                    &mut evaluator,
+                    compositor,
+                    Some(&mut inputs),
+                    &mut current,
+                ) {
                     status = StatusLine::new(reason.as_bytes());
                 }
             }
@@ -1565,6 +1743,7 @@ fn interactive(
                 }
                 status = execute_workshop(
                     compositor,
+                    Some(&mut inputs),
                     &mut evaluator,
                     &mut storage,
                     &mut recovery,
@@ -1587,9 +1766,12 @@ fn interactive(
                     // Source is a snapshot; never label it as current after an edit.
                     current.inspector = None;
                 }
-                if let Err(reason) =
-                    synchronize_language_scene(&mut evaluator, compositor, &mut current)
-                {
+                if let Err(reason) = synchronize_language_scene(
+                    &mut evaluator,
+                    compositor,
+                    Some(&mut inputs),
+                    &mut current,
+                ) {
                     status = StatusLine::new(reason.as_bytes());
                 }
                 prompt_pending = true;
@@ -1621,9 +1803,10 @@ fn interactive(
         let frame = materialize(current, Some(&line[..length]), status.get())
             .unwrap_or_else(|reason| failed(reason));
         if prompt_pending || byte == 0x1b || byte == b'\t' {
-            render(compositor, &frame).unwrap_or_else(|reason| failed(reason));
+            render(compositor, Some(&mut inputs), &frame).unwrap_or_else(|reason| failed(reason));
         } else {
-            render_overlay(compositor, &frame).unwrap_or_else(|reason| failed(reason));
+            render_overlay(compositor, Some(&mut inputs), &frame)
+                .unwrap_or_else(|reason| failed(reason));
         }
         if prompt_pending {
             console::write_bytes(status.get());
@@ -1635,6 +1818,7 @@ fn interactive(
 /// Draw the Agel-authored desktop in a contained compositor domain.
 pub fn run() -> ! {
     let framebuffer = Framebuffer::discover().unwrap_or_else(|| failed("no valid VBE framebuffer"));
+    let framebuffer = framebuffer.native().unwrap_or(framebuffer);
     if VECTOR_STREAM.get(0..4) != Some(STREAM_MAGIC) {
         failed("native vector stream has the wrong magic");
     }
@@ -1676,13 +1860,13 @@ pub fn run() -> ! {
         logical_width,
         logical_height,
     );
-    load_faces(&mut machine, &mut storage, &mut compositor);
+    load_assets(&mut machine, &mut storage, &mut compositor);
     let initial = Scene::initial();
     let frame = materialize(initial, None, b"").unwrap_or_else(|reason| failed(reason));
     if frame.count != count {
         failed("compiled vector command count disagrees");
     }
-    render(&mut compositor, &frame).unwrap_or_else(|reason| failed(reason));
+    render(&mut compositor, None, &frame).unwrap_or_else(|reason| failed(reason));
     let stable = checksum(&mut compositor).unwrap_or_else(|reason| failed(reason));
     if stable == 0 {
         failed("compositor produced an empty framebuffer digest");
@@ -1698,6 +1882,7 @@ pub fn run() -> ! {
     candidate.workspace = 2;
     let changed = commit_scene(
         &mut compositor,
+        None,
         &mut current,
         &mut previous,
         &mut revision,
@@ -1714,6 +1899,7 @@ pub fn run() -> ! {
     }
     let rollback = execute(
         &mut compositor,
+        None,
         &mut current,
         &mut previous,
         &mut revision,
@@ -1764,7 +1950,7 @@ pub fn run() -> ! {
         logical_width,
         logical_height,
     );
-    load_faces(&mut machine, &mut storage, &mut replacement);
+    load_assets(&mut machine, &mut storage, &mut replacement);
     if checksum(&mut replacement).unwrap_or_else(|reason| failed(reason)) != stable {
         failed("replacement compositor did not inherit the last good frame");
     }

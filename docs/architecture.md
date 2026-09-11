@@ -329,9 +329,11 @@ Each rung must be runnable and differentially testable against the rung below:
 51. **A desktop of COSMIC's quality (started at v0.2.47):** the native
    compositor draws anti-aliased text from font atlases in an asset region
    of the disk, blended surfaces with soft shadows, and a scene styled with
-   COSMIC's palette, radii and spacing. Still to come: the display at its
-   native resolution, icons, windows a process can own, a pointer that is
-   an arrow, and the workshop as one window among others.
+   COSMIC's palette, radii and spacing; at v0.2.48 the display runs at
+   1920×1080 with an arrow cursor, dock icons and window controls from a
+   sprite sheet, and painting never loses input. Still to come: windows a
+   process can own, a launcher, and the workshop as one window among
+   others.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

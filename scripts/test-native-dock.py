@@ -15,8 +15,8 @@ def pixels(machine):
     frame = machine.directory / "scene.ppm"
     machine.command("screendump", {"filename": str(frame), "format": "ppm"})
     header, dimensions, maximum, data = frame.read_bytes().split(b"\n", 3)
-    assert (header, dimensions, maximum) == (b"P6", b"1024 768", b"255")
-    return data[:1024 * 684 * 3]  # Exclude command-bar diagnostics.
+    assert (header, dimensions, maximum) == (b"P6", b"1920 1080", b"255")
+    return data[:1920 * 1000 * 3]  # Exclude the command field below the scene.
 
 
 with tempfile.TemporaryDirectory(prefix="agel-dock-", dir="/tmp") as directory:

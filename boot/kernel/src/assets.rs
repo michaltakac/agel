@@ -132,6 +132,62 @@ pub fn load_face(
     name: &[u8],
     slot: usize,
 ) -> Result<Face, &'static str> {
+    let (frames, length) = load_blob(machine, storage, domain, name, slot)?;
+    let length = length as usize;
+    // The header, checked here so layout never trusts a broken atlas; the
+    // compositor checks it again for itself.
+    if length < HEADER_BYTES
+        || byte_at(&frames, 0) != b'A'
+        || byte_at(&frames, 1) != b'G'
+        || byte_at(&frames, 2) != b'F'
+        || byte_at(&frames, 3) != b'1'
+    {
+        return Err("asset is not a font atlas");
+    }
+    let size_count = usize::from(u16_at(&frames, 4));
+    let glyph_count = usize::from(u16_at(&frames, 6));
+    if size_count == 0 || size_count > MAX_SIZES || glyph_count != GLYPHS {
+        return Err("font atlas has an unsupported shape");
+    }
+    let mut face = Face {
+        loaded: true,
+        bytes: length as u32,
+        size_count,
+        ..Face::EMPTY
+    };
+    for index in 0..size_count {
+        let at = HEADER_BYTES + index * SIZE_BYTES;
+        if at + SIZE_BYTES > length {
+            return Err("font atlas size table is truncated");
+        }
+        let table = u32_at(&frames, at + 8) as usize;
+        if table + GLYPHS * GLYPH_BYTES > length {
+            return Err("font atlas glyph table is truncated");
+        }
+        face.sizes[index] = SizeMetrics {
+            px: u16_at(&frames, at),
+            ascent: u16_at(&frames, at + 2) as i16,
+            line_height: u16_at(&frames, at + 6) as i16,
+        };
+        for glyph in 0..GLYPHS {
+            face.advances[index][glyph] = byte_at(&frames, table + glyph * GLYPH_BYTES);
+        }
+    }
+    Ok(face)
+}
+
+/// Load the named asset into slot `slot` of the compositor's asset window
+/// and tell the compositor where it is; the frames, for the caller to parse.
+fn load_blob(
+    machine: &mut arch::Machine,
+    storage: &mut ServiceDomain,
+    domain: &mut arch::Domain,
+    name: &[u8],
+    slot: usize,
+) -> Result<([u64; MAX_PAGES], u32), &'static str> {
+    if slot >= shared::ASSET_SLOTS {
+        return Err("no such asset slot");
+    }
     let entry = REGION
         .find(storage, name)?
         .ok_or("asset is not in the asset region")?;
@@ -154,47 +210,27 @@ pub fn load_face(
             unsafe { ((frame as usize + inside + index) as *mut u8).write_volatile(*byte) };
         }
     })?;
-    // The header, checked here so layout never trusts a broken atlas; the
-    // compositor checks it again for itself.
-    if length < HEADER_BYTES
+    let core = domain.core();
+    core.write_shared(shared::ASSET_WORDS + slot * 2, base);
+    core.write_shared(shared::ASSET_WORDS + slot * 2 + 1, u64::from(entry.length));
+    Ok((frames, entry.length))
+}
+
+/// Load the sprite sheet into its slot; how many sprites it holds.
+pub fn load_sprites(
+    machine: &mut arch::Machine,
+    storage: &mut ServiceDomain,
+    domain: &mut arch::Domain,
+    name: &[u8],
+) -> Result<usize, &'static str> {
+    let (frames, length) = load_blob(machine, storage, domain, name, shared::SPRITE_SLOT)?;
+    if length < 8
         || byte_at(&frames, 0) != b'A'
         || byte_at(&frames, 1) != b'G'
-        || byte_at(&frames, 2) != b'F'
+        || byte_at(&frames, 2) != b'I'
         || byte_at(&frames, 3) != b'1'
     {
-        return Err("asset is not a font atlas");
+        return Err("asset is not a sprite sheet");
     }
-    let size_count = usize::from(u16_at(&frames, 4));
-    let glyph_count = usize::from(u16_at(&frames, 6));
-    if size_count == 0 || size_count > MAX_SIZES || glyph_count != GLYPHS {
-        return Err("font atlas has an unsupported shape");
-    }
-    let mut face = Face {
-        loaded: true,
-        bytes: entry.length,
-        size_count,
-        ..Face::EMPTY
-    };
-    for index in 0..size_count {
-        let at = HEADER_BYTES + index * SIZE_BYTES;
-        if at + SIZE_BYTES > length {
-            return Err("font atlas size table is truncated");
-        }
-        let table = u32_at(&frames, at + 8) as usize;
-        if table + GLYPHS * GLYPH_BYTES > length {
-            return Err("font atlas glyph table is truncated");
-        }
-        face.sizes[index] = SizeMetrics {
-            px: u16_at(&frames, at),
-            ascent: u16_at(&frames, at + 2) as i16,
-            line_height: u16_at(&frames, at + 6) as i16,
-        };
-        for glyph in 0..GLYPHS {
-            face.advances[index][glyph] = byte_at(&frames, table + glyph * GLYPH_BYTES);
-        }
-    }
-    let core = domain.core();
-    core.write_shared(shared::FACE_WORDS + slot * 2, base);
-    core.write_shared(shared::FACE_WORDS + slot * 2 + 1, u64::from(entry.length));
-    Ok(face)
+    Ok(usize::from(u16_at(&frames, 4)))
 }

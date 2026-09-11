@@ -79,5 +79,10 @@ atlas() {
 atlas fira-sans FiraSans-Regular.ttf 12,14,16,20,24,32
 atlas fira-sans-medium FiraSans-Medium.ttf 12,14,16,20,24,32
 atlas fira-mono FiraMono-Regular.ttf 12,14,16,20
+sprites="$assets_dir/sprites.agi"
+if test ! -f "$sprites" || test "$project_dir/scripts/build-sprites.py" -nt "$sprites"; then
+  python3 "$project_dir/scripts/build-sprites.py" "$sprites" >/dev/null
+fi
+python3 "$project_dir/scripts/install-asset.py" "$disk_image" sprites "$sprites" >/dev/null
 
 printf '%s\n' "$disk_image"

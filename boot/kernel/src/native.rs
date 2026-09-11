@@ -22,6 +22,12 @@ const MAX_CELLS: usize = 384;
 const MAX_TEXT: usize = 2048;
 /// Rendered result bytes retained for the frontends; one shared-page payload.
 const RESULT_BYTES: usize = 256;
+/// The native scene's drawable geometry, validated here inside the evaluator
+/// world and again by the supervisor: the screen's width, and the height
+/// above the command field. This file is also compiled into the seL4 world
+/// domain, so the constants live here rather than in the kernel's `world`.
+pub const SCENE_WIDTH: u32 = 1920;
+pub const SCENE_DRAWABLE_HEIGHT: u32 = 1000;
 const NONE: u16 = u16::MAX;
 
 /// Every fixed native resource bound, named and reported from the constants the
@@ -1663,10 +1669,10 @@ fn apply_builtin(
             let [_, x, y, width, height, radius, color] = record;
             if width == 0
                 || height == 0
-                || x > 1024
-                || y > 684
-                || width > 1024 - x
-                || height > 684 - y
+                || x > SCENE_WIDTH
+                || y > SCENE_DRAWABLE_HEIGHT
+                || width > SCENE_WIDTH - x
+                || height > SCENE_DRAWABLE_HEIGHT - y
                 || radius > width / 2
                 || radius > height / 2
                 || color > 0xffffff
@@ -2825,7 +2831,7 @@ mod tests {
         for source in [
             "(scene-rect -1 0 1 1 0 0)",
             "(scene-rect 0 0 0 1 0 0)",
-            "(scene-rect 0 680 1 8 0 0)",
+            "(scene-rect 0 996 1 8 0 0)",
             "(scene-rect 0 0 8 8 5 0)",
             "(scene-rect 0 0 8 8 0 16777216)",
         ] {

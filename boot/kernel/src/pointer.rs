@@ -5,16 +5,22 @@ pub struct Pointer {
     pub x: i32,
     pub y: i32,
     down: bool,
+    /// The last position the screen has, so the pointer stays on it.
+    right: i32,
+    bottom: i32,
 }
 
 impl Pointer {
-    pub const fn new() -> Self {
+    /// A pointer in the middle of a `width` by `height` screen.
+    pub const fn new(width: i32, height: i32) -> Self {
         Self {
             bytes: [0; 3],
             length: 0,
-            x: 512,
-            y: 384,
+            x: width / 2,
+            y: height / 2,
             down: false,
+            right: width - 1,
+            bottom: height - 1,
         }
     }
 
@@ -34,8 +40,8 @@ impl Pointer {
         }
         let dx = i32::from(x) - if flags & 0x10 != 0 { 256 } else { 0 };
         let dy = i32::from(y) - if flags & 0x20 != 0 { 256 } else { 0 };
-        self.x = (self.x + dx).clamp(0, 1023);
-        self.y = (self.y - dy).clamp(0, 767);
+        self.x = (self.x + dx).clamp(0, self.right);
+        self.y = (self.y - dy).clamp(0, self.bottom);
         let down = flags & 1 != 0;
         let pressed = down && !self.down;
         self.down = down;
@@ -48,7 +54,7 @@ mod tests {
     use super::*;
     #[test]
     fn packets_sign_edges_overflow_and_click_debounce() {
-        let mut p = Pointer::new();
+        let mut p = Pointer::new(1024, 768);
         assert_eq!(p.feed(0), None);
         for byte in [0x38, 255] {
             assert_eq!(p.feed(byte), None);

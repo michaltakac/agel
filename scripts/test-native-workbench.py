@@ -20,7 +20,7 @@ def frame(machine):
 
 def dock_pixel(machine):
     data = frame(machine)
-    offset = (645 * 1024 + 365) * 3
+    offset = (645 * 1920 + 365) * 3
     return data[offset:offset + 3]
 
 
@@ -55,8 +55,9 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
         value(machine, "(agent-faulted? dock)", "#f")
         # Real PS/2 packets via QEMU, not the serial command path.
         machine.command("input-send-event", {"events": [
-            {"type": "rel", "data": {"axis": "x", "value": -152}},
-            {"type": "rel", "data": {"axis": "y", "value": 256}},
+            # From the screen's centre (960, 540) to the widget at (360, 640).
+            {"type": "rel", "data": {"axis": "x", "value": -600}},
+            {"type": "rel", "data": {"axis": "y", "value": 100}},
         ]})
         time.sleep(0.3)
         machine.command("input-send-event", {"events": [
