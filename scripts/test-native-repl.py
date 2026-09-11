@@ -83,12 +83,22 @@ def qemu_command(
         ]
     if architecture == "raspi4":
         # QEMU's Raspberry Pi 4: a flat image at 0x80000, entered at EL2 on
-        # core 0, the PL011 on the first serial port; no virtio, no PSCI.
+        # core 0, the PL011 on the first serial port, the card on an SD host
+        # controller; no virtio, no PSCI.
+        card = (
+            [
+                "-drive",
+                f"file={disk},if=sd,format=raw" + ("" if persistent else ",snapshot=on"),
+            ]
+            if disk is not None
+            else []
+        )
         return [
             "qemu-system-aarch64",
             "-machine",
             "raspi4b",
             *serial,
+            *card,
             "-kernel",
             image,
         ]
@@ -1113,6 +1123,50 @@ def smoke_test(image: str, architecture: str) -> None:
         boot.close()
 
 
+def board_test(image: str, architecture: str, disk: str) -> None:
+    """A board with a card: the workshop persists a cell on it, a program
+    loads from it, and a second boot restores the cell. The board has no
+    clean power-off, so each machine is closed."""
+    first = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        first.expect_until(b"AGEL_NATIVE_READY")
+        first.expect_until(b"workspace: no persisted image; starting empty")
+        first.expect_until(b"agel-native[0]> ")
+        run_program(
+            first,
+            ":exec hello",
+            [b"hello from a loaded process", b"process hello exited with status 42"],
+        )
+        first.send("(+ 20 22)", "42", 1)
+        first.send_bytes(":edit boot")
+        assert first.process.stdin is not None
+        first.process.stdin.write(b"\n")
+        first.process.stdin.flush()
+        first.expect_exact(b"\r\nedit[boot]> ")
+        first.send(
+            "(def persisted-answer 42)",
+            "cell staged; :run NAME to evaluate, :save to persist",
+            1,
+        )
+        first.send(":run boot", "42", 2)
+        first.send(
+            ":save",
+            "workspace generation 1 committed: 1 cells; evaluator rebuilt from cells; previous slot retained",
+            3,
+        )
+    finally:
+        first.close()
+    second = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        second.expect_until(b"AGEL_NATIVE_READY")
+        second.expect_until(b"workspace generation 1 restored: 1 cells replayed")
+        second.expect_until(b"agel-native[1]> ")
+        send_healthy(second, "persisted-answer", "42", 1, 2)
+        second.send(":workspace", "workspace generation 1, 1 cells, clean", 2)
+    finally:
+        second.close()
+
+
 def main() -> int:
     arguments = sys.argv[1:]
     architecture = "x86_64"
@@ -1152,10 +1206,23 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--smoke | --persistence | --power-cut | --exec | --files | --c | --spawn | --breadth | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [--smoke | --board | --persistence | --power-cut | --exec | --files | --c | --spawn | --breadth | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
+    if len(arguments) == 2 and arguments[1] == "--board":
+        if disk is None:
+            print("a board test needs a card; pass --disk", file=sys.stderr)
+            return 2
+        try:
+            board_test(arguments[0], architecture, disk)
+        except Exception as error:
+            print(f"board test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print(f"Agel board [{architecture}]: boots from a card, loads a program, persists a cell across boots [ok]")
+        return 0
     if len(arguments) == 2 and arguments[1] == "--smoke":
         try:
             smoke_test(arguments[0], architecture)

@@ -28,6 +28,8 @@ mod layout {
     pub const KERNEL_PROBE_ADDRESS: u64 = 0x4008_0000;
     /// The `virt` machine's virtio-mmio transports: 32 slots of 0x200 bytes.
     pub const VIRTIO_MMIO: Option<(u64, u64, u64)> = Some((0x0a00_0000, 32, 0x200));
+    /// No SD host controllers.
+    pub const SDHCI: &[u64] = &[];
     /// PSCI is how this machine is switched off.
     pub const PSCI: bool = true;
 }
@@ -49,8 +51,13 @@ mod layout {
     pub const POOL_START: u64 = 0x0100_0000;
     pub const POOL_END: u64 = 0x0400_0000;
     pub const KERNEL_PROBE_ADDRESS: u64 = 0x0008_0000;
-    /// No virtio: the SD card is an SDHCI controller, not yet driven.
+    /// No virtio: the SD card is behind an SD host controller.
     pub const VIRTIO_MMIO: Option<(u64, u64, u64)> = None;
+    /// The SD host controllers that may hold the card, in the order tried:
+    /// EMMC2, where the board's slot is wired, then the first controller,
+    /// where QEMU's model puts the card. The one reporting a card is
+    /// granted to the storage driver.
+    pub const SDHCI: &[u64] = &[0xfe34_0000, 0xfe30_0000];
     /// No PSCI without firmware at EL3: the machine is halted instead.
     pub const PSCI: bool = false;
 }

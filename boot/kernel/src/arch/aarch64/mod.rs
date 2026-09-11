@@ -44,6 +44,9 @@ pub const CONSOLE_DEVICE_PHYSICAL: u64 = board::UART_BASE;
 pub const CONSOLE_DEVICE_VADDR: u64 = domain::DEVICE_BASE;
 /// Where the storage driver domain sees its device page and its DMA page.
 pub const STORAGE_DEVICE_VADDR: u64 = domain::STORAGE_DEVICE_BASE;
+/// The DMA page: only the virtio driver has a use for it; the SD driver
+/// moves sectors by programmed I/O.
+#[cfg(not(feature = "board-raspi4"))]
 pub const STORAGE_DMA_VADDR: u64 = domain::DMA_BASE;
 
 /// A supervisor-only address a world may try to write: the kernel's own text.
@@ -303,11 +306,14 @@ impl Machine {
     /// frame to exchange requests with it through, and nothing else. Fails,
     /// rather than pretending, when the machine has no such device.
     pub fn create_storage_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        let device = find_virtio_block().ok_or(if board::VIRTIO_MMIO.is_some() {
-            "no virtio block device (modern MMIO transport) on this machine"
-        } else {
-            "no block device driver for this board yet; its SD controller is not driven"
-        })?;
+        let device = match find_virtio_block() {
+            Some(device) => device,
+            None => find_sd_host().ok_or(if board::VIRTIO_MMIO.is_some() {
+                "no virtio block device (modern MMIO transport) on this machine"
+            } else {
+                "no SD card in any of the board's slots"
+            })?,
+        };
         let page = device & !(crate::memory::PAGE - 1);
         Domain::new(
             &mut self.pool,
@@ -362,6 +368,17 @@ fn find_virtio_block() -> Option<u64> {
         }
     }
     None
+}
+
+/// The board's SD host controller with a card in it: the present-state
+/// register's card-inserted bit, read once at bring-up. The register block
+/// is a page, granted whole; the driver does the rest unprivileged.
+fn find_sd_host() -> Option<u64> {
+    board::SDHCI.iter().copied().find(|base| {
+        // Safety: the device window maps the board's peripherals for the
+        // supervisor, and present state is a read-only register.
+        unsafe { ((base + 0x24) as *const u32).read_volatile() & (1 << 16) != 0 }
+    })
 }
 
 /// The image entry point.

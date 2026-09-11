@@ -1324,6 +1324,25 @@ device tree (unread), the other cores (parked by the firmware and never
 started), and the firmware itself, which loads the image and is trusted
 as it is on every Pi.
 
+## v0.2.56
+
+- **The card driver is unprivileged like every other:** the SD host
+  controller's register page is granted to one domain, which sees that
+  page and the block area and nothing else; a driver that faults is
+  contained and restarted as the virtio and ATA drivers are, and what the
+  sectors mean stays the supervisor's.
+- **One probe, read-only, at bring-up:** the supervisor reads each named
+  controller's present-state register to find the card; nothing is
+  written before the grant, and a board with no card is a workshop
+  without a disk, said plainly.
+- **Bounded requests:** a sector past the card's capacity is refused; a
+  controller that stops answering times out inside the driver's tick
+  budget and is reported, not waited on forever.
+
+Not claimed: the real controller (the sequence is the standard one and
+QEMU's model accepts it; the board will say), multi-block transfers,
+DMA, card removal while running.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

@@ -248,6 +248,10 @@ promise.
   Raspberry Pi 4 as a flat image at `0x80000`, the entry drops from EL2
   to EL1, and `scripts/test-raspi4.sh` boots it on QEMU's `raspi4b` to
   the workshop, which evaluates and reports that it has no disk.
+  `v0.2.56` drives the card: an SD Host Controller driver domain by
+  programmed I/O, the board's two controllers probed once for a card, and
+  the board test loads a program from the card and persists a cell across
+  two boots.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

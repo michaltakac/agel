@@ -344,8 +344,10 @@ Each rung must be runnable and differentially testable against the rung below:
 52. **A board (v0.2.55):** the AArch64 kernel names its physical
    addresses in one `board` module and is laid out for the Raspberry Pi 4
    as a flat image entered at EL2, which QEMU's `raspi4b` boots to the
-   workshop; the Pi 5 shares the shape and needs its addresses, an SDHCI
-   driver and the mailbox framebuffer, each a release with a test.
+   workshop; at v0.2.56 the card is driven by an SD host controller driver
+   domain, so programs load and the workspace persists on the board. The
+   Pi 5 shares the shape and needs its addresses and the mailbox
+   framebuffer, each a release with a test.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

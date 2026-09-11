@@ -1092,6 +1092,7 @@ pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
 // device behind a modern virtio-mmio transport, driven by polling.
 // ---------------------------------------------------------------------------
 
+#[cfg(not(feature = "board-raspi4"))]
 #[cfg(not(target_arch = "x86_64"))]
 mod virtio {
     pub const MAGIC: u64 = 0x000;
@@ -1166,12 +1167,13 @@ unsafe fn mmio_write(base: u64, offset: u64, value: u32) {
     unsafe { ((base + offset) as *mut u32).write_volatile(value) }
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(all(not(target_arch = "x86_64"), not(feature = "board-raspi4")))]
 #[inline(always)]
 fn fence() {
     core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
 }
 
+#[cfg(not(feature = "board-raspi4"))]
 /// Bring the block device up: acknowledge it, negotiate the modern feature
 /// bit (and flush, if offered), and give it the one queue in the DMA page.
 /// Returns whether flush was negotiated.
@@ -1234,6 +1236,7 @@ unsafe fn virtio_initialize(mmio: u64, dma_physical: u64) -> Result<bool, u64> {
     }
 }
 
+#[cfg(not(feature = "board-raspi4"))]
 /// Write one descriptor into the DMA page.
 #[cfg(not(target_arch = "x86_64"))]
 #[link_section = ".user_text"]
@@ -1247,6 +1250,7 @@ unsafe fn descriptor(dma: u64, index: u64, address: u64, length: u32, flags: u16
     }
 }
 
+#[cfg(not(feature = "board-raspi4"))]
 /// Submit one request already laid out in the DMA page and wait for the
 /// device to retire it. `last_used` is the driver's copy of the used index.
 #[cfg(not(target_arch = "x86_64"))]
@@ -1299,7 +1303,7 @@ unsafe fn virtio_submit(mmio: u64, dma: u64, last_used: &mut u16) -> u64 {
 /// Entered by the architecture's return-from-exception instruction with a
 /// private stack, a valid shared page, the device page and the DMA page
 /// mapped.
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(all(not(target_arch = "x86_64"), not(feature = "board-raspi4")))]
 #[no_mangle]
 #[link_section = ".user_text"]
 pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
@@ -1407,6 +1411,390 @@ pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
                 } else if command == shared::COMMAND_FAULT_WRITE {
                     // For the restart test: a driver that misbehaves is
                     // contained like any other world.
+                    unsafe {
+                        (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead)
+                    };
+                    storage_status::UNKNOWN_COMMAND
+                } else {
+                    storage_status::UNKNOWN_COMMAND
+                }
+            }
+        };
+        unsafe { page.add(shared::STATUS).write_volatile(status) };
+        unsafe { yield_to_supervisor() };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The SD host controller driver: the Raspberry Pi's card, by programmed I/O.
+// ---------------------------------------------------------------------------
+
+/// Registers of an SD Host Controller (the simplified specification's
+/// layout, version 2 and up), as offsets from the granted page. Every
+/// access is a whole 32-bit word: the Arasan controller on the Pi takes
+/// nothing narrower, so the 8- and 16-bit registers are reached through the
+/// word that holds them.
+#[cfg(feature = "board-raspi4")]
+mod sdhci {
+    /// Block size (low half) and block count (high half).
+    pub const BLOCK: u64 = 0x04;
+    pub const ARGUMENT: u64 = 0x08;
+    /// Transfer mode (low half) and command (high half).
+    pub const COMMAND: u64 = 0x0c;
+    /// Four words of response.
+    pub const RESPONSE: u64 = 0x10;
+    pub const BUFFER: u64 = 0x20;
+    pub const PRESENT_STATE: u64 = 0x24;
+    /// Host control 1, power control, block gap and wakeup, one byte each.
+    pub const HOST_CONTROL: u64 = 0x28;
+    /// Clock control (low half), timeout control and software reset.
+    pub const CLOCK_CONTROL: u64 = 0x2c;
+    /// Normal (low half) and error (high half) interrupt status.
+    pub const INTERRUPT_STATUS: u64 = 0x30;
+    pub const INTERRUPT_STATUS_ENABLE: u64 = 0x34;
+    pub const INTERRUPT_SIGNAL_ENABLE: u64 = 0x38;
+
+    pub const STATE_COMMAND_INHIBIT: u32 = 1 << 0;
+    pub const STATE_DATA_INHIBIT: u32 = 1 << 1;
+    pub const STATE_CARD_INSERTED: u32 = 1 << 16;
+
+    /// Software reset for all, in the byte at 0x2f.
+    pub const RESET_ALL: u32 = 1 << 24;
+    pub const CLOCK_INTERNAL_ENABLE: u32 = 1 << 0;
+    pub const CLOCK_INTERNAL_STABLE: u32 = 1 << 1;
+    pub const CLOCK_SD_ENABLE: u32 = 1 << 2;
+    /// The largest data timeout, in the byte at 0x2e.
+    pub const TIMEOUT_LONGEST: u32 = 0xe << 16;
+    /// The clock divider field, base clock over twice this.
+    pub const fn divider(value: u32) -> u32 {
+        (value & 0xff) << 8
+    }
+    /// Bus power on at 3.3 V, in the byte at 0x29.
+    pub const POWER_ON_3V3: u32 = 0x0f << 8;
+
+    pub const INT_COMMAND_COMPLETE: u32 = 1 << 0;
+    pub const INT_TRANSFER_COMPLETE: u32 = 1 << 1;
+    pub const INT_BUFFER_WRITE_READY: u32 = 1 << 4;
+    pub const INT_BUFFER_READ_READY: u32 = 1 << 5;
+    pub const INT_ERROR: u32 = 1 << 15;
+
+    /// Command flags, in the command half-word.
+    pub const RESPONSE_NONE: u32 = 0;
+    pub const RESPONSE_136: u32 = 1;
+    pub const RESPONSE_48: u32 = 2;
+    pub const RESPONSE_48_BUSY: u32 = 3;
+    pub const CHECK_CRC: u32 = 1 << 3;
+    pub const CHECK_INDEX: u32 = 1 << 4;
+    pub const DATA_PRESENT: u32 = 1 << 5;
+    /// Transfer mode: the card sends.
+    pub const TRANSFER_READ: u32 = 1 << 4;
+
+    pub const GO_IDLE_STATE: u32 = 0;
+    pub const ALL_SEND_CID: u32 = 2;
+    pub const SEND_RELATIVE_ADDR: u32 = 3;
+    pub const SELECT_CARD: u32 = 7;
+    pub const SEND_IF_COND: u32 = 8;
+    pub const SEND_CSD: u32 = 9;
+    pub const READ_SINGLE_BLOCK: u32 = 17;
+    pub const WRITE_BLOCK: u32 = 24;
+    pub const SD_SEND_OP_COND: u32 = 41;
+    pub const APP_CMD: u32 = 55;
+
+    /// Register polls before a step is reported as timed out: well inside
+    /// the driver's tick budget on an emulated machine.
+    pub const POLL_LIMIT: usize = 4_000_000;
+}
+
+/// What the card said about itself at initialization.
+#[cfg(feature = "board-raspi4")]
+#[derive(Clone, Copy)]
+struct Card {
+    /// In 512-byte sectors.
+    capacity: u64,
+    /// A high-capacity card is addressed by sector, a standard one by byte.
+    high_capacity: bool,
+}
+
+/// Wait until `mask` is set in the interrupt status, clear it, and say
+/// so; an error interrupt or the poll limit is the failure it names.
+#[cfg(feature = "board-raspi4")]
+#[link_section = ".user_text"]
+unsafe fn sd_wait(mmio: u64, mask: u32) -> Result<(), u64> {
+    let mut polls = 0;
+    loop {
+        let status = unsafe { mmio_read(mmio, sdhci::INTERRUPT_STATUS) };
+        if status & sdhci::INT_ERROR != 0 {
+            unsafe { mmio_write(mmio, sdhci::INTERRUPT_STATUS, status) };
+            return Err(storage_status::DEVICE_ERROR);
+        }
+        if status & mask != 0 {
+            unsafe { mmio_write(mmio, sdhci::INTERRUPT_STATUS, mask) };
+            return Ok(());
+        }
+        polls += 1;
+        if polls > sdhci::POLL_LIMIT {
+            return Err(storage_status::DATA_TIMEOUT);
+        }
+    }
+}
+
+/// Issue one command and return its first response word.
+#[cfg(feature = "board-raspi4")]
+#[link_section = ".user_text"]
+unsafe fn sd_command(
+    mmio: u64,
+    index: u32,
+    argument: u32,
+    flags: u32,
+    transfer: u32,
+) -> Result<u32, u64> {
+    let mut polls = 0;
+    while unsafe { mmio_read(mmio, sdhci::PRESENT_STATE) }
+        & (sdhci::STATE_COMMAND_INHIBIT | sdhci::STATE_DATA_INHIBIT)
+        != 0
+    {
+        polls += 1;
+        if polls > sdhci::POLL_LIMIT {
+            return Err(storage_status::BUSY);
+        }
+    }
+    unsafe {
+        mmio_write(mmio, sdhci::INTERRUPT_STATUS, 0xffff_ffff);
+        mmio_write(mmio, sdhci::ARGUMENT, argument);
+        mmio_write(
+            mmio,
+            sdhci::COMMAND,
+            (index << 24) | (flags << 16) | transfer,
+        );
+        sd_wait(mmio, sdhci::INT_COMMAND_COMPLETE)?;
+        Ok(mmio_read(mmio, sdhci::RESPONSE))
+    }
+}
+
+/// Set the SD clock divider with the clock stopped, and wait for it.
+#[cfg(feature = "board-raspi4")]
+#[link_section = ".user_text"]
+unsafe fn sd_clock(mmio: u64, divider: u32) -> Result<(), u64> {
+    unsafe {
+        mmio_write(
+            mmio,
+            sdhci::CLOCK_CONTROL,
+            sdhci::TIMEOUT_LONGEST | sdhci::divider(divider) | sdhci::CLOCK_INTERNAL_ENABLE,
+        );
+    }
+    let mut polls = 0;
+    while unsafe { mmio_read(mmio, sdhci::CLOCK_CONTROL) } & sdhci::CLOCK_INTERNAL_STABLE == 0 {
+        polls += 1;
+        if polls > sdhci::POLL_LIMIT {
+            return Err(storage_status::BUSY);
+        }
+    }
+    unsafe {
+        let control = mmio_read(mmio, sdhci::CLOCK_CONTROL);
+        mmio_write(mmio, sdhci::CLOCK_CONTROL, control | sdhci::CLOCK_SD_ENABLE);
+    }
+    Ok(())
+}
+
+/// Bring the controller and the card up: reset, power, a slow clock, then
+/// the identification sequence, then a faster clock and 512-byte blocks.
+#[cfg(feature = "board-raspi4")]
+#[link_section = ".user_text"]
+unsafe fn sd_initialize(mmio: u64) -> Result<Card, u64> {
+    unsafe { mmio_write(mmio, sdhci::CLOCK_CONTROL, sdhci::RESET_ALL) };
+    let mut polls = 0;
+    while unsafe { mmio_read(mmio, sdhci::CLOCK_CONTROL) } & sdhci::RESET_ALL != 0 {
+        polls += 1;
+        if polls > sdhci::POLL_LIMIT {
+            return Err(storage_status::BUSY);
+        }
+    }
+    unsafe {
+        mmio_write(mmio, sdhci::HOST_CONTROL, sdhci::POWER_ON_3V3);
+        sd_clock(mmio, 0x80)?;
+        // Every status is recorded and none signals: the driver polls.
+        mmio_write(mmio, sdhci::INTERRUPT_STATUS_ENABLE, 0xffff_ffff);
+        mmio_write(mmio, sdhci::INTERRUPT_SIGNAL_ENABLE, 0);
+        if mmio_read(mmio, sdhci::PRESENT_STATE) & sdhci::STATE_CARD_INSERTED == 0 {
+            return Err(storage_status::ABSENT);
+        }
+        sd_command(mmio, sdhci::GO_IDLE_STATE, 0, sdhci::RESPONSE_NONE, 0)?;
+        // A card that answers CMD8 speaks version 2 and may be high capacity.
+        let version_2 = sd_command(
+            mmio,
+            sdhci::SEND_IF_COND,
+            0x1aa,
+            sdhci::RESPONSE_48 | sdhci::CHECK_CRC | sdhci::CHECK_INDEX,
+            0,
+        )
+        .is_ok_and(|response| response & 0xfff == 0x1aa);
+        let mut tries = 0;
+        let ocr = loop {
+            sd_command(
+                mmio,
+                sdhci::APP_CMD,
+                0,
+                sdhci::RESPONSE_48 | sdhci::CHECK_CRC | sdhci::CHECK_INDEX,
+                0,
+            )?;
+            let ocr = sd_command(
+                mmio,
+                sdhci::SD_SEND_OP_COND,
+                if version_2 { 0x40ff_8000 } else { 0x00ff_8000 },
+                sdhci::RESPONSE_48,
+                0,
+            )?;
+            if ocr & (1 << 31) != 0 {
+                break ocr;
+            }
+            tries += 1;
+            if tries > 10_000 {
+                return Err(storage_status::DATA_TIMEOUT);
+            }
+        };
+        let high_capacity = ocr & (1 << 30) != 0;
+        sd_command(
+            mmio,
+            sdhci::ALL_SEND_CID,
+            0,
+            sdhci::RESPONSE_136 | sdhci::CHECK_CRC,
+            0,
+        )?;
+        let rca = sd_command(
+            mmio,
+            sdhci::SEND_RELATIVE_ADDR,
+            0,
+            sdhci::RESPONSE_48 | sdhci::CHECK_CRC | sdhci::CHECK_INDEX,
+            0,
+        )? & 0xffff_0000;
+        sd_command(
+            mmio,
+            sdhci::SEND_CSD,
+            rca,
+            sdhci::RESPONSE_136 | sdhci::CHECK_CRC,
+            0,
+        )?;
+        // The response words hold the CSD less its CRC byte: word 1 is
+        // CSD[71:40], word 2 CSD[103:72], word 3 CSD[127:104].
+        let word1 = mmio_read(mmio, sdhci::RESPONSE + 4);
+        let word2 = mmio_read(mmio, sdhci::RESPONSE + 8);
+        let word3 = mmio_read(mmio, sdhci::RESPONSE + 12);
+        let capacity = if word3 >> 30 == 1 {
+            // Version 2: C_SIZE is CSD[69:48], in 512 KiB units.
+            (u64::from((word1 >> 8) & 0x3f_ffff) + 1) * 1024
+        } else {
+            // Version 1: C_SIZE is CSD[73:62], C_SIZE_MULT CSD[49:47] and
+            // READ_BL_LEN CSD[83:80]; bytes are (C_SIZE + 1) << (MULT + 2 + BL_LEN).
+            let c_size = ((word2 & 3) << 10) | (word1 >> 22);
+            let mult = (word1 >> 7) & 7;
+            let block_length = (word2 >> 8) & 0xf;
+            (u64::from(c_size) + 1) << (mult + 2 + block_length) >> 9
+        };
+        sd_command(
+            mmio,
+            sdhci::SELECT_CARD,
+            rca,
+            sdhci::RESPONSE_48_BUSY | sdhci::CHECK_CRC | sdhci::CHECK_INDEX,
+            0,
+        )?;
+        // Base clock over eight for transfers: safe on every board.
+        sd_clock(mmio, 4)?;
+        mmio_write(mmio, sdhci::BLOCK, 512 | (1 << 16));
+        Ok(Card {
+            capacity,
+            high_capacity,
+        })
+    }
+}
+
+/// Move one sector between the card and the block area, a word at a time
+/// through the controller's buffer.
+#[cfg(feature = "board-raspi4")]
+#[link_section = ".user_text"]
+unsafe fn sd_transfer(mmio: u64, card: Card, lba: u64, block: *mut u8, reading: bool) -> u64 {
+    let address = if card.high_capacity {
+        lba as u32
+    } else {
+        (lba * 512) as u32
+    };
+    let (index, transfer, ready) = if reading {
+        (
+            sdhci::READ_SINGLE_BLOCK,
+            sdhci::TRANSFER_READ,
+            sdhci::INT_BUFFER_READ_READY,
+        )
+    } else {
+        (sdhci::WRITE_BLOCK, 0, sdhci::INT_BUFFER_WRITE_READY)
+    };
+    unsafe {
+        mmio_write(mmio, sdhci::BLOCK, 512 | (1 << 16));
+        if let Err(status) = sd_command(
+            mmio,
+            index,
+            address,
+            sdhci::RESPONSE_48 | sdhci::CHECK_CRC | sdhci::CHECK_INDEX | sdhci::DATA_PRESENT,
+            transfer,
+        ) {
+            return status;
+        }
+        if let Err(status) = sd_wait(mmio, ready) {
+            return status;
+        }
+        for word in 0..crate::world::BLOCK_BYTES / 4 {
+            let at = block.add(word * 4);
+            if reading {
+                let value = mmio_read(mmio, sdhci::BUFFER);
+                for (offset, byte) in value.to_le_bytes().iter().enumerate() {
+                    at.add(offset).write_volatile(*byte);
+                }
+            } else {
+                let mut bytes = [0_u8; 4];
+                for (offset, byte) in bytes.iter_mut().enumerate() {
+                    *byte = at.add(offset).read_volatile();
+                }
+                mmio_write(mmio, sdhci::BUFFER, u32::from_le_bytes(bytes));
+            }
+        }
+        match sd_wait(mmio, sdhci::INT_TRANSFER_COMPLETE) {
+            Ok(()) => storage_status::OK,
+            Err(status) => status,
+        }
+    }
+}
+
+/// The storage driver on the Raspberry Pi: the granted SD host controller,
+/// spoken to by programmed I/O, one sector per request. Writes complete
+/// before the answer, so a flush is nothing to do. As on every machine,
+/// the driver sees a page of registers and the block area and nothing
+/// else; what the sectors mean is the supervisor's.
+///
+/// # Safety
+/// Entered by the architecture's return-from-exception instruction with a
+/// private stack, a valid shared page and the device page mapped.
+#[cfg(feature = "board-raspi4")]
+#[no_mangle]
+#[link_section = ".user_text"]
+pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
+    let page = shared_page as *mut u64;
+    let block = (shared_page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+    let mmio = unsafe { page.add(shared::DEVICE_MMIO).read_volatile() };
+    let card = unsafe { sd_initialize(mmio) };
+    loop {
+        let command = unsafe { page.add(shared::COMMAND).read_volatile() };
+        let lba = unsafe { page.add(shared::ARGUMENTS).read_volatile() };
+        let status = match card {
+            Err(reason) => reason,
+            Ok(card) => {
+                let transfer = command == shared::COMMAND_READ_SECTOR
+                    || command == shared::COMMAND_WRITE_SECTOR;
+                if transfer && lba >= card.capacity {
+                    storage_status::OUT_OF_RANGE
+                } else if transfer {
+                    let reading = command == shared::COMMAND_READ_SECTOR;
+                    unsafe { sd_transfer(mmio, card, lba, block, reading) }
+                } else if command == shared::COMMAND_FLUSH_DISK {
+                    storage_status::OK
+                } else if command == shared::COMMAND_FAULT_WRITE {
                     unsafe {
                         (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead)
                     };
