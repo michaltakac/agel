@@ -1198,6 +1198,26 @@ Not claimed: a process cannot draw into a window of its own, and the
 terminal takes no input from the keyboard for a process (a process's
 descriptor 0 is what it was given at `:exec`, which is nothing).
 
+## v0.2.50
+
+- **A click is a typed command:** every pointer action the desktop owns
+  becomes the same line the operator could have typed, handled by the
+  same code, echoed on the same console. The launcher lists names from
+  the program table and runs one through `:exec` with the operator's own
+  namespace; nothing a click does is unavailable, or different, at the
+  keyboard.
+- **The clock is a driver domain:** two CMOS ports, granted to one world
+  that answers six numbers; the supervisor reads it at boot and while idle
+  and never touches the ports itself. A clock that does not answer leaves
+  the panel showing the workspace's name.
+- **Motion is coalesced, not trusted:** queued pointer packets move the
+  pointer before a repaint and a press ends the run where it landed; the
+  8042's queue still overflows on a burst larger than it, which loses
+  motion, never authority.
+
+Not claimed: the editor tile does nothing yet, and the launcher shows the
+program table's first eight names.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

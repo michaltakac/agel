@@ -179,6 +179,123 @@ struct Scene {
     pointer: Option<(u32, u32)>,
     /// What processes wrote, shown in the workshop window.
     terminal: Terminal,
+    /// The clock driver's last answer, for the panel.
+    clock: Option<Clock>,
+    /// What the pointer is over, for the surface under it to say so.
+    hover: Hover,
+    /// The Applications launcher, when open: the program table's names.
+    launcher: Option<Launcher>,
+}
+
+/// Minutes and the date, as the panel shows them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Clock {
+    hours: u8,
+    minutes: u8,
+    day: u8,
+    month: u8,
+}
+
+impl Clock {
+    fn from_packed(packed: u64) -> Self {
+        Self {
+            minutes: (packed >> 8) as u8,
+            hours: (packed >> 16) as u8,
+            day: (packed >> 24) as u8,
+            month: (packed >> 32) as u8,
+        }
+    }
+}
+
+const MONTHS: [&[u8]; 12] = [
+    b"January",
+    b"February",
+    b"March",
+    b"April",
+    b"May",
+    b"June",
+    b"July",
+    b"August",
+    b"September",
+    b"October",
+    b"November",
+    b"December",
+];
+
+/// What the pointer is over. Each has bounds, for the hover highlight and
+/// for the click that does what the surface says.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Hover {
+    Nothing,
+    Applications,
+    Dock(u8),
+    Launcher(u8),
+}
+
+const DOCK_TILES: u32 = 7;
+
+impl Hover {
+    /// The rectangle a hover covers, for redrawing when it changes.
+    fn bounds(self, scene: &Scene) -> Option<(u32, u32, u32, u32)> {
+        match self {
+            Hover::Nothing => None,
+            Hover::Applications => Some((8, 0, 120, 40)),
+            Hover::Dock(tile) => Some((712 + u32::from(tile) * 72, 932, 64, 64)),
+            Hover::Launcher(entry) => scene.launcher.map(|_| {
+                (
+                    LAUNCHER_X,
+                    LAUNCHER_Y + 56 + u32::from(entry) * 48,
+                    LAUNCHER_WIDTH,
+                    48,
+                )
+            }),
+        }
+    }
+
+    /// What is under (x, y) in this scene.
+    fn at(scene: &Scene, x: u32, y: u32) -> Self {
+        if let Some(launcher) = scene.launcher {
+            if (LAUNCHER_X..LAUNCHER_X + LAUNCHER_WIDTH).contains(&x)
+                && (LAUNCHER_Y + 56..LAUNCHER_Y + 56 + launcher.count as u32 * 48).contains(&y)
+            {
+                return Hover::Launcher(((y - LAUNCHER_Y - 56) / 48) as u8);
+            }
+        }
+        if y < 40 && (8..128).contains(&x) {
+            return Hover::Applications;
+        }
+        if (932..996).contains(&y) && x >= 712 {
+            let tile = (x - 712) / 72;
+            if tile < DOCK_TILES && (x - 712) % 72 < 64 {
+                return Hover::Dock(tile as u8);
+            }
+        }
+        Hover::Nothing
+    }
+}
+
+const LAUNCHER_X: u32 = 24;
+const LAUNCHER_Y: u32 = 48;
+const LAUNCHER_WIDTH: u32 = 360;
+const LAUNCHER_ENTRIES: usize = 8;
+
+/// The launcher's contents: the program region's names at the moment it
+/// was opened.
+#[derive(Clone, Copy)]
+struct Launcher {
+    names: [[u8; crate::region::NAME_BYTES]; LAUNCHER_ENTRIES],
+    lengths: [u8; LAUNCHER_ENTRIES],
+    count: usize,
+}
+
+impl Launcher {
+    fn name(&self, entry: usize) -> &[u8] {
+        &self.names[entry][..usize::from(self.lengths[entry])]
+    }
+
+    fn height(&self) -> u32 {
+        56 + self.count.max(1) as u32 * 48 + 16
+    }
 }
 
 /// The terminal panel: a bounded scrollback of what processes and the file
@@ -282,6 +399,9 @@ impl Scene {
             inspector: None,
             pointer: None,
             terminal: Terminal::EMPTY,
+            clock: None,
+            hover: Hover::Nothing,
+            launcher: None,
         }
     }
 }
@@ -711,19 +831,6 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         replace_accent(&mut record, accent);
         if record_text(&record) == b"Workspace 1" {
             record[46] = b'0' + scene.workspace;
-            if record_u32(&record, 0) == 6 && record_u32(&record, 2) < 40 {
-                // The panel's label is centred on the screen.
-                let width = measure(
-                    record_u32(&record, 3),
-                    record_u32(&record, 4),
-                    record_text(&record),
-                );
-                put_u32(
-                    &mut record,
-                    1,
-                    (crate::world::SCENE_WIDTH.saturating_sub(width)) / 2,
-                );
-            }
         } else if record_text(&record) == b"MOLD THE SYSTEM AS IT RUNS" {
             replace_text(&mut record, &scene.title[..scene.title_len as usize]);
         }
@@ -735,6 +842,45 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
             put_u32(&mut record, index, *word);
         }
         frame.push(record)?;
+    }
+    // The panel's centre: the clock, or the workspace's name until the
+    // clock driver has answered.
+    let mut text = crate::process::Line::new();
+    if let Some(clock) = scene.clock {
+        let month = MONTHS
+            .get(usize::from(clock.month).wrapping_sub(1))
+            .copied()
+            .unwrap_or(b"?");
+        let _ = write!(
+            text,
+            "{} {}, {:02}:{:02}",
+            core::str::from_utf8(month).unwrap_or("?"),
+            clock.day,
+            clock.hours,
+            clock.minutes
+        );
+    } else {
+        let _ = write!(text, "Workspace {}", scene.workspace);
+    }
+    let width = measure(FACE_SANS_MEDIUM, 16, text.get());
+    frame.push(label_record(
+        (crate::world::SCENE_WIDTH.saturating_sub(width)) / 2,
+        10,
+        FACE_SANS_MEDIUM,
+        16,
+        0xde_de_de,
+        text.get(),
+    ))?;
+    // The surface under the pointer says so.
+    match scene.hover {
+        Hover::Applications => {
+            frame.push(surface_record(8, 4, 120, 32, 8, 0xff_ff_ff, 28))?;
+        }
+        Hover::Dock(tile) => {
+            let x = 716 + u32::from(tile) * 72;
+            frame.push(surface_record(x, 936, 56, 56, 14, 0xff_ff_ff, 60))?;
+        }
+        Hover::Launcher(_) | Hover::Nothing => {}
     }
     // The terminal panel: processes' output, or a hint when nothing ran.
     frame.push(surface_record(452, 292, 1360, 508, 16, 0x1b_1b_1b, 255))?;
@@ -764,6 +910,76 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
                 let x = 476 + measure(FACE_MONO, 16, &text[..piece * 28]);
                 frame.push(label_record(x, y, FACE_MONO, 16, 0xde_de_de, chunk))?;
             }
+        }
+    }
+    if let Some(launcher) = scene.launcher {
+        let height = launcher.height();
+        let mut shadow = [0; RECORD_BYTES];
+        for (field, word) in [
+            8,
+            LAUNCHER_X,
+            LAUNCHER_Y,
+            LAUNCHER_WIDTH,
+            height,
+            16,
+            24,
+            120,
+        ]
+        .iter()
+        .enumerate()
+        {
+            put_u32(&mut shadow, field, *word);
+        }
+        frame.push(shadow)?;
+        frame.push(surface_record(
+            LAUNCHER_X,
+            LAUNCHER_Y,
+            LAUNCHER_WIDTH,
+            height,
+            16,
+            0x1b_1b_1b,
+            250,
+        ))?;
+        frame.push(label_record(
+            LAUNCHER_X + 24,
+            LAUNCHER_Y + 18,
+            FACE_SANS_MEDIUM,
+            16,
+            0xde_de_de,
+            b"Applications",
+        ))?;
+        if launcher.count == 0 {
+            frame.push(label_record(
+                LAUNCHER_X + 24,
+                LAUNCHER_Y + 70,
+                FACE_SANS,
+                14,
+                0x80_80_80,
+                b"no programs installed",
+            ))?;
+        }
+        for entry in 0..launcher.count {
+            let y = LAUNCHER_Y + 56 + entry as u32 * 48;
+            if scene.hover == Hover::Launcher(entry as u8) {
+                frame.push(surface_record(
+                    LAUNCHER_X + 8,
+                    y,
+                    LAUNCHER_WIDTH - 16,
+                    48,
+                    8,
+                    0x33_33_33,
+                    255,
+                ))?;
+            }
+            frame.push(sprite_record(LAUNCHER_X + 24, y + 8, 2, 0x9e_9e_9e))?;
+            frame.push(label_record(
+                LAUNCHER_X + 72,
+                y + 14,
+                FACE_SANS_MEDIUM,
+                16,
+                0xde_de_de,
+                launcher.name(entry),
+            ))?;
         }
     }
     if let Some(text) = scene.inspector {
@@ -1646,6 +1862,14 @@ impl<'a> Inputs<'a> {
         }
     }
 
+    /// The next queued byte, without taking it.
+    fn peek(&mut self) -> Option<(bool, u8)> {
+        if self.length == 0 {
+            self.drain();
+        }
+        (self.length > 0).then(|| self.queue[self.head])
+    }
+
     fn pop(&mut self) -> Option<(bool, u8)> {
         if self.length == 0 {
             return None;
@@ -1833,6 +2057,32 @@ fn interactive(
             }
         }
     };
+    // The clock driver: the CMOS clock behind two ports, read at boot and
+    // then while idle, so the panel's time is the machine's.
+    let clock_entry = crate::user::agel_clock_main as *const () as usize as u64;
+    let mut clock_driver = machine
+        .create_clock_world(clock_entry, 8)
+        .map(|domain| ServiceDomain::new(domain, ServiceKind::Clock, clock_entry, 8))
+        .ok();
+    if let Some(driver) = clock_driver.as_mut() {
+        let handle = driver.handle();
+        match driver.read_clock(handle) {
+            Ok(Some(packed)) => {
+                let clock = Clock::from_packed(packed);
+                current.clock = Some(clock);
+                previous.clock = Some(clock);
+                kprint!(
+                    "clock: 20{:02}-{:02}-{:02} {:02}:{:02}\n",
+                    (packed >> 40) as u8,
+                    clock.month,
+                    clock.day,
+                    clock.hours,
+                    clock.minutes
+                );
+            }
+            _ => kprint!("clock: unavailable\n"),
+        }
+    }
     let mut inputs = Inputs::new(&mut input_driver);
     synchronize_language_scene(&mut evaluator, compositor, Some(&mut inputs), &mut current)
         .unwrap_or_else(|reason| failed(reason));
@@ -1855,6 +2105,7 @@ fn interactive(
     render_overlay(compositor, Some(&mut inputs), &frame).unwrap_or_else(|reason| failed(reason));
     console::write("live-desktop> ");
 
+    let mut idle: u32 = 0;
     loop {
         let Some(input) = next_input(
             &mut console_driver,
@@ -1862,6 +2113,24 @@ fn interactive(
             &mut keyboard,
             &mut pointer,
         ) else {
+            idle = idle.wrapping_add(1);
+            if idle.is_multiple_of(200_000) {
+                // While idle, the clock: repainted only when its minute turns.
+                if let Some(driver) = clock_driver.as_mut() {
+                    let handle = driver.handle();
+                    if let Ok(Some(packed)) = driver.read_clock(handle) {
+                        let clock = Clock::from_packed(packed);
+                        if current.clock != Some(clock) {
+                            current.clock = Some(clock);
+                            previous.clock = Some(clock);
+                            let frame = materialize(current, Some(&line[..length]), status.get())
+                                .unwrap_or_else(|reason| failed(reason));
+                            render_region(compositor, Some(&mut inputs), &frame, (600, 0, 720, 40))
+                                .unwrap_or_else(|reason| failed(reason));
+                        }
+                    }
+                }
+            }
             core::hint::spin_loop();
             continue;
         };
@@ -1869,8 +2138,81 @@ fn interactive(
             Input::Byte(byte) => byte,
             Input::Pointer(pressed) => {
                 let before = current.pointer;
-                current.pointer = Some((pointer.x as u32, pointer.y as u32));
-                if pressed
+                // Motion queued behind this packet moves the pointer before
+                // anything is painted: one redraw for the whole path, so a
+                // burst of packets never waits on a paint per packet. A
+                // press ends the run and is handled where it landed.
+                let mut pressed = pressed;
+                while !pressed {
+                    match inputs.peek() {
+                        Some((true, byte)) => {
+                            inputs.pop();
+                            if let Some(press) = pointer.feed(byte) {
+                                pressed = press;
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+                let (px, py) = (pointer.x as u32, pointer.y as u32);
+                current.pointer = Some((px, py));
+                let over = Hover::at(&current, px, py);
+                let hovered_before = current.hover;
+                current.hover = over;
+                if pressed && over != Hover::Nothing && length == 0 {
+                    // A click on something the desktop itself owns: it runs
+                    // as a typed command, so the console shows it too.
+                    let mut command = StatusLine::new(b"");
+                    let mut close_launcher = true;
+                    match over {
+                        Hover::Applications | Hover::Dock(0) | Hover::Dock(5) => {
+                            if current.launcher.is_none() {
+                                let listing = crate::region::Region {
+                                    table: crate::process::TABLE_SECTOR,
+                                    last: crate::process::LAST_SECTOR,
+                                    magic: b"AGELPR1\0",
+                                }
+                                .list::<LAUNCHER_ENTRIES>(&mut storage);
+                                current.launcher = listing.ok().map(|listing| Launcher {
+                                    names: listing.names,
+                                    lengths: listing.lengths,
+                                    count: listing.count,
+                                });
+                                close_launcher = false;
+                            }
+                        }
+                        Hover::Launcher(entry) => {
+                            if let Some(launcher) = current.launcher {
+                                command.push(b":exec ");
+                                command.push(launcher.name(usize::from(entry)));
+                            }
+                        }
+                        Hover::Dock(1) => current.terminal = Terminal::EMPTY,
+                        Hover::Dock(2) => command.push(b":fs-ls /"),
+                        Hover::Dock(4) => command.push(match current.accent {
+                            0 => b"(accent cyan)",
+                            1 => b"(accent amber)",
+                            _ => b"(accent violet)",
+                        }),
+                        Hover::Dock(6) => command.push(b":help"),
+                        Hover::Dock(_) | Hover::Nothing => {}
+                    }
+                    if close_launcher {
+                        current.launcher = None;
+                        current.hover = Hover::Nothing;
+                    }
+                    if command.len > 0 {
+                        line[..command.len].copy_from_slice(command.get());
+                        length = command.len;
+                        b'\n'
+                    } else {
+                        let frame = materialize(current, Some(&line[..length]), status.get())
+                            .unwrap_or_else(|reason| failed(reason));
+                        render(compositor, Some(&mut inputs), &frame)
+                            .unwrap_or_else(|reason| failed(reason));
+                        continue;
+                    }
+                } else if pressed
                     && (pointer.y as u32) < crate::world::SCENE_DRAWABLE_HEIGHT
                     && current.inspector.is_none()
                     && length == 0
@@ -1886,13 +2228,24 @@ fn interactive(
                 } else {
                     let frame = materialize(current, Some(&line[..length]), status.get())
                         .unwrap_or_else(|reason| failed(reason));
-                    // Only where the pointer was and where it is now.
+                    // Only where the pointer was and where it is now, and
+                    // the surfaces whose hover changed.
                     let (nx, ny) = (pointer.x as u32, pointer.y as u32);
                     let (ox, oy) = before.unwrap_or((nx, ny));
-                    let left = nx.min(ox).saturating_sub(2);
-                    let top = ny.min(oy).saturating_sub(2);
-                    let right = nx.max(ox) + 26;
-                    let bottom = ny.max(oy) + 34;
+                    let mut left = nx.min(ox).saturating_sub(2);
+                    let mut top = ny.min(oy).saturating_sub(2);
+                    let mut right = nx.max(ox) + 26;
+                    let mut bottom = ny.max(oy) + 34;
+                    if hovered_before != over {
+                        for hover in [hovered_before, over] {
+                            if let Some((x, y, width, height)) = hover.bounds(&current) {
+                                left = left.min(x);
+                                top = top.min(y);
+                                right = right.max(x + width);
+                                bottom = bottom.max(y + height);
+                            }
+                        }
+                    }
                     render_region(
                         compositor,
                         Some(&mut inputs),

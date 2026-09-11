@@ -82,6 +82,48 @@ impl Region {
     }
 }
 
+/// The names a region's table holds, in table order, at most `N`.
+#[cfg(feature = "native-graphics")]
+pub struct Listing<const N: usize> {
+    pub names: [[u8; NAME_BYTES]; N],
+    pub lengths: [u8; N],
+    pub count: usize,
+}
+
+impl Region {
+    /// Every name in the table, for a launcher to show.
+    #[cfg(feature = "native-graphics")]
+    pub fn list<const N: usize>(
+        self,
+        storage: &mut ServiceDomain,
+    ) -> Result<Listing<N>, &'static str> {
+        let mut listing = Listing {
+            names: [[0; NAME_BYTES]; N],
+            lengths: [0; N],
+            count: 0,
+        };
+        let mut table = [0_u8; 512];
+        read_sector(storage, self.table, &mut table)?;
+        if !table.starts_with(self.magic) {
+            return Ok(listing);
+        }
+        let count = (u32::from_le_bytes([table[8], table[9], table[10], table[11]]) as usize)
+            .min(MAX_ENTRIES)
+            .min(N);
+        let (rows, _) = table[16..].as_chunks::<ENTRY_BYTES>();
+        for (index, entry) in rows.iter().take(count).enumerate() {
+            let length = entry[..NAME_BYTES]
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(NAME_BYTES);
+            listing.names[index][..length].copy_from_slice(&entry[..length]);
+            listing.lengths[index] = length as u8;
+            listing.count = index + 1;
+        }
+        Ok(listing)
+    }
+}
+
 impl Entry {
     /// Read the entry sector by sector, handing each 512-byte piece and its
     /// offset to `sink`, checking the CRC-32 at the end. For readers that

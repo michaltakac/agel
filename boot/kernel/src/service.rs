@@ -37,6 +37,9 @@ pub enum ServiceKind {
     /// The 8042 keyboard controller, x86-64 graphics only.
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
     Input,
+    /// The CMOS real-time clock, x86-64 graphics only.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    Clock,
     /// The filesystem service: no device at all, only sectors it asks the
     /// supervisor to move through the storage driver.
     #[cfg(feature = "process")]
@@ -145,6 +148,21 @@ impl ServiceDomain {
             return Ok(None);
         }
         Ok(Some(self.domain.core().read_shared(shared::VALUES) as u8))
+    }
+
+    /// Ask the clock driver for the time: seconds, minutes, hours, day,
+    /// month and year packed as bytes from the low end.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub fn read_clock(&mut self, handle: ServiceHandle) -> Result<Option<u64>, ServiceError> {
+        self.check(handle)?;
+        match self.domain.provoke(shared::COMMAND_READ_CLOCK) {
+            Stop::Replied => {}
+            _ => return Err(ServiceError::Faulted),
+        }
+        if self.domain.core().read_shared(shared::STATUS) == 0 {
+            return Ok(None);
+        }
+        Ok(Some(self.domain.core().read_shared(shared::VALUES)))
     }
 
     /// Ask the input driver for one raw byte and whether the pointer sent it.
@@ -454,6 +472,8 @@ impl ServiceDomain {
             ServiceKind::Storage => machine.create_storage_world(self.entry, self.ticks)?,
             #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
             ServiceKind::Input => machine.create_input_world(self.entry, self.ticks)?,
+            #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+            ServiceKind::Clock => machine.create_clock_world(self.entry, self.ticks)?,
             #[cfg(feature = "process")]
             ServiceKind::Filesystem => machine.create_filesystem_world(self.entry, self.ticks)?,
         };

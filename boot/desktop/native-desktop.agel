@@ -26,7 +26,8 @@
   (label 277 10 1 16 "#1b1b1b" "1")
   (label 312 10 0 16 "#9e9e9e" "2")
   (label 340 10 0 16 "#9e9e9e" "3")
-  (label 860 10 1 16 "#dedede" "Workspace 1")
+  ; The panel's centre is drawn by the supervisor: the clock, or the
+  ; workspace's name until the clock driver answers.
   (surface 1836 13 14 14 7 "#e79cfe" 255)
   (label 1860 10 0 16 "#dedede" "Agel")
 

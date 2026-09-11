@@ -154,6 +154,9 @@ pub enum PortGrant {
     /// The two 8042 keyboard-controller ports.
     #[cfg(feature = "native-graphics")]
     Input,
+    /// The two CMOS real-time-clock ports.
+    #[cfg(feature = "native-graphics")]
+    Clock,
 }
 
 /// Grant or withhold a device for the next ring-3 entry.
@@ -180,6 +183,11 @@ pub unsafe fn grant_ports(grant: PortGrant) {
             PortGrant::Input => {
                 (*tss).io_bitmap[0x60 / 8] &= !(1 << (0x60 % 8));
                 (*tss).io_bitmap[0x64 / 8] &= !(1 << (0x64 % 8));
+            }
+            #[cfg(feature = "native-graphics")]
+            PortGrant::Clock => {
+                (*tss).io_bitmap[0x70 / 8] &= !(1 << (0x70 % 8));
+                (*tss).io_bitmap[0x71 / 8] &= !(1 << (0x71 % 8));
             }
             PortGrant::Storage => {
                 (*tss).io_bitmap[0x1f0 / 8] = 0x00;

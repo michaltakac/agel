@@ -715,6 +715,92 @@ pub unsafe extern "C" fn agel_input_main(shared_page: u64) -> ! {
     }
 }
 
+/// The clock driver's entry point: the CMOS real-time clock through its two
+/// ports, read when the supervisor asks, decoded from BCD and twelve-hour
+/// form to plain numbers. It has no other port and no other job.
+///
+/// # Safety
+/// Entered by the architecture's return-from-exception instruction with a
+/// private stack, a valid shared page, and the CMOS ports granted.
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[no_mangle]
+#[link_section = ".user_text"]
+pub unsafe extern "C" fn agel_clock_main(shared_page: u64) -> ! {
+    let page = shared_page as *mut u64;
+    loop {
+        let command = unsafe { page.add(shared::COMMAND).read_volatile() };
+        if command == shared::COMMAND_READ_CLOCK {
+            match unsafe { read_clock() } {
+                Some(packed) => unsafe {
+                    page.add(shared::STATUS).write_volatile(1);
+                    page.add(shared::VALUES).write_volatile(packed);
+                },
+                None => unsafe { page.add(shared::STATUS).write_volatile(0) },
+            }
+        } else if command == shared::COMMAND_FAULT_WRITE {
+            unsafe { (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead) };
+        } else {
+            unsafe { page.add(shared::STATUS).write_volatile(0) };
+        }
+        unsafe { yield_to_supervisor() };
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[inline(always)]
+unsafe fn cmos(register: u8) -> u8 {
+    unsafe {
+        port_out8(0x70, 0x80 | register);
+        port_in8(0x71)
+    }
+}
+
+/// Seconds, minutes, hours, day, month, year as bytes from the low end, or
+/// `None` when an update was in progress for too long.
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[inline(always)]
+unsafe fn read_clock() -> Option<u64> {
+    let mut polls = 0;
+    while unsafe { cmos(0x0a) } & 0x80 != 0 {
+        polls += 1;
+        if polls > 100_000 {
+            return None;
+        }
+    }
+    let status = unsafe { cmos(0x0b) };
+    let binary = status & 0x04 != 0;
+    let twenty_four = status & 0x02 != 0;
+    let decode = |value: u8| -> u8 {
+        if binary {
+            value
+        } else {
+            (value >> 4) * 10 + (value & 0x0f)
+        }
+    };
+    let seconds = decode(unsafe { cmos(0x00) });
+    let minutes = decode(unsafe { cmos(0x02) });
+    let raw_hours = unsafe { cmos(0x04) };
+    let mut hours = decode(raw_hours & 0x7f);
+    if !twenty_four {
+        if raw_hours & 0x80 != 0 {
+            hours = (hours % 12) + 12;
+        } else if hours == 12 {
+            hours = 0;
+        }
+    }
+    let day = decode(unsafe { cmos(0x07) });
+    let month = decode(unsafe { cmos(0x08) });
+    let year = decode(unsafe { cmos(0x09) });
+    Some(
+        u64::from(seconds)
+            | (u64::from(minutes) << 8)
+            | (u64::from(hours) << 16)
+            | (u64::from(day) << 24)
+            | (u64::from(month) << 32)
+            | (u64::from(year) << 40),
+    )
+}
+
 /// Write a byte to the 8042 once its input buffer is empty, within a bound.
 #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
 #[inline(always)]

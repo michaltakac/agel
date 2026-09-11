@@ -109,6 +109,11 @@ pub mod shared {
     /// Touch the 8042 controller without having been granted it.
     #[cfg(target_arch = "x86_64")]
     pub const COMMAND_FAULT_INPUT_DEVICE: u64 = 0x6400;
+    /// Ask the clock driver for the CMOS real-time clock: the answer's first
+    /// value packs seconds, minutes, hours, day, month and year (from 2000)
+    /// as bytes from the low end; status 0 means the clock did not answer.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const COMMAND_READ_CLOCK: u64 = 0x6500;
     /// Read the sector named by the first argument word into the block area.
     pub const COMMAND_READ_SECTOR: u64 = 0xa000;
     /// Write the block area to the sector named by the first argument word.

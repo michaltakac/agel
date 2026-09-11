@@ -4,7 +4,8 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.49: programs run on the desktop, with `:exec` in the graphical workshop
+The current repository is **v0.2.50: the desktop responds to the pointer, with a launcher over the program
+region, dock tiles that act, hover states and a clock from a driver domain; programs run on the desktop, with `:exec` in the graphical workshop
 and a terminal panel in its window showing what they write; the native desktop runs at 1920×1080 with an arrow cursor, dock
 icons and window controls from a sprite sheet, and never loses a keystroke to painting; it draws anti-aliased Fira Sans and Fira Mono from
 font atlases in a new asset region of the disk, blends rounded surfaces with soft shadows, and is

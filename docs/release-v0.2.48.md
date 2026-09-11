@@ -4,7 +4,7 @@ The desktop now runs at 1920×1080, draws its cursor, dock icons and window
 controls from a sprite sheet, and keeps every keystroke typed while a frame
 is being painted.
 
-![The native desktop at v0.2.49](images/native-desktop-v0.2.49.png)
+![The native desktop at v0.2.50](images/native-desktop-v0.2.50.png)
 
 ## What changed
 

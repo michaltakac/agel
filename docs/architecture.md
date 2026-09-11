@@ -332,9 +332,10 @@ Each rung must be runnable and differentially testable against the rung below:
    COSMIC's palette, radii and spacing; at v0.2.48 the display runs at
    1920×1080 with an arrow cursor, dock icons and window controls from a
    sprite sheet, and painting never loses input; at v0.2.49 programs run on
-   the desktop with their output in a terminal panel. Still to come:
-   windows a process can own, a launcher, and the workshop as one window
-   among others.
+   the desktop with their output in a terminal panel; at v0.2.50 the
+   desktop responds to the pointer, with a launcher, dock actions, hover
+   states and a clock from a driver domain. Still to come: windows a
+   process can own, and the workshop as one window among others.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

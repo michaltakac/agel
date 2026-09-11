@@ -6,7 +6,7 @@ and the `:fs-*` commands work as they do on the serial workshop, and what a
 process writes appears in a terminal panel in the workshop window as it is
 written.
 
-![Programs on the desktop at v0.2.49](images/native-desktop-v0.2.49.png)
+![Programs on the desktop at v0.2.50](images/native-desktop-v0.2.50.png)
 
 ## What changed
 

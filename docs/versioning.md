@@ -210,6 +210,13 @@ promise.
   workshops share over a console trait, and a terminal panel in the
   workshop window shows what processes write; `scripts/test-desktop-process.sh`
   runs a Rust and two C programs there and checks the panel changed.
+  `v0.2.50` makes the desktop respond: hover states on the dock and the
+  panel, an Applications launcher that lists the program region and runs
+  a name as a typed `:exec`, dock tiles that clear the terminal, list the
+  root, cycle the accent or print the help, and a clock in the panel from
+  a CMOS driver domain that holds only its two ports; pointer packets are
+  coalesced into one repaint. The desktop test clicks the launcher and the
+  dock.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

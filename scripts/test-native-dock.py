@@ -16,7 +16,9 @@ def pixels(machine):
     machine.command("screendump", {"filename": str(frame), "format": "ppm"})
     header, dimensions, maximum, data = frame.read_bytes().split(b"\n", 3)
     assert (header, dimensions, maximum) == (b"P6", b"1920 1080", b"255")
-    return data[:1920 * 1000 * 3]  # Exclude the command field below the scene.
+    # Exclude the panel, whose clock turns, and the command field below the
+    # scene: the language's drawing region is what these comparisons mean.
+    return data[1920 * 40 * 3 : 1920 * 1000 * 3]
 
 
 with tempfile.TemporaryDirectory(prefix="agel-dock-", dir="/tmp") as directory:

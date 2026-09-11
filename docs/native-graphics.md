@@ -48,7 +48,7 @@ bytes. Characters such as `≤` are not automatically new language operators.
 
 ## Typography, surfaces and assets (v0.2.47), native resolution and sprites (v0.2.48)
 
-![The native desktop at v0.2.49](images/native-desktop-v0.2.49.png)
+![The native desktop at v0.2.50](images/native-desktop-v0.2.50.png)
 
 The compositor draws from three more record operations, each validated
 like the others:
@@ -117,10 +117,30 @@ window, sixteen rows of eighty-four columns in Fira Mono, scrolling, drawn
 by the supervisor from the scene like everything else. What a process
 writes appears there as it writes it; how it ended is the last line.
 
+## A desktop that responds (v0.2.50)
+
+The pointer does things. What it is over says so: a dock tile lightens,
+the panel's "Applications" gets a pill, a launcher entry a row. A click on
+"Applications" (or the Agel and store tiles) opens the **launcher**, which
+lists the program region's names; a click on a name runs it, as if
+`:exec NAME` had been typed, so the serial console shows it too. The
+terminal tile clears the panel, the files tile lists the root, the settings
+tile cycles the accent, the help tile prints the help. Every click is a
+typed command underneath; there is no second path into the system.
+
+The panel's centre is a **clock** from a driver domain: `agel_clock_main`
+holds the two CMOS ports and nothing else, answers the supervisor with the
+real-time clock decoded from BCD, and is read at boot and while the
+session is idle; the label is repainted only when its minute turns. The
+serial console prints `clock: YYYY-MM-DD HH:MM` at boot.
+
+A burst of pointer packets is coalesced into one repaint, and a large move
+sent as one event loses packets to the controller's queue, as a real
+mouse never sends one; the tests move in steps.
+
 What this is not yet: a process cannot own a window or draw into one; it
-writes text into the workshop's terminal and nothing else. There is no
-launcher behind the panel's words, no clock, and the shadow is a linear
-falloff, not a blur.
+writes text into the workshop's terminal and nothing else. The editor tile
+does nothing. The shadow is a linear falloff, not a blur.
 
 ## Live Agel forms
 

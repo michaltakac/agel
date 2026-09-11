@@ -335,6 +335,21 @@ impl Machine {
     /// Build a protection domain granted the 8042 keyboard controller's two
     /// ports and nothing else: the keyboard and pointer driver.
     #[cfg(feature = "native-graphics")]
+    /// Build the clock driver's domain: the two CMOS ports and nothing else.
+    #[cfg(feature = "native-graphics")]
+    pub fn create_clock_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            cpu::PortGrant::Clock,
+            crate::world::STACK_PAGES,
+        )
+        .map_err(|error| error.name())
+    }
+
+    #[cfg(feature = "native-graphics")]
     pub fn create_input_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
         Domain::new(
             &mut self.pool,
