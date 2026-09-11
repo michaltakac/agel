@@ -193,6 +193,10 @@ Exact, because the gap is large:
   does not claim.
 - **Storage drivers:** unprivileged ATA and virtio-blk driver domains on the
   three research machines.
+- **A board:** the AArch64 kernel laid out for the Raspberry Pi 4 boots
+  under QEMU's model of it (v0.2.55): a flat image, an EL2 entry, RAM from
+  zero, the GIC-400 and the PL011 on the header; no disk yet. See
+  [`raspberry-pi.md`](raspberry-pi.md) for what the Pi 5 changes.
 
 Not started: local inference and a network stack. The C library's breadth
 is begun and far from done. The hosted agent runtime has not moved into a

@@ -15,7 +15,7 @@ import zlib
 # The x86-64 debug-exit device maps the guest's clean value 0x10 to host status
 # 33; the other two machines leave cleanly with status 0 and the success token.
 LAST_HARNESS: "Harness | None" = None
-EXPECTED_EXIT = {"x86_64": 33, "aarch64": 0, "riscv64": 0}
+EXPECTED_EXIT = {"x86_64": 33, "aarch64": 0, "riscv64": 0, "raspi4": None}
 
 
 def qemu_command(
@@ -78,6 +78,17 @@ def qemu_command(
             "128M",
             *serial,
             *virtio,
+            "-kernel",
+            image,
+        ]
+    if architecture == "raspi4":
+        # QEMU's Raspberry Pi 4: a flat image at 0x80000, entered at EL2 on
+        # core 0, the PL011 on the first serial port; no virtio, no PSCI.
+        return [
+            "qemu-system-aarch64",
+            "-machine",
+            "raspi4b",
+            *serial,
             "-kernel",
             image,
         ]
@@ -1086,6 +1097,22 @@ def shutdown(harness: Harness) -> None:
         raise RuntimeError(f"QEMU exit status {exit_code}, expected {expected}")
 
 
+def smoke_test(image: str, architecture: str) -> None:
+    """A board without a disk: the workshop comes up, evaluates, and says
+    what it has not got. There is no clean power-off on the board, so the
+    machine is simply closed."""
+    boot = Harness(image, architecture=architecture)
+    try:
+        boot.expect_until(b"AGEL_NATIVE_READY")
+        boot.expect_until(b"agel-native[0]> ")
+        boot.send("(+ 20 22)", "42", 1)
+        boot.send("(def double (fn (x) (+ x x)))", "#<native-function>", 2)
+        boot.send("(double 21)", "42", 3)
+        boot.send(":exec hello", "denied: no storage device", 3)
+    finally:
+        boot.close()
+
+
 def main() -> int:
     arguments = sys.argv[1:]
     architecture = "x86_64"
@@ -1125,10 +1152,20 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --files | --c | --spawn | --breadth | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [--smoke | --persistence | --power-cut | --exec | --files | --c | --spawn | --breadth | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
+    if len(arguments) == 2 and arguments[1] == "--smoke":
+        try:
+            smoke_test(arguments[0], architecture)
+        except Exception as error:
+            print(f"smoke test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print(f"Agel native serial REPL [{architecture}]: boots, evaluates, names what it lacks [ok]")
+        return 0
     if len(arguments) == 2 and arguments[1] == "--exec":
         if disk is None:
             print("loading programs needs a disk; pass --disk", file=sys.stderr)

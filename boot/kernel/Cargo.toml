@@ -26,6 +26,9 @@ process = ["pages"]
 isolated-repl = ["isolation-selftest", "process"]
 native-graphics = ["isolation-selftest", "pages", "process"]
 graphics-selftest = ["native-graphics"]
+# The AArch64 kernel laid out for the Raspberry Pi 4 (BCM2711), which QEMU
+# models: a flat image at 0x80000, RAM from zero, entry at EL2, no virtio.
+board-raspi4 = []
 
 [profile.dev]
 panic = "abort"

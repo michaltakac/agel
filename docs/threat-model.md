@@ -1306,6 +1306,24 @@ modifier keys.
   a control the desktop owns and cleared by the release; no process can
   set or read it.
 
+## v0.2.55
+
+- **EL2 is left, not used:** the entry drops to EL1 once and installs no
+  vectors at EL2; no path returns there, and the bring-up refuses any
+  exception level but EL1, so the kernel never runs with hypervisor
+  privilege it does not account for.
+- **A board is a compile-time fact:** every physical address comes from
+  one module selected by a feature; nothing is probed, so a kernel built
+  for one board cannot be talked into another's device window.
+- **No disk means no disk:** the board's SD controller is not driven, the
+  workshop says so at boot and refuses `:exec`, and nothing pretends to
+  persist.
+
+Not claimed: the Pi 5's addresses (unverified without the board), the
+device tree (unread), the other cores (parked by the firmware and never
+started), and the firmware itself, which loads the image and is trusted
+as it is on every Pi.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

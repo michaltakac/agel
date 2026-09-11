@@ -11,9 +11,9 @@ use super::hal;
 use crate::memory::{read_entry, table_index, write_entry, Access, FramePool, MemoryError, PAGE};
 
 /// Physical base of the device window: the UART and the interrupt controller.
-const DEVICE_BASE: u64 = 0x0000_0000;
-/// Physical base of RAM on QEMU's `virt` machine.
-const RAM_BASE: u64 = 0x4000_0000;
+const DEVICE_BASE: u64 = super::board::DEVICE_BASE;
+/// Physical base of RAM.
+const RAM_BASE: u64 = super::board::RAM_BASE;
 /// How much RAM the identity window describes.
 const RAM_BYTES: u64 = 0x0800_0000;
 /// Size of one second-level block.

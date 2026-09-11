@@ -12,6 +12,11 @@ fn main() {
     println!("cargo:rerun-if-changed=../../bootstrap/kernel-signing.pub");
     compile_native_desktop();
     embed_trust_key();
+    // A board that loads the image somewhere else tells the linker script
+    // so; the script's default is QEMU's `virt` machine.
+    if env::var_os("CARGO_FEATURE_BOARD_RASPI4").is_some() {
+        println!("cargo:rustc-link-arg=--defsym=AGEL_LOAD=0x80000");
+    }
 }
 
 /// The public key a running kernel checks candidate kernels against, baked

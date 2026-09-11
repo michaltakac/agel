@@ -23,8 +23,8 @@ pub const EC_SVC: u64 = 0x15;
 /// GICv2 distributor and CPU interface on QEMU's `virt` machine, and the four
 /// registers this kernel touches. Naming them is worth the lines: an interrupt
 /// controller programmed by bare offsets is where kernels go to be haunted.
-const GIC_DISTRIBUTOR: u64 = 0x0800_0000;
-const GIC_CPU: u64 = 0x0801_0000;
+const GIC_DISTRIBUTOR: u64 = super::board::GIC_DISTRIBUTOR;
+const GIC_CPU: u64 = super::board::GIC_CPU;
 /// Distributor control.
 const GICD_CTLR: u64 = GIC_DISTRIBUTOR;
 /// Set-enable for interrupts 0 through 31.

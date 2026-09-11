@@ -243,6 +243,11 @@ promise.
   the control under a held button darkens until the release; the
   graphics digest is refrozen and the desktop test measures the pressed
   tile.
+  `v0.2.55` boots the AArch64 kernel on a board: a `board` module holds
+  every physical address, `board-raspi4` lays the kernel out for the
+  Raspberry Pi 4 as a flat image at `0x80000`, the entry drops from EL2
+  to EL1, and `scripts/test-raspi4.sh` boots it on QEMU's `raspi4b` to
+  the workshop, which evaluates and reports that it has no disk.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

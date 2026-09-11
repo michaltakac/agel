@@ -9,6 +9,7 @@
 
 pub mod hal;
 
+pub mod board;
 pub mod cpu;
 mod domain;
 mod memory;
@@ -28,16 +29,16 @@ use crate::memory::DeviceGrant;
 use crate::world::Provocation;
 
 /// Short label used in serial reports.
-pub const NAME: &str = "aarch64";
+pub const NAME: &str = board::NAME;
 
 /// Start of the frame pool, well above the loaded image and its stack.
-pub const POOL_START: u64 = 0x4100_0000;
-/// End of the frame pool. QEMU is started with more memory than this; the bound
+pub const POOL_START: u64 = board::POOL_START;
+/// End of the frame pool. The machine has more memory than this; the bound
 /// is a deliberate fixed resource policy, not a probe result.
-pub const POOL_END: u64 = 0x4400_0000;
+pub const POOL_END: u64 = board::POOL_END;
 
 /// Physical base of the console device, granted to the driver domain alone.
-pub const CONSOLE_DEVICE_PHYSICAL: u64 = 0x0900_0000;
+pub const CONSOLE_DEVICE_PHYSICAL: u64 = board::UART_BASE;
 
 /// Where the driver domain sees the console device in its own address space.
 pub const CONSOLE_DEVICE_VADDR: u64 = domain::DEVICE_BASE;
@@ -45,17 +46,12 @@ pub const CONSOLE_DEVICE_VADDR: u64 = domain::DEVICE_BASE;
 pub const STORAGE_DEVICE_VADDR: u64 = domain::STORAGE_DEVICE_BASE;
 pub const STORAGE_DMA_VADDR: u64 = domain::DMA_BASE;
 
-/// The `virt` machine's virtio-mmio transports: 32 slots of 0x200 bytes.
-const VIRTIO_MMIO_BASE: u64 = 0x0a00_0000;
-const VIRTIO_MMIO_SLOTS: u64 = 32;
-const VIRTIO_MMIO_STRIDE: u64 = 0x200;
-
 /// A supervisor-only address a world may try to write: the kernel's own text.
-pub const KERNEL_PROBE_ADDRESS: u64 = 0x4008_0000;
+pub const KERNEL_PROBE_ADDRESS: u64 = board::KERNEL_PROBE_ADDRESS;
 
-/// PL011 data and flag registers on the `virt` machine.
-const UART_DATA: *mut u8 = 0x0900_0000 as *mut u8;
-const UART_FLAGS: *const u32 = 0x0900_0018 as *const u32;
+/// PL011 data and flag registers.
+const UART_DATA: *mut u8 = board::UART_BASE as *mut u8;
+const UART_FLAGS: *const u32 = (board::UART_BASE + 0x18) as *const u32;
 /// Transmit FIFO full.
 const UART_TX_FULL: u32 = 1 << 5;
 
@@ -86,7 +82,9 @@ pub fn exit(success: bool) -> ! {
     // still being woken by an interrupt it will never service.
     unsafe {
         cpu::stop_preemption();
-        hal::power_off();
+        if board::PSCI {
+            hal::power_off();
+        }
     }
     halt()
 }
@@ -180,9 +178,9 @@ impl Machine {
     pub fn bring_up() -> Result<Self, &'static str> {
         hal::mask_interrupts();
         if hal::current_exception_level() != 1 {
-            // QEMU's `virt` machine enters an ELF kernel at EL1 unless
-            // virtualization is enabled. Dropping from EL2 is a different
-            // bring-up sequence, so say so rather than misbehave subtly.
+            // QEMU's `virt` machine enters an ELF kernel at EL1; a board
+            // that enters at EL2 was dropped to EL1 by `agel_boot`. Anything
+            // else is a machine this kernel does not know how to leave.
             return Err("kernel was not entered at EL1");
         }
         let mut pool = crate::memory::FramePool::new();
@@ -305,8 +303,11 @@ impl Machine {
     /// frame to exchange requests with it through, and nothing else. Fails,
     /// rather than pretending, when the machine has no such device.
     pub fn create_storage_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        let device = find_virtio_block()
-            .ok_or("no virtio block device (modern MMIO transport) on this machine")?;
+        let device = find_virtio_block().ok_or(if board::VIRTIO_MMIO.is_some() {
+            "no virtio block device (modern MMIO transport) on this machine"
+        } else {
+            "no block device driver for this board yet; its SD controller is not driven"
+        })?;
         let page = device & !(crate::memory::PAGE - 1);
         Domain::new(
             &mut self.pool,
@@ -342,8 +343,11 @@ impl Machine {
 /// modern layout, so a legacy device is reported as absent rather than driven
 /// wrongly.
 fn find_virtio_block() -> Option<u64> {
-    for slot in 0..VIRTIO_MMIO_SLOTS {
-        let base = VIRTIO_MMIO_BASE + slot * VIRTIO_MMIO_STRIDE;
+    // The board's transports: their base, how many, and the stride; a
+    // board without them has no block device this kernel can drive.
+    let (transports, slots, stride) = board::VIRTIO_MMIO?;
+    for slot in 0..slots {
+        let base = transports + slot * stride;
         // Safety: the device window maps the whole virtio-mmio range for the
         // supervisor, and these three registers are read-only identification.
         let (magic, version, device) = unsafe {
@@ -372,6 +376,30 @@ fn find_virtio_block() -> Option<u64> {
 #[unsafe(naked)]
 unsafe extern "C" fn agel_boot() -> ! {
     core::arch::naked_asm!(
+        // A board's firmware (and QEMU's Raspberry Pi) enters at EL2. The
+        // kernel does not run there: EL1 is made AArch64 with the physical
+        // timer and counter untrapped and no virtual offset, EL1's system
+        // control is set to its reset value (MMU and caches off), and the
+        // drop lands on the same first instruction with interrupts masked.
+        // EL2 is left with no vectors: nothing returns to it.
+        "mrs x1, CurrentEL",
+        "lsr x1, x1, #2",
+        "cmp x1, #2",
+        "b.ne 1f",
+        "mov x1, #0x80000000",
+        "msr hcr_el2, x1",
+        "mov x1, #3",
+        "msr cnthctl_el2, x1",
+        "msr cntvoff_el2, xzr",
+        "mov x1, #0x0800",
+        "movk x1, #0x30d0, lsl #16",
+        "msr sctlr_el1, x1",
+        "mov x1, #0x3c5",
+        "msr spsr_el2, x1",
+        "adr x1, 1f",
+        "msr elr_el2, x1",
+        "eret",
+        "1:",
         "adrp x0, {stack}",
         "add x0, x0, :lo12:{stack}",
         "mov sp, x0",

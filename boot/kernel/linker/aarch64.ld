@@ -1,10 +1,12 @@
 ENTRY(agel_boot)
 
 /* QEMU's `virt` machine places RAM at 1 GiB and loads an ELF kernel by its
-   program headers, so the image simply states where it wants to live. */
+   program headers, so the image simply states where it wants to live. A
+   board whose firmware loads a flat image elsewhere (the Raspberry Pi, at
+   0x80000) says so through AGEL_LOAD, which the build script defines. */
 SECTIONS
 {
-  . = 0x40080000;
+  . = DEFINED(AGEL_LOAD) ? AGEL_LOAD : 0x40080000;
   .entry : ALIGN(4K) { KEEP(*(.text.entry)) }
 
   /* VBAR_EL1 ignores the low eleven bits of the vector base, so the table gets
