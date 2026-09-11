@@ -11,6 +11,7 @@
 //! console_initialize       prepare the serial device
 //! console_write_byte       emit one byte
 //! exit(success)            leave the emulator, if it can be left
+//! monotonic_microseconds   time since bring-up, from the machine's counter
 //! user_text_range          bounds of the user-executable section
 //! fault_name(cause)        the shared name for a trap cause
 //! PROVOCATIONS             the misbehaviours this architecture can produce

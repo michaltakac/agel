@@ -14,6 +14,8 @@ ssize_t write(int descriptor, const void *buffer, size_t count);
 int close(int descriptor);
 void _exit(int status) __attribute__((noreturn));
 
+unsigned int sleep(unsigned int seconds);
+int usleep(unsigned int microseconds);
 int unlink(const char *path);
 int rmdir(const char *path);
 

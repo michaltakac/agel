@@ -180,6 +180,8 @@ pub fn exec_program(
     let exit = loop {
         match process::step_run(machine, &mut services, run) {
             process::Progress::Running => {}
+            // Time passes on its own: the pass is repeated until it has.
+            process::Progress::Sleeping => core::hint::spin_loop(),
             process::Progress::Listening => {
                 // Nothing here delivers events between passes: a process
                 // that waits for one on this path waits for nothing.

@@ -49,6 +49,46 @@ pub const POOL_END: u64 = 0x0100_0000;
 #[cfg(feature = "isolation-selftest")]
 pub const KERNEL_PROBE_ADDRESS: u64 = 0x0001_0000;
 
+/// Time-stamp counter ticks per microsecond, measured once at bring-up.
+#[cfg(feature = "process")]
+static mut TSC_PER_MICROSECOND: u64 = 1;
+
+/// Measure the time-stamp counter against the timer's second channel:
+/// ten milliseconds of the 1.193182 MHz clock, counted down once, while
+/// the counter runs. The channel is left off and its gate closed.
+///
+/// # Safety
+/// Once, at bring-up, with interrupts disabled.
+#[cfg(feature = "process")]
+unsafe fn calibrate_counter() {
+    const TEN_MILLISECONDS: u16 = 11_932;
+    unsafe {
+        let gate = hal::in8(0x61) & 0xfc;
+        hal::out8(0x61, gate);
+        // Channel 2, low then high byte, mode 0: the output rises at the end.
+        hal::out8(0x43, 0xb0);
+        hal::out8(0x42, TEN_MILLISECONDS as u8);
+        hal::out8(0x42, (TEN_MILLISECONDS >> 8) as u8);
+        let start = hal::rdtsc();
+        hal::out8(0x61, gate | 1);
+        let mut polls: u32 = 0;
+        while hal::in8(0x61) & 0x20 == 0 && polls < 50_000_000 {
+            polls += 1;
+        }
+        let end = hal::rdtsc();
+        hal::out8(0x61, gate);
+        TSC_PER_MICROSECOND = ((end - start) / 10_000).max(1);
+    }
+}
+
+/// Microseconds since bring-up, from the time-stamp counter.
+#[cfg(feature = "process")]
+pub fn monotonic_microseconds() -> u64 {
+    // Safety: written once at bring-up, read thereafter.
+    let per_microsecond = unsafe { core::ptr::addr_of!(TSC_PER_MICROSECOND).read() };
+    hal::rdtsc() / per_microsecond
+}
+
 const COM1: u16 = 0x3f8;
 const DEBUG_EXIT_PORT: u16 = 0xf4;
 
@@ -219,6 +259,8 @@ impl Machine {
             cpu::install(trap_stack, fault_stack);
             // 1_193_182 Hz / 11_932 is very close to 100 Hz.
             cpu::remap_interrupts(11_932);
+            #[cfg(feature = "process")]
+            calibrate_counter();
         }
         Ok(Self { pool, identity })
     }

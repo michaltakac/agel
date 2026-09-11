@@ -2026,6 +2026,10 @@ fn execute_workshop(
                     *running = Some(run);
                     return StatusLine::new(b"PROCESS LISTENING");
                 }
+                crate::process::Progress::Sleeping => {
+                    *running = Some(run);
+                    return StatusLine::new(b"PROCESS SLEEPING");
+                }
                 crate::process::Progress::Ended(exit) => {
                     crate::workshop::finish_program(machine, services.console, run, exit);
                     return StatusLine::new(b"PROCESS ENDED");
@@ -2745,7 +2749,8 @@ fn interactive(
                     for _ in 0..PASSES_PER_IDLE {
                         match crate::process::step_run(machine, &mut services, run) {
                             crate::process::Progress::Running => {}
-                            crate::process::Progress::Listening => break,
+                            crate::process::Progress::Listening
+                            | crate::process::Progress::Sleeping => break,
                             crate::process::Progress::Ended(exit) => {
                                 crate::workshop::finish_program(
                                     machine,

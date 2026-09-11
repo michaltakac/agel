@@ -38,6 +38,11 @@ pub const UNLINK: u64 = 13;
 pub const RENAME: u64 = 14;
 pub const STAT: u64 = 15;
 pub const READDIR: u64 = 16;
+/// Time since the machine came up, a sleep, and the end of a child.
+pub const CLOCK: u64 = 17;
+pub const SLEEP: u64 = 18;
+pub const KILL: u64 = 19;
+pub const SIGNAL_KILLED: u64 = 9;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;
@@ -295,6 +300,21 @@ impl Process {
             *byte = unsafe { payload.add(offset).read_volatile() };
         }
         Ok(Some((length, (result & 0xff) as u8, result >> 16)))
+    }
+
+    /// Microseconds since the machine came up.
+    pub fn clock(&self) -> u64 {
+        self.request(CLOCK, [0; 4])
+    }
+
+    /// Sleep for `microseconds`; the desktop runs meanwhile.
+    pub fn sleep(&self, microseconds: u64) -> i64 {
+        self.request(SLEEP, [microseconds, 0, 0, 0]) as i64
+    }
+
+    /// End child `id` with `signal`, which can only be `SIGNAL_KILLED`.
+    pub fn kill(&self, id: u64, signal: u64) -> i64 {
+        self.request(KILL, [id, signal, 0, 0]) as i64
     }
 
     /// Wait for child `id` to end: its exit status, `WAIT_SIGNALED` with a

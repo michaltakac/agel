@@ -88,6 +88,9 @@ and resumes the process.
 | `14` rename | old length, new length | 0; the payload's first path moved to the second, which must not exist (`-EEXIST`); a directory cannot be moved into itself; needs `write`; stratum 4 |
 | `15` stat | path length | the kind in the low byte (`1` a file, `2` a directory) and the length above it; needs `read`; stratum 4 |
 | `16` readdir | descriptor | the next child of the directory open there: its name in the payload area, the kind in the low byte, the name's length in the next, the child's length above; 0 past the last; the descriptor's offset counts the children given; stratum 4 |
+| `17` clock | none | microseconds since the machine came up, from its counter (the time-stamp counter calibrated against the timer on x86-64, the generic counter on AArch64, the `time` CSR on RISC-V); stratum 4 |
+| `18` sleep | microseconds | 0, once the clock has passed; the process is asleep meanwhile, the desktop runs, and the serial workshop repeats its pass; stratum 4 |
+| `19` kill | child id, signal | 0; the child, which must be the caller's and alive, ends as killed, and its `wait` answers `0x100` with `9`; `-ESRCH` otherwise, `-EINVAL` for a signal other than `9`; stratum 4 |
 | `12` event | window, wait | the next event for a window the process owns, packed: the kind in the top byte (`1` a press, with content coordinates in bits 32–48 and 16–32; `2` a key, with its byte in the low eight; `3` the release and `4` the pointer's motion after a press, with coordinates like a press), 0 when there is none; with `wait` set the process sleeps until there is one and the desktop runs meanwhile; `-ENODEV` without a display (and a sleeping process is stopped as blocked where nothing can deliver), `-EBADF` for a window not its own; not POSIX |
 | `11` draw | window, record count ≤ 8, flags (`1` clears first) | the records the window holds after this; the records are 64-byte compositor records in the block area, relative to the window's content; `-EINVAL` and nothing drawn when any is not permitted or reaches outside the content, `-ENOSPC` past 24 records, `-EBADF` for a window the process does not own; not POSIX |
 
@@ -469,6 +472,20 @@ scanner keeps one character of pushback.
 `optopt`, letters with a colon for an argument, `--` to end the options,
 `?` for an unknown one.
 
+**Time and signals (v0.2.59).** `<time.h>`: `clock` (microseconds,
+`CLOCKS_PER_SEC` a million), `time` (seconds since the boot: there is no
+calendar), `clock_gettime` (every clock is the monotonic one),
+`nanosleep`; `<unistd.h>` `sleep` and `usleep`; `<signal.h>` `kill` with
+`SIGKILL` to one's own child, every other signal `EINVAL`, and no signal
+handlers, since nothing is delivered to a process; `<setjmp.h>` `setjmp`
+and `longjmp` in assembly for the three machines; `<stdlib.h>` `getenv`,
+`setenv`, `unsetenv`, `putenv` over an environment that is the process's
+own, empty at the start, since nothing is inherited. `clock.c` sleeps
+and requires the clock to have advanced, escapes three frames with
+`longjmp`, sets and unsets a variable, spawns `nap` (which sleeps thirty
+seconds), is refused `SIGTERM`, kills it, and reads the signal from
+`waitpid`; a second `kill` is `ESRCH`.
+
 **Windows, which are not POSIX.** `<agel/window.h>` declares
 `agel_window(width, height, title)` and `agel_draw(window, records, count,
 flags)` over the `10` and `11` requests, with inline builders for the
@@ -485,9 +502,12 @@ machines, and `scripts/test-desktop-process.sh` the windows themselves.
 How the desktop keeps and checks what a process draws is in
 [`native-graphics.md`](native-graphics.md).
 
-What it does not add: no `time`, no `signal`, no `setjmp`, no `math`, no
-environment, no floating point in the formatter or the scanner, no
-locale, no threads, no `chdir` (paths are always from the namespace's
-root), no `truncate`, no `%[` in the scanner. `qsort` is quadratic. The
+What it does not add: no calendar time, no signal handlers or signals
+other than `SIGKILL` to a child, no `alarm`, no `math` (the processes
+run without floating point), no floating point in the formatter or the
+scanner, no locale, no threads, no `chdir` (paths are always from the
+namespace's root), no `truncate`, no `%[` in the scanner. A process that
+sleeps holds the serial workshop's `:exec` until it wakes, as any
+process holds it until it ends; the desktop hands the prompt back. `qsort` is quadratic. The
 heap is one arena and never grows. Each is a step this stratum takes when
 a program needs it, with a test.

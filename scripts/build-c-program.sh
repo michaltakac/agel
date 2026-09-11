@@ -45,10 +45,10 @@ mkdir -p "$out"
 # shellcheck disable=SC2086
 cflags="--target=$triple $arch_flags -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
   -fno-asynchronous-unwind-tables -O2 -Wall -Wextra -Werror -I$posix_dir/libc/include"
-# The library's own C, one object each.
+# The library's own C and assembly, one object each.
 library_objects=""
-for source in "$posix_dir"/libc/c/*.c; do
-  object="$out/libc_$(basename "$source" .c).o"
+for source in "$posix_dir"/libc/c/*.c "$posix_dir"/libc/c/*.S; do
+  object="$out/libc_$(basename "$source" | tr '.' '_').o"
   # shellcheck disable=SC2086
   "$clang" $cflags -c "$source" -o "$object"
   library_objects="$library_objects $object"

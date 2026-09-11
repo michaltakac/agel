@@ -397,6 +397,82 @@ pub unsafe extern "C" fn closedir(directory: *mut DIR) -> c_int {
 }
 
 // ---------------------------------------------------------------------------
+// time.h, signal.h
+// ---------------------------------------------------------------------------
+
+/// `<time.h>`'s `struct timespec`.
+#[repr(C)]
+pub struct timespec {
+    pub tv_sec: c_long,
+    pub tv_nsec: c_long,
+}
+
+/// Microseconds since the machine came up: `CLOCKS_PER_SEC` is a million.
+#[no_mangle]
+pub extern "C" fn clock() -> c_long {
+    process().clock() as c_long
+}
+
+/// Seconds since the machine came up: there is no calendar here, so the
+/// epoch is the boot.
+///
+/// # Safety
+/// `out` is null or points to a writable `time_t`.
+#[no_mangle]
+pub unsafe extern "C" fn time(out: *mut c_long) -> c_long {
+    let seconds = (process().clock() / 1_000_000) as c_long;
+    if !out.is_null() {
+        unsafe { out.write(seconds) };
+    }
+    seconds
+}
+
+/// Every clock is the one monotonic clock.
+///
+/// # Safety
+/// `out` must point to a writable `timespec`.
+#[no_mangle]
+pub unsafe extern "C" fn clock_gettime(_clock: c_int, out: *mut timespec) -> c_int {
+    let microseconds = process().clock();
+    unsafe {
+        (*out).tv_sec = (microseconds / 1_000_000) as c_long;
+        (*out).tv_nsec = ((microseconds % 1_000_000) * 1000) as c_long;
+    }
+    0
+}
+
+/// # Safety
+/// `request` must point to a `timespec`; `remaining` is ignored.
+#[no_mangle]
+pub unsafe extern "C" fn nanosleep(request: *const timespec, _remaining: *mut timespec) -> c_int {
+    let microseconds = unsafe {
+        ((*request).tv_sec.max(0) as u64) * 1_000_000 + ((*request).tv_nsec.max(0) as u64) / 1000
+    };
+    outcome(process().sleep(microseconds)) as c_int
+}
+
+#[no_mangle]
+pub extern "C" fn usleep(microseconds: c_uint) -> c_int {
+    outcome(process().sleep(u64::from(microseconds))) as c_int
+}
+
+#[no_mangle]
+pub extern "C" fn sleep(seconds: c_uint) -> c_uint {
+    process().sleep(u64::from(seconds) * 1_000_000);
+    0
+}
+
+/// `kill`, for the one signal there is: `SIGKILL` to one of this
+/// process's own children. Anything else is `EINVAL` or `ESRCH`.
+#[no_mangle]
+pub extern "C" fn kill(child: c_int, signal: c_int) -> c_int {
+    if child < 0 {
+        return outcome(-3) as c_int;
+    }
+    outcome(process().kill(child as u64, signal as u64)) as c_int
+}
+
+// ---------------------------------------------------------------------------
 // agel/window.h
 // ---------------------------------------------------------------------------
 

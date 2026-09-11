@@ -487,6 +487,16 @@ pub mod process {
     /// next byte the name's length, the length of the child above; 0 past
     /// the last. The descriptor's offset counts the children given.
     pub const READDIR: u64 = 16;
+    /// Microseconds since the machine came up, from its counter.
+    pub const CLOCK: u64 = 17;
+    /// Sleep for `arguments[0]` microseconds: the process is resumed once
+    /// the clock has passed that, and the desktop runs meanwhile.
+    pub const SLEEP: u64 = 18;
+    /// End child `arguments[0]` with signal `arguments[1]`, which is only
+    /// `SIGNAL_KILLED`; `-ESRCH` for a child that is not the caller's or
+    /// has ended, `-EINVAL` for any other signal. The child's `wait`
+    /// answers `WAIT_SIGNALED` with the signal.
+    pub const KILL: u64 = 19;
     /// An event's kind is its top byte; a press carries the content
     /// coordinates in bits 32..48 and 16..32, a key its byte in the low
     /// eight bits.

@@ -101,6 +101,7 @@ impl Descriptor {
 
 const EIO: i64 = 5;
 const EBADF: i64 = 9;
+const ESRCH: i64 = 3;
 const ECHILD: i64 = 10;
 const ENODEV: i64 = 19;
 const EAGAIN: i64 = 11;
@@ -148,6 +149,8 @@ pub enum Exit {
     BudgetExhausted,
     /// It was blocked on a wait or a pipe that nothing left could answer.
     Blocked,
+    /// Its parent ended it with `kill`.
+    Killed,
 }
 
 #[derive(Clone, Copy)]
@@ -447,6 +450,8 @@ enum State {
     /// Waiting for an event in a window; answered when the desktop has
     /// one for it.
     Listening(u64),
+    /// Asleep until the clock reads this many microseconds.
+    Sleeping(u64),
     Ended(Exit),
 }
 
@@ -542,6 +547,8 @@ pub enum Progress {
     /// Every live process waits for the desktop: an event for a window.
     /// Nothing in the table can move until the desktop delivers one.
     Listening,
+    /// Nothing moved, and a live process is asleep: time will wake it.
+    Sleeping,
     /// Every process has ended; how the first did.
     Ended(Exit),
 }
@@ -671,6 +678,8 @@ pub fn step_run(
     let mut progressed = false;
     let mut alive = false;
     let mut listening = false;
+    let mut sleeping = false;
+    let now = arch::monotonic_microseconds();
     for index in 0..process::PROCESSES {
         let state = match table.processes[index].as_ref() {
             Some(process) => process.state,
@@ -704,6 +713,15 @@ pub fn step_run(
                     progressed = true;
                 }
             }
+            State::Sleeping(until) => {
+                alive = true;
+                if now >= until {
+                    answer(table, index, 0);
+                    progressed = true;
+                } else {
+                    sleeping = true;
+                }
+            }
             State::Listening(window) => {
                 alive = true;
                 match services.display.as_deref_mut() {
@@ -731,6 +749,9 @@ pub fn step_run(
     }
     if progressed {
         return Progress::Running;
+    }
+    if sleeping {
+        return Progress::Sleeping;
     }
     if listening {
         return Progress::Listening;
@@ -822,6 +843,17 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
             name_request(table, index, services, kind, arguments)
         }
         process::READDIR => read_directory(table, index, services, arguments[0]),
+        process::CLOCK => arch::monotonic_microseconds(),
+        process::SLEEP => {
+            if arguments[0] == 0 {
+                0
+            } else {
+                let until = arch::monotonic_microseconds().saturating_add(arguments[0]);
+                block(table, index, State::Sleeping(until));
+                return;
+            }
+        }
+        process::KILL => kill(machine, services, table, index, arguments),
         process::CLOSE => close(table, index, arguments[0]),
         process::PIPE => pipe(table, index),
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
@@ -907,6 +939,31 @@ fn draw(table: &mut Table, index: usize, services: &mut Services<'_>, arguments:
         }
     }
     display.draw(index, arguments[0], arguments[2], &records[..count]) as u64
+}
+
+/// `KILL`: end one of the caller's own children with the one signal there
+/// is. The child's `wait` then answers as for any stopped child.
+fn kill(
+    machine: &mut arch::Machine,
+    services: &mut Services<'_>,
+    table: &mut Table,
+    index: usize,
+    arguments: [u64; 4],
+) -> u64 {
+    if arguments[1] != process::SIGNAL_KILLED {
+        return error(EINVAL);
+    }
+    let child = arguments[0] as usize;
+    let known = child < process::PROCESSES
+        && child != index
+        && table.processes[child].as_ref().is_some_and(|process| {
+            process.parent == Some(index) && !matches!(process.state, State::Ended(_))
+        });
+    if !known {
+        return error(ESRCH);
+    }
+    end(machine, services, table, child, Exit::Killed);
+    0
 }
 
 /// `EVENT`: the next event for a window the process owns, or, with
@@ -995,6 +1052,9 @@ pub fn report(out: &mut dyn Write, exit: Exit) {
                 " blocked on what nothing left could answer; stopped\r\n"
             );
         }
+        Exit::Killed => {
+            let _ = write!(out, " killed by signal {}\r\n", process::SIGNAL_KILLED);
+        }
     }
 }
 
@@ -1011,7 +1071,9 @@ fn reap(table: &mut Table, parent: usize, child: usize) -> Option<u64> {
     Some(match ended {
         Exit::Status(status) => status & 0xff,
         Exit::Faulted(_) => process::WAIT_SIGNALED | process::SIGNAL_FAULT,
-        Exit::BudgetExhausted | Exit::Blocked => process::WAIT_SIGNALED | process::SIGNAL_KILLED,
+        Exit::BudgetExhausted | Exit::Blocked | Exit::Killed => {
+            process::WAIT_SIGNALED | process::SIGNAL_KILLED
+        }
     })
 }
 

@@ -1380,6 +1380,27 @@ Not claimed: no timestamps, no permissions beyond the namespace's three
 rights, no `chdir`, no atomicity across a power cut inside `rename`
 (one entry sector is written).
 
+## v0.2.59
+
+- **A signal reaches only one's own child:** `kill` names a child of the
+  caller that is alive, or is `-ESRCH`; there is no way to name another
+  process, and the only signal ends the child as the machine ends a
+  faulting one, so a killed child holds nothing afterwards.
+- **The clock is read, never set:** the counter is the machine's; a
+  process reads microseconds and cannot move them. On x86-64 the
+  time-stamp counter is calibrated once at bring-up against the timer's
+  second channel, with interrupts disabled and a bounded poll.
+- **Sleep is a state, not a loop:** a sleeping process runs nothing
+  until the clock passes its time; the desktop keeps its inputs, and the
+  serial workshop's `:exec`, which runs a process to its end, waits with
+  it. A process cannot be woken early by anyone but its own `kill`er.
+- **The environment is not inherited:** it is a table in the process's
+  own memory, empty at the start; a child receives exactly its
+  arguments and descriptors, as before.
+
+Not claimed: no signal delivery, no handlers, no `alarm`; time since
+boot is not time of day.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

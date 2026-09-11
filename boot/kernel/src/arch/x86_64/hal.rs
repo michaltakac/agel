@@ -12,6 +12,15 @@ use core::arch::asm;
 /// The caller must know that writing `value` to `port` is meaningful and not
 /// destructive on this platform.
 #[inline]
+/// The time-stamp counter.
+#[cfg(feature = "process")]
+pub fn rdtsc() -> u64 {
+    let low: u32;
+    let high: u32;
+    unsafe { asm!("rdtsc", out("eax") low, out("edx") high, options(nomem, nostack)) };
+    (u64::from(high) << 32) | u64::from(low)
+}
+
 pub unsafe fn out8(port: u16, value: u8) {
     unsafe { asm!("out dx, al", in("dx") port, in("al") value, options(nomem, nostack)) };
 }

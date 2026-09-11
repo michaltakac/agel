@@ -982,6 +982,23 @@ def c_test(image: str, architecture: str, disk: str) -> None:
                 b"process c-dir exited with status 1",
             ],
         )
+        # Time and signals: the monotonic clock across a sleep, setjmp and
+        # longjmp, the environment, and a sleeping child killed by its
+        # parent, which the machine reports and the parent's wait sees.
+        run_program(
+            boot,
+            ":exec c-clock",
+            [
+                b"clock: slept, the monotonic clock advanced at least 20 ms",
+                b"clock: longjmp returned 7",
+                b"clock: HOME=/app",
+                b"clock: HOME unset",
+                b"process c-nap killed by signal 9",
+                b"clock: nap killed by signal 9",
+                b"clock: kill again: errno 3",
+                b"process c-clock exited with status 0",
+            ],
+        )
         # The serial workshop has no display: a window is refused with
         # ENODEV, and the program says so.
         run_program(

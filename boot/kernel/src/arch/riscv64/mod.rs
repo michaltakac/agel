@@ -88,6 +88,13 @@ pub fn halt() -> ! {
     hal::halt()
 }
 
+/// Microseconds since the counter started: the `time` CSR at ten
+/// megahertz, as QEMU's `virt` machine runs it.
+#[cfg(feature = "process")]
+pub fn monotonic_microseconds() -> u64 {
+    hal::read_time() / 10
+}
+
 /// Bounds of the U-mode-executable section.
 pub fn user_text_range() -> core::ops::Range<u64> {
     extern "C" {

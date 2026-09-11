@@ -97,6 +97,13 @@ pub fn halt() -> ! {
     hal::halt()
 }
 
+/// Microseconds since the counter started, which is before bring-up.
+#[cfg(feature = "process")]
+pub fn monotonic_microseconds() -> u64 {
+    let frequency = hal::read_counter_frequency().max(1);
+    (u128::from(hal::read_counter()) * 1_000_000 / u128::from(frequency)) as u64
+}
+
 /// Bounds of the EL0-executable section.
 pub fn user_text_range() -> core::ops::Range<u64> {
     extern "C" {

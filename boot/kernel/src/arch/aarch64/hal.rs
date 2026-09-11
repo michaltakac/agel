@@ -116,6 +116,14 @@ pub unsafe fn deny_el0_timer_access() {
     unsafe { asm!("msr cntkctl_el1, xzr", options(nomem, nostack)) };
 }
 
+/// The system counter.
+#[cfg(feature = "process")]
+pub fn read_counter() -> u64 {
+    let value: u64;
+    unsafe { asm!("isb", "mrs {}, cntpct_el0", out(reg) value, options(nomem, nostack)) };
+    value
+}
+
 /// The system counter's frequency in hertz, as the firmware reported it.
 pub fn read_counter_frequency() -> u64 {
     let value: u64;

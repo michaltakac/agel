@@ -262,6 +262,11 @@ promise.
   service commands and process requests, each bounded by the namespace;
   `sscanf`, `fscanf` and `scanf`; `getopt`; a `dir` program exercises
   them on all three machines, in a full and a read-only namespace.
+  `v0.2.59` gives processes time and signals: a monotonic clock from each
+  machine's counter, `sleep` as a state the process table wakes, `kill`
+  of one's own child, and the C library's `time.h`, `signal.h`,
+  `setjmp.h` and environment; `clock.c` proves each on all three
+  machines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
