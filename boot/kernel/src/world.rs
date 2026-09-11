@@ -418,6 +418,13 @@ pub mod process {
     /// status, or `WAIT_SIGNALED` with the signal number when the machine
     /// stopped it. Blocks the caller until then.
     pub const WAIT: u64 = 8;
+    /// Move descriptor `arguments[0]`'s offset: to `arguments[1]` from the
+    /// start (`arguments[2]` = 0), the current offset (1) or the end (2);
+    /// answers the new offset. Pipes and the console have no offset.
+    pub const SEEK: u64 = 9;
+    /// The number of NUL-terminated arguments the supervisor placed in the
+    /// payload area before the process first ran; the first is its name.
+    pub const ARGUMENT_COUNT: usize = 70;
     /// A descriptor argument that names none.
     pub const NO_DESCRIPTOR: u64 = 0xffff;
     pub const SPAWN_READ_ONLY: u64 = 1;
@@ -435,6 +442,7 @@ pub mod process {
     pub const O_WRONLY: u64 = 0o1;
     pub const O_RDWR: u64 = 0o2;
     pub const O_CREAT: u64 = 0o100;
+    pub const O_APPEND: u64 = 0o2000;
     pub const O_DIRECTORY: u64 = 0o200000;
     /// Descriptors a process may hold at once, numbered from 3.
     pub const DESCRIPTORS: usize = 16;

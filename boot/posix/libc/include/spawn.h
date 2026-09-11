@@ -8,6 +8,8 @@
 
 #define AGEL_SPAWN_READ_ONLY 1
 
-pid_t agel_spawn(const char *program, int stdin_fd, int stdout_fd, int flags);
+/* argv is NULL, giving the child its name as its one argument, or a
+   NULL-terminated array that becomes the child's argv as it is. */
+pid_t agel_spawn(const char *program, const char *const argv[], int stdin_fd, int stdout_fd, int flags);
 
 #endif

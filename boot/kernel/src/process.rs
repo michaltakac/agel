@@ -73,6 +73,8 @@ struct Descriptor {
     entry: u16,
     pipe: u8,
     offset: u64,
+    /// The file's length as last seen, for `O_APPEND` and seeking to the end.
+    length: u64,
     readable: bool,
     writable: bool,
     handle: ServiceHandle,
@@ -84,6 +86,7 @@ impl Descriptor {
         entry: 0,
         pipe: 0,
         offset: 0,
+        length: 0,
         readable: false,
         writable: false,
         handle: ServiceHandle::NONE,
@@ -102,6 +105,8 @@ const EAGAIN: i64 = 11;
 const EACCES: i64 = 13;
 const ENFILE: i64 = 23;
 const EMFILE: i64 = 24;
+const EINVAL: i64 = 22;
+const ESPIPE: i64 = 29;
 const EPIPE: i64 = 32;
 const ENOSYS: i64 = 38;
 const ESTALE: i64 = 116;
@@ -449,9 +454,21 @@ pub fn exec(
     services: &mut Services<'_>,
     program: Program,
     name: &[u8],
+    arguments: &[u8],
     namespace: Namespace,
 ) -> Result<Exit, &'static str> {
-    let domain = load(machine, services.storage, program)?;
+    let mut domain = load(machine, services.storage, program)?;
+    // The argument block: the name, then each argument, each NUL-terminated,
+    // in the payload area, with the count in its word.
+    let mut block = [0_u8; PAYLOAD_BYTES];
+    let mut used = 0;
+    for byte in name.iter().chain(&[0]).chain(arguments) {
+        if used < PAYLOAD_BYTES {
+            block[used] = *byte;
+            used += 1;
+        }
+    }
+    place_arguments(&mut domain, &block[..used]);
     let mut table = Table {
         processes: [None, None, None, None],
         pipes: [Pipe::EMPTY; process::PIPES],
@@ -479,6 +496,28 @@ pub fn exec(
         }
     }
     Ok(outcome)
+}
+
+/// Give a process its arguments: `block` is NUL-terminated strings, and a
+/// trailing string without its NUL counts too.
+fn place_arguments(domain: &mut arch::Domain, block: &[u8]) {
+    let mut count = 0;
+    let mut open = false;
+    for (offset, byte) in block.iter().enumerate().take(PAYLOAD_BYTES) {
+        domain.core().write_payload(offset, *byte);
+        if *byte == 0 {
+            if open {
+                count += 1;
+            }
+            open = false;
+        } else {
+            open = true;
+        }
+    }
+    if open {
+        count += 1;
+    }
+    domain.core().write_shared(process::ARGUMENT_COUNT, count);
 }
 
 fn padded_name(name: &[u8]) -> [u8; NAME_BYTES] {
@@ -638,6 +677,7 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         process::OPEN => open(table, index, services, arguments[0], arguments[1]),
         process::CLOSE => close(table, index, arguments[0]),
         process::PIPE => pipe(table, index),
+        process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
         process::SPAWN => spawn(machine, services, table, index, arguments),
         process::WAIT => {
             let child = arguments[0] as usize;
@@ -812,7 +852,7 @@ fn open(
         [u64::from(namespace.root), flags, length as u64],
     );
     match service_error(outcome) {
-        Ok([entry, _, kind]) => {
+        Ok([entry, length, kind]) => {
             if kind == fs::KIND_DIRECTORY && flags & process::O_DIRECTORY == 0 {
                 return error(fs::EISDIR as i64);
             }
@@ -821,7 +861,12 @@ fn open(
                     kind: Kind::File,
                     entry: entry as u16,
                     pipe: 0,
-                    offset: 0,
+                    offset: if flags & process::O_APPEND != 0 {
+                        length
+                    } else {
+                        0
+                    },
+                    length,
                     readable: !wants_write || flags & process::O_RDWR != 0,
                     writable: wants_write,
                     handle,
@@ -831,6 +876,36 @@ fn open(
         }
         Err(number) => error(number),
     }
+}
+
+/// Move a file descriptor's offset. The end is the length the supervisor
+/// last saw for this descriptor: at open, and after its own writes.
+fn seek(table: &mut Table, index: usize, descriptor: u64, offset: u64, whence: u64) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
+        return error(EBADF);
+    };
+    match slot.kind {
+        Kind::File => {}
+        Kind::Free => return error(EBADF),
+        _ => return error(ESPIPE),
+    }
+    let base = match whence {
+        0 => 0_i64,
+        1 => slot.offset as i64,
+        2 => slot.length as i64,
+        _ => return error(EINVAL),
+    };
+    let Some(target) = base.checked_add(offset as i64) else {
+        return error(EINVAL);
+    };
+    if target < 0 || target > fs::FILE_BYTES as i64 {
+        return error(EINVAL);
+    }
+    slot.offset = target as u64;
+    slot.offset
 }
 
 /// Close a descriptor: a pipe end gives its count back, and the last write
@@ -969,7 +1044,7 @@ fn spawn(
     let Some(free) = table.processes.iter().position(|slot| slot.is_none()) else {
         return error(EAGAIN);
     };
-    let (name, name_length, namespace, stdin, stdout) = {
+    let (name, name_length, block, block_length, namespace, stdin, stdout) = {
         let Some(parent) = table.processes[index].as_mut() else {
             return error(EBADF);
         };
@@ -978,6 +1053,22 @@ fn spawn(
         for (offset, byte) in name.iter_mut().enumerate().take(length) {
             *byte = parent.domain.core().read_payload(offset);
         }
+        // The child's arguments follow the name in the parent's payload:
+        // `arguments[3]`'s upper bits say how many bytes. Without any, the
+        // child's one argument is its name.
+        let block_length = ((arguments[3] >> 16) as usize).min(PAYLOAD_BYTES - length - 1);
+        let mut block = [0_u8; PAYLOAD_BYTES];
+        if block_length == 0 {
+            block[..length].copy_from_slice(&name[..length]);
+        }
+        for (offset, byte) in block.iter_mut().enumerate().take(block_length) {
+            *byte = parent.domain.core().read_payload(length + 1 + offset);
+        }
+        let block_length = if block_length == 0 {
+            length + 1
+        } else {
+            block_length
+        };
         let namespace = if arguments[3] & process::SPAWN_READ_ONLY != 0 {
             Namespace::read_only(parent.namespace.root)
         } else {
@@ -993,17 +1084,26 @@ fn spawn(
                 _ => return error(EBADF),
             }
         }
-        (name, length, namespace, given[0], given[1])
+        (
+            name,
+            length,
+            block,
+            block_length,
+            namespace,
+            given[0],
+            given[1],
+        )
     };
     let program = match find(services.storage, &name[..name_length]) {
         Ok(Some(program)) => program,
         Ok(None) => return error(fs::ENOENT as i64),
         Err(_) => return error(EIO),
     };
-    let domain = match load(machine, services.storage, program) {
+    let mut domain = match load(machine, services.storage, program) {
         Ok(domain) => domain,
         Err(_) => return error(EIO),
     };
+    place_arguments(&mut domain, &block[..block_length]);
     let mut descriptors = [Descriptor::FREE; process::DESCRIPTORS];
     descriptors[0] = stdin;
     descriptors[1] = stdout;
@@ -1104,6 +1204,7 @@ fn file_write(
     match service_error(outcome) {
         Ok([count, _, _]) => {
             slot.offset += count;
+            slot.length = slot.length.max(slot.offset);
             count
         }
         Err(number) => error(number),

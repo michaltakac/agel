@@ -1,8 +1,8 @@
 # The POSIX personality
 
 Status: started at v0.2.41; stratum 1 at v0.2.43; stratum 2 at v0.2.44;
-stratum 3 at v0.2.45. This document is the plan, the process ABI, and an
-honest account of what exists.
+stratum 3 at v0.2.45; stratum 4 begun at v0.2.46. This document is the
+plan, the process ABI, and an honest account of what exists.
 
 The requirements are in [`deployment-targets.md`](deployment-targets.md):
 the kernel contract contains no POSIX concept; the personality runs
@@ -20,7 +20,7 @@ from source. Everything below is measured against those.
 | 1. Files and namespaces | an unprivileged filesystem service; a namespace capability per process; `open`, `read`, `write`, `close` on descriptors derived from it | **v0.2.43**, all three research machines |
 | 2. The C library | `agel-libc`, a `no_std` Rust library with a C ABI, so C and Rust programs build for Agel from source | **v0.2.44**, all three research machines |
 | 3. Processes that make processes | `spawn` with an explicit capability set, never `fork`; pipes; `wait` | **v0.2.45**, all three research machines |
-| 4. Breadth | the growing subset of the standard that real programs need: `stdio`, `malloc`, `string`, `errno`, time | ongoing |
+| 4. Breadth | the growing subset of the standard that real programs need: `stdio`, `malloc`, `string`, `errno`, time | **begun at v0.2.46**: arguments, a free-list heap, streams, seek and append, `ctype`, the wider `string` and `stdlib`; an unmodified third-party source builds and runs |
 
 Binary compatibility with Linux ELFs is not planned; see the requirements.
 
@@ -82,6 +82,15 @@ and resumes the process.
 | `6` spawn | name length, stdin descriptor, stdout descriptor, flags | the child's id; the name is in the payload area; `0xffff` names no descriptor; flag `1` gives the child a read-only namespace; stratum 3 |
 | `7` pipe | none | read descriptor in the low sixteen bits, write descriptor in the next sixteen; stratum 3 |
 | `8` wait | child id | the child's exit status, or `0x100` with a signal number in the low byte when the machine stopped it (`11` a fault, `9` a budget or a deadlock); blocks until the child ends; `-ECHILD` for a child that is not the caller's; stratum 3 |
+| `9` seek | descriptor, offset, whence (0 start, 1 current, 2 end) | the new offset; `-ESPIPE` for a pipe or the console; stratum 4 |
+
+Before a process first runs, the supervisor places its arguments in the
+payload area as NUL-terminated strings, the program's name first, and
+their count in word 70. `:exec NAME [ROOT] [ro] [-- ARG...]` supplies them
+from the workshop; `spawn` supplies a child's from the bytes after the
+name in the parent's payload, whose length rides in the upper bits of the
+flags word. `open` honours `O_APPEND` (`0o2000`): the descriptor starts at
+the file's end.
 
 Any other kind answers `-ENOSYS`. Nothing here is a contract operation, and
 nothing here is a path the kernel interprets: the program region is a table
@@ -371,3 +380,64 @@ no process groups, no `exec` that replaces a running image, and no
 blocking `read` of the console. Deadlock is detected only when nothing at
 all can run; a process spinning on a pipe it will never fill is stopped by
 its tick budget, not by the detector.
+
+## Stratum 4: breadth, begun
+
+Breadth is not a release but a direction: each step adds what a real
+program needs next, with a test. v0.2.46 is the first step, chosen so
+that a C source written for other systems builds and runs unmodified.
+
+```text
+agel-native[0]> :exec c-cat /app -- notes
+notes for the app
+process c-cat exited with status 0
+agel-native[0]> :exec c-digest /app -- notes
+968fdb320ca48afd0557fe96b6416246e0b266031146ab2a707a119c0107b684  notes
+process c-digest exited with status 0
+agel-native[0]> :exec c-breadth /etc -- one two
+arguments: 3 [c-breadth] [one] [two]
+heap: reuse, join, realloc, ENOMEM
+formatter: widths, flags, precision, truncation
+strings: strtol, strstr, strrchr, ctype, strcat, qsort
+streams: fopen, fprintf, append, fgets, feof, lseek
+breadth: 23 checks passed
+process c-breadth exited with status 0
+```
+
+What this step adds:
+
+- **Arguments.** `main(int argc, char **argv)` receives what `:exec`'s
+  `--` or the parent's `agel_spawn(program, argv, ...)` supplied, at most
+  256 bytes and 32 arguments; `argv[0]` is the program's name.
+- **A heap that gives memory back.** `malloc` is a first-fit free list
+  over a 256 KiB arena in the process's `.bss` with 16-byte headers;
+  `free` joins a freed block with free neighbours; `realloc` grows in place
+  when the block already suffices and copies otherwise; `calloc` clears.
+- **Streams.** `FILE` is a descriptor with a line-buffered output buffer
+  and a block-buffered input buffer: `fopen` (`r`, `w`, `a`, with `+`),
+  `fclose`, `fflush`, `fileno`, `feof`, `ferror`, `clearerr`, `fputc`,
+  `putc`, `putchar`, `fputs`, `puts`, `fwrite`, `fgetc`, `getc`,
+  `getchar`, `fgets`, `fread`, `printf`, `fprintf`, `sprintf`,
+  `snprintf`, `vprintf`, `vfprintf`, `vsprintf`, `vsnprintf`, `perror`.
+  `exit` flushes every stream. The formatter handles `%s %c %d %i %u %x
+  %X %o %p %%` with `-`, `0`, `+` and space, a width, a precision, `*`,
+  and the `l`, `ll`, `z` and `h` modifiers; no floating point.
+- **Seek and append.** `lseek` with `SEEK_SET`, `SEEK_CUR` and `SEEK_END`
+  on file descriptors, `O_APPEND`, and `fopen`'s `a`.
+- **`string.h`, `stdlib.h`, `ctype.h`, `assert.h`, `memory.h`.**
+  `memchr`, `strncpy`, `strcat`, `strncat`, `strrchr`, `strstr`, `strdup`,
+  `strerror`; `atoi`, `atol`, `strtol`, `strtoul`, `abs`, `labs`, `qsort`
+  (an insertion sort), `EXIT_SUCCESS`; the C-locale character classes;
+  `assert`; and `memory.h` as the old name of `string.h`, which the
+  third-party source includes.
+- **A third-party source, unmodified.** `boot/posix/c/third-party/sha256.c`
+  is Brad Conte's public-domain SHA-256 as published; `digest.c` is the
+  program around it, and the test compares its digest of a file with the
+  host's.
+
+What it does not add: no `scanf` family, no `time`, no `signal`, no
+`setjmp`, no `math`, no environment, no `getopt`, no `stat`, no
+`opendir`, no `unlink` or `rename` (the filesystem has none), no floating
+point in the formatter, no locale, no threads. `qsort` is quadratic. The
+heap is one arena and never grows. Each is a step this stratum takes when
+a program needs it, with a test.

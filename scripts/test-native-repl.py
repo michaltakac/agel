@@ -973,6 +973,63 @@ def spawn_test(image: str, architecture: str, disk: str) -> None:
         boot.close()
 
 
+def breadth_test(image: str, architecture: str, disk: str) -> None:
+    """The C library's breadth: arguments, heap, formatter, streams, a third-party file."""
+    boot = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        boot.expect_until(b"AGEL_NATIVE_READY")
+        boot.expect_until(b"agel-native[0]> ")
+        boot.send(":fs-format", "formatted", 0)
+        boot.send(":fs-mkdir app", "directory ready: app", 0)
+        boot.send(":fs-mkdir etc", "directory ready: etc", 0)
+        run_program(
+            boot,
+            ":exec writer",
+            [b"writer: wrote etc/secret and app/notes", b"process writer exited with status 0"],
+        )
+        # Arguments reach main; cat names its file now.
+        run_program(
+            boot,
+            ":exec c-cat /app -- notes",
+            [b"notes for the app", b"process c-cat exited with status 0"],
+        )
+        run_program(
+            boot,
+            ":exec c-cat /app -- nothing notes",
+            [b"cat: nothing: errno 2", b"process c-cat exited with status 2"],
+        )
+        # An unmodified public-domain SHA-256, read through stdio, agrees
+        # with the host's digest of the same bytes.
+        run_program(
+            boot,
+            ":exec c-digest /app -- notes",
+            [b"968fdb320ca48afd0557fe96b6416246e0b266031146ab2a707a119c0107b684  notes", b"process c-digest exited with status 0"],
+        )
+        # The library checked from C, with files in a namespace of its own.
+        run_program(
+            boot,
+            ":exec c-breadth /etc -- one two",
+            [
+                b"arguments: 3 [c-breadth] [one] [two]",
+                b"heap: reuse, join, realloc, ENOMEM",
+                b"formatter: widths, flags, precision, truncation",
+                b"strings: strtol, strstr, strrchr, ctype, strcat, qsort",
+                b"streams: fopen, fprintf, append, fgets, feof, lseek",
+                b"breadth: 23 checks passed",
+                b"process c-breadth exited with status 0",
+            ],
+        )
+        boot.send_bytes(":fs-ls /etc")
+        assert boot.process.stdin is not None
+        boot.process.stdin.write(b"\n")
+        boot.process.stdin.flush()
+        boot.expect_exact(b"\r\nsecret  11 bytes\r\nlog  14 bytes\r\nagel-native[0]> ")
+        boot.send("(+ 20 22)", "42", 1)
+        shutdown(boot)
+    finally:
+        boot.close()
+
+
 def send_kernel_healthy(
     harness: Harness, line: str, expected: str, slot: str, revision: int
 ) -> None:
@@ -1061,7 +1118,7 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --files | --c | --spawn | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --files | --c | --spawn | --breadth | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
@@ -1116,6 +1173,19 @@ def main() -> int:
                 print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
             return 1
         print(f"Agel processes [{architecture}]: pipe -> spawn with explicit descriptors -> wait, faults and errors seen by the parent [ok]")
+        return 0
+    if len(arguments) == 2 and arguments[1] == "--breadth":
+        if disk is None:
+            print("the breadth test needs a disk; pass --disk", file=sys.stderr)
+            return 2
+        try:
+            breadth_test(arguments[0], architecture, disk)
+        except Exception as error:
+            print(f"breadth test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print(f"Agel C library breadth [{architecture}]: arguments, heap, formatter, streams, an unmodified third-party source [ok]")
         return 0
     if len(arguments) == 2 and arguments[1] == "--power-cut":
         if disk is None:

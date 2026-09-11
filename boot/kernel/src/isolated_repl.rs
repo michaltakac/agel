@@ -206,7 +206,7 @@ pub fn run() -> ! {
         match source {
             b":help" => driver_line(
                 &mut driver,
-                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart/reap | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :cut-power N | processes: :exec NAME [ROOT] [ro] :fs-format :fs-mkdir PATH :fs-ls [PATH] :fs-restart | :shutdown",
+                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart/reap | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :cut-power N | processes: :exec NAME [ROOT] [ro] [-- ARG...] :fs-format :fs-mkdir PATH :fs-ls [PATH] :fs-restart | :shutdown",
             ),
             b":revision" => {
                 let mut out = ServiceWriter::new(&mut driver);
@@ -910,15 +910,45 @@ fn exec_program(
         driver_line(driver, b"denied: no storage device");
         return;
     };
-    let mut words = rest
+    // `NAME [ROOT] [ro] [-- ARG...]`: everything after `--` is the
+    // program's, one argument per word.
+    let (options, arguments) = match rest.windows(2).position(|pair| pair == b"--") {
+        Some(at)
+            if (at == 0 || rest[at - 1] == b' ')
+                && (at + 2 == rest.len() || rest[at + 2] == b' ') =>
+        {
+            (&rest[..at], &rest[at + 2..])
+        }
+        _ => (rest, &rest[rest.len()..]),
+    };
+    let mut words = options
         .split(|byte| *byte == b' ')
         .filter(|word| !word.is_empty());
     let Some(name) = words.next() else {
-        driver_line(driver, b"usage: :exec NAME [ROOT] [ro]");
+        driver_line(driver, b"usage: :exec NAME [ROOT] [ro] [-- ARG...]");
         return;
     };
-    let root_path = words.next();
-    let read_only = words.next() == Some(b"ro");
+    let mut root_path = words.next();
+    let mut read_only = false;
+    if root_path == Some(b"ro") {
+        root_path = None;
+        read_only = true;
+    } else if words.next() == Some(b"ro") {
+        read_only = true;
+    }
+    let mut block = [0_u8; crate::world::PAYLOAD_BYTES];
+    let mut block_length = 0;
+    for word in arguments
+        .split(|byte| *byte == b' ')
+        .filter(|word| !word.is_empty())
+    {
+        for byte in word.iter().chain(&[0]) {
+            if block_length < block.len() {
+                block[block_length] = *byte;
+                block_length += 1;
+            }
+        }
+    }
     let mut filesystem = filesystem;
     // No ROOT names the filesystem's root, entry 0, which is the root by
     // construction: a program that never opens a file runs whether or not
@@ -962,7 +992,14 @@ fn exec_program(
         console: driver,
         filesystem,
     };
-    let outcome = match crate::process::exec(machine, &mut services, program, name, namespace) {
+    let outcome = match crate::process::exec(
+        machine,
+        &mut services,
+        program,
+        name,
+        &block[..block_length],
+        namespace,
+    ) {
         Ok(outcome) => outcome,
         Err(reason) => {
             driver_text_error(driver, b"cannot load program: ", reason.as_bytes());

@@ -183,6 +183,12 @@ promise.
   scheduler and stops what can never progress. `agel-libc` gains `pipe`,
   `waitpid` and `agel_spawn`; `scripts/test-spawn.sh` proves a C pipeline
   on all three machines.
+  `v0.2.46` begins the C library's breadth: arguments to `main` from
+  `:exec NAME [ROOT] [ro] [-- ARG...]` and from `agel_spawn`'s `argv`, a
+  free-list heap, `stdio` streams with a full integer formatter, `lseek`
+  and `O_APPEND`, `ctype`, and the wider `string` and `stdlib`; an
+  unmodified public-domain SHA-256 builds and its digest agrees with the
+  host's, on all three machines (`scripts/test-breadth.sh`).
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

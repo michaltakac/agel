@@ -119,9 +119,11 @@ definition without rebooting the VM.
 :kernel-promote    make a kernel slot verified by a healthy boot the trusted one
 :kernel-fault      give the candidate kernel up; the next boot loads the trusted slot
 :cut-power N       fault injection: tear the N-th sector write from now and halt
-:exec NAME [ROOT] [ro]  load a program from the disk's program region into a fresh domain and run it
-                   inside a namespace rooted at ROOT (default /), read-only with ro; serves it and
-                   every process it spawns until all have ended
+:exec NAME [ROOT] [ro] [-- ARG...]
+                   load a program from the disk's program region into a fresh domain and run it
+                   inside a namespace rooted at ROOT (default /), read-only with ro, with the
+                   words after -- as its arguments; serves it and every process it spawns until
+                   all have ended
 :fs-format         write an empty filesystem to the region the filesystem service owns
 :fs-mkdir PATH     create a directory
 :fs-ls [PATH]      list a directory: names, with / after a directory and the size after a file

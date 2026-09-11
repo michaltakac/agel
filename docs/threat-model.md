@@ -1109,6 +1109,31 @@ thing a child learns from its parent is what it reads on descriptor 0;
 there is no way to stop a child from outside; and the scheduler is a round
 robin with no notion of fairness beyond one entry per pass.
 
+## v0.2.46
+
+- **Arguments are data in the process's own page:** the supervisor writes
+  the argument block into the payload area before the process first runs
+  and the count into a word; the library copies it out and builds `argv`
+  in its own memory with a terminator it writes itself, so a block the
+  supervisor left unterminated cannot run `argv` off its end. A child's
+  arguments come from its parent's payload, bounded to the area.
+- **Seek is bounded:** a descriptor's offset can be moved only inside the
+  file size the filesystem allows, and only on a file; the length used for
+  `SEEK_END` is what the supervisor last saw for that descriptor, so two
+  descriptors on one file may disagree about its end until one reads it
+  again, which is a correctness limit and not a boundary one.
+- **A third-party source is still a process:** the SHA-256 built
+  unmodified runs with the rights of the program around it and nothing
+  more; source compatibility adds no authority, only the ability to build.
+- **The heap is the process's own:** a heap corrupted by a program's bug
+  corrupts that program's domain; the allocator checks that a pointer it is
+  handed lies in its arena at a block boundary before writing a header,
+  which keeps a stray `free` from writing outside the arena, not from
+  confusing the program that misused it.
+
+Not claimed: the library is not audited against a C standard, and the
+breadth is what the tests exercise.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

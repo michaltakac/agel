@@ -6,6 +6,7 @@
 #define O_WRONLY 01
 #define O_RDWR 02
 #define O_CREAT 0100
+#define O_APPEND 02000
 #define O_DIRECTORY 0200000
 
 int open(const char *path, int flags, ...);

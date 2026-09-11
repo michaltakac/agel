@@ -323,7 +323,9 @@ Each rung must be runnable and differentially testable against the rung below:
    service restart. The third (v0.2.44) is `agel-libc`: C programs build
    from source and run as processes on all three machines. The fourth
    (v0.2.45) is processes that make processes: `spawn` with an explicit
-   descriptor set in place of `fork`, pipes, and `wait`.
+   descriptor set in place of `fork`, pipes, and `wait`. Breadth began at
+   v0.2.46: arguments, a real heap, streams, and a third-party C source
+   built unmodified.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

@@ -49,8 +49,20 @@ cflags="--target=$triple $arch_flags -ffreestanding -nostdlib -fno-builtin -fno-
 "$clang" $cflags -c "$posix_dir/libc/c/stdio.c" -o "$out/stdio.o"
 # shellcheck disable=SC2086
 "$clang" $cflags -c "$posix_dir/c/$name.c" -o "$out/$name.o"
+# A program may list further sources, one per line relative to c/, in
+# c/NAME.deps; third-party files are compiled as they are, without -Werror.
+objects="$out/$name.o"
+if test -f "$posix_dir/c/$name.deps"; then
+  while read -r source; do
+    test -n "$source" || continue
+    object="$out/$(printf '%s' "$source" | tr '/' '_').o"
+    # shellcheck disable=SC2086
+    "$clang" $cflags -Wno-error -Wno-unused-parameter -c "$posix_dir/c/$source" -o "$object"
+    objects="$objects $object"
+  done < "$posix_dir/c/$name.deps"
+fi
 # shellcheck disable=SC2086
 "$clang" --target=$triple -fuse-ld=lld -nostdlib -static -Wl,--gc-sections -Wl,-z,max-page-size=4096 \
   -Wl,-T,"$posix_dir/linker/$architecture.ld" -o "$out/$name" \
-  "$out/$name.o" "$out/stdio.o" "$archive"
+  $objects "$out/stdio.o" "$archive"
 printf '%s\n' "$out/$name"

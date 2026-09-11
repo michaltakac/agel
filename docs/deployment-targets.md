@@ -186,11 +186,14 @@ Exact, because the gap is large:
   granted per process and served by an unprivileged filesystem service
   (v0.2.43), `agel-libc`, so C programs build from source and run
   (v0.2.44), and processes that make processes, with `spawn` in place of
-  `fork`, pipes and `wait` (v0.2.45); see
+  `fork`, pipes and `wait` (v0.2.45), with the fifth, breadth, begun:
+  arguments, a free-list heap, streams, seek and append, and an
+  unmodified public-domain C source built and run (v0.2.46); see
   [`posix-personality.md`](posix-personality.md) for what each stratum
   does not claim.
 - **Storage drivers:** unprivileged ATA and virtio-blk driver domains on the
   three research machines.
 
-Not started: the breadth of the C library, local inference, and a network
-stack. The hosted agent runtime has not moved into a domain.
+Not started: local inference and a network stack. The C library's breadth
+is begun and far from done. The hosted agent runtime has not moved into a
+domain.

@@ -20,6 +20,11 @@ pub const CLOSE: u64 = 5;
 pub const SPAWN: u64 = 6;
 pub const PIPE: u64 = 7;
 pub const WAIT: u64 = 8;
+pub const SEEK: u64 = 9;
+/// Shared-page word holding the number of NUL-terminated arguments the
+/// supervisor placed in the payload area before the process first ran.
+pub const ARGUMENT_COUNT: usize = 70;
+pub const O_APPEND: u64 = 0o2000;
 /// A descriptor argument to `spawn` that names none.
 pub const NO_DESCRIPTOR: u64 = 0xffff;
 pub const SPAWN_READ_ONLY: u64 = 1;
@@ -118,13 +123,49 @@ impl Process {
     /// and 1 (`NO_DESCRIPTOR` for none), the console as its 2, and this
     /// process's namespace, read-only with `SPAWN_READ_ONLY`. The child's
     /// id, or a negated error number.
-    pub fn spawn(&self, program: &[u8], stdin: u64, stdout: u64, flags: u64) -> i64 {
-        let take = program.len().min(PAYLOAD_BYTES);
+    /// `arguments` is the child's argument block, NUL-terminated strings;
+    /// empty gives the child its name as its one argument.
+    pub fn spawn(
+        &self,
+        program: &[u8],
+        arguments: &[u8],
+        stdin: u64,
+        stdout: u64,
+        flags: u64,
+    ) -> i64 {
+        let take = program.len().min(16);
         let payload = (self.page as usize + PAYLOAD_OFFSET) as *mut u8;
         for (offset, byte) in program.iter().take(take).enumerate() {
             unsafe { payload.add(offset).write_volatile(*byte) };
         }
-        self.request(SPAWN, [take as u64, stdin, stdout, flags]) as i64
+        unsafe { payload.add(take).write_volatile(0) };
+        let room = PAYLOAD_BYTES - take - 1;
+        let block = arguments.len().min(room);
+        for (offset, byte) in arguments.iter().take(block).enumerate() {
+            unsafe { payload.add(take + 1 + offset).write_volatile(*byte) };
+        }
+        self.request(
+            SPAWN,
+            [take as u64, stdin, stdout, flags | ((block as u64) << 16)],
+        ) as i64
+    }
+
+    /// The arguments the supervisor gave this process: the count, and the
+    /// payload bytes holding them.
+    pub fn arguments(&self) -> (usize, [u8; PAYLOAD_BYTES]) {
+        let count = unsafe { self.page.add(ARGUMENT_COUNT).read_volatile() } as usize;
+        let payload = (self.page as usize + PAYLOAD_OFFSET) as *const u8;
+        let mut block = [0_u8; PAYLOAD_BYTES];
+        for (offset, byte) in block.iter_mut().enumerate() {
+            *byte = unsafe { payload.add(offset).read_volatile() };
+        }
+        (count, block)
+    }
+
+    /// Move a file descriptor's offset; `whence` is 0 from the start, 1
+    /// from the current offset, 2 from the end.
+    pub fn seek(&self, descriptor: u64, offset: i64, whence: u64) -> i64 {
+        self.request(SEEK, [descriptor, offset as u64, whence, 0]) as i64
     }
 
     /// A pipe: the read end and the write end, or a negated error number.

@@ -15,7 +15,7 @@ int main(void) {
         printf("pipeline: pipe: errno %d\n", errno);
         return 1;
     }
-    pid_t child = agel_spawn("c-shout", ends[0], 1, 0);
+    pid_t child = agel_spawn("c-shout", NULL, ends[0], 1, 0);
     if (child < 0) {
         printf("pipeline: spawn: errno %d\n", errno);
         return 1;
@@ -33,7 +33,7 @@ int main(void) {
     }
     printf("child %d exited with %d\n", child, WEXITSTATUS(status));
 
-    pid_t hostile = agel_spawn("hostile", -1, 1, 0);
+    pid_t hostile = agel_spawn("hostile", NULL, -1, 1, 0);
     if (hostile < 0) {
         printf("pipeline: spawn hostile: errno %d\n", errno);
         return 1;
@@ -45,7 +45,7 @@ int main(void) {
         printf("child %d exited with %d\n", hostile, WEXITSTATUS(status));
     }
 
-    if (agel_spawn("nothing", -1, 1, 0) < 0) {
+    if (agel_spawn("nothing", NULL, -1, 1, 0) < 0) {
         printf("spawn nothing: errno %d\n", errno);
     }
     if (waitpid(7, &status, 0) < 0) {
