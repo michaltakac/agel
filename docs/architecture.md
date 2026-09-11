@@ -316,7 +316,8 @@ Each rung must be runnable and differentially testable against the rung below:
    first stratum exists: a static ELF loaded from the disk into a fresh
    domain on all three research machines, speaking a request protocol for
    `write` and `exit`; see [`posix-personality.md`](posix-personality.md)
-   for the strata that follow.
+   for the strata that follow. v0.2.42 grew the disk layout, doubling the
+   kernel slots, so those strata have room in the image.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

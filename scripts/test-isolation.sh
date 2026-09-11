@@ -24,7 +24,7 @@ run_x86_64() {
 # test, with the 0xaa55 boot signature the test reads back from sector 0.
 virtio_disk() {
   disk=$(mktemp "${TMPDIR:-/tmp}/agel-virtio.XXXXXX")
-  dd if=/dev/zero of="$disk" bs=512 count=2048 2>/dev/null
+  dd if=/dev/zero of="$disk" bs=512 count=3072 2>/dev/null
   printf '\125\252' | dd of="$disk" bs=1 seek=510 conv=notrunc 2>/dev/null
   printf '%s\n' "$disk"
 }

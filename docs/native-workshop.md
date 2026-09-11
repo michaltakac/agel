@@ -171,8 +171,8 @@ then tries valid generations newest-first. If the newest slot is torn, corrupt,
 or cannot be evaluated, the preceding slot is replayed automatically. CRC detects accidental
 damage; it is not a cryptographic signature or protection from a malicious disk.
 
-`./scripts/build-boot.sh` replaces only sectors 0 through 255 and preserves the
-workspace region. Thus rebuilding or rerunning `./scripts/run-qemu.sh` keeps
+`./scripts/build-boot.sh` replaces only sectors 0 through 511 (the BIOS stage
+and kernel slot A) and preserves the workspace region. Thus rebuilding or rerunning `./scripts/run-qemu.sh` keeps
 your cells. `./scripts/test-native-persistence.sh` uses a temporary disk and
 proves edit → save → reboot → reject a checksummed but semantically invalid
 newest slot → corrupt it → simulate an invalidated/partially written slot →
@@ -195,7 +195,7 @@ its exact transaction and containment semantics are in
 
 ## v0.2.29 disk-backed recovery
 
-Sector 288 of the x86-64 disk holds a recovery record: the **trusted**
+Sector 1056 of the disk (288 before v0.2.42) holds a recovery record: the **trusted**
 generation, the **candidate** generation, how many boots the candidate has
 been given, and whether it has been verified. The record is supervisor policy
 carried by the storage driver domain; no language world can reach it.
@@ -254,9 +254,9 @@ slots and one record, so a rollback point survives exactly one further save.
 
 ## v0.2.30 kernel slots
 
-The kernel image has the same shape one level down. Sector 289 is a selector
-the BIOS stage reads before loading anything, and sectors 290 through 543 are
-a second kernel slot. `scripts/stage-kernel.py IMAGE KERNEL.bin` writes a
+The kernel image has the same shape one level down. Sector 1057 is a selector
+the BIOS stage reads before loading anything, and sectors 512 through 1019 are
+a second kernel slot (before v0.2.42: sectors 289 and 290 through 543). `scripts/stage-kernel.py IMAGE KERNEL.bin` writes a
 candidate into whichever slot is not trusted and proposes it; the stage
 charges every boot of an unverified candidate before it runs and loads the
 trusted slot after three. Since v0.2.32 the stage loads a candidate only after

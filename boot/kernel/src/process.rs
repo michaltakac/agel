@@ -21,9 +21,9 @@ use crate::workspace::read_sector;
 use crate::world::{process, Fault, Stop, BLOCK_BYTES};
 
 /// The program region: a table sector followed by the programs it names.
-pub const TABLE_SECTOR: u32 = 1024;
+pub const TABLE_SECTOR: u32 = 2048;
 /// Last sector of the program region, inclusive.
-pub const LAST_SECTOR: u32 = 2047;
+pub const LAST_SECTOR: u32 = 3071;
 const MAGIC: &[u8; 8] = b"AGELPR1\0";
 const ENTRY_BYTES: usize = 32;
 const MAX_PROGRAMS: usize = (512 - 16) / ENTRY_BYTES;

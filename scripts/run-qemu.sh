@@ -5,14 +5,14 @@ set -eu
 
 architecture=${1:-x86_64}
 
-# The diskless machines keep their workshop on a 1 MiB virtio disk image
+# The diskless machines keep their workshop on a 1.5 MiB virtio disk image
 # beside the x86-64 one; it is created blank once and then preserved, so
 # cells saved in one session are there in the next.
 workshop_disk() {
   disk="target/boot/agel-$1.img"
   if test ! -f "$disk"; then
     mkdir -p target/boot
-    dd if=/dev/zero of="$disk" bs=512 count=2048 2>/dev/null
+    dd if=/dev/zero of="$disk" bs=512 count=3072 2>/dev/null
   fi
   printf '%s\n' "$disk"
 }

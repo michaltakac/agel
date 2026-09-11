@@ -9,11 +9,11 @@ on that substrate while retaining the recovery boundary.
 AArch64 and RISC-V need none of this: QEMU's `virt` machine loads an ELF by its
 program headers, so those images state where they want to live and start there.
 x86-64 keeps the BIOS seed because that is where the project's native work
-began, and because a reproducible 128 KiB boot seed is a useful thing to have.
+began, and because a reproducible 256 KiB boot seed is a useful thing to have.
 
-1. The 512-byte BIOS stage reads the kernel slot selector at sector 289,
+1. The 512-byte BIOS stage reads the kernel slot selector at sector 1057,
    charges an unverified candidate one boot and writes the selector back, and
-   loads 254 kernel sectors from the chosen slot in two conservative
+   loads 508 kernel sectors from the chosen slot in four conservative
    127-sector requests beginning at physical `0x10000`. It leaves the chosen
    slot at `0x6fec` behind a marker at `0x6fe8` for the kernel.
 2. It creates identity-mapped four-level page tables for the first GiB.
@@ -25,13 +25,29 @@ began, and because a reproducible 128 KiB boot seed is a useful thing to have.
    evaluator's world banks.
 
 The linker keeps `.text.entry` first so helper-function reordering cannot move
-the address called by the BIOS stage. The complete raw image is 2,048 sectors
-(1 MiB). Sectors 0 through 255 are the replaceable boot seed; the build rejects
-an oversized kernel and is kernel slot A. Sectors 256 through 287 are the two
-v0.1.7 workspace slots, sector 288 is the v0.2.29 recovery record, sector 289
-is the v0.2.30 kernel slot selector, and sectors 290 through 543 are kernel
-slot B. Rebuilding installs the new kernel as slot A, clears the selector so
-that kernel is what boots, and preserves everything else.
+the address called by the BIOS stage. The complete raw image is 3,072 sectors
+(1.5 MiB), laid out as follows since v0.2.42; the same layout is used on the
+virtio disks of the AArch64 and RISC-V machines, which have no BIOS stage and
+no kernel slots but keep everything from sector 1024 on in the same place.
+
+| Sectors | Contents |
+|---|---|
+| 0 | the BIOS stage |
+| 1–508 | kernel slot A; with sector 0 it is the replaceable boot seed, and the build rejects a kernel over 508 sectors (260,096 bytes) |
+| 512–1019 | kernel slot B |
+| 1024–1055 | the two v0.1.7 workspace slots, 16 sectors each |
+| 1056 | the v0.2.29 recovery record |
+| 1057 | the v0.2.30 kernel slot selector |
+| 1536–2047 | reserved for the filesystem the POSIX personality's next stratum adds |
+| 2048–3071 | the v0.2.41 program region: a table sector and static ELF images |
+
+Rebuilding installs the new kernel as slot A, clears the selector so that
+kernel is what boots, and preserves everything else. Before v0.2.42 a kernel
+slot held 254 sectors, the workspace slots began at sector 256, the records
+were sectors 288 and 289, slot B was 290–543 and the program region 1024–2047;
+an image from before then is not read by this layout and has to be rebuilt,
+which `./scripts/build-boot.sh` does by growing the file and installing the
+new seed.
 
 ## Kernel slots
 

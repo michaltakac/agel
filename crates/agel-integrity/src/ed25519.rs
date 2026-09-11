@@ -133,13 +133,18 @@ impl Sha512 {
         }
     }
 
+    // Written without indexing that could panic: this code is linked into
+    // kernel images, where a panic path is dead weight that also names the
+    // building machine's source path.
     pub fn update(&mut self, mut input: &[u8]) {
         self.length = self.length.wrapping_add(input.len() as u128);
         if self.buffered > 0 {
             let take = (128 - self.buffered).min(input.len());
-            self.block[self.buffered..self.buffered + take].copy_from_slice(&input[..take]);
+            for (stored, byte) in self.block.iter_mut().skip(self.buffered).zip(input) {
+                *stored = *byte;
+            }
             self.buffered += take;
-            input = &input[take..];
+            input = input.get(take..).unwrap_or(&[]);
             if self.buffered == 128 {
                 let block = self.block;
                 compress(&mut self.state, &block);
@@ -147,12 +152,17 @@ impl Sha512 {
             }
         }
         while input.len() >= 128 {
-            let block: &[u8; 128] = input[..128].try_into().expect("128-byte block");
-            compress(&mut self.state, block);
-            input = &input[128..];
+            let mut block = [0_u8; 128];
+            for (stored, byte) in block.iter_mut().zip(input) {
+                *stored = *byte;
+            }
+            compress(&mut self.state, &block);
+            input = input.get(128..).unwrap_or(&[]);
         }
         if !input.is_empty() {
-            self.block[..input.len()].copy_from_slice(input);
+            for (stored, byte) in self.block.iter_mut().zip(input) {
+                *stored = *byte;
+            }
             self.buffered = input.len();
         }
     }
@@ -165,8 +175,14 @@ impl Sha512 {
         while (self.buffered + padded) % 128 != 112 {
             padded += 1;
         }
-        padding[padded..padded + 16].copy_from_slice(&bit_length.to_be_bytes());
-        self.update(&padding[..padded + 16]);
+        for (stored, byte) in padding
+            .iter_mut()
+            .skip(padded)
+            .zip(bit_length.to_be_bytes())
+        {
+            *stored = byte;
+        }
+        self.update(padding.get(..padded + 16).unwrap_or(&[]));
         debug_assert_eq!(self.buffered, 0);
         let mut output = [0_u8; 64];
         for (chunk, word) in output.chunks_exact_mut(8).zip(self.state) {
@@ -185,8 +201,12 @@ pub fn sha512(input: &[u8]) -> [u8; 64] {
 
 fn compress(hash: &mut [u64; 8], chunk: &[u8; 128]) {
     let mut words = [0_u64; 80];
-    for (index, bytes) in chunk.chunks_exact(8).enumerate() {
-        words[index] = u64::from_be_bytes(bytes.try_into().expect("eight-byte chunk"));
+    for (word, bytes) in words.iter_mut().zip(chunk.chunks_exact(8)) {
+        let mut stored = [0_u8; 8];
+        for (place, byte) in stored.iter_mut().zip(bytes) {
+            *place = *byte;
+        }
+        *word = u64::from_be_bytes(stored);
     }
     for index in 16..80 {
         let s0 = words[index - 15].rotate_right(1)
@@ -421,8 +441,13 @@ fn curve() -> Curve {
         sqrt_minus_one,
         base: Point::IDENTITY,
     };
-    let base = decode_point(&partial, &encoded).expect("the base point decodes");
-    Curve { base, ..partial }
+    // The base point is a constant that decodes; the signing and
+    // verification tests against published vectors pin it, so a failure here
+    // is a build that those tests reject rather than a runtime condition.
+    match decode_point(&partial, &encoded) {
+        Some(base) => Curve { base, ..partial },
+        None => partial,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -585,10 +610,12 @@ fn reduce_mod_l(wide: &[u64; 8]) -> [u8; 32] {
 
 fn limbs_from_bytes(bytes: &[u8]) -> [u64; 8] {
     let mut limbs = [0_u64; 8];
-    for (index, chunk) in bytes.chunks(8).enumerate() {
+    for (limb, chunk) in limbs.iter_mut().zip(bytes.chunks(8)) {
         let mut word = [0_u8; 8];
-        word[..chunk.len()].copy_from_slice(chunk);
-        limbs[index] = u64::from_le_bytes(word);
+        for (stored, byte) in word.iter_mut().zip(chunk) {
+            *stored = *byte;
+        }
+        *limb = u64::from_le_bytes(word);
     }
     limbs
 }

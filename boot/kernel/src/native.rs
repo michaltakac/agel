@@ -83,7 +83,7 @@ pub struct Error(pub &'static str);
 /// `Nil` is declared first so that an empty cell, slot, binding and heap is
 /// all-zero bytes. The image then zero-fills the three world banks at boot
 /// instead of carrying three non-zero copies of them in its read-only data,
-/// which is what keeps the kernel inside the 254-sector BIOS load.
+/// which is what keeps the kernel inside its BIOS-loaded slot.
 #[derive(Clone, Copy)]
 enum Scalar {
     Nil,

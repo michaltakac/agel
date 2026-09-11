@@ -27,7 +27,8 @@ Binary compatibility with Linux ELFs is not planned; see the requirements.
 
 A process is an ordinary protection domain whose code did not come from the
 kernel image. The supervisor reads a static ELF from the disk's **program
-region**, sectors 1024 through 2047: a table sector (`AGELPR1`, a count, then
+region**, sectors 2048 through 3071 (1024 through 2047 before v0.2.42): a
+table sector (`AGELPR1`, a count, then
 32-byte rows of name, start sector, length and CRC-32) followed by the
 images. `scripts/install-program.py IMAGE NAME ELF` writes a row;
 `scripts/build-program.sh NAME [arch]` builds one of the programs under
@@ -93,6 +94,6 @@ There is no C library yet: the programs are Rust. There are no files,
 descriptors other than the console, namespaces, arguments, environment, or
 processes that make processes. The program table names programs but grants
 nothing; a process has no capability set beyond the console policy above.
-The graphics image does not carry the loader; its 254-sector budget is
-spent. Reclamation of a process's frames is the frame pool's, which the
+The graphics image does not carry the loader; it has no command that would
+reach it. Reclamation of a process's frames is the frame pool's, which the
 serial workshop now compiles in.

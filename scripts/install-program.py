@@ -4,7 +4,7 @@
     install-program.py IMAGE NAME ELF      add or replace NAME
     install-program.py IMAGE --list        print the table
 
-The program region is sectors 1024 through 2047: a table sector ("AGELPR1",
+The program region is sectors 2048 through 3071: a table sector ("AGELPR1",
 a count, then 32-byte rows of name, start sector, length and CRC-32) followed
 by the images. The supervisor's `:exec NAME` reads the table, checks the
 CRC, parses the ELF and loads it into a fresh protection domain.
@@ -16,8 +16,8 @@ import sys
 import zlib
 
 SECTOR = 512
-TABLE = 1024
-LAST = 2047
+TABLE = 2048
+LAST = 3071
 MAGIC = b"AGELPR1\0"
 NAME_BYTES = 16
 ROW = 32

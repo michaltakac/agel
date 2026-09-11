@@ -156,6 +156,13 @@ promise.
   through the shared page. Two programs under `boot/posix` and
   `scripts/test-process.sh` prove it on all three machines. The disk layout
   grows; earlier images have an empty program region.
+  `v0.2.42` grows the disk layout so the kernel can grow: a kernel slot holds
+  508 sectors loaded by four BIOS transfers, slot B moves to 512–1019, the
+  workspace slots to 1024–1055, the records to 1056 and 1057, the program
+  region to 2048–3071, and 1536–2047 is reserved for the filesystem; the image
+  is 3,072 sectors. Images from before are not read and are rebuilt. The
+  hashing and curve code linked into the kernel and the contract model's
+  object lookups no longer carry panic paths.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

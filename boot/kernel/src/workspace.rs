@@ -12,14 +12,14 @@ pub const MAX_CELLS: usize = 16;
 pub const MAX_CELL_NAME: usize = 24;
 pub const MAX_CELL_SOURCE: usize = crate::world::PAYLOAD_BYTES;
 
-const SLOT_A: u32 = 256;
-const SLOT_B: u32 = 272;
+const SLOT_A: u32 = 1024;
+const SLOT_B: u32 = 1040;
 const SLOT_SECTORS: u32 = 16;
 const PAYLOAD_SECTORS: usize = SLOT_SECTORS as usize - 1;
 const PAYLOAD_BYTES: usize = PAYLOAD_SECTORS * 512;
 /// The recovery record follows the two workspace slots. It names which
 /// generation is trusted and which is a candidate still earning that trust.
-pub const RECOVERY_SECTOR: u32 = 288;
+pub const RECOVERY_SECTOR: u32 = 1056;
 const RECOVERY_MAGIC: &[u8; 8] = b"AGELRC1\0";
 const RECOVERY_VERSION: u16 = 1;
 #[cfg(target_arch = "x86_64")]
@@ -30,16 +30,16 @@ const RECOVERY_VERSION: u16 = 1;
 /// flag, admitted flag. Bytes 12-15 hold the candidate's signed length and
 /// bytes 64-127 its Ed25519 signature over the SHA-512 of those bytes; the
 /// stage never reads them, the running kernel checks them before admitting.
-pub const KERNEL_SELECTOR_SECTOR: u32 = 289;
+pub const KERNEL_SELECTOR_SECTOR: u32 = 1057;
 #[cfg(target_arch = "x86_64")]
 const KERNEL_SELECTOR_MAGIC: &[u8; 4] = b"AGKS";
 #[cfg(target_arch = "x86_64")]
 const KERNEL_SELECTOR_VERSION: u8 = 2;
 #[cfg(target_arch = "x86_64")]
 /// First sector of each kernel slot and the sectors a slot holds.
-pub const KERNEL_SLOT_BASE: [u32; 2] = [1, 290];
+pub const KERNEL_SLOT_BASE: [u32; 2] = [1, 512];
 #[cfg(target_arch = "x86_64")]
-pub const KERNEL_SLOT_SECTORS: u32 = 254;
+pub const KERNEL_SLOT_SECTORS: u32 = 508;
 #[cfg(target_arch = "x86_64")]
 pub const NO_CANDIDATE: u8 = 0xff;
 const MAGIC: &[u8; 8] = b"AGELWS1\0";

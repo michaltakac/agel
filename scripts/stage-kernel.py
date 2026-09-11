@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Stage a candidate kernel into the slot the boot stage is not trusting.
 
-The x86-64 image has two kernel slots: A at sectors 1-254 and B at sectors
-290-543. Sector 289 is the selector the 512-byte BIOS stage reads before it
+The x86-64 image has two kernel slots: A at sectors 1-508 and B at sectors
+512-1019. Sector 1057 is the selector the 512-byte BIOS stage reads before it
 loads anything: which slot is trusted, which is a candidate, how many boots
 the candidate has been given, and whether one of them was healthy. Staging
 writes the kernel into the slot that is not trusted and proposes it with a
@@ -31,9 +31,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_KEY = os.path.join(ROOT, "bootstrap", "kernel-signing.key")
 
 SECTOR = 512
-SELECTOR_SECTOR = 289
-SLOT_SECTORS = 254
-SLOT_BASE = {0: 1, 1: 290}
+SELECTOR_SECTOR = 1057
+SLOT_SECTORS = 508
+SLOT_BASE = {0: 1, 1: 512}
 NO_CANDIDATE = 0xFF
 MAGIC = b"AGKS"
 VERSION = 2

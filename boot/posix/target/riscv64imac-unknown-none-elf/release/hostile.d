@@ -1,1 +1,0 @@
-/Users/michaltakac/projects/agel/boot/posix/target/riscv64imac-unknown-none-elf/release/hostile: /Users/michaltakac/projects/agel/boot/posix/hostile/src/abi.rs /Users/michaltakac/projects/agel/boot/posix/hostile/src/main.rs

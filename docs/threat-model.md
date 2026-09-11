@@ -1005,6 +1005,26 @@ the kernel's trusted slot. There is no capability set: a process can write
 to the console and nothing else, and that is policy in the supervisor, not
 a capability the process holds. No files, no namespaces, no C library.
 
+## v0.2.42
+
+- **A bigger kernel slot, the same trust:** the BIOS stage now loads 508
+  sectors in four 127-sector transfers instead of 254 in two. Nothing about
+  what is trusted changes: the selector is still read first, an unverified
+  candidate is still charged its boot before its first instruction, and the
+  kernel still hashes and verifies a staged candidate over the slot's signed
+  length, which the length check now bounds at 508 sectors.
+- **Images that predate the layout:** an image laid out before v0.2.42 has
+  its workspace, records and slot B where this layout expects kernel slot A
+  and nothing. The build rebuilds such an image as a new baseline; the kernel
+  does not guess at the old layout, so an old workspace is simply absent
+  rather than misread.
+- **Fewer panic paths in the kernel image:** the SHA-512, curve and
+  scalar-decoding code the kernel links from `agel-integrity`, and the
+  contract model's object lookups from `agel-kernel-abi`, no longer index in
+  ways the compiler must guard with a panic. A panic in a supervisor is a
+  halt, so every one removed is a way the machine cannot stop; the change
+  also removes the building machine's source paths from the image.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

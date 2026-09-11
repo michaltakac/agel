@@ -316,10 +316,18 @@ impl IndependentKernel {
         Ok((slot as usize, self.capability(slot)?))
     }
 
+    /// The object a validated capability names. A capability only ever holds
+    /// an index the kernel issued, so the miss arm is unreachable; it is
+    /// written as a status rather than a panic because this model is linked
+    /// into kernel images, where a panic path is dead weight.
+    fn object_mut(&mut self, index: usize) -> Result<&mut Object, Status> {
+        self.objects.get_mut(index).ok_or(Status::InvalidCapability)
+    }
+
     /// Look a slot up and require an object type, checking type before rights.
     fn typed(&self, slot: u32, kind: ObjectType) -> Result<Capability, Status> {
         let capability = self.capability(slot)?;
-        if self.objects[capability.object].kind() != kind {
+        if self.objects.get(capability.object).map(Object::kind) != Some(kind) {
             return Err(Status::WrongObjectType);
         }
         Ok(capability)
@@ -669,7 +677,7 @@ impl IndependentKernel {
                 if arguments[0] != 0 {
                     return Err(Status::InvalidArgument);
                 }
-                let Object::Endpoint(endpoint) = &mut self.objects[capability.object] else {
+                let Object::Endpoint(endpoint) = self.object_mut(capability.object)? else {
                     return Err(Status::WrongObjectType);
                 };
                 if endpoint.length == QUEUE {
@@ -689,13 +697,17 @@ impl IndependentKernel {
                 if arguments != [0; WORDS] {
                     return Err(Status::InvalidArgument);
                 }
-                let Object::Endpoint(endpoint) = &mut self.objects[capability.object] else {
+                let Object::Endpoint(endpoint) = self.object_mut(capability.object)? else {
                     return Err(Status::WrongObjectType);
                 };
                 if endpoint.length == 0 {
                     return Err(Status::WouldBlock);
                 }
-                let message = endpoint.queue[endpoint.head];
+                let message = endpoint
+                    .queue
+                    .get(endpoint.head)
+                    .copied()
+                    .ok_or(Status::InvalidCapability)?;
                 endpoint.head = (endpoint.head + 1) % QUEUE;
                 endpoint.length -= 1;
                 Ok([
@@ -731,8 +743,7 @@ impl IndependentKernel {
                 if arguments != [0; WORDS] {
                     return Err(Status::InvalidArgument);
                 }
-                let Object::Notification(notification) = &mut self.objects[capability.object]
-                else {
+                let Object::Notification(notification) = self.object_mut(capability.object)? else {
                     return Err(Status::WrongObjectType);
                 };
                 notification.pending = true;
@@ -745,8 +756,7 @@ impl IndependentKernel {
                 if arguments != [0; WORDS] {
                     return Err(Status::InvalidArgument);
                 }
-                let Object::Notification(notification) = &mut self.objects[capability.object]
-                else {
+                let Object::Notification(notification) = self.object_mut(capability.object)? else {
                     return Err(Status::WrongObjectType);
                 };
                 if !notification.pending {
@@ -769,7 +779,7 @@ impl IndependentKernel {
                 if arguments != [0; WORDS] {
                     return Err(Status::InvalidArgument);
                 }
-                let Object::Clock { ticks } = &mut self.objects[capability.object] else {
+                let Object::Clock { ticks } = self.object_mut(capability.object)? else {
                     return Err(Status::WrongObjectType);
                 };
                 let now = *ticks;

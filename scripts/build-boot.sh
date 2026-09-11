@@ -38,23 +38,26 @@ clang -target i386-none-elf -c "$project_dir/boot/bios/boot.S" -o "$boot_object"
 "$objcopy_bin" -O binary "$boot_elf" "$boot_bin"
 
 test "$(wc -c < "$boot_bin" | tr -d ' ')" -eq 512
-test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 130048
+# A kernel slot holds 508 sectors: four 127-sector BIOS transfers.
+test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 260096
 
-# The first 256 sectors are the reproducible boot seed. Sectors from 256 onward
-# belong to the native dual-slot source workspace, the recovery record and
-# the kernel slot selector, and must survive rebuilding the kernel between
-# workshop sessions. A rebuild installs the new kernel as slot A and clears
-# the selector (sector 289): it is a new baseline, and any candidate staged
-# with scripts/stage-kernel.py is dropped rather than silently kept in front
-# of the kernel just built. Slot B (sectors 290-543) is left as it was.
-disk_bytes=1048576
+# The first 512 sectors are the reproducible boot seed: the BIOS stage and
+# kernel slot A. Sectors from 512 onward belong to kernel slot B, the native
+# dual-slot source workspace, the recovery record, the kernel slot selector,
+# the filesystem region and the program region, and must survive rebuilding
+# the kernel between workshop sessions. A rebuild installs the new kernel as
+# slot A and clears the selector (sector 1057): it is a new baseline, and any
+# candidate staged with scripts/stage-kernel.py is dropped rather than
+# silently kept in front of the kernel just built. Slot B (sectors 512-1019)
+# is left as it was.
+disk_bytes=1572864
 if test ! -f "$disk_image"; then
-  dd if=/dev/zero of="$disk_image" bs=512 count=2048 2>/dev/null
+  dd if=/dev/zero of="$disk_image" bs=512 count=3072 2>/dev/null
 elif test "$(wc -c < "$disk_image" | tr -d ' ')" -lt "$disk_bytes"; then
   dd if=/dev/zero of="$disk_image" bs=1 count=1 seek=$((disk_bytes - 1)) conv=notrunc 2>/dev/null
 fi
-dd if=/dev/zero of="$disk_image" bs=512 seek=1 count=255 conv=notrunc 2>/dev/null
-dd if=/dev/zero of="$disk_image" bs=512 seek=289 count=1 conv=notrunc 2>/dev/null
+dd if=/dev/zero of="$disk_image" bs=512 seek=1 count=511 conv=notrunc 2>/dev/null
+dd if=/dev/zero of="$disk_image" bs=512 seek=1057 count=1 conv=notrunc 2>/dev/null
 dd if="$boot_bin" of="$disk_image" conv=notrunc 2>/dev/null
 dd if="$kernel_bin" of="$disk_image" bs=512 seek=1 conv=notrunc 2>/dev/null
 

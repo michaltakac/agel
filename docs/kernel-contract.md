@@ -106,7 +106,9 @@ broker publishes v1.0, because under Microkit's static system description a
 server domain cannot change another domain's mappings, and it does not claim
 a group it cannot make real. The group is a crate feature, on for the hosted
 crate and the isolation builds and off in the x86-64 workshop images, which
-publish v1.0 and would otherwise exceed their 254-sector budget.
+publish v1.0; they were left so when their kernel slot held 254 sectors, and
+turning the group on in them now that v0.2.42 gives a slot 508 is a separate
+step.
 
 ## The memory group
 

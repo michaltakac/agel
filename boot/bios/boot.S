@@ -41,7 +41,7 @@ _start:
     movl $0xa6e10fb0, 0x6ff0
 graphics_done:
 
-    # Kernel slot selection. Sector 289 is the selector: "AGKS", version,
+    # Kernel slot selection. Sector 1057 is the selector: "AGKS", version,
     # trusted slot, candidate slot (0xff none), boot attempts, verified flag,
     # admitted flag. A candidate the running kernel has not admitted (its
     # signature checked) is never loaded. An unverified candidate is charged
@@ -77,28 +77,30 @@ select_done:
     movb %bl, 0x6fec
     movl $0xa6e15107, 0x6fe8
 
-    # Load the kernel in two conservative 127-sector BIOS transfers from the
-    # chosen slot: slot A begins at sector 1, slot B at sector 290. One DAP
+    # Load the kernel in four conservative 127-sector BIOS transfers from the
+    # chosen slot: slot A begins at sector 1, slot B at sector 512. One DAP
     # request is deliberately kept below the common firmware limit; together
-    # they leave 127 KiB for the isolated evaluator without making the seed
-    # depend on a filesystem.
+    # they load a 508-sector slot to physical 0x10000 without making the
+    # seed depend on a filesystem.
     movw $1, %ax
     testb %bl, %bl
     jz base_done
-    movw $290, %ax
+    movw $512, %ax
 base_done:
     movw %ax, disk_packet + 8
     movw $127, disk_packet + 2
     movw $0, disk_packet + 4
     movw $0x1000, disk_packet + 6
+    movw $4, %cx
+load_loop:
+    pushw %cx
     movb $0x42, %ah
     int $0x13
     jc disk_error
-    movw $0x1fe0, disk_packet + 6
+    popw %cx
     addw $127, disk_packet + 8
-    movb $0x42, %ah
-    int $0x13
-    jc disk_error
+    addw $0xfe0, disk_packet + 6
+    loop load_loop
 
     # Zero PML4, PDPT and PD at 0x1000..0x3fff.
     xorw %ax, %ax
@@ -182,7 +184,7 @@ disk_packet:
     .word 1
     .word 0x6000
     .word 0
-    .quad 289
+    .quad 1057
 
 .org 510
 .word 0xaa55

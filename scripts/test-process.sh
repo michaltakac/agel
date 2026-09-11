@@ -13,14 +13,14 @@ case "$architecture" in
     disk=$(mktemp "${TMPDIR:-/tmp}/agel-process.XXXXXX")
     trap 'rm -f "$disk"' EXIT HUP INT TERM
     cp "$image" "$disk"
-    dd if=/dev/zero of="$disk" bs=512 seek=256 count=33 conv=notrunc 2>/dev/null
+    dd if=/dev/zero of="$disk" bs=512 seek=1024 count=34 conv=notrunc 2>/dev/null
     kernel=$disk
     ;;
   aarch64 | riscv64)
     kernel=$(./scripts/build-kernel.sh "$architecture" --features isolated-repl | tail -n 1)
     disk=$(mktemp "${TMPDIR:-/tmp}/agel-process.XXXXXX")
     trap 'rm -f "$disk"' EXIT HUP INT TERM
-    dd if=/dev/zero of="$disk" bs=512 count=2048 2>/dev/null
+    dd if=/dev/zero of="$disk" bs=512 count=3072 2>/dev/null
     ;;
   *) printf 'unknown architecture: %s\n' "$architecture" >&2; exit 2 ;;
 esac

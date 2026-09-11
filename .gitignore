@@ -8,3 +8,4 @@ __pycache__/
 /boot/microkit/target/
 /.playwright-cli/
 /output/playwright/
+/boot/posix/target/

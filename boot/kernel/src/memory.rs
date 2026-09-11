@@ -91,7 +91,7 @@ impl MemoryError {
 /// evaluator's 128 stack pages, its tables and its shared page fit with room
 /// to spare, and a domain that would need more is refused rather than
 /// tracked partially. It is sized tightly because every domain carries one
-/// and the x86-64 image has a 254-sector budget.
+/// and the x86-64 image has a fixed slot budget.
 #[derive(Clone, Copy)]
 #[cfg_attr(feature = "native-graphics", allow(dead_code))]
 pub struct FrameLedger {
@@ -100,10 +100,10 @@ pub struct FrameLedger {
 }
 
 impl FrameLedger {
-    /// Reclamation exists where restart exists: the self-test builds replace
-    /// domains and account for their frames; the interactive workshops never
-    /// replace one, so there the ledger is a single word and the x86-64 image
-    /// keeps its 254-sector budget.
+    /// Reclamation exists where restart exists: the self-test builds and the
+    /// serial workshop replace domains and account for their frames; the
+    /// graphics workshop never replaces one, so there the ledger is a single
+    /// word and the image keeps within its slot budget.
     #[cfg(not(feature = "native-graphics"))]
     pub const CAPACITY: usize = 160;
     #[cfg(feature = "native-graphics")]

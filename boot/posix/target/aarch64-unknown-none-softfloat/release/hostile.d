@@ -1,1 +1,0 @@
-/Users/michaltakac/projects/agel/boot/posix/target/aarch64-unknown-none-softfloat/release/hostile: /Users/michaltakac/projects/agel/boot/posix/hostile/src/abi.rs /Users/michaltakac/projects/agel/boot/posix/hostile/src/main.rs

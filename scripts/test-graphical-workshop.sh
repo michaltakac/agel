@@ -10,7 +10,7 @@ first=$(mktemp "${TMPDIR:-/tmp}/agel-graphical-first.XXXXXX")
 second=$(mktemp "${TMPDIR:-/tmp}/agel-graphical-second.XXXXXX")
 trap 'rm -f "$test_image" "$first" "$second"' EXIT HUP INT TERM
 cp "$image" "$test_image"
-dd if=/dev/zero of="$test_image" bs=512 seek=256 count=33 conv=notrunc 2>/dev/null
+dd if=/dev/zero of="$test_image" bs=512 seek=1024 count=34 conv=notrunc 2>/dev/null
 
 boot() {
   output=$1

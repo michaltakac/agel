@@ -331,10 +331,10 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
     # Make generation 2 checksummed and structurally valid but semantically
     # invalid. Boot must reject its replay and try generation 1.
     with open(disk, "r+b") as media:
-        media.seek(256 * 512)
+        media.seek(1024 * 512)
         header = bytearray(media.read(512))
         length = int.from_bytes(header[24:28], "big")
-        media.seek(257 * 512)
+        media.seek(1025 * 512)
         payload = bytearray(media.read(15 * 512))
         old = b"(def persisted-answer 42)"
         new = b"(def persisted-answer zz)"
@@ -345,9 +345,9 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
         header[28:32] = (
             zlib.crc32(header[:28] + payload[:length]) & 0xFFFFFFFF
         ).to_bytes(4, "big")
-        media.seek(256 * 512)
+        media.seek(1024 * 512)
         media.write(header)
-        media.seek(257 * 512)
+        media.seek(1025 * 512)
         media.write(payload)
         media.flush()
 
@@ -369,11 +369,11 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
     # Now damage generation 2's payload without updating its checksum. The
     # structural verifier must independently reach the same older generation.
     with open(disk, "r+b") as media:
-        media.seek(257 * 512)
+        media.seek(1025 * 512)
         original = media.read(1)
         if len(original) != 1:
             raise RuntimeError("test image has no workspace payload sector")
-        media.seek(257 * 512)
+        media.seek(1025 * 512)
         media.write(bytes([original[0] ^ 0x80]))
         media.flush()
 
@@ -392,7 +392,7 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
     # Model a power loss after target-slot invalidation and a partial payload
     # write. With no published header, boot must ignore the torn generation.
     with open(disk, "r+b") as media:
-        media.seek(256 * 512)
+        media.seek(1024 * 512)
         media.write(bytes(512))
         media.write(b"partial-uncommitted-workspace")
         media.flush()
@@ -965,7 +965,7 @@ def main() -> int:
         # A blank scratch disk, opened snapshot-on, so the diskless machines
         # run the same session as x86-64 without keeping anything.
         scratch = tempfile.NamedTemporaryFile(prefix="agel-scratch-", suffix=".img")
-        scratch.write(bytes(2048 * 512))
+        scratch.write(bytes(3072 * 512))
         scratch.flush()
         disk = scratch.name
     harness = Harness(arguments[0], architecture=architecture, disk=disk)
