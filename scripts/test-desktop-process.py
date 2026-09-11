@@ -180,6 +180,47 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         release()
         until_text(b"sketch: release at 260,180")
         Path("target/desktop-sketch.png").write_bytes(machine.frame())
+        # The header's controls: maximize fills the screen below the panel
+        # and tells the process its new size, again restores; minimize
+        # leaves a pill in the panel, which brings the window back; the
+        # corner resizes, and the release tells the process.
+        def header_pixel():
+            return panel_region(machine, 10, 60, 1, 1)[:3]
+        assert header_pixel() != b"\x26\x26\x26", "the maximized header colour before maximize"
+        move_to(904, 140)
+        click()
+        response = until_text(b"sketch: resized to 1920x920")
+        assert ":maximize 0" in response.decode() and "WINDOW MAXIMIZED 0" in response.decode(), response
+        time.sleep(1.0)
+        assert header_pixel() == b"\x26\x26\x26", "the window did not fill the screen"
+        move_to(1920 - 72 + 16, 40 + 4 + 16)
+        click()
+        response = until_text(b"sketch: resized to 400x300")
+        assert "WINDOW RESTORED 0" in response.decode(), response
+        time.sleep(1.0)
+        assert header_pixel() != b"\x26\x26\x26", "the window did not restore"
+        move_to(872, 140)
+        click()
+        response = until_text(b"live-desktop> ")
+        assert ":minimize 0" in response.decode() and "WINDOW MINIMIZED 0" in response.decode(), response
+        time.sleep(1.0)
+        # The window's content is the darker surface; the workshop body
+        # beneath it is the lighter one.
+        assert panel_region(machine, 570, 280, 1, 1)[:3] == b"\x26\x26\x26", "the window is still painted"
+        assert panel_region(machine, 380, 6, 200, 28).count(b"\x33\x33\x33") > 200, "no pill in the panel"
+        move_to(400, 20)
+        click()
+        response = until_text(b"live-desktop> ")
+        assert ":restore 0" in response.decode() and "WINDOW RESTORED 0" in response.decode(), response
+        time.sleep(1.0)
+        assert panel_region(machine, 570, 280, 1, 1)[:3] == b"\x1b\x1b\x1b", "the window did not come back"
+        move_to(952, 452)
+        press()
+        move_to(1052, 502)
+        release()
+        response = until_text(b"sketch: resized to 500x350")
+        time.sleep(1.0)
+        assert panel_region(machine, 1050, 280, 1, 1)[:3] == b"\x1b\x1b\x1b", "the window did not grow"
         # A press in the header takes hold of the window: it follows the
         # pointer, dot and all, and the place it left is repainted.
         move_to(700, 140)

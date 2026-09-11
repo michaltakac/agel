@@ -313,6 +313,37 @@ What this is not: a real Gaussian (the rings are a radial sum, not a
 separable convolution), and no frosted or translucent panels, which need
 a blur of what is beneath that the compositor does not have.
 
+## Window controls (v0.2.63)
+
+The header's three controls do what their icons say, and windows resize:
+
+- **Maximize** fills the screen below the panel (1920 by 920 of content)
+  and a second press restores the box the window had; **minimize** hides
+  the window and leaves a **pill** with its title in the panel, which
+  brings it back in front; **close** as before. Each is the typed command
+  it always was: `:maximize N` (which also restores), `:minimize N`,
+  `:restore N`, `:close N`, echoed on the console when clicked.
+- **A press in the content's bottom-right corner** (sixteen pixels) takes
+  hold of the size: the content follows the pointer while the button is
+  held, from the window's minimum up to the screen's edge, repainted
+  where it was and where it is.
+- **The owner is told.** After a maximize, a restore or a corner drag,
+  the owner receives `EVENT_RESIZE` (5) with the content's new width and
+  height, so a listening program can lay itself out again; `sketch.c`
+  does, and reports the size. What the process drew before stays kept,
+  and a window made smaller paints only the records that still fit its
+  content, checked as they were when drawn.
+
+`scripts/test-desktop-process.sh` maximizes the sketch window, reads
+`sketch: resized to 1920x920` and a header pixel where the wallpaper was,
+restores it and reads `400x300`, minimizes it and finds the pill, clicks
+the pill and finds the header back, drags the corner and reads `500x350`
+and the header wider than before.
+
+What this is not: no snapping, no keyboard shortcuts for the controls,
+no double-click on the header, and the maximized size is the screen's,
+not a chosen one.
+
 ## The desktop on a board (v0.2.62)
 
 The graphics image builds for AArch64 and runs on QEMU's Raspberry Pi 4:

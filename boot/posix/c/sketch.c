@@ -7,21 +7,23 @@
 #include <errno.h>
 #include <stdio.h>
 
-#define WIDTH 400
-#define HEIGHT 300
 #define DOTS 20
 #define RADIUS 12
+
+/* The content's size, as opened and as the operator resizes it. */
+static unsigned width = 400;
+static unsigned height = 300;
 
 static agel_record dot_at(int x, int y) {
     unsigned cx = x < RADIUS ? RADIUS : (unsigned)x;
     unsigned cy = y < RADIUS ? RADIUS : (unsigned)y;
-    if (cx + RADIUS > WIDTH) cx = WIDTH - RADIUS;
-    if (cy + RADIUS > HEIGHT) cy = HEIGHT - RADIUS;
+    if (cx + RADIUS > width) cx = width - RADIUS;
+    if (cy + RADIUS > height) cy = height - RADIUS;
     return agel_ellipse(cx, cy, RADIUS, RADIUS, 0xe79cfe);
 }
 
 int main(void) {
-    int window = agel_window(WIDTH, HEIGHT, "Sketch");
+    int window = agel_window(width, height, "Sketch");
     if (window < 0) {
         printf("sketch: no display (errno %d)\n", errno);
         return 3;
@@ -46,6 +48,12 @@ int main(void) {
             holding = 0;
             agel_draw(window, records, 1, AGEL_DRAW_CLEAR);
             printf("sketch: cleared\n");
+            continue;
+        }
+        if (event.kind == AGEL_EVENT_RESIZE) {
+            width = (unsigned)event.x;
+            height = (unsigned)event.y;
+            printf("sketch: resized to %ux%u\n", width, height);
             continue;
         }
         if (event.kind == AGEL_EVENT_PRESS) {

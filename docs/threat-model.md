@@ -1464,6 +1464,23 @@ Not claimed: the firmware itself (it allocates the buffer from memory it
 reserves; the kernel trusts the address it answers, as every Pi kernel
 does), and HDMI on a real board, which has not been seen.
 
+## v0.2.63
+
+- **A window's size is the operator's:** maximize, restore and the corner
+  drag change the scene's record of the window; a process learns the new
+  size by an event and cannot set one. A window made smaller keeps its
+  records and paints only those still inside, so nothing a process drew
+  reaches outside its content however the box changes.
+- **A window at the screen's edge stays on the screen:** its edge and
+  shadow are clamped, so no record the desktop makes for a window can be
+  one the compositor refuses, which would fail the frame.
+- **Minimized is hidden, not gone:** the pill is the window's; its owner
+  keeps drawing into the kept records, receives no presses, and the
+  window returns with everything it drew.
+
+Not claimed: no keyboard shortcuts, no snapping; the controls are
+sixteen-pixel targets, which a pointer under emulation reaches in steps.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

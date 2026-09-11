@@ -523,6 +523,10 @@ pub mod process {
     pub const EVENT_RELEASE: u64 = 3 << 56;
     #[cfg(feature = "native-graphics")]
     pub const EVENT_MOTION: u64 = 4 << 56;
+    /// The window's content is now the width in bits 32..48 by the height
+    /// in bits 16..32: after a maximize, a restore or a corner drag.
+    #[cfg(feature = "native-graphics")]
+    pub const EVENT_RESIZE: u64 = 5 << 56;
     /// Events a window queues before the oldest is dropped.
     #[cfg(feature = "native-graphics")]
     pub const WINDOW_EVENTS: usize = 8;

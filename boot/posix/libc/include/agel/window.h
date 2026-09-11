@@ -43,6 +43,9 @@ int agel_draw(int window, const agel_record *records, unsigned count, unsigned f
 #define AGEL_EVENT_KEY 2
 #define AGEL_EVENT_RELEASE 3
 #define AGEL_EVENT_MOTION 4
+/* The content is now x by y wide and high: the operator maximized,
+   restored or dragged the window's corner. */
+#define AGEL_EVENT_RESIZE 5
 
 typedef struct {
     int kind;

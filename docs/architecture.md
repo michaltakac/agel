@@ -370,6 +370,9 @@ Each rung must be runnable and differentially testable against the rung below:
    into the compositor domain as normal uncached memory; the keyboard
    controller, the clock and the kernel slots are x86-64's alone, and a
    board's input is its serial console.
+58. **Window controls (v0.2.63):** maximize, minimize to a panel pill,
+   restore and a corner resize, each a typed command, with a resize
+   event to the window's owner.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

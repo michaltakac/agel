@@ -32,6 +32,7 @@ pub const EVENT_PRESS: u64 = 1 << 56;
 pub const EVENT_KEY: u64 = 2 << 56;
 pub const EVENT_RELEASE: u64 = 3 << 56;
 pub const EVENT_MOTION: u64 = 4 << 56;
+pub const EVENT_RESIZE: u64 = 5 << 56;
 /// Names in the namespace: remove, move, ask; and the next child of an
 /// open directory.
 pub const UNLINK: u64 = 13;

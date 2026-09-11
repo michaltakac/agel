@@ -37,7 +37,7 @@ const MAX_SCENE_COMMANDS: usize = 224;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :save :reload | :exec NAME [ROOT] :close N :fs-format :fs-mkdir :fs-ls | :revision :rollback :shutdown";
+const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :save :reload | :exec NAME [ROOT] :close :minimize :maximize N :fs-format :fs-ls | :rollback :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 26;
 
@@ -50,6 +50,8 @@ const SPRITE_SHEET: &[u8] = b"sprites";
 /// Sprite ids in the sheet `scripts/build-sprites.py` draws.
 const SPRITE_CURSOR: u32 = 0;
 const SPRITE_CLOSE: u32 = 10;
+const SPRITE_MAXIMIZE: u32 = 9;
+const SPRITE_MINIMIZE: u32 = 8;
 const SPRITE_COUNT: u32 = 12;
 const SPRITE_SIZE: u32 = 32;
 pub const FACE_SANS: u32 = 0;
@@ -223,6 +225,8 @@ struct Scene {
     grab: Option<u8>,
     /// The control under a held button, drawn pressed until the release.
     pressed: Hover,
+    /// A window being resized by its corner.
+    resize: Option<u8>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -255,6 +259,8 @@ const ENOSPC: i64 = 28;
 /// them with everything else.
 #[derive(Clone, Copy)]
 struct Window {
+    /// Which of the scene's windows this is.
+    slot: u8,
     title: [u8; 28],
     title_len: u8,
     x: u32,
@@ -270,9 +276,58 @@ struct Window {
     events: [u64; crate::world::process::WINDOW_EVENTS],
     event_head: u8,
     event_count: u8,
+    /// Minimized: kept, not painted, a pill in the panel.
+    hidden: bool,
+    /// The box a maximized window returns to.
+    restore: Option<(u32, u32, u32, u32)>,
 }
 
+/// Where the panel's pills for minimized windows start, and their height.
+const PILL_X: u32 = 380;
+const PILL_Y: u32 = 6;
+const PILL_HEIGHT: u32 = 28;
+/// The corner a resize takes hold of: this many pixels inside the content.
+const CORNER: u32 = 16;
+
 impl Window {
+    /// The header's three controls, left to right: minimize, maximize,
+    /// close; each a sprite in a square.
+    fn control_bounds(&self, control: u8) -> (u32, u32, u32, u32) {
+        (
+            self.x + self.width - 40 - 32 * u32::from(control),
+            self.y - WINDOW_HEADER + 4,
+            SPRITE_SIZE,
+            SPRITE_SIZE,
+        )
+    }
+
+    /// The bottom-right corner of the content, for a resize.
+    fn corner_bounds(&self) -> (u32, u32, u32, u32) {
+        (
+            self.x + self.width - CORNER,
+            self.y + self.height - CORNER,
+            CORNER,
+            CORNER,
+        )
+    }
+
+    /// The pill a minimized window shows in the panel: its left edge and
+    /// width, given the pills before it.
+    fn pill_width(&self) -> u32 {
+        measure(FACE_SANS, 14, self.title()) + 24
+    }
+
+    /// Tell the owner the content's size.
+    fn announce_size(&mut self) {
+        if self.listens() {
+            self.queue(
+                crate::world::process::EVENT_RESIZE
+                    | (u64::from(self.width) << 32)
+                    | (u64::from(self.height) << 16),
+            );
+        }
+    }
+
     /// Queue an event for the owner; a full queue loses its oldest.
     fn queue(&mut self, event: u64) {
         let capacity = self.events.len();
@@ -335,15 +390,6 @@ impl Window {
     }
 
     /// The close control at the header's right.
-    fn close_bounds(&self) -> (u32, u32, u32, u32) {
-        (
-            self.x + self.width - 40,
-            self.y - WINDOW_HEADER + 4,
-            SPRITE_SIZE,
-            SPRITE_SIZE,
-        )
-    }
-
     fn title(&self) -> &[u8] {
         &self.title[..usize::from(self.title_len)]
     }
@@ -414,7 +460,7 @@ impl Window {
 fn window_records(
     frame: &mut Frame,
     window: &Window,
-    hover_close: bool,
+    hover: Hover,
     shadow: bool,
 ) -> Result<(), &'static str> {
     let (x, y, width, height) = window.outer();
@@ -428,12 +474,17 @@ fn window_records(
         }
         frame.push(record)?;
     }
-    // The edge: a lighter box one pixel larger, under the surface.
+    // The edge: a lighter box one pixel larger, under the surface, kept
+    // on the screen for a window at its edge.
+    let left = x.saturating_sub(1);
+    let top = y.saturating_sub(1);
+    let right = (x + width + 1).min(crate::world::SCENE_WIDTH);
+    let bottom = (y + height + 1).min(crate::world::SCENE_HEIGHT);
     frame.push(surface_record(
-        x - 1,
-        y - 1,
-        width + 2,
-        height + 2,
+        left,
+        top,
+        right - left,
+        bottom - top,
         WINDOW_RADIUS + 1,
         OUTLINE,
         255,
@@ -472,25 +523,40 @@ fn window_records(
         0xde_de_de,
         window.title(),
     ))?;
-    let (cx, cy, _, _) = window.close_bounds();
-    if hover_close {
-        frame.push(surface_record(
+    // The controls: minimize, maximize, close, the hovered one lit.
+    let slot = window.slot;
+    let controls = [
+        (0, SPRITE_CLOSE, Hover::WindowClose(slot)),
+        (1, SPRITE_MAXIMIZE, Hover::WindowMaximize(slot)),
+        (2, SPRITE_MINIMIZE, Hover::WindowMinimize(slot)),
+    ];
+    for (control, sprite, lit) in controls {
+        let (cx, cy, _, _) = window.control_bounds(control);
+        let hovered = hover == lit;
+        if hovered {
+            frame.push(surface_record(
+                cx,
+                cy,
+                SPRITE_SIZE,
+                SPRITE_SIZE,
+                16,
+                0xff_ff_ff,
+                40,
+            ))?;
+        }
+        frame.push(sprite_record(
             cx,
             cy,
-            SPRITE_SIZE,
-            SPRITE_SIZE,
-            16,
-            0xff_ff_ff,
-            40,
+            sprite,
+            if hovered { 0xde_de_de } else { 0x9e_9e_9e },
         ))?;
     }
-    frame.push(sprite_record(
-        cx,
-        cy,
-        SPRITE_CLOSE,
-        if hover_close { 0xde_de_de } else { 0x9e_9e_9e },
-    ))?;
+    // What the process drew, where it still fits: a window made smaller
+    // keeps its records, and shows those inside its content.
     for record in &window.records[..usize::from(window.count)] {
+        if !window.permits(record) {
+            continue;
+        }
         let mut moved = *record;
         put_u32(&mut moved, 1, record_u32(record, 1) + window.x);
         put_u32(&mut moved, 2, record_u32(record, 2) + window.y);
@@ -519,7 +585,7 @@ impl Desk<'_, '_> {
             return;
         };
         let mut frame = Frame::empty();
-        if window_records(&mut frame, &window, false, shadow).is_err() {
+        if window_records(&mut frame, &window, Hover::Nothing, shadow).is_err() {
             return;
         }
         let (x, y, width, height) = window.outer();
@@ -568,6 +634,7 @@ impl crate::process::Display for Desk<'_, '_> {
             .min(crate::world::SCENE_DRAWABLE_HEIGHT - height - WINDOW_SHADOW)
             .max(WINDOW_HEADER + 48);
         let mut window = Window {
+            slot: slot as u8,
             title: [0; 28],
             title_len: title.len().min(28) as u8,
             x,
@@ -580,6 +647,8 @@ impl crate::process::Display for Desk<'_, '_> {
             events: [0; crate::world::process::WINDOW_EVENTS],
             event_head: 0,
             event_count: 0,
+            hidden: false,
+            restore: None,
         };
         window.title[..usize::from(window.title_len)]
             .copy_from_slice(&title[..usize::from(window.title_len)]);
@@ -706,6 +775,12 @@ enum Hover {
     /// A window's header: a press there takes hold of the window.
     WindowHeader(u8),
     WindowClose(u8),
+    WindowMaximize(u8),
+    WindowMinimize(u8),
+    /// The content's bottom-right corner: a press there resizes.
+    WindowCorner(u8),
+    /// A minimized window's pill in the panel.
+    Pill(u8),
 }
 
 const DOCK_TILES: u32 = 7;
@@ -725,10 +800,17 @@ impl Hover {
                     48,
                 )
             }),
-            Hover::Window(_) | Hover::WindowHeader(_) => None,
+            Hover::Window(_) | Hover::WindowHeader(_) | Hover::WindowCorner(_) => None,
             Hover::WindowClose(slot) => scene.windows[usize::from(slot)]
                 .as_ref()
-                .map(Window::close_bounds),
+                .map(|window| window.control_bounds(0)),
+            Hover::WindowMaximize(slot) => scene.windows[usize::from(slot)]
+                .as_ref()
+                .map(|window| window.control_bounds(1)),
+            Hover::WindowMinimize(slot) => scene.windows[usize::from(slot)]
+                .as_ref()
+                .map(|window| window.control_bounds(2)),
+            Hover::Pill(slot) => scene.pill(slot),
         }
     }
 
@@ -741,22 +823,41 @@ impl Hover {
                 return Hover::Launcher(((y - LAUNCHER_Y - 56) / 48) as u8);
             }
         }
+        let inside = |bounds: (u32, u32, u32, u32)| {
+            (bounds.0..bounds.0 + bounds.2).contains(&x)
+                && (bounds.1..bounds.1 + bounds.3).contains(&y)
+        };
         // Front to back.
         for slot in scene.order.iter().rev() {
             let Some(window) = scene.windows[usize::from(*slot)] else {
                 continue;
             };
-            let (cx, cy, cw, ch) = window.close_bounds();
-            if (cx..cx + cw).contains(&x) && (cy..cy + ch).contains(&y) {
+            if window.hidden {
+                continue;
+            }
+            if inside(window.control_bounds(0)) {
                 return Hover::WindowClose(*slot);
             }
-            let (wx, wy, ww, wh) = window.outer();
-            if (wx..wx + ww).contains(&x) && (wy..wy + wh).contains(&y) {
+            if inside(window.control_bounds(1)) {
+                return Hover::WindowMaximize(*slot);
+            }
+            if inside(window.control_bounds(2)) {
+                return Hover::WindowMinimize(*slot);
+            }
+            if inside(window.corner_bounds()) {
+                return Hover::WindowCorner(*slot);
+            }
+            if inside(window.outer()) {
                 return if y < window.y {
                     Hover::WindowHeader(*slot)
                 } else {
                     Hover::Window(*slot)
                 };
+            }
+        }
+        for slot in 0..crate::world::process::WINDOWS as u8 {
+            if scene.pill(slot).is_some_and(inside) {
+                return Hover::Pill(slot);
             }
         }
         if y < 40 && (8..128).contains(&x) {
@@ -886,6 +987,26 @@ impl crate::process::Console for Tee<'_> {
 }
 
 impl Scene {
+    /// The panel pill of minimized window `slot`, if it is minimized: the
+    /// pills sit left to right in slot order.
+    fn pill(&self, slot: u8) -> Option<(u32, u32, u32, u32)> {
+        let mut x = PILL_X;
+        for (index, window) in self.windows.iter().enumerate() {
+            let Some(window) = window else {
+                continue;
+            };
+            if !window.hidden {
+                continue;
+            }
+            let width = window.pill_width();
+            if index == usize::from(slot) {
+                return Some((x, PILL_Y, width, PILL_HEIGHT));
+            }
+            x += width + 8;
+        }
+        None
+    }
+
     fn initial() -> Self {
         let mut title = [0; 28];
         let text = b"MOLD THE SYSTEM AS IT RUNS";
@@ -910,6 +1031,7 @@ impl Scene {
             drag: None,
             grab: None,
             pressed: Hover::Nothing,
+            resize: None,
         }
     }
 }
@@ -1432,11 +1554,37 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
             let x = 716 + u32::from(tile) * 72;
             frame.push(surface_record(x, 936, 56, 56, 14, 0xff_ff_ff, 60))?;
         }
+        Hover::Pill(slot) => {
+            if let Some((x, y, width, height)) = scene.pill(slot) {
+                frame.push(surface_record(x, y, width, height, 8, 0xff_ff_ff, 28))?;
+            }
+        }
         Hover::Launcher(_)
         | Hover::Window(_)
         | Hover::WindowHeader(_)
         | Hover::WindowClose(_)
+        | Hover::WindowMaximize(_)
+        | Hover::WindowMinimize(_)
+        | Hover::WindowCorner(_)
         | Hover::Nothing => {}
+    }
+    // Minimized windows: pills in the panel, their titles.
+    for slot in 0..crate::world::process::WINDOWS as u8 {
+        let Some((x, y, width, height)) = scene.pill(slot) else {
+            continue;
+        };
+        let Some(window) = &scene.windows[usize::from(slot)] else {
+            continue;
+        };
+        frame.push(surface_record(x, y, width, height, 8, 0x33_33_33, 255))?;
+        frame.push(label_record(
+            x + 12,
+            centred_top(FACE_SANS, 14, y, height),
+            FACE_SANS,
+            14,
+            0xde_de_de,
+            window.title(),
+        ))?;
     }
     // The control under a held button darkens, as COSMIC's do.
     match scene.pressed {
@@ -1482,8 +1630,10 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
     // Back to front, so the front window covers the others.
     for slot in scene.order {
         if let Some(window) = &scene.windows[usize::from(slot)] {
-            let hover_close = scene.hover == Hover::WindowClose(slot);
-            window_records(&mut frame, window, hover_close, true)?;
+            if window.hidden {
+                continue;
+            }
+            window_records(&mut frame, window, scene.hover, true)?;
         }
     }
     if let Some(launcher) = scene.launcher {
@@ -2094,6 +2244,62 @@ fn execute_workshop(
             }
         }
     }
+    // The header's other controls, and the pills, as typed commands.
+    for (prefix, action) in [
+        (&b":maximize "[..], 0_u8),
+        (&b":minimize "[..], 1),
+        (&b":restore "[..], 2),
+    ] {
+        let Some(rest) = line.strip_prefix(prefix) else {
+            continue;
+        };
+        let slot = match trim(rest) {
+            [digit @ b'0'..=b'9'] => usize::from(digit - b'0'),
+            _ => return StatusLine::new(b"USAGE :maximize|:minimize|:restore N"),
+        };
+        let Some(Some(window)) = current.windows.get_mut(slot) else {
+            return StatusLine::new(b"NO SUCH WINDOW");
+        };
+        match action {
+            0 => {
+                if let Some((x, y, width, height)) = window.restore.take() {
+                    window.x = x;
+                    window.y = y;
+                    window.width = width;
+                    window.height = height;
+                } else {
+                    window.restore = Some((window.x, window.y, window.width, window.height));
+                    window.x = 0;
+                    window.y = 40 + WINDOW_HEADER;
+                    window.width = crate::world::SCENE_WIDTH;
+                    window.height = crate::world::SCENE_DRAWABLE_HEIGHT - window.y;
+                }
+                window.hidden = false;
+                window.announce_size();
+            }
+            1 => {
+                window.hidden = true;
+                if current.focus == Some(slot as u8) {
+                    current.focus = None;
+                }
+            }
+            _ => {
+                window.hidden = false;
+                raise(&mut current.order, slot as u8);
+                current.focus = Some(slot as u8);
+            }
+        }
+        let mut status = StatusLine::new(match action {
+            0 if current.windows[slot].is_some_and(|window| window.restore.is_some()) => {
+                b"WINDOW MAXIMIZED "
+            }
+            0 => b"WINDOW RESTORED ",
+            1 => b"WINDOW MINIMIZED ",
+            _ => b"WINDOW RESTORED ",
+        });
+        status.number(slot as u8);
+        return status;
+    }
     if let Some(rest) = line.strip_prefix(b":close ") {
         let slot = match trim(rest) {
             [digit @ b'0'..=b'9'] => usize::from(digit - b'0'),
@@ -2110,6 +2316,9 @@ fn execute_workshop(
                 }
                 if current.drag.is_some_and(|drag| drag.slot == slot as u8) {
                     current.drag = None;
+                }
+                if current.resize == Some(slot as u8) {
+                    current.resize = None;
                 }
                 let mut status = StatusLine::new(b"WINDOW CLOSED ");
                 status.number(slot as u8);
@@ -2967,6 +3176,50 @@ fn interactive(
                     }
                     current.drag = None;
                 }
+                // A window taken hold of by its corner grows and shrinks
+                // with the pointer; the release tells its owner the size.
+                if let Some(slot) = current.resize {
+                    if let Some(window) = current.windows[usize::from(slot)].as_mut() {
+                        let (ox, oy, ow, oh) = window.outer();
+                        let (min_width, min_height) = crate::world::process::WINDOW_MIN;
+                        let width = (i64::from(px) - i64::from(window.x) + i64::from(CORNER) / 2)
+                            .clamp(
+                                i64::from(min_width),
+                                i64::from(crate::world::SCENE_WIDTH - window.x),
+                            );
+                        let height = (i64::from(py) - i64::from(window.y) + i64::from(CORNER) / 2)
+                            .clamp(
+                                i64::from(min_height),
+                                i64::from(crate::world::SCENE_DRAWABLE_HEIGHT - window.y),
+                            );
+                        window.width = width as u32;
+                        window.height = height as u32;
+                        window.restore = None;
+                        if released {
+                            current.resize = None;
+                            window.announce_size();
+                        }
+                        let left = ox.saturating_sub(WINDOW_SHADOW);
+                        let top = oy.saturating_sub(WINDOW_SHADOW);
+                        let right = (ox + ow.max(window.width) + WINDOW_SHADOW + 32)
+                            .min(crate::world::SCENE_WIDTH);
+                        let bottom =
+                            (oy + oh.max(window.height + WINDOW_HEADER) + WINDOW_SHADOW + 40)
+                                .min(crate::world::SCENE_HEIGHT);
+                        current.hover = Hover::at(&current, px, py);
+                        let frame = materialize(current, Some(&line[..length]), status.get())
+                            .unwrap_or_else(|reason| failed(reason));
+                        render_region(
+                            compositor,
+                            Some(&mut inputs),
+                            &frame,
+                            (left, top, right - left, bottom - top),
+                        )
+                        .unwrap_or_else(|reason| failed(reason));
+                        continue;
+                    }
+                    current.resize = None;
+                }
                 // A window whose content took the press has the pointer
                 // until the release: motion and the release are its.
                 if let Some(slot) = current.grab {
@@ -3030,6 +3283,24 @@ fn interactive(
                         Hover::WindowClose(slot) => {
                             command.push(b":close ");
                             command.number(slot);
+                        }
+                        Hover::WindowMaximize(slot) => {
+                            command.push(b":maximize ");
+                            command.number(slot);
+                        }
+                        Hover::WindowMinimize(slot) => {
+                            command.push(b":minimize ");
+                            command.number(slot);
+                        }
+                        Hover::Pill(slot) => {
+                            command.push(b":restore ");
+                            command.number(slot);
+                        }
+                        Hover::WindowCorner(slot) => {
+                            raise(&mut current.order, slot);
+                            current.focus = Some(slot);
+                            current.resize = Some(slot);
+                            continue;
                         }
                         Hover::Window(slot) | Hover::WindowHeader(slot) => {
                             // The window's: it comes to the front and takes

@@ -282,6 +282,10 @@ promise.
   controller, clock and kernel slots made conditional, input from the
   serial console; `scripts/test-raspi4-desktop.sh` reads the frame back
   and runs a program from the card.
+  `v0.2.63` gives windows their controls: maximize and restore, minimize
+  to a pill in the panel, a corner that resizes, each a typed command
+  underneath, and a resize event to the owner; the README is rewritten
+  to read as a summary rather than a history.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
