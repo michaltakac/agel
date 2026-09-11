@@ -941,6 +941,40 @@ semantics with two agreeing hosted implementations, compiled out of the
 x86-64 workshop images to keep their budget. The seL4 backend will not
 publish it under Microkit as it stands.
 
+## v0.2.40
+
+- **A mapping that was only bookkeeping:** v0.2.39 specified the memory
+  group and no backend mapped anything. The research kernels now back the
+  frame window with their page tables: after every memory operation the
+  object table accepts, the supervisor reconciles the page tables with the
+  window, page by page, so the two cannot disagree for longer than one trap.
+- **Allocation at trap time:** a domain is built with the five frames behind
+  its budget and the tables under its eight window pages, and `frame.map`
+  at trap time only rewrites a leaf entry; nothing in the trap path touches
+  the frame pool, and a budget exhausted is the object table's answer, not
+  an allocator's.
+- **Rights the tables cannot express:** `execute` maps as read-and-execute,
+  because these machines have no execute-only page, and that is stated;
+  `write` with `execute` is refused by the contract before it reaches a
+  table, so no domain is ever handed a page it can both write and run.
+- **A world that tests its own mappings:** the isolation self-test has a
+  world write through a mapping and read the value back, take a page fault
+  on a write to a mapping protected to read-only, and take a page fault on a
+  read of a page it unmapped, on all three machines; a divergence between
+  what the object table says and what the tables enforce would fail the
+  boot.
+- **A command code reused:** the first build gave the window-touch command
+  the code of the x86-64 divide-by-zero provocation, and the divide world
+  page-faulted reading the window instead. The self-test's "contained in an
+  unexpected way" check caught it before anything was claimed.
+
+Not claimed: the window is eight pages and the budget five frames per
+domain, fixed at build; no domain can map another's frames, because
+`frame.share` derives a capability inside one domain's space and there is
+no operation that crosses domains. The seL4 backend still publishes v1.0.
+The x86-64 workshop images link the implementation without the memory group
+and publish v1.0.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

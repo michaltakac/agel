@@ -98,13 +98,15 @@ publishes v1.0 answers every memory step with `invalid-operation`, and its
 transcript is frozen in `bootstrap/kernel-contract-v1.0.trace`; a backend
 that publishes v1.1 answers them, and its transcript is
 `bootstrap/kernel-contract.trace`. Both hosted implementations reproduce both.
-The three research kernels and the seL4 broker publish v1.0 today: on the
-research kernels the frame window is not yet backed by the machine's page
-tables, and on seL4 a server domain cannot change another domain's mappings
-under Microkit's static system description, so neither claims a group it
-cannot make real. The group is a crate feature, on for the hosted crate and
-the isolation builds and off in the x86-64 workshop images, which publish
-v1.0 and would otherwise exceed their 254-sector budget.
+The three research kernels publish v1.1 since v0.2.40: every domain is built
+with the physical frames behind its budget and the page tables under its
+window, and after each memory operation the object table accepts, the
+supervisor makes the page tables say what the object table says. The seL4
+broker publishes v1.0, because under Microkit's static system description a
+server domain cannot change another domain's mappings, and it does not claim
+a group it cannot make real. The group is a crate feature, on for the hosted
+crate and the isolation builds and off in the x86-64 workshop images, which
+publish v1.0 and would otherwise exceed their 254-sector budget.
 
 ## The memory group
 
@@ -195,10 +197,11 @@ cargo test -p agel-kernel-abi        # reference model = frozen transcript
 `bootstrap/kernel-contract.trace` is the frozen canonical transcript of the
 v1.1 profile and `bootstrap/kernel-contract-v1.0.trace` of the v1.0 profile.
 The hosted reference model and the independent implementation reproduce both.
-An unprivileged protection domain on each of x86-64, AArch64, and RISC-V
-talking to its kernel through that machine's trap gate, and a protection domain
-on seL4 talking to a *server* through a protected procedure, reproduce the v1.0
-transcript, the profile they publish. This is the same comparison discipline
+An unprivileged protection domain on each of x86-64, AArch64, and RISC-V,
+talking to its kernel through that machine's trap gate, reproduces the v1.1
+transcript with a frame window its page tables make real; a protection domain
+on seL4 talking to a *server* through a protected procedure reproduces the v1.0
+transcript, the profile it publishes. This is the same comparison discipline
 the Common Lisp reference uses for the language kernel.
 
 The host test also stands up a deliberately non-conformant backend — one that
@@ -217,10 +220,20 @@ unprivileged world is a trap gate. The isolation self-test keeps the reference
 model in the supervisor and checks every one of the world's 118 answers against
 it, so on each machine the frozen transcript is two implementations agreeing
 live across a hardware privilege boundary. The seL4 broker answers with the
-same independent implementation; see the seL4 notes below. Both publish the
-v1.0 profile: the memory group exists in the implementation they link and is
-switched off until the research kernels back the frame window with real
-mappings, which is the next rung.
+same independent implementation; see the seL4 notes below.
+
+Since v0.2.40 the research kernels' memory group is real. A domain is built
+with the five physical frames behind its budget and with the page tables
+under its eight-page window, so a memory operation at trap time never
+allocates. After every `frame.*` or `as.*` invocation the object table
+accepts, the supervisor reconciles the page tables with the object table's
+window: a page the table says is mapped becomes a leaf entry carrying the
+mapping's rights (`execute` implies `read`, and `write` with `execute` never
+gets this far), a page it says is unmapped becomes an absence. The isolation
+self-test has a world map its frame and write through the mapping, protect
+it to read-only and take a page fault on the next write, and allocate a
+budget frame, write through it, unmap it, and fault on the next read, on all
+three machines.
 
 It builds for three architectures from one source. The shared driver, the
 capability space, the shared handshake page, the tick budget, and the rule that

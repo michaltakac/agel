@@ -16,6 +16,8 @@ mod memory;
 
 #[cfg(feature = "isolation-selftest")]
 pub use domain::Domain;
+#[cfg(feature = "contract-memory")]
+pub use domain::FRAME_WINDOW_BASE;
 
 #[cfg(all(
     feature = "isolation-selftest",

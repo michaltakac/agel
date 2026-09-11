@@ -537,6 +537,18 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
             // user bit. Writing to it must fault rather than corrupt the
             // supervisor that is about to judge this world.
             unsafe { (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead) };
+        } else if cfg!(feature = "contract-memory") && command == touch_window_command() {
+            // Touch a page of the frame window. Whether this returns or
+            // faults is what the memory group's mappings are worth.
+            let index = unsafe { page.add(shared::ARGUMENTS).read_volatile() };
+            let value = unsafe { page.add(shared::ARGUMENTS + 1).read_volatile() };
+            let write = unsafe { page.add(shared::ARGUMENTS + 2).read_volatile() };
+            let address = (frame_window_base() + (index % 8) * 4096) as *mut u64;
+            if write != 0 {
+                unsafe { address.write_volatile(value) };
+            }
+            let seen = unsafe { address.read_volatile() };
+            unsafe { page.add(shared::VALUES).write_volatile(seen) };
         } else if command == shared::COMMAND_FAULT_PRIVILEGED {
             unsafe { execute_privileged() };
         } else if command == shared::COMMAND_FAULT_ILLEGAL {
@@ -598,6 +610,32 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
             }
         }
         unsafe { yield_to_supervisor() };
+    }
+}
+
+/// The touch-window command, or an unreachable code where the frame window
+/// is not built.
+#[inline(always)]
+fn touch_window_command() -> u64 {
+    #[cfg(feature = "contract-memory")]
+    {
+        shared::COMMAND_TOUCH_WINDOW
+    }
+    #[cfg(not(feature = "contract-memory"))]
+    {
+        u64::MAX
+    }
+}
+
+#[inline(always)]
+fn frame_window_base() -> u64 {
+    #[cfg(feature = "contract-memory")]
+    {
+        crate::arch::FRAME_WINDOW_BASE
+    }
+    #[cfg(not(feature = "contract-memory"))]
+    {
+        0
     }
 }
 

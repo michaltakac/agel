@@ -38,8 +38,12 @@ impl DomainObjects {
     /// A domain holding the conformance capability space.
     pub fn new() -> Self {
         Self {
-            // The v1.0 profile: the memory group's frame window is not yet
-            // backed by real mappings on this backend, so it is not published.
+            // The isolation build backs the frame window with the machine's
+            // page tables and publishes v1.1; the workshop images link the
+            // implementation without the memory group and publish v1.0.
+            #[cfg(feature = "contract-memory")]
+            objects: IndependentKernel::with_profile(agel_kernel_abi::model::group::V1_1_PROFILE),
+            #[cfg(not(feature = "contract-memory"))]
             objects: IndependentKernel::with_profile(agel_kernel_abi::model::group::V1_PROFILE),
         }
     }
@@ -53,6 +57,12 @@ impl DomainObjects {
     /// Answer one contract invocation.
     pub fn invoke(&mut self, request: &Request) -> Response {
         self.objects.invoke(request)
+    }
+
+    /// The frame window's contents at `page`, for the machine to mirror.
+    #[cfg(feature = "contract-memory")]
+    pub fn mapping(&self, page: usize) -> Option<(u8, agel_kernel_abi::Rights)> {
+        self.objects.mapping(page)
     }
 }
 

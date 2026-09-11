@@ -3,8 +3,8 @@
 #
 # For each architecture this boots the research kernel under QEMU and requires
 # that an unprivileged world answers all 118 kernel-contract steps with a
-# transcript byte-identical to the frozen one for the profile the research
-# kernels publish (v1.0 until their frame window is real), that every way
+# transcript byte-identical to bootstrap/kernel-contract.trace, the v1.1
+# profile with a frame window the page tables make real, that every way
 # that architecture lets a world misbehave is contained, and that the recovery
 # monitor still works afterwards.
 #
@@ -132,7 +132,7 @@ run_architecture() {
   tr -d '\r' < "$output_file" \
     | sed -n '/^---BEGIN AGEL CONTRACT TRANSCRIPT---$/,/^---END AGEL CONTRACT TRANSCRIPT---$/p' \
     | sed '1d;$d' > "$transcript_file"
-  diff -u bootstrap/kernel-contract-v1.0.trace "$transcript_file"
+  diff -u bootstrap/kernel-contract.trace "$transcript_file"
 
   # Every architecture must contain a world that writes to kernel memory, a
   # world that executes something it is not allowed to, and a world that never
@@ -141,6 +141,11 @@ run_architecture() {
   grep -q "isolation\[$architecture\]: the world answered with the independent implementation behind a trap gate; the supervisor checked all 118 steps against the reference model" \
     "$output_file"
   grep -q "isolation\[$architecture\]: native Agel evaluated factorial with transactional rollback in an unprivileged domain" "$output_file"
+  # The memory group is real on this machine: mappings are page-table
+  # entries, protection is enforced, and an unmapped page is an absence.
+  grep -q "isolation\[$architecture\]: a world mapped its frame, wrote through the mapping, and read the value back" "$output_file"
+  grep -q "isolation\[$architecture\]: a mapping protected to read-only refused the write: page-fault" "$output_file"
+  grep -q "isolation\[$architecture\]: an allocated frame was written through the window, unmapped, and the page then faulted: page-fault" "$output_file"
   grep -q "isolation\[$architecture\]: contained a world writing to kernel memory: page-fault" "$output_file"
   grep -q "isolation\[$architecture\]: contained a world executing an undefined instruction" "$output_file"
   grep -q "isolation\[$architecture\]: preempted a world that never yields" "$output_file"

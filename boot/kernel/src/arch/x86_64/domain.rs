@@ -19,6 +19,29 @@ const SHARED_BASE: u64 = DOMAIN_BASE + 0x0010_0000;
 #[cfg(feature = "native-graphics")]
 pub const DISPLAY_BASE: u64 = DOMAIN_BASE + 0x0020_0000;
 
+/// Virtual address of the frame window: `CONFORMANCE_FRAME_WINDOW` pages a
+/// world maps its frames into through the contract's memory group.
+#[cfg(feature = "contract-memory")]
+pub const FRAME_WINDOW_BASE: u64 = DOMAIN_BASE + 0x0100_0000_0000;
+#[cfg(feature = "contract-memory")]
+const WINDOW_PAGES: usize = agel_kernel_abi::CONFORMANCE_FRAME_WINDOW as usize;
+#[cfg(feature = "contract-memory")]
+const WINDOW_FRAMES: usize = agel_kernel_abi::CONFORMANCE_FRAME_BUDGET as usize + 1;
+
+/// The page-table shape of a mapping's rights. `execute` implies `read` on
+/// every machine here, and `write` with `execute` never reaches this point:
+/// the contract refuses it.
+#[cfg(feature = "contract-memory")]
+fn window_access(rights: agel_kernel_abi::Rights) -> Access {
+    if rights.contains(agel_kernel_abi::Rights::EXECUTE) {
+        Access::UserCode
+    } else if rights.contains(agel_kernel_abi::Rights::WRITE) {
+        Access::UserData
+    } else {
+        Access::UserReadOnly
+    }
+}
+
 /// An unprivileged world.
 pub struct Domain {
     space: AddressSpace,
@@ -29,6 +52,15 @@ pub struct Domain {
     grant: PortGrant,
     /// Every frame this domain was built from, for reclamation.
     frames: FrameLedger,
+    /// The physical frames behind the domain's frame budget, frame 0 first,
+    /// reserved when the domain is built so a memory operation at trap time
+    /// never allocates.
+    #[cfg(feature = "contract-memory")]
+    window_frames: [u64; WINDOW_FRAMES],
+    /// What the page tables currently say about each window page: the frame
+    /// number and the rights, mirrored from the object table.
+    #[cfg(feature = "contract-memory")]
+    window: [Option<(u8, u32)>; WINDOW_PAGES],
 }
 
 impl Domain {
@@ -87,6 +119,22 @@ impl Domain {
         }
         let shared_physical = pool.allocate()?;
         space.map(pool, SHARED_BASE, shared_physical, Access::UserData)?;
+        // The frame window: the frames behind the domain's budget and the
+        // tables under every window page, built now so a memory operation
+        // never allocates at trap time. The pages start unmapped.
+        #[cfg(feature = "contract-memory")]
+        let window_frames = {
+            let mut frames = [0_u64; WINDOW_FRAMES];
+            for frame in frames.iter_mut() {
+                *frame = pool.allocate()?;
+            }
+            for page in 0..WINDOW_PAGES as u64 {
+                let address = FRAME_WINDOW_BASE + page * PAGE;
+                space.map(pool, address, frames[0], Access::UserReadOnly)?;
+                space.set_leaf(address, None)?;
+            }
+            frames
+        };
         // The stack grows down from the top of the last mapped stack page. The
         // page above is deliberately absent, so an overflowing world faults
         // instead of walking into whatever the allocator handed out next.
@@ -97,6 +145,10 @@ impl Domain {
             core: DomainCore::new(shared_physical, tick_budget),
             grant,
             frames: FrameLedger::EMPTY,
+            #[cfg(feature = "contract-memory")]
+            window_frames,
+            #[cfg(feature = "contract-memory")]
+            window: [None; WINDOW_PAGES],
         })
     }
 
@@ -156,6 +208,33 @@ impl Domain {
             // A world that faults or overruns while answering has not answered.
             // Reporting anything else would let a crash masquerade as a result.
             _ => Response::fail(Status::FaultedDomain),
+        }
+    }
+
+    /// Make the page tables say what the object table says about the frame
+    /// window. Called after every memory operation the object table
+    /// accepted; the tables under the window were built with the domain, so
+    /// nothing here allocates or can fail for want of memory.
+    #[cfg(feature = "contract-memory")]
+    pub fn reconcile_window(&mut self) {
+        for page in 0..WINDOW_PAGES {
+            let desired = self
+                .core
+                .mapping(page)
+                .map(|(number, rights)| (number, rights.0));
+            if desired == self.window[page] {
+                continue;
+            }
+            let address = FRAME_WINDOW_BASE + page as u64 * PAGE;
+            let leaf = desired.map(|(number, rights)| {
+                (
+                    self.window_frames[usize::from(number) % WINDOW_FRAMES],
+                    window_access(agel_kernel_abi::Rights(rights)),
+                )
+            });
+            if self.space.set_leaf(address, leaf).is_ok() {
+                self.window[page] = desired;
+            }
         }
     }
 
@@ -253,6 +332,12 @@ pub unsafe extern "C" fn dispatch_trap(frame: *mut TrapFrame) -> *mut TrapFrame 
         cpu::VECTOR_SYSCALL => {
             let arguments = [saved.rsi, saved.rdx, saved.r10, saved.r8];
             if let Some(response) = domain.core.syscall(saved.rax, saved.rdi, arguments) {
+                #[cfg(feature = "contract-memory")]
+                if response.status == agel_kernel_abi::Status::Ok
+                    && matches!(saved.rax >> 8, 0x02 | 0x07)
+                {
+                    domain.reconcile_window();
+                }
                 saved.rax = u64::from(response.status.code());
                 saved.rdi = response.values[0];
                 saved.rsi = response.values[1];

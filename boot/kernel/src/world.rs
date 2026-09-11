@@ -74,6 +74,12 @@ pub mod shared {
 
     /// Perform one contract invocation and report what came back.
     pub const COMMAND_INVOKE: u64 = 0x0001;
+    /// Touch a page of the frame window: the first argument word is the page,
+    /// the second a value to write when the third is non-zero; the first
+    /// result word is what the page then holds. What happens is the page
+    /// tables' decision, which is the point of asking.
+    #[cfg(feature = "contract-memory")]
+    pub const COMMAND_TOUCH_WINDOW: u64 = 0x5100;
     /// Write to an address only the kernel may touch.
     pub const COMMAND_FAULT_WRITE: u64 = 0x1000;
     /// Execute an instruction reserved to the supervisor.
@@ -236,6 +242,12 @@ impl DomainCore {
             tick_budget,
             stop: None,
         }
+    }
+
+    /// The frame window's contents at `page`, from the object table.
+    #[cfg(feature = "contract-memory")]
+    pub fn mapping(&self, page: usize) -> Option<(u8, agel_kernel_abi::Rights)> {
+        self.objects.mapping(page)
     }
 
     /// Write one word of the shared handshake block.

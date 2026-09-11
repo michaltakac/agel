@@ -178,8 +178,8 @@ under `--features isolation-selftest`:
 
 `./scripts/test-isolation.sh` boots each architecture and requires that an
 unprivileged world answers all 118 steps of the kernel-contract corpus with a
-transcript byte-identical to `bootstrap/kernel-contract-v1.0.trace`, the
-profile the research kernels publish; that a world
+transcript byte-identical to `bootstrap/kernel-contract.trace`, the v1.1
+profile with a frame window the page tables make real; that a world
 writing to kernel memory, a world executing something it is not allowed to, and
 a world that never yields are each contained with the fault that machine
 actually produces; that the native evaluator performs persistent definitions,

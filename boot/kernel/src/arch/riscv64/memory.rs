@@ -151,6 +151,37 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// Replace the leaf entry for `virtual_address`, or clear it, without
+    /// allocating: the tables above it must already exist, which `map` at
+    /// build time guarantees for the frame window.
+    #[cfg(feature = "contract-memory")]
+    pub fn set_leaf(
+        &mut self,
+        virtual_address: u64,
+        mapping: Option<(u64, Access)>,
+    ) -> Result<(), MemoryError> {
+        if !virtual_address.is_multiple_of(PAGE) || virtual_address < DOMAIN_BASE {
+            return Err(MemoryError::OutsideDomainWindow);
+        }
+        let mut table = self.root;
+        for level in (1..3).rev() {
+            let index = table_index(virtual_address, level);
+            // Safety: as in `map`.
+            let existing = unsafe { read_entry(table, index) };
+            if existing & VALID == 0 {
+                return Err(MemoryError::OutsideDomainWindow);
+            }
+            table = entry_address(existing);
+        }
+        let entry = match mapping {
+            Some((frame, access)) => address_bits(frame) | leaf_bits(access),
+            None => 0,
+        };
+        // Safety: `table` is the leaf table this space owns.
+        unsafe { write_entry(table, table_index(virtual_address, 0), entry) };
+        Ok(())
+    }
+
     /// Install this address space on the current hart.
     ///
     /// # Safety

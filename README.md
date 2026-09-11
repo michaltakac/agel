@@ -4,9 +4,11 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.39: kernel contract v1.1 specifies the memory group, both hosted
-implementations answer it identically across 118 corpus steps, and every native backend publishes
-the profile it can make real, with a frozen transcript for each profile; the native evaluator runs inside the seL4 world protection
+The current repository is **v0.2.40: the kernel contract's memory group is real on all three research
+kernels, where a world's frame mappings are page-table entries the supervisor reconciles with the
+object table after every operation, so a read-only mapping refuses a write and an unmapped page
+faults; contract v1.1 specifies that group, both hosted implementations answer it identically across
+118 corpus steps, and every native backend publishes the profile it can make real; the native evaluator runs inside the seL4 world protection
 domain too, so the language has evaluated the same forms unprivileged on all four backends; stored native functions carry their captured scalars, so a closure
 made inside a lexical call can be defined and a lambda escaping a stored function is kept rather than
 refused; native actor slots can be given back, with generation-checked

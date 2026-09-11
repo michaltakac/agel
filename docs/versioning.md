@@ -146,6 +146,10 @@ promise.
   implementations, and covered by 37 new corpus steps. The corpus is 118
   steps with two frozen transcripts, one per published profile; the research
   kernels and the seL4 broker publish v1.0 until the frame window is real.
+  `v0.2.40` makes the frame window real on x86-64, AArch64 and RISC-V: every
+  domain carries the frames behind its budget, the page tables follow the
+  object table after each memory operation, and the research kernels publish
+  v1.1 and reproduce its transcript. No contract change; seL4 stays v1.0.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

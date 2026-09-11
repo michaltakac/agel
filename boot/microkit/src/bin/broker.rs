@@ -31,7 +31,11 @@ static mut OBJECTS: Option<IndependentKernel> = None;
 #[no_mangle]
 pub extern "C" fn init() {
     // Safety: `init` runs once, before any entry point that reads this.
-    unsafe { OBJECTS = Some(IndependentKernel::with_profile(agel_kernel_abi::model::group::V1_PROFILE)) };
+    unsafe {
+        OBJECTS = Some(IndependentKernel::with_profile(
+            agel_kernel_abi::model::group::V1_PROFILE,
+        ))
+    };
 }
 
 #[no_mangle]

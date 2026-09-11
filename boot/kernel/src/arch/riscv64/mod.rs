@@ -14,6 +14,8 @@ mod domain;
 mod memory;
 
 pub use domain::Domain;
+#[cfg(feature = "contract-memory")]
+pub use domain::FRAME_WINDOW_BASE;
 
 use crate::memory::DeviceGrant;
 

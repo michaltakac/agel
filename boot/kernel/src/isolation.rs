@@ -60,6 +60,8 @@ pub fn run() -> ! {
     );
 
     run_conformance(&mut machine, &mut console);
+    #[cfg(feature = "contract-memory")]
+    run_memory(&mut machine);
     run_native_evaluator(&mut machine, &mut console);
     run_containment(&mut machine);
     run_driver_restart(&mut machine, &mut console);
@@ -83,6 +85,107 @@ pub fn run() -> ! {
 
     console::write("AGEL_ISOLATION_OK\n");
     arch::exit(true)
+}
+
+/// The memory group is real: a world maps a frame into its window and writes
+/// through it, a mapping protected to read-only refuses the write, and an
+/// unmapped page is an absence the machine reports as a fault.
+#[cfg(feature = "contract-memory")]
+fn run_memory(machine: &mut arch::Machine) {
+    use agel_kernel_abi::model::slot;
+    use agel_kernel_abi::{Operation, Request, Rights, Status};
+    let entry = crate::user::agel_world_main as *const () as usize as u64;
+    let read_write = u64::from(Rights::READ.0 | Rights::WRITE.0);
+    let read = u64::from(Rights::READ.0);
+    let mut world = match machine.create_world(entry, 8) {
+        Ok(world) => world,
+        Err(reason) => failed(reason),
+    };
+    let ok = |world: &mut arch::Domain, request: Request| {
+        if world.invoke_in_world(&request).status != Status::Ok {
+            failed("a memory operation the corpus accepts was refused here");
+        }
+    };
+    ok(
+        &mut world,
+        Request::with(Operation::FrameMap, slot::FRAME, [0, read_write, 0, 0]),
+    );
+    match touch_window(&mut world, 0, 0xa5a5, true) {
+        Some(0xa5a5) => kprint!(
+            "isolation[{}]: a world mapped its frame, wrote through the mapping, and read the value back\n",
+            arch::NAME
+        ),
+        _ => failed("a mapped frame was not writable through the window"),
+    }
+    ok(
+        &mut world,
+        Request::with(Operation::AsProtect, slot::ADDRESS_SPACE, [0, read, 0, 0]),
+    );
+    if touch_window(&mut world, 0, 0, false) != Some(0xa5a5) {
+        failed("a mapping protected to read-only lost its contents or its read");
+    }
+    match provoke_touch(&mut world, 0, 1, true) {
+        Stop::Faulted(fault) => kprint!(
+            "isolation[{}]: a mapping protected to read-only refused the write: {}\n",
+            arch::NAME,
+            fault.name()
+        ),
+        _ => failed("a read-only mapping accepted a write"),
+    }
+
+    // A fresh world: a frame from the budget, mapped, written, unmapped,
+    // and then gone.
+    let mut world = match machine.create_world(entry, 8) {
+        Ok(world) => world,
+        Err(reason) => failed(reason),
+    };
+    let allocated = slot::FIRST_FREE;
+    ok(
+        &mut world,
+        Request::with(
+            Operation::FrameAllocate,
+            slot::CNODE,
+            [u64::from(allocated), read_write, 0, 0],
+        ),
+    );
+    ok(
+        &mut world,
+        Request::with(Operation::FrameMap, allocated, [1, read_write, 0, 0]),
+    );
+    if touch_window(&mut world, 1, 0x77, true) != Some(0x77) {
+        failed("an allocated frame was not writable through the window");
+    }
+    ok(
+        &mut world,
+        Request::with(Operation::AsUnmap, slot::ADDRESS_SPACE, [1, 0, 0, 0]),
+    );
+    match provoke_touch(&mut world, 1, 0, false) {
+        Stop::Faulted(fault) => kprint!(
+            "isolation[{}]: an allocated frame was written through the window, unmapped, and the page then faulted: {}\n",
+            arch::NAME,
+            fault.name()
+        ),
+        _ => failed("an unmapped window page was still reachable"),
+    }
+}
+
+/// Ask a world to touch a window page; `None` when it stopped instead.
+#[cfg(feature = "contract-memory")]
+fn touch_window(world: &mut arch::Domain, page: u64, value: u64, write: bool) -> Option<u64> {
+    match provoke_touch(world, page, value, write) {
+        Stop::Replied => Some(world.core().read_shared(shared::VALUES)),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "contract-memory")]
+fn provoke_touch(world: &mut arch::Domain, page: u64, value: u64, write: bool) -> Stop {
+    world.core().write_shared(shared::ARGUMENTS, page);
+    world.core().write_shared(shared::ARGUMENTS + 1, value);
+    world
+        .core()
+        .write_shared(shared::ARGUMENTS + 2, u64::from(write));
+    world.provoke(shared::COMMAND_TOUCH_WINDOW)
 }
 
 /// Run a persistent native Agel session entirely inside an unprivileged world.
@@ -208,9 +311,13 @@ fn run_conformance(machine: &mut arch::Machine, driver: &mut ServiceDomain) {
             Ok(world) => world,
             Err(reason) => failed(reason),
         };
-    // The research kernels publish the v1.0 profile until their frame window
-    // is backed by real mappings; the oracle publishes the same.
-    let mut reference = ModelKernel::with_profile(agel_kernel_abi::model::group::V1_PROFILE);
+    // With the memory group compiled in, the frame window is backed by real
+    // mappings and the world publishes v1.1; the oracle publishes the same.
+    #[cfg(feature = "contract-memory")]
+    let profile = agel_kernel_abi::model::group::V1_1_PROFILE;
+    #[cfg(not(feature = "contract-memory"))]
+    let profile = agel_kernel_abi::model::group::V1_PROFILE;
+    let mut reference = ModelKernel::with_profile(profile);
     reference.reset_to_conformance_domain();
 
     let mut agreed = 0_usize;

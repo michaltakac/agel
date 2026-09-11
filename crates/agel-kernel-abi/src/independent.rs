@@ -264,6 +264,20 @@ impl IndependentKernel {
         Ok([page as u64, 0, 0, 0])
     }
 
+    /// What the frame window holds at `page`: the frame's number and the
+    /// mapping's rights. Not a contract operation: a backend that backs the
+    /// window with real translations reads this after every memory
+    /// operation to make its page tables agree with the object table.
+    #[cfg(feature = "memory")]
+    pub fn mapping(&self, page: usize) -> Option<(u8, Rights)> {
+        let Object::AddressSpace(space) = &self.objects[OBJECT_ADDRESS_SPACE] else {
+            return None;
+        };
+        let entry = space.pages.get(page)?;
+        let object = entry.frame?;
+        Some((self.frame_number(object) as u8, entry.rights))
+    }
+
     #[cfg(feature = "memory")]
     fn frame_number(&self, object: usize) -> u64 {
         match self.objects[object] {

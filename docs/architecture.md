@@ -297,12 +297,15 @@ Each rung must be runnable and differentially testable against the rung below:
    project's own dependency-free implementation compiled `no_std`. The
    trusted slot, the selector's own bytes and workspace generations are
    still unsigned, and there is no root of trust before the BIOS stage.
-47. **Contract memory group (started at v0.2.39):** contract v1.1 specifies
-   `frame.allocate/map/share/reclaim` and `as.map/unmap/protect/query` over a
-   numbered frame budget and a page-indexed window; both hosted
-   implementations agree on 37 new corpus steps and two transcripts are
-   frozen, one per published profile. The research kernels back the window
-   with real page-table mappings next; seL4 publishes v1.0.
+47. **Contract memory group (complete on the research kernels at v0.2.40):**
+   contract v1.1 specifies `frame.allocate/map/share/reclaim` and
+   `as.map/unmap/protect/query` over a numbered frame budget and a
+   page-indexed window; both hosted implementations agree on 37 new corpus
+   steps and two transcripts are frozen, one per published profile. On
+   x86-64, AArch64 and RISC-V the window is real: the page tables are
+   reconciled with the object table after every memory operation, and a
+   world's writes, refused writes and faults on unmapped pages are asserted
+   in CI. seL4 publishes v1.0 under Microkit's static mappings.
 48. **Live system:** signed workspace generations, the trusted slot checked
    before it runs, and kernel-image selection on the machines without a BIOS
    stage, whose kernels QEMU loads as ELFs.
