@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix="agel-dock-", dir="/tmp") as directory:
     image = Path(directory) / "disk.img"
     shutil.copyfile(sys.argv[1], image)
     with image.open("r+b") as disk:
-        disk.seek(256 * 512)
+        disk.seek(1024 * 512)
         disk.write(bytes(32 * 512))
     machine = module.Machine(str(image), directory)
     try:
