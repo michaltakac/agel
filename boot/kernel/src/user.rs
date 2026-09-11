@@ -1334,3 +1334,456 @@ pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
         unsafe { yield_to_supervisor() };
     }
 }
+
+// ---------------------------------------------------------------------------
+// The filesystem service: an unprivileged world that owns a region of the
+// disk it cannot touch, asking the supervisor for every sector.
+// ---------------------------------------------------------------------------
+
+/// The on-disk shape: a superblock, four directory sectors, then one
+/// eight-sector extent per directory entry. Entry 0 is the root directory.
+#[cfg(feature = "process")]
+mod agelfs {
+    pub const MAGIC: &[u8; 8] = b"AGELFS1\0";
+    pub const SUPERBLOCK: u64 = crate::world::fs::FIRST_SECTOR as u64;
+    pub const DIRECTORY: u64 = SUPERBLOCK + 1;
+    pub const DIRECTORY_SECTORS: u64 = 4;
+    pub const DATA: u64 = DIRECTORY + DIRECTORY_SECTORS;
+    pub const EXTENT_SECTORS: u64 = crate::world::fs::FILE_BYTES / 512;
+    pub const ENTRIES: usize = crate::world::fs::ENTRIES as usize;
+    pub const ENTRY_BYTES: usize = 64;
+    pub const PER_SECTOR: usize = 512 / ENTRY_BYTES;
+    pub const NAME_BYTES: usize = 32;
+}
+
+/// One directory entry as the service keeps it in memory.
+#[cfg(feature = "process")]
+#[derive(Clone, Copy)]
+struct Entry {
+    name: [u8; agelfs::NAME_BYTES],
+    name_len: u8,
+    kind: u8,
+    parent: u16,
+    length: u32,
+}
+
+#[cfg(feature = "process")]
+impl Entry {
+    const EMPTY: Self = Self {
+        name: [0; agelfs::NAME_BYTES],
+        name_len: 0,
+        kind: 0,
+        parent: 0,
+        length: 0,
+    };
+}
+
+/// The service's whole state: the directory, and whether it has been read.
+#[cfg(feature = "process")]
+struct Filesystem {
+    page: *mut u64,
+    entries: [Entry; agelfs::ENTRIES],
+    mounted: bool,
+    sector: [u8; 512],
+}
+
+#[cfg(feature = "process")]
+impl Filesystem {
+    /// Ask the supervisor for one sector into this world's block area, then
+    /// copy it into the local buffer. Yields; the supervisor resumes here.
+    #[link_section = ".user_text"]
+    unsafe fn read_sector(&mut self, sector: u64) -> Result<(), u64> {
+        use crate::world::fs;
+        unsafe {
+            self.page.add(fs::DISK_SECTOR).write_volatile(sector);
+            self.page
+                .add(fs::DISK_OPERATION)
+                .write_volatile(fs::DISK_READ);
+            yield_to_supervisor();
+            let status = self.page.add(fs::DISK_STATUS).read_volatile();
+            if status != 0 {
+                return Err(status);
+            }
+            let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *const u8;
+            for (offset, byte) in self.sector.iter_mut().enumerate() {
+                *byte = block.add(offset).read_volatile();
+            }
+        }
+        Ok(())
+    }
+
+    #[link_section = ".user_text"]
+    unsafe fn write_sector(&mut self, sector: u64) -> Result<(), u64> {
+        use crate::world::fs;
+        unsafe {
+            let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+            for (offset, byte) in self.sector.iter().enumerate() {
+                block.add(offset).write_volatile(*byte);
+            }
+            self.page.add(fs::DISK_SECTOR).write_volatile(sector);
+            self.page
+                .add(fs::DISK_OPERATION)
+                .write_volatile(fs::DISK_WRITE);
+            yield_to_supervisor();
+            let status = self.page.add(fs::DISK_STATUS).read_volatile();
+            if status != 0 {
+                return Err(status);
+            }
+        }
+        Ok(())
+    }
+
+    /// The entry at `index`, when the index names one. Nothing in this world
+    /// may panic: a panic would leave the world's text for the kernel's and
+    /// be contained as a fault, so every lookup is checked instead.
+    #[link_section = ".user_text"]
+    fn entry(&self, index: usize) -> Result<Entry, u64> {
+        self.entries
+            .get(index)
+            .copied()
+            .ok_or(crate::world::fs::EINVAL)
+    }
+
+    /// Read the directory from disk; an unformatted region is an error the
+    /// caller reports as `EIO`, not a filesystem it invents.
+    #[link_section = ".user_text"]
+    unsafe fn mount(&mut self) -> Result<(), u64> {
+        use crate::world::fs;
+        if self.mounted {
+            return Ok(());
+        }
+        unsafe { self.read_sector(agelfs::SUPERBLOCK)? };
+        if !self.sector.starts_with(agelfs::MAGIC) {
+            return Err(fs::EIO);
+        }
+        for sector in 0..agelfs::DIRECTORY_SECTORS {
+            unsafe { self.read_sector(agelfs::DIRECTORY + sector)? };
+            let (rows, _) = self.sector.as_chunks::<{ agelfs::ENTRY_BYTES }>();
+            let first = sector as usize * agelfs::PER_SECTOR;
+            for (raw, slot) in rows.iter().zip(self.entries.iter_mut().skip(first)) {
+                let mut entry = Entry::EMPTY;
+                for (byte, stored) in entry.name.iter_mut().zip(raw.iter()) {
+                    *byte = *stored;
+                }
+                entry.name_len = raw[32];
+                entry.kind = raw[33];
+                entry.parent = u16::from_le_bytes([raw[34], raw[35]]);
+                entry.length = u32::from_le_bytes([raw[36], raw[37], raw[38], raw[39]]);
+                if entry.name_len as usize > agelfs::NAME_BYTES {
+                    entry.name_len = 0;
+                }
+                *slot = entry;
+            }
+        }
+        self.mounted = true;
+        Ok(())
+    }
+
+    /// Write the directory sector holding `index` back to disk.
+    #[link_section = ".user_text"]
+    unsafe fn flush_entry(&mut self, index: usize) -> Result<(), u64> {
+        let sector = index / agelfs::PER_SECTOR;
+        self.sector = [0; 512];
+        let (rows, _) = self.sector.as_chunks_mut::<{ agelfs::ENTRY_BYTES }>();
+        let first = sector * agelfs::PER_SECTOR;
+        for (raw, entry) in rows.iter_mut().zip(self.entries.iter().skip(first)) {
+            for (stored, byte) in raw.iter_mut().zip(entry.name.iter()) {
+                *stored = *byte;
+            }
+            raw[32] = entry.name_len;
+            raw[33] = entry.kind;
+            let [parent_low, parent_high] = entry.parent.to_le_bytes();
+            raw[34] = parent_low;
+            raw[35] = parent_high;
+            let [l0, l1, l2, l3] = entry.length.to_le_bytes();
+            raw[36] = l0;
+            raw[37] = l1;
+            raw[38] = l2;
+            raw[39] = l3;
+        }
+        unsafe { self.write_sector(agelfs::DIRECTORY + sector as u64) }
+    }
+
+    #[link_section = ".user_text"]
+    unsafe fn format(&mut self) -> Result<(), u64> {
+        self.sector = [0; 512];
+        for (stored, byte) in self.sector.iter_mut().zip(agelfs::MAGIC.iter()) {
+            *stored = *byte;
+        }
+        self.sector[8] = 1;
+        unsafe { self.write_sector(agelfs::SUPERBLOCK)? };
+        self.entries = [Entry::EMPTY; agelfs::ENTRIES];
+        self.entries[0].kind = crate::world::fs::KIND_DIRECTORY as u8;
+        for sector in 0..agelfs::DIRECTORY_SECTORS as usize {
+            unsafe { self.flush_entry(sector * agelfs::PER_SECTOR)? };
+        }
+        self.mounted = true;
+        Ok(())
+    }
+
+    /// The child of `directory` named `name`, if any.
+    #[link_section = ".user_text"]
+    fn child(&self, directory: u16, name: &[u8]) -> Option<usize> {
+        self.entries
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find_map(|(index, entry)| {
+                (entry.kind != 0
+                    && entry.parent == directory
+                    && entry.name.get(..entry.name_len as usize) == Some(name))
+                .then_some(index)
+            })
+    }
+
+    /// Resolve `path` from `root`, refusing to climb above it: a process's
+    /// namespace is the whole of what it can name.
+    #[link_section = ".user_text"]
+    unsafe fn open(&mut self, root: u16, flags: u64, path: &[u8]) -> Result<(usize, u32, u8), u64> {
+        use crate::world::fs;
+        unsafe { self.mount()? };
+        if self.entry(root as usize)?.kind != fs::KIND_DIRECTORY as u8 {
+            return Err(fs::ENOTDIR);
+        }
+        let mut current = root;
+        let mut components = path
+            .split(|byte| *byte == b'/')
+            .filter(|component| !component.is_empty())
+            .peekable();
+        while let Some(component) = components.next() {
+            let last = components.peek().is_none();
+            if component == b"." {
+                continue;
+            }
+            if component == b".." {
+                if current == root {
+                    return Err(fs::EACCES);
+                }
+                current = self.entry(current as usize)?.parent;
+                continue;
+            }
+            if component.len() > agelfs::NAME_BYTES {
+                return Err(fs::EINVAL);
+            }
+            match self.child(current, component) {
+                Some(index) => {
+                    if !last && self.entry(index)?.kind != fs::KIND_DIRECTORY as u8 {
+                        return Err(fs::ENOTDIR);
+                    }
+                    current = index as u16;
+                }
+                None if last && flags & fs::O_CREAT_BIT != 0 => {
+                    let Some(index) = self
+                        .entries
+                        .iter()
+                        .enumerate()
+                        .skip(1)
+                        .find_map(|(index, entry)| (entry.kind == 0).then_some(index))
+                    else {
+                        return Err(fs::ENOSPC);
+                    };
+                    let mut entry = Entry::EMPTY;
+                    for (stored, byte) in entry.name.iter_mut().zip(component.iter()) {
+                        *stored = *byte;
+                    }
+                    entry.name_len = component.len() as u8;
+                    entry.kind = if flags & fs::O_DIRECTORY_BIT != 0 {
+                        fs::KIND_DIRECTORY as u8
+                    } else {
+                        fs::KIND_FILE as u8
+                    };
+                    entry.parent = current;
+                    if let Some(slot) = self.entries.get_mut(index) {
+                        *slot = entry;
+                    }
+                    unsafe { self.flush_entry(index)? };
+                    current = index as u16;
+                }
+                None => return Err(fs::ENOENT),
+            }
+        }
+        let entry = self.entry(current as usize)?;
+        if flags & fs::O_DIRECTORY_BIT != 0 && entry.kind != fs::KIND_DIRECTORY as u8 {
+            return Err(fs::ENOTDIR);
+        }
+        if flags & fs::O_DIRECTORY_BIT == 0
+            && entry.kind == fs::KIND_DIRECTORY as u8
+            && flags & (fs::O_WRONLY_BIT | fs::O_RDWR_BIT) != 0
+        {
+            return Err(fs::EISDIR);
+        }
+        Ok((current as usize, entry.length, entry.kind))
+    }
+
+    /// The bytes of `entry` at `offset`, at most one block, into the block
+    /// area.
+    #[link_section = ".user_text"]
+    unsafe fn read(&mut self, index: usize, offset: u64, length: u64) -> Result<u64, u64> {
+        use crate::world::fs;
+        unsafe { self.mount()? };
+        let entry = self.entry(index)?;
+        if entry.kind != fs::KIND_FILE as u8 {
+            return Err(fs::EINVAL);
+        }
+        let size = u64::from(entry.length);
+        if offset >= size {
+            return Ok(0);
+        }
+        let length = length.min(512).min(size - offset);
+        let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+        let mut done = 0_u64;
+        while done < length {
+            let at = offset + done;
+            let sector = agelfs::DATA + index as u64 * agelfs::EXTENT_SECTORS + at / 512;
+            unsafe { self.read_sector(sector)? };
+            let inside = (at % 512) as usize;
+            let take = ((512 - inside) as u64).min(length - done) as usize;
+            for (position, byte) in self.sector.iter().skip(inside).take(take).enumerate() {
+                unsafe { block.add(done as usize + position).write_volatile(*byte) };
+            }
+            done += take as u64;
+        }
+        Ok(done)
+    }
+
+    /// Store the block area's first `length` bytes at `offset` of `entry`.
+    #[link_section = ".user_text"]
+    unsafe fn write(&mut self, index: usize, offset: u64, length: u64) -> Result<u64, u64> {
+        use crate::world::fs;
+        unsafe { self.mount()? };
+        let entry = self.entry(index)?;
+        if entry.kind != fs::KIND_FILE as u8 {
+            return Err(fs::EINVAL);
+        }
+        let length = length.min(512);
+        if offset + length > fs::FILE_BYTES {
+            return Err(fs::EFBIG);
+        }
+        let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *const u8;
+        let mut data = [0_u8; 512];
+        for (position, byte) in data.iter_mut().enumerate().take(length as usize) {
+            *byte = unsafe { block.add(position).read_volatile() };
+        }
+        let mut done = 0_u64;
+        while done < length {
+            let at = offset + done;
+            let sector = agelfs::DATA + index as u64 * agelfs::EXTENT_SECTORS + at / 512;
+            let inside = (at % 512) as usize;
+            let take = ((512 - inside) as u64).min(length - done) as usize;
+            unsafe { self.read_sector(sector)? };
+            for (stored, byte) in self
+                .sector
+                .iter_mut()
+                .skip(inside)
+                .zip(data.iter().skip(done as usize))
+                .take(take)
+            {
+                *stored = *byte;
+            }
+            unsafe { self.write_sector(sector)? };
+            done += take as u64;
+        }
+        let end = (offset + length) as u32;
+        if end > entry.length {
+            if let Some(slot) = self.entries.get_mut(index) {
+                slot.length = end;
+            }
+            unsafe { self.flush_entry(index)? };
+        }
+        Ok(length)
+    }
+
+    /// The `position`-th child of `directory`.
+    #[link_section = ".user_text"]
+    unsafe fn list(&mut self, directory: u16, position: u64) -> Result<(usize, u8, u32), u64> {
+        use crate::world::fs;
+        unsafe { self.mount()? };
+        let mut seen = 0_u64;
+        for (index, entry) in self.entries.iter().enumerate().skip(1) {
+            if entry.kind != 0 && entry.parent == directory {
+                if seen == position {
+                    let payload = (self.page as usize + crate::world::PAYLOAD_OFFSET) as *mut u8;
+                    let name_len = entry.name_len as usize;
+                    for (offset, byte) in entry.name.iter().take(name_len).enumerate() {
+                        unsafe { payload.add(offset).write_volatile(*byte) };
+                    }
+                    unsafe {
+                        self.page
+                            .add(shared::VALUES + 3)
+                            .write_volatile(u64::from(entry.name_len))
+                    };
+                    return Ok((index, entry.kind, entry.length));
+                }
+                seen += 1;
+            }
+        }
+        Err(fs::ENOENT)
+    }
+}
+
+/// The filesystem service's entry point.
+///
+/// # Safety
+/// Entered by the architecture's return-from-exception instruction with a
+/// private stack and a valid shared page.
+#[cfg(feature = "process")]
+#[no_mangle]
+#[link_section = ".user_text"]
+pub unsafe extern "C" fn agel_fs_main(shared_page: u64) -> ! {
+    use crate::world::fs;
+    let page = shared_page as *mut u64;
+    let mut filesystem = Filesystem {
+        page,
+        entries: [Entry::EMPTY; agelfs::ENTRIES],
+        mounted: false,
+        sector: [0; 512],
+    };
+    loop {
+        let command = unsafe { page.add(shared::COMMAND).read_volatile() };
+        let arguments = [
+            unsafe { page.add(shared::ARGUMENTS).read_volatile() },
+            unsafe { page.add(shared::ARGUMENTS + 1).read_volatile() },
+            unsafe { page.add(shared::ARGUMENTS + 2).read_volatile() },
+        ];
+        let outcome: Result<[u64; 3], u64> = if command == fs::COMMAND_FORMAT {
+            unsafe { filesystem.format() }.map(|()| [0, 0, 0])
+        } else if command == fs::COMMAND_OPEN {
+            let length = (arguments[2] as usize).min(crate::world::PAYLOAD_BYTES);
+            let payload = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *const u8;
+            let mut path = [0_u8; crate::world::PAYLOAD_BYTES];
+            for (offset, byte) in path.iter_mut().enumerate().take(length) {
+                *byte = unsafe { payload.add(offset).read_volatile() };
+            }
+            let path = path.get(..length).unwrap_or(&[]);
+            unsafe { filesystem.open(arguments[0] as u16, arguments[1], path) }
+                .map(|(entry, length, kind)| [entry as u64, u64::from(length), u64::from(kind)])
+        } else if command == fs::COMMAND_READ {
+            unsafe { filesystem.read(arguments[0] as usize, arguments[1], arguments[2]) }
+                .map(|count| [count, 0, 0])
+        } else if command == fs::COMMAND_WRITE {
+            unsafe { filesystem.write(arguments[0] as usize, arguments[1], arguments[2]) }
+                .map(|count| [count, 0, 0])
+        } else if command == fs::COMMAND_LIST {
+            unsafe { filesystem.list(arguments[0] as u16, arguments[1]) }
+                .map(|(entry, kind, length)| [entry as u64, u64::from(kind), u64::from(length)])
+        } else if command == shared::COMMAND_FAULT_WRITE {
+            unsafe { (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead) };
+            Err(fs::EINVAL)
+        } else {
+            Err(fs::EINVAL)
+        };
+        unsafe {
+            page.add(fs::DISK_OPERATION).write_volatile(0);
+            match outcome {
+                Ok(values) => {
+                    page.add(shared::STATUS).write_volatile(0);
+                    page.add(shared::VALUES).write_volatile(values[0]);
+                    page.add(shared::VALUES + 1).write_volatile(values[1]);
+                    page.add(shared::VALUES + 2).write_volatile(values[2]);
+                }
+                Err(status) => page.add(shared::STATUS).write_volatile(status),
+            }
+            yield_to_supervisor();
+        }
+    }
+}

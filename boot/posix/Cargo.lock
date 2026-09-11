@@ -3,9 +3,33 @@
 version = 4
 
 [[package]]
+name = "agel-process-abi"
+version = "0.1.0"
+
+[[package]]
 name = "hello"
 version = "0.1.0"
+dependencies = [
+ "agel-process-abi",
+]
 
 [[package]]
 name = "hostile"
 version = "0.1.0"
+dependencies = [
+ "agel-process-abi",
+]
+
+[[package]]
+name = "reader"
+version = "0.1.0"
+dependencies = [
+ "agel-process-abi",
+]
+
+[[package]]
+name = "writer"
+version = "0.1.0"
+dependencies = [
+ "agel-process-abi",
+]

@@ -3,7 +3,7 @@
 #![no_std]
 #![no_main]
 
-mod abi;
+use agel_process_abi as abi;
 
 #[no_mangle]
 #[link_section = ".text.entry"]

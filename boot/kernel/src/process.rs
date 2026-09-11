@@ -16,9 +16,59 @@
 
 use crate::arch;
 use crate::memory::Access;
-use crate::service::ServiceDomain;
+use crate::service::{ServiceDomain, ServiceError, ServiceHandle};
 use crate::workspace::read_sector;
-use crate::world::{process, Fault, Stop, BLOCK_BYTES};
+use crate::world::{fs, process, Fault, Stop, BLOCK_BYTES, PAYLOAD_BYTES};
+
+/// What a process may do with names: read files, write them, create them.
+/// Granted at `exec` by the operator; a process never widens it.
+#[derive(Clone, Copy)]
+pub struct Namespace {
+    /// The directory entry the process sees as `/`; it cannot climb above.
+    pub root: u16,
+    pub read: bool,
+    pub write: bool,
+    pub create: bool,
+}
+
+impl Namespace {
+    pub const fn all(root: u16) -> Self {
+        Self {
+            root,
+            read: true,
+            write: true,
+            create: true,
+        }
+    }
+
+    pub const fn read_only(root: u16) -> Self {
+        Self {
+            root,
+            read: true,
+            write: false,
+            create: false,
+        }
+    }
+}
+
+/// An open file: derived from the namespace, never wider than it, and bound
+/// to the filesystem service's generation so a restart fails it closed.
+#[derive(Clone, Copy)]
+struct Descriptor {
+    used: bool,
+    entry: u16,
+    offset: u64,
+    readable: bool,
+    writable: bool,
+    handle: ServiceHandle,
+}
+
+const EIO: i64 = 5;
+const EBADF: i64 = 9;
+const EACCES: i64 = 13;
+const EMFILE: i64 = 24;
+const ENOSYS: i64 = 38;
+const ESTALE: i64 = 116;
 
 /// The program region: a table sector followed by the programs it names.
 pub const TABLE_SECTOR: u32 = 2048;
@@ -279,21 +329,41 @@ fn load(
     Ok(domain)
 }
 
-/// Load and run the named program to its end, serving its requests through
-/// `console`. Returns how it ended; the domain's frames go back to the pool.
+/// The services a process's requests are answered through.
+pub struct Services<'a> {
+    pub storage: &'a mut ServiceDomain,
+    pub console: &'a mut ServiceDomain,
+    /// Absent when the machine has no filesystem service; every file request
+    /// then answers `-ENOSYS`.
+    pub filesystem: Option<&'a mut ServiceDomain>,
+}
+
+/// Load and run the named program to its end, serving its requests inside
+/// `namespace`. Returns how it ended; the domain's frames go back to the
+/// pool.
+#[inline(never)]
 pub fn exec(
     machine: &mut arch::Machine,
-    storage: &mut ServiceDomain,
-    console: &mut ServiceDomain,
+    services: &mut Services<'_>,
     program: Program,
+    namespace: Namespace,
 ) -> Result<Exit, &'static str> {
-    let mut domain = load(machine, storage, program)?;
-    let outcome = serve(&mut domain, console);
+    let mut domain = load(machine, services.storage, program)?;
+    let outcome = serve(&mut domain, services, namespace);
     machine.reclaim(domain.frames());
     Ok(outcome)
 }
 
-fn serve(domain: &mut arch::Domain, console: &mut ServiceDomain) -> Exit {
+#[inline(never)]
+fn serve(domain: &mut arch::Domain, services: &mut Services<'_>, namespace: Namespace) -> Exit {
+    let mut descriptors = [Descriptor {
+        used: false,
+        entry: 0,
+        offset: 0,
+        readable: false,
+        writable: false,
+        handle: ServiceHandle::NONE,
+    }; process::DESCRIPTORS];
     loop {
         match domain.run() {
             Stop::Replied => {}
@@ -307,25 +377,207 @@ fn serve(domain: &mut arch::Domain, console: &mut ServiceDomain) -> Exit {
         ];
         let result = match kind {
             process::EXIT => return Exit::Status(arguments[0]),
-            process::WRITE => write(domain, console, arguments[0], arguments[1]),
-            _ => (-38_i64) as u64, // ENOSYS: the request has no meaning here.
+            process::WRITE => match arguments[0] {
+                1 | 2 => write_console(domain, services.console, arguments[1]),
+                _ => file_write(
+                    domain,
+                    services,
+                    &mut descriptors,
+                    arguments[0],
+                    arguments[1],
+                ),
+            },
+            process::OPEN => open(
+                domain,
+                services,
+                namespace,
+                &mut descriptors,
+                arguments[0],
+                arguments[1],
+            ),
+            process::READ => file_read(
+                domain,
+                services,
+                &mut descriptors,
+                arguments[0],
+                arguments[1],
+            ),
+            process::CLOSE => close(&mut descriptors, arguments[0]),
+            _ => error(ENOSYS),
         };
         domain.core().write_shared(process::RESULT, result);
+    }
+}
+
+fn error(number: i64) -> u64 {
+    (-number) as u64
+}
+
+/// The filesystem service's status word as an errno the process sees.
+fn service_error(outcome: Result<(u64, [u64; 3]), ServiceError>) -> Result<[u64; 3], i64> {
+    match outcome {
+        Ok((0, values)) => Ok(values),
+        Ok((status, _)) => Err(status as i64),
+        Err(ServiceError::Stale) => Err(ESTALE),
+        Err(_) => Err(EIO),
+    }
+}
+
+#[inline(never)]
+fn open(
+    domain: &mut arch::Domain,
+    services: &mut Services<'_>,
+    namespace: Namespace,
+    descriptors: &mut [Descriptor; process::DESCRIPTORS],
+    flags: u64,
+    length: u64,
+) -> u64 {
+    let Some(filesystem) = services.filesystem.as_deref_mut() else {
+        return error(ENOSYS);
+    };
+    let wants_write = flags & (process::O_WRONLY | process::O_RDWR) != 0;
+    let wants_create = flags & process::O_CREAT != 0;
+    // The namespace's rights bound the request before the service sees it:
+    // a process without `write` cannot open for writing, without `create`
+    // cannot create, and nothing a path spells changes that.
+    if (wants_write && !namespace.write) || (wants_create && !namespace.create) {
+        return error(EACCES);
+    }
+    if !wants_write && !namespace.read {
+        return error(EACCES);
+    }
+    let Some((number, free)) = descriptors
+        .iter_mut()
+        .enumerate()
+        .find(|(_, descriptor)| !descriptor.used)
+    else {
+        return error(EMFILE);
+    };
+    let length = (length as usize).min(PAYLOAD_BYTES);
+    let mut path = [0_u8; PAYLOAD_BYTES];
+    for (offset, byte) in path.iter_mut().enumerate().take(length) {
+        *byte = domain.core().read_payload(offset);
+    }
+    filesystem.write_payload(path.get(..length).unwrap_or(&[]));
+    let handle = filesystem.handle();
+    let outcome = filesystem.filesystem_request(
+        handle,
+        services.storage,
+        fs::COMMAND_OPEN,
+        [u64::from(namespace.root), flags, length as u64],
+    );
+    match service_error(outcome) {
+        Ok([entry, _, kind]) => {
+            if kind == fs::KIND_DIRECTORY && flags & process::O_DIRECTORY == 0 {
+                return error(fs::EISDIR as i64);
+            }
+            *free = Descriptor {
+                used: true,
+                entry: entry as u16,
+                offset: 0,
+                readable: !wants_write || flags & process::O_RDWR != 0,
+                writable: wants_write,
+                handle,
+            };
+            (number + 3) as u64
+        }
+        Err(number) => error(number),
+    }
+}
+
+/// The open descriptor a process number names: descriptors count from 3,
+/// after the console's.
+fn lookup(
+    descriptors: &mut [Descriptor; process::DESCRIPTORS],
+    descriptor: u64,
+) -> Option<&mut Descriptor> {
+    let index = usize::try_from(descriptor).ok()?.checked_sub(3)?;
+    descriptors.get_mut(index).filter(|slot| slot.used)
+}
+
+fn close(descriptors: &mut [Descriptor; process::DESCRIPTORS], descriptor: u64) -> u64 {
+    match lookup(descriptors, descriptor) {
+        Some(slot) => {
+            slot.used = false;
+            0
+        }
+        None => error(EBADF),
+    }
+}
+
+#[inline(never)]
+fn file_read(
+    domain: &mut arch::Domain,
+    services: &mut Services<'_>,
+    descriptors: &mut [Descriptor; process::DESCRIPTORS],
+    descriptor: u64,
+    length: u64,
+) -> u64 {
+    let Some(slot) = lookup(descriptors, descriptor).filter(|slot| slot.readable) else {
+        return error(EBADF);
+    };
+    let Some(filesystem) = services.filesystem.as_deref_mut() else {
+        return error(ENOSYS);
+    };
+    let length = length.min(BLOCK_BYTES as u64);
+    let outcome = filesystem.filesystem_request(
+        slot.handle,
+        services.storage,
+        fs::COMMAND_READ,
+        [u64::from(slot.entry), slot.offset, length],
+    );
+    match service_error(outcome) {
+        Ok([count, _, _]) => {
+            for offset in 0..(count as usize).min(BLOCK_BYTES) {
+                let byte = filesystem.read_block(offset);
+                domain.core().write_block(offset, byte);
+            }
+            slot.offset += count;
+            count
+        }
+        Err(number) => error(number),
+    }
+}
+
+#[inline(never)]
+fn file_write(
+    domain: &mut arch::Domain,
+    services: &mut Services<'_>,
+    descriptors: &mut [Descriptor; process::DESCRIPTORS],
+    descriptor: u64,
+    length: u64,
+) -> u64 {
+    let Some(slot) = lookup(descriptors, descriptor).filter(|slot| slot.writable) else {
+        return error(EBADF);
+    };
+    let Some(filesystem) = services.filesystem.as_deref_mut() else {
+        return error(ENOSYS);
+    };
+    let length = length.min(BLOCK_BYTES as u64);
+    for offset in 0..length as usize {
+        let byte = domain.core().read_block(offset);
+        filesystem.write_block(offset, byte);
+    }
+    let outcome = filesystem.filesystem_request(
+        slot.handle,
+        services.storage,
+        fs::COMMAND_WRITE,
+        [u64::from(slot.entry), slot.offset, length],
+    );
+    match service_error(outcome) {
+        Ok([count, _, _]) => {
+            slot.offset += count;
+            count
+        }
+        Err(number) => error(number),
     }
 }
 
 /// Descriptors 1 and 2 are the console, through the console driver domain,
 /// with the terminal's line discipline applied here: a newline becomes a
 /// carriage return and a newline, so the process may write text as text.
-fn write(
-    domain: &mut arch::Domain,
-    console: &mut ServiceDomain,
-    descriptor: u64,
-    length: u64,
-) -> u64 {
-    if descriptor != 1 && descriptor != 2 {
-        return (-9_i64) as u64; // EBADF
-    }
+#[inline(never)]
+fn write_console(domain: &mut arch::Domain, console: &mut ServiceDomain, length: u64) -> u64 {
     let length = (length as usize).min(BLOCK_BYTES);
     let mut bytes = [0_u8; BLOCK_BYTES * 2];
     let mut count = 0;

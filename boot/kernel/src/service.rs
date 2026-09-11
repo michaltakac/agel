@@ -38,6 +38,10 @@ pub enum ServiceKind {
     /// The 8042 keyboard controller, x86-64 graphics only.
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
     Input,
+    /// The filesystem service: no device at all, only sectors it asks the
+    /// supervisor to move through the storage driver.
+    #[cfg(feature = "process")]
+    Filesystem,
 }
 
 /// A capability-shaped reference to a service.
@@ -51,6 +55,10 @@ pub struct ServiceHandle {
 }
 
 impl ServiceHandle {
+    /// A handle no service ever issued; it fails every check.
+    #[cfg(feature = "process")]
+    pub const NONE: Self = Self { generation: 0 };
+
     /// The generation this handle was issued against.
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn generation(self) -> u32 {
@@ -86,7 +94,7 @@ impl ServiceError {
     }
 
     /// A short name for serial reports.
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     pub fn name(self) -> &'static str {
         match self {
             Self::Stale => "stale-generation",
@@ -100,14 +108,14 @@ impl ServiceError {
 /// An unprivileged driver domain the supervisor can lose and replace.
 pub struct ServiceDomain {
     domain: arch::Domain,
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     kind: ServiceKind,
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     entry: u64,
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     ticks: u32,
     generation: u32,
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     restarts: u32,
     /// Fault injection for the persistence suite: how many more sector writes
     /// this machine survives. The write the count lands on is torn, half of
@@ -121,14 +129,14 @@ impl ServiceDomain {
     pub fn new(domain: arch::Domain, _kind: ServiceKind, _entry: u64, _ticks: u32) -> Self {
         Self {
             domain,
-            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+            #[cfg(not(feature = "native-graphics"))]
             kind: _kind,
-            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+            #[cfg(not(feature = "native-graphics"))]
             entry: _entry,
-            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+            #[cfg(not(feature = "native-graphics"))]
             ticks: _ticks,
             generation: 1,
-            #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+            #[cfg(not(feature = "native-graphics"))]
             restarts: 0,
             #[cfg(feature = "isolated-repl")]
             power_cut: None,
@@ -242,6 +250,113 @@ impl ServiceDomain {
         self.block_request(handle, shared::COMMAND_FLUSH_DISK, 0)
     }
 
+    /// Ask the filesystem service to perform `command`, serving every sector
+    /// request it makes along the way through `storage`. The service's
+    /// answer is its status word (zero, or an error number) and value words.
+    #[cfg(feature = "process")]
+    #[inline(never)]
+    pub fn filesystem_request(
+        &mut self,
+        handle: ServiceHandle,
+        storage: &mut ServiceDomain,
+        command: u64,
+        arguments: [u64; 3],
+    ) -> Result<(u64, [u64; 3]), ServiceError> {
+        use crate::world::fs;
+        self.check(handle)?;
+        for (index, argument) in arguments.iter().enumerate() {
+            self.domain
+                .core()
+                .write_shared(shared::ARGUMENTS + index, *argument);
+        }
+        self.domain.core().write_shared(fs::DISK_OPERATION, 0);
+        self.domain.core().stage_command(command);
+        loop {
+            match self.domain.run() {
+                Stop::Replied => {}
+                _ => return Err(ServiceError::Faulted),
+            }
+            let operation = self.domain.core().read_shared(fs::DISK_OPERATION);
+            if operation == 0 {
+                break;
+            }
+            // A sector request: the service's block area is the buffer, and
+            // the sector must lie inside the region the service owns.
+            let sector = self.domain.core().read_shared(fs::DISK_SECTOR);
+            let status =
+                if sector < u64::from(fs::FIRST_SECTOR) || sector > u64::from(fs::LAST_SECTOR) {
+                    fs::EACCES
+                } else {
+                    let lba = sector as u32;
+                    let mut bytes = [0_u8; crate::world::BLOCK_BYTES];
+                    let outcome = if operation == fs::DISK_READ {
+                        storage
+                            .read_sector(storage.handle(), lba, &mut bytes)
+                            .map(|()| {
+                                for (offset, byte) in bytes.iter().enumerate() {
+                                    self.domain.core().write_block(offset, *byte);
+                                }
+                            })
+                    } else if operation == fs::DISK_WRITE {
+                        for (offset, byte) in bytes.iter_mut().enumerate() {
+                            *byte = self.domain.core().read_block(offset);
+                        }
+                        storage
+                            .write_sector(storage.handle(), lba, &bytes)
+                            .and_then(|()| storage.flush(storage.handle()))
+                    } else {
+                        Err(ServiceError::Faulted)
+                    };
+                    if outcome.is_ok() {
+                        0
+                    } else {
+                        fs::EIO
+                    }
+                };
+            self.domain.core().write_shared(fs::DISK_STATUS, status);
+            self.domain.core().write_shared(fs::DISK_OPERATION, 0);
+        }
+        let status = self.domain.core().read_shared(shared::STATUS);
+        let values = [
+            self.domain.core().read_shared(shared::VALUES),
+            self.domain.core().read_shared(shared::VALUES + 1),
+            self.domain.core().read_shared(shared::VALUES + 2),
+        ];
+        Ok((status, values))
+    }
+
+    /// Copy `bytes` into the service's payload area, for a path.
+    #[cfg(feature = "process")]
+    pub fn write_payload(&mut self, bytes: &[u8]) {
+        for (offset, byte) in bytes.iter().take(PAYLOAD_BYTES).enumerate() {
+            self.domain.core().write_payload(offset, *byte);
+        }
+    }
+
+    /// The length of the name the filesystem service left in its payload.
+    #[cfg(feature = "process")]
+    pub fn name_length(&mut self) -> u64 {
+        self.domain.core().read_shared(shared::VALUES + 3)
+    }
+
+    /// One byte of the service's payload area, for a name it answered.
+    #[cfg(feature = "process")]
+    pub fn read_payload(&mut self, offset: usize) -> u8 {
+        self.domain.core().read_payload(offset)
+    }
+
+    /// One byte of the service's block area, for data it answered.
+    #[cfg(feature = "process")]
+    pub fn read_block(&mut self, offset: usize) -> u8 {
+        self.domain.core().read_block(offset)
+    }
+
+    /// Write one byte of the service's block area, for data to store.
+    #[cfg(feature = "process")]
+    pub fn write_block(&mut self, offset: usize, byte: u8) {
+        self.domain.core().write_block(offset, byte);
+    }
+
     fn check(&self, handle: ServiceHandle) -> Result<(), ServiceError> {
         if handle.generation != self.generation {
             return Err(ServiceError::Stale);
@@ -280,7 +395,7 @@ impl ServiceDomain {
     }
 
     /// The current generation.
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     pub fn generation(&self) -> u32 {
         self.generation
     }
@@ -343,7 +458,7 @@ impl ServiceDomain {
     /// the translations it still holds to those frames are dead. The
     /// replacement is a different domain with a different address space, not
     /// a resumed one.
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     pub fn restart(&mut self, machine: &mut arch::Machine) -> Result<(), &'static str> {
         let stopped = *self.domain.frames();
         machine.reclaim(&stopped);
@@ -352,6 +467,8 @@ impl ServiceDomain {
             ServiceKind::Storage => machine.create_storage_world(self.entry, self.ticks)?,
             #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
             ServiceKind::Input => machine.create_input_world(self.entry, self.ticks)?,
+            #[cfg(feature = "process")]
+            ServiceKind::Filesystem => machine.create_filesystem_world(self.entry, self.ticks)?,
         };
         self.domain = replacement;
         self.generation = self

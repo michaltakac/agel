@@ -244,6 +244,25 @@ impl Machine {
             .map_err(|error| error.name())
     }
 
+    /// Build the filesystem service's domain: no device, a private stack,
+    /// and the shared page through which it asks for sectors.
+    #[cfg(feature = "process")]
+    pub fn create_filesystem_world(
+        &mut self,
+        entry: u64,
+        ticks: u32,
+    ) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            DeviceGrant::Nothing,
+            crate::world::fs::STACK_PAGES,
+        )
+        .map_err(|error| error.name())
+    }
+
     /// Build a domain with the fixed stack budget required by the native evaluator.
     pub fn create_evaluator_world(
         &mut self,

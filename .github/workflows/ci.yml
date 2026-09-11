@@ -52,6 +52,9 @@ jobs:
       - run: ./scripts/test-process.sh
       - run: ./scripts/test-process.sh aarch64
       - run: ./scripts/test-process.sh riscv64
+      - run: ./scripts/test-files.sh
+      - run: ./scripts/test-files.sh aarch64
+      - run: ./scripts/test-files.sh riscv64
       - run: ./scripts/test-kernel-rollback.sh
       - run: ./scripts/test-graphics.sh
       - run: ./scripts/test-live-desktop.sh

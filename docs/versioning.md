@@ -163,6 +163,13 @@ promise.
   is 3,072 sectors. Images from before are not read and are rebuilt. The
   hashing and curve code linked into the kernel and the contract model's
   object lookups no longer carry panic paths.
+  `v0.2.43` is the POSIX personality's first stratum of files: an
+  unprivileged filesystem service owning disk sectors 1536–2047 through
+  supervisor-relayed sector requests, a namespace granted per process at
+  `:exec NAME [ROOT] [ro]`, and `open`, `read`, `write`, `close` on
+  descriptors derived from it, with `ESTALE` after `:fs-restart`;
+  `scripts/test-files.sh` proves it on all three machines, and the programs
+  share the `agel-process-abi` crate.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

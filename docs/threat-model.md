@@ -1025,6 +1025,33 @@ a capability the process holds. No files, no namespaces, no C library.
   halt, so every one removed is a way the machine cannot stop; the change
   also removes the building machine's source paths from the image.
 
+## v0.2.43
+
+- **A path is not authority:** a process opens a name through the namespace
+  the operator granted at `:exec`, a root entry and three rights. The
+  supervisor refuses a write or a create the namespace lacks before the
+  filesystem service sees the path; the service resolves the path from the
+  process's root and refuses `..` there; so a file outside the namespace is
+  `ENOENT` however it is spelled, and the tests spell it both ways.
+- **A filesystem that cannot reach the disk:** the service is an
+  unprivileged world with no device. Every sector it wants is a request the
+  supervisor relays through the storage driver domain, bounded to the
+  region the service owns; a sector outside it is `EACCES`, and the
+  service's arithmetic cannot change that.
+- **Descriptors that die with their service:** a descriptor records the
+  service generation it was opened under, and `:fs-restart` makes every
+  earlier one `ESTALE`. This is the same rule as driver handles, and it is
+  implemented but not yet exercised by a test, because a process cannot
+  outlive one `:exec`.
+- **No panics in the service:** the filesystem world is written without
+  indexing the compiler must guard, so a malformed directory sector is
+  refused by its checks rather than by a panic that would leave the world's
+  text for the kernel's and be contained as a fault.
+- **The region is data:** the service believes the directory sectors it
+  reads. A damaged or hostile region can make it return wrong names and
+  lengths, never a sector outside the region and never anything in the
+  supervisor; the superblock magic is the only integrity check.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

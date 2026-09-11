@@ -119,7 +119,12 @@ definition without rebooting the VM.
 :kernel-promote    make a kernel slot verified by a healthy boot the trusted one
 :kernel-fault      give the candidate kernel up; the next boot loads the trusted slot
 :cut-power N       fault injection: tear the N-th sector write from now and halt
-:exec NAME         load a program from the disk's program region into a fresh domain and run it
+:exec NAME [ROOT] [ro]  load a program from the disk's program region into a fresh domain and run it
+                   inside a namespace rooted at ROOT (default /), read-only with ro
+:fs-format         write an empty filesystem to the region the filesystem service owns
+:fs-mkdir PATH     create a directory
+:fs-ls [PATH]      list a directory: names, with / after a directory and the size after a file
+:fs-restart        replace the filesystem service world; descriptors from before fail closed
 :shutdown          leave QEMU when the debug-exit device is present
 ```
 

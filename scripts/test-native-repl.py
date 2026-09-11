@@ -824,6 +824,78 @@ def exec_test(image: str, architecture: str, disk: str) -> None:
         boot.close()
 
 
+def run_program(harness: Harness, command: str, lines: list[bytes]) -> None:
+    """Send an :exec line and require exactly these output lines, then the prompt."""
+    harness.send_bytes(command)
+    assert harness.process.stdin is not None
+    harness.process.stdin.write(b"\n")
+    harness.process.stdin.flush()
+    harness.expect_exact(b"\r\n" + b"".join(line + b"\r\n" for line in lines) + b"agel-native[0]> ")
+
+
+def files_test(image: str, architecture: str, disk: str) -> None:
+    """Files through a namespace: the filesystem service, descriptors, restarts."""
+    boot = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        boot.expect_until(b"AGEL_NATIVE_READY")
+        boot.expect_until(b"agel-native[0]> ")
+        # An unformatted region is refused, not invented.
+        boot.send(":fs-ls", "filesystem: error 5", 0)
+        boot.send(":fs-format", "formatted", 0)
+        boot.send(":fs-ls", "(empty)", 0)
+        boot.send(":fs-mkdir app", "directory ready: app", 0)
+        boot.send(":fs-mkdir etc", "directory ready: etc", 0)
+        # The operator's root: the writer creates files in two directories.
+        run_program(
+            boot,
+            ":exec writer",
+            [b"writer: wrote etc/secret and app/notes", b"process writer exited with status 0"],
+        )
+        # A namespace rooted at app: notes is there, etc/secret is not a
+        # name, and .. does not climb out.
+        reader_lines = [
+            b"reader: notes: notes for the app",
+            b"reader: etc/secret: error 2",
+            b"reader: ../etc/secret: error 13",
+            b"process reader exited with status 0",
+        ]
+        run_program(boot, ":exec reader /app", reader_lines)
+        # The service restarts with a new generation and the files survive it.
+        boot.send(":fs-restart", "filesystem restarted: generation 2", 0)
+        run_program(boot, ":exec reader /app", reader_lines)
+        # A read-only namespace refuses the first write before the service
+        # sees it, and the program reports the refusal and exits with it.
+        run_program(
+            boot,
+            ":exec writer /app ro",
+            [b"writer: open etc/secret: error 13", b"process writer exited with status 13"],
+        )
+        boot.send_bytes(":fs-ls /")
+        assert boot.process.stdin is not None
+        boot.process.stdin.write(b"\n")
+        boot.process.stdin.flush()
+        boot.expect_exact(b"\r\napp/\r\netc/\r\nagel-native[0]> ")
+        boot.send_bytes(":fs-ls /etc")
+        boot.process.stdin.write(b"\n")
+        boot.process.stdin.flush()
+        boot.expect_exact(b"\r\nsecret  11 bytes\r\nagel-native[0]> ")
+        boot.send(":exec reader /nowhere", "filesystem: error 2", 0)
+        boot.send("(+ 20 22)", "42", 1)
+        shutdown(boot)
+    finally:
+        boot.close()
+
+    # The files are on the disk, not in the service: a new boot reads them.
+    again = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        again.expect_until(b"AGEL_NATIVE_READY")
+        again.expect_until(b"agel-native[0]> ")
+        run_program(again, ":exec reader /app", reader_lines)
+        shutdown(again)
+    finally:
+        again.close()
+
+
 def send_kernel_healthy(
     harness: Harness, line: str, expected: str, slot: str, revision: int
 ) -> None:
@@ -912,7 +984,7 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --files | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
@@ -928,6 +1000,19 @@ def main() -> int:
                 print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
             return 1
         print(f"Agel processes [{architecture}]: load from disk -> run in a domain -> exit, contained, or absent [ok]")
+        return 0
+    if len(arguments) == 2 and arguments[1] == "--files":
+        if disk is None:
+            print("files need a disk; pass --disk", file=sys.stderr)
+            return 2
+        try:
+            files_test(arguments[0], architecture, disk)
+        except Exception as error:
+            print(f"files test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print(f"Agel files [{architecture}]: format -> namespaces -> descriptors -> service restart -> reboot [ok]")
         return 0
     if len(arguments) == 2 and arguments[1] == "--power-cut":
         if disk is None:

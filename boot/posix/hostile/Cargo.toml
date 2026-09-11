@@ -7,3 +7,6 @@ publish = false
 [[bin]]
 name = "hostile"
 path = "src/main.rs"
+
+[dependencies]
+agel-process-abi = { path = "../abi" }

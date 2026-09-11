@@ -392,13 +392,92 @@ pub mod process {
     /// Leave with the status in the first argument word.
     pub const EXIT: u64 = 1;
     /// Write the block area's first `arguments[1]` bytes to descriptor
-    /// `arguments[0]`. Descriptors 1 and 2 are the console.
+    /// `arguments[0]`. Descriptors 1 and 2 are the console; 3 and up are
+    /// files opened through the process's namespace.
     pub const WRITE: u64 = 2;
+    /// Open the path in the payload area (`arguments[1]` bytes) with the
+    /// flags in `arguments[0]`, resolved inside the process's namespace;
+    /// answers a descriptor or a negated error number.
+    pub const OPEN: u64 = 3;
+    /// Read up to `arguments[1]` bytes from descriptor `arguments[0]` into
+    /// the block area; answers the count, zero at the end of the file.
+    pub const READ: u64 = 4;
+    /// Close descriptor `arguments[0]`.
+    pub const CLOSE: u64 = 5;
+    /// `open` flags, the POSIX values.
+    pub const O_WRONLY: u64 = 0o1;
+    pub const O_RDWR: u64 = 0o2;
+    pub const O_CREAT: u64 = 0o100;
+    pub const O_DIRECTORY: u64 = 0o200000;
+    /// Descriptors a process may hold at once, numbered from 3.
+    pub const DESCRIPTORS: usize = 16;
     /// Stack pages a process is built with.
     pub const STACK_PAGES: u64 = 16;
     /// Tick budget per entry: a process that computes for longer yields
     /// nothing and is stopped like any world that never yields.
     pub const TICKS: u32 = 100;
+}
+
+/// The filesystem service's protocol: commands the supervisor issues on a
+/// process's behalf, with the answer in the status and value words, and
+/// the sector requests the service makes of the supervisor while it works,
+/// which the supervisor serves through the storage driver domain and then
+/// resumes the service. The service never names a device; it names sectors
+/// inside the region it was told it owns.
+#[cfg(feature = "process")]
+pub mod fs {
+    /// Write an empty filesystem over the region.
+    pub const COMMAND_FORMAT: u64 = 0xb000;
+    /// Resolve the payload path from directory `arguments[0]` with `open`
+    /// flags `arguments[1]` and length `arguments[2]`; values: entry, length,
+    /// kind.
+    pub const COMMAND_OPEN: u64 = 0xb100;
+    /// Read `arguments[2]` bytes at offset `arguments[1]` of entry
+    /// `arguments[0]` into the block area; values: bytes read.
+    pub const COMMAND_READ: u64 = 0xb200;
+    /// Write the block area's `arguments[2]` bytes at offset `arguments[1]`
+    /// of entry `arguments[0]`; values: bytes written.
+    pub const COMMAND_WRITE: u64 = 0xb300;
+    /// The `arguments[1]`-th child of directory `arguments[0]`: its name in
+    /// the payload, values: entry, kind, length, or status `not found` past
+    /// the last.
+    pub const COMMAND_LIST: u64 = 0xb400;
+    /// Sector request words the service fills before it yields mid-command:
+    /// operation (0 none, 1 read, 2 write), sector, and the answer.
+    pub const DISK_OPERATION: usize = 72;
+    pub const DISK_SECTOR: usize = 73;
+    pub const DISK_STATUS: usize = 74;
+    pub const DISK_READ: u64 = 1;
+    pub const DISK_WRITE: u64 = 2;
+    /// The region the service owns on the disk, inclusive.
+    pub const FIRST_SECTOR: u32 = 1536;
+    pub const LAST_SECTOR: u32 = 2047;
+    /// Kinds of directory entry.
+    pub const KIND_FILE: u64 = 1;
+    pub const KIND_DIRECTORY: u64 = 2;
+    /// The most a file may hold: one extent.
+    pub const FILE_BYTES: u64 = 4096;
+    /// Entries in the directory, the root included.
+    pub const ENTRIES: u64 = 32;
+    /// Error numbers the service answers with, POSIX values.
+    pub const ENOENT: u64 = 2;
+    pub const EIO: u64 = 5;
+    pub const EACCES: u64 = 13;
+    pub const ENOTDIR: u64 = 20;
+    pub const EISDIR: u64 = 21;
+    pub const EINVAL: u64 = 22;
+    pub const EFBIG: u64 = 27;
+    pub const ENOSPC: u64 = 28;
+    /// `open` flag bits the service interprets, the POSIX values.
+    pub const O_WRONLY_BIT: u64 = 0o1;
+    pub const O_RDWR_BIT: u64 = 0o2;
+    pub const O_CREAT_BIT: u64 = 0o100;
+    pub const O_DIRECTORY_BIT: u64 = 0o200000;
+    /// Stack pages the service is built with.
+    pub const STACK_PAGES: u64 = 8;
+    /// Its tick budget per entry, generous because a command may relay
+    /// several sectors.
+    pub const TICKS: u32 = 300;
 }
 
 /// Byte offset in the shared page where console payload bytes begin.

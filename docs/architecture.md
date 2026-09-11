@@ -317,7 +317,10 @@ Each rung must be runnable and differentially testable against the rung below:
    domain on all three research machines, speaking a request protocol for
    `write` and `exit`; see [`posix-personality.md`](posix-personality.md)
    for the strata that follow. v0.2.42 grew the disk layout, doubling the
-   kernel slots, so those strata have room in the image.
+   kernel slots, so those strata have room in the image. The second
+   stratum (v0.2.43) exists: an unprivileged filesystem service, a
+   namespace per process, and descriptors that fail closed across a
+   service restart.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
