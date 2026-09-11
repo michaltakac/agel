@@ -1424,6 +1424,26 @@ Not claimed: the ledger does not count page-table frames, which the
 pool allocates as mappings need them and which are not reclaimed with
 the domain's frames (as before); no `mmap`; no shrinking of the break.
 
+## v0.2.61
+
+- **A block is zeroed before it is anyone's:** the service writes eight
+  zero sectors over a block before recording it in the bitmap and the
+  entry, so a file that grows into a block an earlier file freed reads
+  zeros there, never the earlier file's bytes; a partial write into a
+  fresh block lands on zeros.
+- **The bitmap is the service's, inside its region:** allocation and
+  release change one word of the superblock the service alone writes,
+  through the same relayed sector requests, so the supervisor's bound
+  on the region holds for every block.
+- **Still one world, one request at a time:** a block taken and a
+  superblock written are two sector writes; a power cut between them
+  leaks the block (marked used, not in any entry) rather than sharing
+  it, since the bitmap is written first.
+
+Not claimed: no recovery of leaked blocks after a cut, no free-space
+accounting beyond the bitmap, and a region formatted before v0.2.61 is
+`EIO` until formatted again.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

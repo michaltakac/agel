@@ -272,6 +272,10 @@ promise.
   the frame ledger is 512 on every build; `chdir` and `getcwd` in the
   library; `ftruncate` through a service command that zero-fills growth;
   `heap.c` proves each on all three machines.
+  `v0.2.61` lets files grow past one block: `agelfs` version 2 with a
+  block bitmap in the superblock and sixteen block numbers per entry,
+  blocks zeroed when taken and freed on cut or removal, files of 64 KiB
+  in a region of 63 blocks; `big.c` proves it on all three machines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -1820,20 +1820,35 @@ pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
 // disk it cannot touch, asking the supervisor for every sector.
 // ---------------------------------------------------------------------------
 
-/// The on-disk shape: a superblock, four directory sectors, then one
-/// eight-sector extent per directory entry. Entry 0 is the root directory.
+/// The on-disk shape: a superblock holding a bitmap of the data blocks,
+/// four directory sectors, then sixty-three blocks of four kibibytes
+/// that entries take as they grow, up to sixteen each. Entry 0 is the
+/// root directory.
 #[cfg(feature = "process")]
 mod agelfs {
-    pub const MAGIC: &[u8; 8] = b"AGELFS1\0";
+    pub const MAGIC: &[u8; 8] = b"AGELFS2\0";
     pub const SUPERBLOCK: u64 = crate::world::fs::FIRST_SECTOR as u64;
+    /// The bitmap's place in the superblock: bit `k` set when block `k`
+    /// is some entry's.
+    pub const BITMAP_OFFSET: usize = 16;
     pub const DIRECTORY: u64 = SUPERBLOCK + 1;
     pub const DIRECTORY_SECTORS: u64 = 4;
-    pub const DATA: u64 = DIRECTORY + DIRECTORY_SECTORS;
-    pub const EXTENT_SECTORS: u64 = crate::world::fs::FILE_BYTES / 512;
+    /// The first data block's sector: the metadata rounded up to a block.
+    pub const DATA: u64 = SUPERBLOCK + BLOCK_SECTORS;
+    pub const BLOCK_SECTORS: u64 = 8;
+    pub const BLOCK_BYTES: u64 = 512 * BLOCK_SECTORS;
+    /// Data blocks in the region: what is left after the metadata.
+    pub const BLOCKS: usize =
+        ((crate::world::fs::LAST_SECTOR as u64 + 1 - DATA) / BLOCK_SECTORS) as usize;
+    /// Blocks one entry may hold, and the value of a slot holding none.
+    pub const ENTRY_BLOCKS: usize = (crate::world::fs::FILE_BYTES / BLOCK_BYTES) as usize;
+    pub const NO_BLOCK: u8 = 0xff;
     pub const ENTRIES: usize = crate::world::fs::ENTRIES as usize;
     pub const ENTRY_BYTES: usize = 64;
     pub const PER_SECTOR: usize = 512 / ENTRY_BYTES;
     pub const NAME_BYTES: usize = 32;
+    /// Where an entry's block list sits in its 64 bytes.
+    pub const BLOCKS_OFFSET: usize = 40;
 }
 
 /// One directory entry as the service keeps it in memory.
@@ -1845,6 +1860,8 @@ struct Entry {
     kind: u8,
     parent: u16,
     length: u32,
+    /// The data blocks, in order; `NO_BLOCK` past the last.
+    blocks: [u8; agelfs::ENTRY_BLOCKS],
 }
 
 #[cfg(feature = "process")]
@@ -1855,6 +1872,7 @@ impl Entry {
         kind: 0,
         parent: 0,
         length: 0,
+        blocks: [agelfs::NO_BLOCK; agelfs::ENTRY_BLOCKS],
     };
 }
 
@@ -1863,6 +1881,8 @@ impl Entry {
 struct Filesystem {
     page: *mut u64,
     entries: [Entry; agelfs::ENTRIES],
+    /// The superblock's bitmap: bit `k` set when block `k` is taken.
+    used: u64,
     mounted: bool,
     sector: [u8; 512],
 }
@@ -1936,6 +1956,9 @@ impl Filesystem {
         if !self.sector.starts_with(agelfs::MAGIC) {
             return Err(fs::EIO);
         }
+        let mut bitmap = [0_u8; 8];
+        bitmap.copy_from_slice(&self.sector[agelfs::BITMAP_OFFSET..agelfs::BITMAP_OFFSET + 8]);
+        self.used = u64::from_le_bytes(bitmap);
         for sector in 0..agelfs::DIRECTORY_SECTORS {
             unsafe { self.read_sector(agelfs::DIRECTORY + sector)? };
             let (rows, _) = self.sector.as_chunks::<{ agelfs::ENTRY_BYTES }>();
@@ -1949,6 +1972,13 @@ impl Filesystem {
                 entry.kind = raw[33];
                 entry.parent = u16::from_le_bytes([raw[34], raw[35]]);
                 entry.length = u32::from_le_bytes([raw[36], raw[37], raw[38], raw[39]]);
+                for (block, stored) in entry
+                    .blocks
+                    .iter_mut()
+                    .zip(raw.iter().skip(agelfs::BLOCKS_OFFSET))
+                {
+                    *block = *stored;
+                }
                 if entry.name_len as usize > agelfs::NAME_BYTES {
                     entry.name_len = 0;
                 }
@@ -1980,8 +2010,95 @@ impl Filesystem {
             raw[37] = l1;
             raw[38] = l2;
             raw[39] = l3;
+            for (stored, block) in raw
+                .iter_mut()
+                .skip(agelfs::BLOCKS_OFFSET)
+                .zip(entry.blocks.iter())
+            {
+                *stored = *block;
+            }
         }
         unsafe { self.write_sector(agelfs::DIRECTORY + sector as u64) }
+    }
+
+    /// Write the superblock: the magic and the bitmap.
+    #[link_section = ".user_text"]
+    unsafe fn flush_superblock(&mut self) -> Result<(), u64> {
+        self.sector = [0; 512];
+        for (stored, byte) in self.sector.iter_mut().zip(agelfs::MAGIC.iter()) {
+            *stored = *byte;
+        }
+        self.sector[8] = 2;
+        self.sector[agelfs::BITMAP_OFFSET..agelfs::BITMAP_OFFSET + 8]
+            .copy_from_slice(&self.used.to_le_bytes());
+        unsafe { self.write_sector(agelfs::SUPERBLOCK) }
+    }
+
+    /// The sector holding byte `at` of entry `index`, when the block for it
+    /// is there.
+    #[link_section = ".user_text"]
+    fn sector_of(&self, index: usize, at: u64) -> Result<u64, u64> {
+        let entry = self.entry(index)?;
+        let block = entry
+            .blocks
+            .get((at / agelfs::BLOCK_BYTES) as usize)
+            .copied()
+            .filter(|block| *block != agelfs::NO_BLOCK)
+            .ok_or(crate::world::fs::EIO)?;
+        Ok(agelfs::DATA
+            + u64::from(block) * agelfs::BLOCK_SECTORS
+            + (at % agelfs::BLOCK_BYTES) / 512)
+    }
+
+    /// Give entry `index` a block for byte `at` if it has none: a free
+    /// block from the bitmap, zeroed on the disk before it is anyone's,
+    /// so a fresh block never shows what an earlier file left.
+    #[link_section = ".user_text"]
+    unsafe fn ensure_block(&mut self, index: usize, at: u64) -> Result<(), u64> {
+        use crate::world::fs;
+        let slot = (at / agelfs::BLOCK_BYTES) as usize;
+        if slot >= agelfs::ENTRY_BLOCKS {
+            return Err(fs::EFBIG);
+        }
+        if self.entry(index)?.blocks[slot] != agelfs::NO_BLOCK {
+            return Ok(());
+        }
+        let Some(block) = (0..agelfs::BLOCKS).find(|block| self.used & (1 << block) == 0) else {
+            return Err(fs::ENOSPC);
+        };
+        self.sector = [0; 512];
+        for sector in 0..agelfs::BLOCK_SECTORS {
+            unsafe {
+                self.write_sector(agelfs::DATA + block as u64 * agelfs::BLOCK_SECTORS + sector)?
+            };
+        }
+        self.used |= 1 << block;
+        unsafe { self.flush_superblock()? };
+        if let Some(entry) = self.entries.get_mut(index) {
+            entry.blocks[slot] = block as u8;
+        }
+        unsafe { self.flush_entry(index) }
+    }
+
+    /// Give back entry `index`'s blocks from `first_kept_bytes` on.
+    #[link_section = ".user_text"]
+    unsafe fn release_blocks(&mut self, index: usize, first_kept_bytes: u64) -> Result<(), u64> {
+        let first = first_kept_bytes.div_ceil(agelfs::BLOCK_BYTES) as usize;
+        let mut changed = false;
+        if let Some(entry) = self.entries.get_mut(index) {
+            for slot in entry.blocks.iter_mut().skip(first) {
+                if *slot != agelfs::NO_BLOCK {
+                    self.used &= !(1 << *slot);
+                    *slot = agelfs::NO_BLOCK;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            unsafe { self.flush_superblock()? };
+            unsafe { self.flush_entry(index)? };
+        }
+        Ok(())
     }
 
     #[link_section = ".user_text"]
@@ -1990,8 +2107,8 @@ impl Filesystem {
         for (stored, byte) in self.sector.iter_mut().zip(agelfs::MAGIC.iter()) {
             *stored = *byte;
         }
-        self.sector[8] = 1;
-        unsafe { self.write_sector(agelfs::SUPERBLOCK)? };
+        self.used = 0;
+        unsafe { self.flush_superblock()? };
         self.entries = [Entry::EMPTY; agelfs::ENTRIES];
         self.entries[0].kind = crate::world::fs::KIND_DIRECTORY as u8;
         for sector in 0..agelfs::DIRECTORY_SECTORS as usize {
@@ -2114,7 +2231,7 @@ impl Filesystem {
         let mut done = 0_u64;
         while done < length {
             let at = offset + done;
-            let sector = agelfs::DATA + index as u64 * agelfs::EXTENT_SECTORS + at / 512;
+            let sector = self.sector_of(index, at)?;
             unsafe { self.read_sector(sector)? };
             let inside = (at % 512) as usize;
             let take = ((512 - inside) as u64).min(length - done) as usize;
@@ -2147,7 +2264,8 @@ impl Filesystem {
         let mut done = 0_u64;
         while done < length {
             let at = offset + done;
-            let sector = agelfs::DATA + index as u64 * agelfs::EXTENT_SECTORS + at / 512;
+            unsafe { self.ensure_block(index, at)? };
+            let sector = self.sector_of(index, at)?;
             let inside = (at % 512) as usize;
             let take = ((512 - inside) as u64).min(length - done) as usize;
             unsafe { self.read_sector(sector)? };
@@ -2191,6 +2309,7 @@ impl Filesystem {
         {
             return Err(fs::ENOTEMPTY);
         }
+        unsafe { self.release_blocks(index, 0)? };
         if let Some(slot) = self.entries.get_mut(index) {
             *slot = Entry::EMPTY;
         }
@@ -2260,9 +2379,20 @@ impl Filesystem {
             return Err(fs::EFBIG);
         }
         let old = u64::from(entry.length);
+        if length < old {
+            unsafe { self.release_blocks(index, length)? };
+        }
         let mut at = old;
         while at < length {
-            let sector = agelfs::DATA + index as u64 * agelfs::EXTENT_SECTORS + at / 512;
+            let slot = (at / agelfs::BLOCK_BYTES) as usize;
+            let fresh = self.entry(index)?.blocks.get(slot).copied() == Some(agelfs::NO_BLOCK);
+            unsafe { self.ensure_block(index, at)? };
+            if fresh {
+                // A block just allocated is zeros already: skip to its end.
+                at = (at / agelfs::BLOCK_BYTES + 1) * agelfs::BLOCK_BYTES;
+                continue;
+            }
+            let sector = self.sector_of(index, at)?;
             let inside = (at % 512) as usize;
             let take = ((512 - inside) as u64).min(length - at) as usize;
             unsafe { self.read_sector(sector)? };
@@ -2320,6 +2450,7 @@ pub unsafe extern "C" fn agel_fs_main(shared_page: u64) -> ! {
     let mut filesystem = Filesystem {
         page,
         entries: [Entry::EMPTY; agelfs::ENTRIES],
+        used: 0,
         mounted: false,
         sector: [0; 512],
     };

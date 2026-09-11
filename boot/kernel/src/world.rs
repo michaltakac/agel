@@ -618,8 +618,8 @@ pub mod fs {
     /// Kinds of directory entry.
     pub const KIND_FILE: u64 = 1;
     pub const KIND_DIRECTORY: u64 = 2;
-    /// The most a file may hold: one extent.
-    pub const FILE_BYTES: u64 = 4096;
+    /// The most a file may hold: sixteen blocks of four kibibytes.
+    pub const FILE_BYTES: u64 = 65536;
     /// Entries in the directory, the root included.
     pub const ENTRIES: u64 = 32;
     /// Error numbers the service answers with, POSIX values.

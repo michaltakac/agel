@@ -971,6 +971,22 @@ def c_test(image: str, architecture: str, disk: str) -> None:
                 b"process c-heap exited with status 0",
             ],
         )
+        # Files beyond one block: the writer's two files hold two of the
+        # region's 63 blocks, big takes three, so three full files of 16
+        # blocks fit and the fourth runs out; everything removed, the
+        # space is back.
+        run_program(
+            boot,
+            ":exec c-big",
+            [
+                b"big: 50000 bytes on disk, 50000 read back, intact",
+                b"big: cut to 3000 and grown to 10000: kept, the growth zero",
+                b"big: a byte past 64 KiB: errno 27",
+                b"big: 3 files of 64 KiB, then errno 28",
+                b"big: space came back: yes",
+                b"process c-big exited with status 0",
+            ],
+        )
         # Names: mkdir, stat, rename, opendir and readdir, unlink and rmdir
         # in a namespace rooted at app; sscanf and getopt on the arguments.
         run_program(

@@ -362,6 +362,9 @@ Each rung must be runnable and differentially testable against the rung below:
    process's break, past a guard page after its image; the C library's
    heap lives on them and grows on demand; `chdir` is the library's,
    `ftruncate` the service's, zero-filling what grows.
+56. **Files beyond one block (v0.2.61):** the filesystem service's second
+   on-disk shape, a bitmap of 4 KiB blocks and sixteen per entry, blocks
+   zeroed when taken and given back on cut or removal.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

@@ -181,9 +181,13 @@ service never touches the device and cannot reach a sector it does not own,
 however it computes the number.
 
 The on-disk shape, `agelfs`, is deliberately small: a superblock
-(`AGELFS1\0`) at sector 1536, four directory sectors of 32 entries (a
-32-byte name, a kind, a parent, a length), and one 8-sector extent per
-entry, so a file holds at most 4,096 bytes. Entry 0 is the root directory.
+(`AGELFS2\0` since v0.2.61) at sector 1536 holding a bitmap of the data
+blocks, four directory sectors of 32 entries (a 32-byte name, a kind, a
+parent, a length, and up to sixteen block numbers), and sixty-three
+blocks of 4 KiB from sector 1544 that entries take as they grow, so a
+file holds at most 64 KiB and the region 252 KiB of data. A block is
+zeroed on the disk when it is taken, before it is anyone's, and given
+back when a file is removed or cut. Entry 0 is the root directory.
 An unformatted region is `EIO`, not an empty filesystem the service
 invents; `:fs-format` writes one. The service keeps the directory in its
 stack and writes an entry's sector back on every change, so the files are
@@ -236,7 +240,7 @@ read on a closed descriptor to answer `EBADF`.
 The stale-descriptor path is implemented and not exercised: a process runs
 to its end within one `:exec`, and there is no way yet to restart the
 service while one holds a descriptor, so `ESTALE` is code the tests have
-not reached. Files hold one extent; there is no `unlink`, `rename`, `seek`,
+not reached. Files held one extent until v0.2.61; there was no `unlink`, `rename`, `seek`,
 `stat`, no timestamps, no free-space accounting beyond the fixed table, and
 no integrity beyond the superblock magic: a damaged directory sector is
 read as it is. The namespace is a root and three rights, not a general
@@ -506,6 +510,19 @@ fills and checks sixteen 64 KiB blocks, frees them, takes one megabyte,
 is refused 64 megabytes, changes directory into `app` and reads the
 notes, is refused a directory that is not there, and truncates and
 grows a file.
+
+**Files beyond one block (v0.2.61).** `agelfs` version 2 keeps a bitmap
+of sixty-three 4 KiB data blocks in its superblock and up to sixteen
+block numbers per entry: a write into a byte with no block takes a free
+one, zeroes it on the disk and records it in the entry and the bitmap
+before the byte lands, so a fresh block never shows an earlier file; a
+cut or a removal gives blocks back; a write past 64 KiB is `EFBIG` and
+a region with no free block `ENOSPC`. `big.c` writes fifty thousand
+bytes and reads them back, cuts and grows the file with zeros, is
+refused a byte past 64 KiB, fills the region with 64 KiB files until
+`ENOSPC` (three of them, the writer's files and its own taking the rest),
+removes everything and writes 64 KiB again. An `AGELFS1` region is
+`EIO` until formatted: the shape changed and nothing converts it.
 
 **Windows, which are not POSIX.** `<agel/window.h>` declares
 `agel_window(width, height, title)` and `agel_draw(window, records, count,
