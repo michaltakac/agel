@@ -1271,6 +1271,30 @@ Not claimed: one running program at a time; no release, motion or
 modifier events; the budget of sixteen passes is a constant, not a
 scheduler.
 
+## v0.2.53
+
+- **A held pointer belongs to one window:** after a press in a window's
+  content, motion and the release go to that window's owner and nowhere
+  else, until the button is up; the desktop takes no other action from
+  the held pointer, so a process cannot be made to act on a drag that
+  started elsewhere, and a drag that starts in a window cannot reach the
+  desktop's controls.
+- **A window moves only by its own header, only by the pointer:** a
+  process cannot move, raise or resize its window or any other; the
+  order and the places are the scene's, changed by the operator's
+  presses, and a window stays on the screen below the panel.
+- **Stacking is a real order:** the hit test walks the windows from the
+  front, so a press lands on what the operator sees; a covered window
+  receives nothing through the one above it.
+- **Motion is coalesced, never lost to the process's benefit:** a window
+  keeps the latest motion in place of an older one, so a process that
+  reads slowly sees the pointer's position, not a stale one, and the
+  queue of eight still bounds what a window holds.
+
+Not claimed: no resize; a process's window can be dragged over another
+process's window, which is the operator's doing and covers it; no
+modifier keys.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

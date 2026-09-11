@@ -144,12 +144,36 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         def dot_pixels(x, y, width, height):
             return panel_region(machine, x, y, width, height).count(b"\xe7\x9c\xfe")
         assert dot_pixels(740, 280, 40, 40) == 0, "a dot before any press"
+        def press():
+            machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": True, "button": "left"}}]})
+            time.sleep(0.4)
+        def release():
+            machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": False, "button": "left"}}]})
+            time.sleep(0.4)
         move_to(760, 300)
-        click()
+        press()
         until_text(b"sketch: press at 200,140")
         time.sleep(1.0)
         assert dot_pixels(740, 280, 40, 40) > 300, "no dot where the press landed"
+        # While the button is held the pointer is the window's: the dot
+        # follows it, and the release fixes it where it is.
+        move_to(820, 340)
+        time.sleep(1.0)
+        assert dot_pixels(800, 320, 40, 40) > 300, "the dot did not follow the pointer"
+        assert dot_pixels(740, 280, 40, 40) == 0, "the dot left a trace"
+        release()
+        until_text(b"sketch: release at 260,180")
         Path("target/desktop-sketch.png").write_bytes(machine.frame())
+        # A press in the header takes hold of the window: it follows the
+        # pointer, dot and all, and the place it left is repainted.
+        move_to(700, 140)
+        press()
+        move_to(900, 240)
+        release()
+        time.sleep(1.5)
+        assert dot_pixels(1000, 420, 40, 40) > 300, "the window did not move with its header"
+        assert dot_pixels(800, 320, 40, 40) == 0, "the window's old place was not repainted"
+        Path("target/desktop-moved.png").write_bytes(machine.frame())
         # The window has the keyboard: a serial byte reaches the process,
         # not the workshop's line.
         machine.serial.sendall(b"q")
@@ -157,9 +181,18 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         assert "sketch: quit after 1 dots" in response.decode(), response
         assert "process c-sketch exited with status 0" in response.decode(), response
         assert "PROCESS ENDED" in response.decode(), response
-        # Its window stays, with the dot, until closed.
-        assert dot_pixels(740, 280, 40, 40) > 300, "the dot vanished with the process"
+        # Its window stays, with the dot, until closed; a window opened
+        # later covers it, and a click on it brings it back to the front.
+        assert dot_pixels(1000, 420, 40, 40) > 300, "the dot vanished with the process"
+        response = machine.submit(":exec c-chart -- 1 2")
+        assert "chart: window 1 shows 2 bars" in response, response
+        assert dot_pixels(1000, 420, 40, 40) == 0, "the new window did not cover the old"
+        move_to(1140, 540)
+        click()
+        time.sleep(1.5)
+        assert dot_pixels(1000, 420, 40, 40) > 300, "the clicked window was not raised"
         assert "WINDOW CLOSED 0" in machine.submit(":close 0")
+        assert "WINDOW CLOSED 1" in machine.submit(":close 1")
         # The workshop is still whole, and the frame is a real image.
         assert "42" in machine.submit("(+ 20 22)")
         assert machine.frame().startswith(b"\x89PNG\r\n\x1a\n")

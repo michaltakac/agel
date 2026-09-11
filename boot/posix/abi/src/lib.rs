@@ -30,6 +30,8 @@ pub const DRAW_CLEAR: u64 = 1;
 pub const EVENT: u64 = 12;
 pub const EVENT_PRESS: u64 = 1 << 56;
 pub const EVENT_KEY: u64 = 2 << 56;
+pub const EVENT_RELEASE: u64 = 3 << 56;
+pub const EVENT_MOTION: u64 = 4 << 56;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;

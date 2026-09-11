@@ -24,6 +24,11 @@ impl Pointer {
         }
     }
 
+    /// Whether the button is held, as of the last packet.
+    pub fn down(&self) -> bool {
+        self.down
+    }
+
     pub fn feed(&mut self, byte: u8) -> Option<bool> {
         if self.length == 0 && byte & 8 == 0 {
             return None;

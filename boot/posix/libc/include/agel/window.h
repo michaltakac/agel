@@ -35,10 +35,14 @@ int agel_window(unsigned width, unsigned height, const char *title);
 int agel_draw(int window, const agel_record *records, unsigned count, unsigned flags);
 
 /* What a window receives: a press in its content, at x and y relative to
-   the content, or a key while the window has the keyboard (it has it from
-   when it opens or is clicked until the workshop is clicked). */
+   the content; a key while the window has the keyboard (it has it from
+   when it opens or is clicked until the workshop is clicked); and, after
+   a press, the pointer's motion (coalesced to the latest) and its release,
+   with content coordinates, which may lie outside the content. */
 #define AGEL_EVENT_PRESS 1
 #define AGEL_EVENT_KEY 2
+#define AGEL_EVENT_RELEASE 3
+#define AGEL_EVENT_MOTION 4
 
 typedef struct {
     int kind;

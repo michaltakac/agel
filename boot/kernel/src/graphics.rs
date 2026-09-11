@@ -202,6 +202,28 @@ struct Scene {
     windows: [Option<Window>; crate::world::process::WINDOWS],
     /// The window keys go to, while a live process owns it.
     focus: Option<u8>,
+    /// The windows back to front: every slot once, the front last.
+    order: [u8; crate::world::process::WINDOWS],
+    /// A window being moved by its header: the slot, and where in the
+    /// window the pointer took hold.
+    drag: Option<Drag>,
+    /// The window whose content took a press, until the button is released:
+    /// motion and the release are its.
+    grab: Option<u8>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Drag {
+    slot: u8,
+    dx: i32,
+    dy: i32,
+}
+
+/// Bring `slot` to the front of the order.
+fn raise(order: &mut [u8; crate::world::process::WINDOWS], slot: u8) {
+    if let Some(at) = order.iter().position(|entry| *entry == slot) {
+        order[at..].rotate_left(1);
+    }
 }
 
 const WINDOW_HEADER: u32 = 40;
@@ -246,6 +268,30 @@ impl Window {
         let at = (usize::from(self.event_head) + usize::from(self.event_count)) % capacity;
         self.events[at] = event;
         self.event_count += 1;
+    }
+
+    /// Motion is coalesced: a motion behind another motion replaces it,
+    /// so a slow reader sees where the pointer is, not where it was.
+    fn queue_motion(&mut self, event: u64) {
+        if self.event_count > 0 {
+            let capacity = self.events.len();
+            let last =
+                (usize::from(self.event_head) + usize::from(self.event_count) - 1) % capacity;
+            if self.events[last] & (0xff << 56) == crate::world::process::EVENT_MOTION {
+                self.events[last] = event;
+                return;
+            }
+        }
+        self.queue(event);
+    }
+
+    /// A content coordinate of the pointer at (px, py), which may lie
+    /// outside the content while the button is held: clamped to sixteen
+    /// bits and packed like a press.
+    fn packed_position(&self, px: u32, py: u32) -> u64 {
+        let x = i64::from(px) - i64::from(self.x);
+        let y = i64::from(py) - i64::from(self.y);
+        ((x.clamp(0, 0xffff) as u64) << 32) | ((y.clamp(0, 0xffff) as u64) << 16)
     }
 
     fn take(&mut self) -> Option<u64> {
@@ -436,6 +482,7 @@ struct Desk<'a, 'b> {
     inputs: Option<&'a mut Inputs<'b>>,
     windows: &'a mut [Option<Window>; crate::world::process::WINDOWS],
     focus: &'a mut Option<u8>,
+    order: &'a mut [u8; crate::world::process::WINDOWS],
     pointer: Option<(u32, u32)>,
 }
 
@@ -512,7 +559,8 @@ impl crate::process::Display for Desk<'_, '_> {
         window.title[..usize::from(window.title_len)]
             .copy_from_slice(&title[..usize::from(window.title_len)]);
         self.windows[slot] = Some(window);
-        // A new window has the keyboard.
+        // A new window is in front and has the keyboard.
+        raise(self.order, slot as u8);
         *self.focus = Some(slot as u8);
         self.paint(slot, true);
         slot as i64
@@ -629,6 +677,8 @@ enum Hover {
     Launcher(u8),
     /// A window's body: a click there is the window's, not the desktop's.
     Window(u8),
+    /// A window's header: a press there takes hold of the window.
+    WindowHeader(u8),
     WindowClose(u8),
 }
 
@@ -649,7 +699,7 @@ impl Hover {
                     48,
                 )
             }),
-            Hover::Window(_) => None,
+            Hover::Window(_) | Hover::WindowHeader(_) => None,
             Hover::WindowClose(slot) => scene.windows[usize::from(slot)]
                 .as_ref()
                 .map(Window::close_bounds),
@@ -665,18 +715,22 @@ impl Hover {
                 return Hover::Launcher(((y - LAUNCHER_Y - 56) / 48) as u8);
             }
         }
-        // The last window opened is on top.
-        for (slot, window) in scene.windows.iter().enumerate().rev() {
-            let Some(window) = window else {
+        // Front to back.
+        for slot in scene.order.iter().rev() {
+            let Some(window) = scene.windows[usize::from(*slot)] else {
                 continue;
             };
             let (cx, cy, cw, ch) = window.close_bounds();
             if (cx..cx + cw).contains(&x) && (cy..cy + ch).contains(&y) {
-                return Hover::WindowClose(slot as u8);
+                return Hover::WindowClose(*slot);
             }
             let (wx, wy, ww, wh) = window.outer();
             if (wx..wx + ww).contains(&x) && (wy..wy + wh).contains(&y) {
-                return Hover::Window(slot as u8);
+                return if y < window.y {
+                    Hover::WindowHeader(*slot)
+                } else {
+                    Hover::Window(*slot)
+                };
             }
         }
         if y < 40 && (8..128).contains(&x) {
@@ -826,6 +880,9 @@ impl Scene {
             launcher: None,
             windows: [None; crate::world::process::WINDOWS],
             focus: None,
+            order: [0, 1],
+            drag: None,
+            grab: None,
         }
     }
 }
@@ -1304,7 +1361,11 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
             let x = 716 + u32::from(tile) * 72;
             frame.push(surface_record(x, 936, 56, 56, 14, 0xff_ff_ff, 60))?;
         }
-        Hover::Launcher(_) | Hover::Window(_) | Hover::WindowClose(_) | Hover::Nothing => {}
+        Hover::Launcher(_)
+        | Hover::Window(_)
+        | Hover::WindowHeader(_)
+        | Hover::WindowClose(_)
+        | Hover::Nothing => {}
     }
     // The terminal panel: processes' output, or a hint when nothing ran.
     frame.push(surface_record(452, 292, 1360, 508, 16, 0x1b_1b_1b, 255))?;
@@ -1336,9 +1397,10 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
             }
         }
     }
-    for (slot, window) in scene.windows.iter().enumerate() {
-        if let Some(window) = window {
-            let hover_close = scene.hover == Hover::WindowClose(slot as u8);
+    // Back to front, so the front window covers the others.
+    for slot in scene.order {
+        if let Some(window) = &scene.windows[usize::from(slot)] {
+            let hover_close = scene.hover == Hover::WindowClose(slot);
             window_records(&mut frame, window, hover_close, true)?;
         }
     }
@@ -1898,6 +1960,7 @@ fn execute_workshop(
             inputs,
             windows: &mut current.windows,
             focus: &mut current.focus,
+            order: &mut current.order,
             pointer: current.pointer,
         };
         let run = prepare_run();
@@ -1944,6 +2007,12 @@ fn execute_workshop(
                 *window = None;
                 if current.focus == Some(slot as u8) {
                     current.focus = None;
+                }
+                if current.grab == Some(slot as u8) {
+                    current.grab = None;
+                }
+                if current.drag.is_some_and(|drag| drag.slot == slot as u8) {
+                    current.drag = None;
                 }
                 let mut status = StatusLine::new(b"WINDOW CLOSED ");
                 status.number(slot as u8);
@@ -2607,6 +2676,8 @@ fn interactive(
     let mut idle: u32 = 0;
     // A process that waits for its window's events, run between inputs.
     let mut running: Option<&'static mut crate::process::Run> = None;
+    // The pointer's button as of the last packet, for releases.
+    let mut held = false;
     loop {
         let Some(input) = next_input(
             &mut console_driver,
@@ -2625,6 +2696,7 @@ fn interactive(
                         inputs: Some(&mut inputs),
                         windows: &mut current.windows,
                         focus: &mut current.focus,
+                        order: &mut current.order,
                         pointer: current.pointer,
                     };
                     let mut services = crate::process::Services {
@@ -2724,6 +2796,61 @@ fn interactive(
                 }
                 let (px, py) = (pointer.x as u32, pointer.y as u32);
                 current.pointer = Some((px, py));
+                let released = held && !pointer.down();
+                held = pointer.down();
+                // A window taken hold of by its header follows the pointer
+                // while the button is held; the old and new places are
+                // repainted together.
+                if let Some(drag) = current.drag {
+                    if let Some(window) = current.windows[usize::from(drag.slot)].as_mut() {
+                        let (ox, oy, width, height) = window.outer();
+                        let x = (i64::from(px) - i64::from(drag.dx))
+                            .clamp(0, i64::from(crate::world::SCENE_WIDTH - width));
+                        let y = (i64::from(py) - i64::from(drag.dy)).clamp(
+                            i64::from(WINDOW_HEADER + 40),
+                            i64::from(crate::world::SCENE_DRAWABLE_HEIGHT - window.height),
+                        );
+                        window.x = x as u32;
+                        window.y = y as u32;
+                        let (nx, ny, _, _) = window.outer();
+                        if released {
+                            current.drag = None;
+                        }
+                        let left = ox.min(nx).saturating_sub(WINDOW_SHADOW);
+                        let top = oy.min(ny).saturating_sub(WINDOW_SHADOW);
+                        let right = (ox.max(nx) + width + WINDOW_SHADOW + 32)
+                            .min(crate::world::SCENE_WIDTH);
+                        let bottom = (oy.max(ny) + height + WINDOW_SHADOW + 40)
+                            .min(crate::world::SCENE_HEIGHT);
+                        current.hover = Hover::at(&current, px, py);
+                        let frame = materialize(current, Some(&line[..length]), status.get())
+                            .unwrap_or_else(|reason| failed(reason));
+                        render_region(
+                            compositor,
+                            Some(&mut inputs),
+                            &frame,
+                            (left, top, right - left, bottom - top),
+                        )
+                        .unwrap_or_else(|reason| failed(reason));
+                        continue;
+                    }
+                    current.drag = None;
+                }
+                // A window whose content took the press has the pointer
+                // until the release: motion and the release are its.
+                if let Some(slot) = current.grab {
+                    if let Some(window) = current.windows[usize::from(slot)].as_mut() {
+                        let position = window.packed_position(px, py);
+                        if released {
+                            window.queue(crate::world::process::EVENT_RELEASE | position);
+                        } else if !pressed {
+                            window.queue_motion(crate::world::process::EVENT_MOTION | position);
+                        }
+                    }
+                    if released {
+                        current.grab = None;
+                    }
+                }
                 let over = Hover::at(&current, px, py);
                 let hovered_before = current.hover;
                 current.hover = over;
@@ -2767,19 +2894,48 @@ fn interactive(
                             command.push(b":close ");
                             command.number(slot);
                         }
-                        Hover::Window(slot) => {
-                            // The window's: it takes the keyboard, and a
-                            // press in its content is an event for its
-                            // owner. Nothing on the desktop changes.
+                        Hover::Window(slot) | Hover::WindowHeader(slot) => {
+                            // The window's: it comes to the front and takes
+                            // the keyboard; a press in its content is an
+                            // event for its owner, and the pointer is the
+                            // window's until the release; a press in its
+                            // header takes hold of it.
+                            let was_front = current.order[current.order.len() - 1] == slot;
+                            raise(&mut current.order, slot);
                             current.focus = Some(slot);
                             if let Some(window) = current.windows[usize::from(slot)].as_mut() {
-                                if window.listens() && px >= window.x && py >= window.y {
+                                if over == Hover::WindowHeader(slot) {
+                                    current.drag = Some(Drag {
+                                        slot,
+                                        dx: px as i32 - window.x as i32,
+                                        dy: py as i32 - window.y as i32,
+                                    });
+                                } else if window.listens() && px >= window.x && py >= window.y {
                                     let (x, y) = (px - window.x, py - window.y);
                                     window.queue(
                                         crate::world::process::EVENT_PRESS
                                             | (u64::from(x) << 32)
                                             | (u64::from(y) << 16),
                                     );
+                                    current.grab = Some(slot);
+                                }
+                                if !was_front {
+                                    let (x, y, width, height) = window.outer();
+                                    let frame =
+                                        materialize(current, Some(&line[..length]), status.get())
+                                            .unwrap_or_else(|reason| failed(reason));
+                                    render_region(
+                                        compositor,
+                                        Some(&mut inputs),
+                                        &frame,
+                                        (
+                                            x.saturating_sub(WINDOW_SHADOW),
+                                            y.saturating_sub(WINDOW_SHADOW),
+                                            width + 2 * WINDOW_SHADOW,
+                                            height + 2 * WINDOW_SHADOW,
+                                        ),
+                                    )
+                                    .unwrap_or_else(|reason| failed(reason));
                                 }
                             }
                             continue;

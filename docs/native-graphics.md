@@ -247,10 +247,46 @@ the dot's colour where the press landed, sends `q` on the serial console
 and reads the quit, the exit report and `PROCESS ENDED`, and requires the
 dot still there until `:close 0`.
 
-What this is not yet: no pointer release, motion or modifier events; a
-process that computes without listening still holds the desktop until it
-ends; one running program at a time; sixteen passes per idle turn is a
-fixed budget, not a scheduler. Windows still do not move or resize.
+What this was not yet: no pointer release or motion events; windows did
+not move or stack. A process that computes without listening still holds
+the desktop until it ends; one running program at a time; sixteen passes
+per idle turn is a fixed budget, not a scheduler.
+
+## Windows that move (v0.2.53)
+
+Windows behave like windows:
+
+![The sketch window moved by its header, the dot with it, at v0.2.53](images/native-desktop-v0.2.53.png)
+
+- **A press in a header takes hold of the window.** While the button is
+  held the window follows the pointer, clamped to the screen below the
+  panel; the place it left and the place it reaches are repainted
+  together, with the shadow's margin, and nothing else. The release lets
+  go.
+- **A press on a window brings it to the front.** The scene keeps the
+  windows' order, back to front; the frame paints them in that order and
+  the hit test walks it from the front, so a covered window's content is
+  not clicked through the one above. A new window opens in front.
+- **After a press in a window's content, the pointer is the window's
+  until the release.** The owner receives the motion, coalesced to the
+  latest position so a slow reader sees where the pointer is, and then
+  the release, both in content coordinates (clamped, as the pointer may
+  leave the content while held); `EVENT_RELEASE` and `EVENT_MOTION` join
+  the protocol. Nothing else on the desktop sees the held pointer.
+- The pointer decoder reports whether the button is held, so a release
+  is a packet with the button up after one with it down.
+
+`sketch.c` now moves the dot with the pointer until the release fixes it.
+`scripts/test-desktop-process.sh` presses in the window, drags, requires
+the dot to follow with no trace behind, reads the release on the console,
+drags the window by its header and requires the dot to have moved with
+it and the old place repainted, opens a chart over it and requires the
+dot covered, clicks the sketch and requires it back in front.
+
+What this is not yet: no resize, no maximize or minimize (the sprite
+sheet has the controls; nothing answers them), no motion events without
+a press, no modifier keys; windows cannot be moved over the panel or off
+the screen.
 
 ## Live Agel forms
 

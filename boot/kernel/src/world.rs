@@ -477,6 +477,13 @@ pub mod process {
     pub const EVENT_PRESS: u64 = 1 << 56;
     #[cfg(feature = "native-graphics")]
     pub const EVENT_KEY: u64 = 2 << 56;
+    /// After a press in the content, the pointer is the window's until the
+    /// button is released: motion, coalesced to the latest, then release,
+    /// both with content coordinates like a press.
+    #[cfg(feature = "native-graphics")]
+    pub const EVENT_RELEASE: u64 = 3 << 56;
+    #[cfg(feature = "native-graphics")]
+    pub const EVENT_MOTION: u64 = 4 << 56;
     /// Events a window queues before the oldest is dropped.
     #[cfg(feature = "native-graphics")]
     pub const WINDOW_EVENTS: usize = 8;

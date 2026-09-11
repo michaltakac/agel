@@ -336,9 +336,10 @@ Each rung must be runnable and differentially testable against the rung below:
    desktop responds to the pointer, with a launcher, dock actions, hover
    states and a clock from a driver domain; at v0.2.51 a process owns a
    window, drawing records the supervisor checks and keeps; at v0.2.52
-   the window listens and the process runs between the desktop's inputs.
-   Still to come: the workshop as one window among others, and windows
-   that move.
+   the window listens and the process runs between the desktop's inputs;
+   at v0.2.53 windows move by their header, stack, and hand their owner
+   the pointer's motion. Still to come: the workshop as one window among
+   others, and windows that resize.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

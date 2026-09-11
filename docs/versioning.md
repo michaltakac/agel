@@ -232,6 +232,12 @@ promise.
   serial workshop unchanged in behaviour, `agel_event` in the C library
   and a `sketch` program; the desktop test presses in its window, reads
   the press on the console, sees the dot, and ends it with a key.
+  `v0.2.53` makes windows move: a press in a header takes hold of the
+  window and it follows the pointer, a press on a window brings it to the
+  front through an order the scene keeps, and after a press in a
+  window's content the owner receives the pointer's motion and release;
+  the desktop test drags the dot, drags the window and raises it from
+  under another.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
