@@ -4,7 +4,7 @@
 //! what a command means; it runs the service protocols and reports.
 
 use crate::arch;
-use crate::process::{self, Console, Line, Namespace, Services};
+use crate::process::{self, Console, Display, Line, Namespace, Services};
 use crate::service::{ServiceDomain, ServiceError};
 use crate::world::fs;
 use core::fmt::Write;
@@ -145,6 +145,7 @@ pub fn exec_program(
     storage: Option<&mut ServiceDomain>,
     filesystem: Option<&mut ServiceDomain>,
     console: &mut dyn Console,
+    display: Option<&mut dyn Display>,
     rest: &[u8],
 ) {
     let Some(storage) = storage else {
@@ -231,6 +232,8 @@ pub fn exec_program(
             storage,
             console,
             filesystem,
+            // Reborrowed, so the trait object's lifetime is the table's.
+            display: display.map(|display| &mut *display as &mut dyn Display),
         };
         match process::exec(
             machine,

@@ -1,13 +1,15 @@
 #!/bin/sh
 # C programs built from source against agel-libc, on any of the three
 # machines: printf, the heap and the string routines; open, read, write and
-# close through a namespace; errno and main's status.
+# close through a namespace; errno and main's status; a window request
+# where there is no display.
 set -eu
 
 architecture=${1:-x86_64}
 writer=$(./scripts/build-program.sh writer "$architecture" | tail -n 1)
 hello=$(./scripts/build-c-program.sh hello "$architecture" | tail -n 1)
 cat_program=$(./scripts/build-c-program.sh cat "$architecture" | tail -n 1)
+chart=$(./scripts/build-c-program.sh chart "$architecture" | tail -n 1)
 case "$architecture" in
   x86_64)
     image=$(./scripts/build-boot.sh --features isolated-repl | tail -n 1)
@@ -28,4 +30,5 @@ esac
 python3 ./scripts/install-program.py "$disk" writer "$writer" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-hello "$hello" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-cat "$cat_program" >/dev/null
+python3 ./scripts/install-program.py "$disk" c-chart "$chart" >/dev/null
 python3 ./scripts/test-native-repl.py "$kernel" --c --arch "$architecture" --disk "$disk"

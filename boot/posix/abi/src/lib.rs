@@ -21,6 +21,13 @@ pub const SPAWN: u64 = 6;
 pub const PIPE: u64 = 7;
 pub const WAIT: u64 = 8;
 pub const SEEK: u64 = 9;
+/// A window on the desktop, and records drawn into it: graphics only.
+pub const WINDOW: u64 = 10;
+pub const DRAW: u64 = 11;
+pub const DRAW_CLEAR: u64 = 1;
+/// A compositor record is 64 bytes; a draw request carries at most eight.
+pub const RECORD_BYTES: usize = 64;
+pub const DRAW_RECORDS: usize = 8;
 /// Shared-page word holding the number of NUL-terminated arguments the
 /// supervisor placed in the payload area before the process first ran.
 pub const ARGUMENT_COUNT: usize = 70;
@@ -176,6 +183,35 @@ impl Process {
         } else {
             Ok((result & 0xffff, (result >> 16) & 0xffff))
         }
+    }
+
+    /// Ask the desktop for a window of `width` by `height` pixels of
+    /// content, titled `title` (at most 28 bytes): its number, or a
+    /// negated error number (`-ENODEV` where there is no display).
+    pub fn window(&self, width: u32, height: u32, title: &[u8]) -> i64 {
+        let take = title.len().min(28);
+        let payload = (self.page as usize + PAYLOAD_OFFSET) as *mut u8;
+        for (offset, byte) in title.iter().take(take).enumerate() {
+            unsafe { payload.add(offset).write_volatile(*byte) };
+        }
+        self.request(
+            WINDOW,
+            [u64::from(width), u64::from(height), take as u64, 0],
+        ) as i64
+    }
+
+    /// Draw `records` (whole 64-byte compositor records, at most eight)
+    /// into window `window`, relative to its content, clearing it first
+    /// with `DRAW_CLEAR` in `flags`. The records the window now holds, or
+    /// a negated error number; `-EINVAL` and nothing drawn when any record
+    /// is not permitted or lies outside the content.
+    pub fn draw(&self, window: u64, records: &[u8], flags: u64) -> i64 {
+        let count = (records.len() / RECORD_BYTES).min(DRAW_RECORDS);
+        let block = (self.page as usize + BLOCK_OFFSET) as *mut u8;
+        for (offset, byte) in records.iter().take(count * RECORD_BYTES).enumerate() {
+            unsafe { block.add(offset).write_volatile(*byte) };
+        }
+        self.request(DRAW, [window, count as u64, flags, 0]) as i64
     }
 
     /// Wait for child `id` to end: its exit status, `WAIT_SIGNALED` with a

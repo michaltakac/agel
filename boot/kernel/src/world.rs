@@ -447,6 +447,37 @@ pub mod process {
     /// start (`arguments[2]` = 0), the current offset (1) or the end (2);
     /// answers the new offset. Pipes and the console have no offset.
     pub const SEEK: u64 = 9;
+    /// Ask the display for a window of `arguments[0]` by `arguments[1]`
+    /// pixels of content, titled by the payload area's first
+    /// `arguments[2]` bytes; answers the window's number. `-ENODEV` where
+    /// there is no display (the serial workshop), `-EBUSY` when every
+    /// window is taken or the process already owns one, `-EINVAL` for a
+    /// size outside `WINDOW_MIN`..`WINDOW_MAX`. Graphics only.
+    pub const WINDOW: u64 = 10;
+    /// Draw the block area's first `arguments[1]` records (64 bytes each,
+    /// at most `DRAW_RECORDS`) into window `arguments[0]`, relative to its
+    /// content; `arguments[2]` with `DRAW_CLEAR` empties the window first.
+    /// The supervisor keeps the records and repaints them with the desktop,
+    /// so nothing a process draws outlives a check: every record must be a
+    /// permitted operation lying wholly inside the window's content, or the
+    /// whole request is `-EINVAL` and nothing is drawn. Answers the number
+    /// of records the window now holds; `-ENOSPC` when they would exceed
+    /// `WINDOW_RECORDS`, `-EBADF` for a window the process does not own.
+    pub const DRAW: u64 = 11;
+    #[cfg(feature = "native-graphics")]
+    pub const DRAW_CLEAR: u64 = 1;
+    /// Records one draw request carries: the block area's 512 bytes.
+    pub const DRAW_RECORDS: usize = 8;
+    /// Windows the desktop keeps at once, and what one retains.
+    #[cfg(feature = "native-graphics")]
+    pub const WINDOWS: usize = 2;
+    #[cfg(feature = "native-graphics")]
+    pub const WINDOW_RECORDS: usize = 24;
+    /// The smallest and largest content a window may have.
+    #[cfg(feature = "native-graphics")]
+    pub const WINDOW_MIN: (u32, u32) = (64, 48);
+    #[cfg(feature = "native-graphics")]
+    pub const WINDOW_MAX: (u32, u32) = (1280, 720);
     /// The number of NUL-terminated arguments the supervisor placed in the
     /// payload area before the process first ran; the first is its name.
     pub const ARGUMENT_COUNT: usize = 70;

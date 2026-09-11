@@ -83,6 +83,8 @@ and resumes the process.
 | `7` pipe | none | read descriptor in the low sixteen bits, write descriptor in the next sixteen; stratum 3 |
 | `8` wait | child id | the child's exit status, or `0x100` with a signal number in the low byte when the machine stopped it (`11` a fault, `9` a budget or a deadlock); blocks until the child ends; `-ECHILD` for a child that is not the caller's; stratum 3 |
 | `9` seek | descriptor, offset, whence (0 start, 1 current, 2 end) | the new offset; `-ESPIPE` for a pipe or the console; stratum 4 |
+| `10` window | width, height, title length ≤ 28 | a window's number, or `-ENODEV` where there is no display, `-EBUSY` when every window is taken or the process has one, `-EINVAL` for a size outside 64×48..1280×720; the title is in the payload area; not POSIX, see [`native-graphics.md`](native-graphics.md) |
+| `11` draw | window, record count ≤ 8, flags (`1` clears first) | the records the window holds after this; the records are 64-byte compositor records in the block area, relative to the window's content; `-EINVAL` and nothing drawn when any is not permitted or reaches outside the content, `-ENOSPC` past 24 records, `-EBADF` for a window the process does not own; not POSIX |
 
 Before a process first runs, the supervisor places its arguments in the
 payload area as NUL-terminated strings, the program's name first, and
@@ -436,6 +438,19 @@ What this step adds:
   is Brad Conte's public-domain SHA-256 as published; `digest.c` is the
   program around it, and the test compares its digest of a file with the
   host's.
+
+**Windows, which are not POSIX.** `<agel/window.h>` declares
+`agel_window(width, height, title)` and `agel_draw(window, records, count,
+flags)` over the `10` and `11` requests, with inline builders for the
+records the desktop admits: `agel_rect`, `agel_gradient`, `agel_ellipse`,
+`agel_label`, `agel_surface`, `agel_sprite`. `chart.c` draws a bar for
+each number on its command line and, given the word `outside`, first asks
+to draw past its window's edge and reports the refusal. On a machine with
+no display the request answers `-ENODEV`, which `chart` reports and exits
+with 3; `scripts/test-libc.sh` requires exactly that on all three
+machines, and `scripts/test-desktop-process.sh` the windows themselves.
+How the desktop keeps and checks what a process draws is in
+[`native-graphics.md`](native-graphics.md).
 
 What it does not add: no `scanf` family, no `time`, no `signal`, no
 `setjmp`, no `math`, no environment, no `getopt`, no `stat`, no

@@ -138,9 +138,72 @@ A burst of pointer packets is coalesced into one repaint, and a large move
 sent as one event loses packets to the controller's queue, as a real
 mouse never sends one; the tests move in steps.
 
-What this is not yet: a process cannot own a window or draw into one; it
-writes text into the workshop's terminal and nothing else. The editor tile
-does nothing. The shadow is a linear falloff, not a blur.
+What this was not yet: a process could not own a window or draw into one;
+it wrote text into the workshop's terminal and nothing else. The editor
+tile does nothing. The shadow is a linear falloff, not a blur.
+
+## Windows a process can own (v0.2.51)
+
+A process asks the supervisor for a window and draws into it, and the
+supervisor keeps what it drew:
+
+![Two windows a C program asked for, at v0.2.51](images/native-desktop-v0.2.51.png)
+
+The process protocol gains two requests, `10` **window** and `11`
+**draw** (the table is in [`posix-personality.md`](posix-personality.md)).
+A window is content of a requested size, 64×48 up to 1280×720, under a
+header the desktop draws: the title in Fira Sans Medium, a close control
+from the sprite sheet, COSMIC's surfaces and radius, a shadow. Windows
+cascade from the workshop's upper left; the desktop keeps two.
+
+A draw request carries up to eight 64-byte compositor records in the
+process's block area, in the coordinates of the window's content. The
+supervisor **checks every record before anything is painted**: the
+operation must be one a window admits (a rectangle, a gradient
+rectangle, an ellipse, a label, a surface, a sprite; never the full-screen
+gradient, never a shadow), the colours 24-bit and the alphas at most 255,
+the face and sprite index ones the atlases carry, and the whole shape must
+lie inside the content, a label measured in its face. One record that
+fails refuses the request with `-EINVAL` and nothing of it is drawn. The
+records that pass are appended to the window (at most 24; a request past
+that is `-ENOSPC`; `DRAW_CLEAR` empties the window first) and kept **by
+the supervisor**, translated to the window's place when the frame is
+materialized, so a window is repainted with the desktop like every other
+surface, and outlives its process. A process may draw only into a window
+it asked for, while it runs: the process table names the drawing process
+by its slot, and when the process ends the window's owner is cleared, so
+a later process in the same slot is refused with `-EBADF`.
+
+Painting is regional: opening a window paints its box with the shadow
+once; each draw repaints the box without the shadow, so the shadow is
+never blended twice, and the pointer is redrawn when it is over the box.
+The close control lightens under the pointer; a click on it is the typed
+command `:close N`, which the operator can also type; `:close` answers
+`WINDOW CLOSED N` or `NO SUCH WINDOW`. A click anywhere else on a window
+belongs to the window and does nothing on the desktop beneath. The scene
+transaction leaves windows and the terminal alone: `(rollback)` restores
+the language's scene, not what processes made. The frame's record budget
+grows from 160 to 224 for two windows and the launcher at once.
+
+The serial workshop has no display: a window request there answers
+`-ENODEV`, and `chart` says so and exits with 3.
+
+From C, `<agel/window.h>` declares `agel_window` and `agel_draw` and
+inline builders for the six record kinds; `boot/posix/c/chart.c` draws a
+bar for each number on its command line and, given `outside`, first asks
+for a rectangle past the edge and reports the refusal.
+`scripts/test-desktop-process.sh` runs it twice, requires the refusal
+and both windows' bars on the screen (the bars' colour appears inside the
+windows' boxes and nowhere there before), closes the second by clicking
+its close control and the first by `:close 0`, and requires the bars
+gone; `scripts/test-libc.sh` requires the `-ENODEV` answer on all three
+machines.
+
+What this is not yet: a window receives no input, so a process cannot
+react to a click or a key in it; a process runs to its end before the
+desktop takes the next input, so a window cannot animate; windows do not
+move, resize, stack by click or overlap the launcher; the workshop is not
+itself a window. Two windows, 24 records each.
 
 ## Live Agel forms
 

@@ -1218,6 +1218,33 @@ descriptor 0 is what it was given at `:exec`, which is nothing).
 Not claimed: the editor tile does nothing yet, and the launcher shows the
 program table's first eight names.
 
+## v0.2.51
+
+- **A window is a bounded grant, not a framebuffer:** a process never
+  sees pixels or the compositor. It hands the supervisor records in the
+  coordinates of its own content, and the supervisor refuses any record
+  that is not one of the admitted operations or reaches outside the
+  content, before anything is painted; a refused request draws nothing.
+  The full-screen gradient and the shadow are not admitted, so a process
+  cannot paint over the desktop or darken what is around its window.
+- **What is kept is the supervisor's:** the accepted records live in the
+  scene, translated to the window's place at materialization, and are
+  repainted with the desktop; a window outlives its process, and no
+  process can draw into a window it did not ask for: the process table
+  names the drawing process by its slot, and the owner is cleared when it
+  ends, so a later process in the same slot is `-EBADF`.
+- **Bounded:** two windows, 24 records each, eight per request, titles
+  of 28 bytes, sizes from 64×48 to 1280×720; a draw is refused, never
+  truncated. The frame budget is 224 records and a frame past it fails
+  the paint rather than dropping records silently.
+- **Closing is a typed command:** the close control becomes `:close N`,
+  echoed on the console like every click.
+
+Not claimed: a window receives no input; a process runs to its end before
+the desktop reads the next input, so a window cannot react or animate;
+the process side's records are trusted only after the check, and the
+compositor still validates every record it receives as before.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

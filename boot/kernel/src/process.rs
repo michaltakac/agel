@@ -102,6 +102,7 @@ impl Descriptor {
 const EIO: i64 = 5;
 const EBADF: i64 = 9;
 const ECHILD: i64 = 10;
+const ENODEV: i64 = 19;
 const EAGAIN: i64 = 11;
 const EACCES: i64 = 13;
 const ENFILE: i64 = 23;
@@ -396,6 +397,32 @@ pub struct Services<'a> {
     /// Absent when the machine has no filesystem service; every file request
     /// then answers `-ENOSYS`.
     pub filesystem: Option<&'a mut ServiceDomain>,
+    /// Absent where there is no desktop; a window request then answers
+    /// `-ENODEV`.
+    pub display: Option<&'a mut dyn Display>,
+}
+
+/// A compositor record as a process hands it over: 64 bytes.
+pub const RECORD_BYTES: usize = 64;
+
+/// The desktop's side of windows: what serves `WINDOW` and `DRAW`. The
+/// implementation owns the windows and the policy of what may be drawn;
+/// the process table only relays a process's slot as the owner.
+pub trait Display {
+    /// A window for process `owner`: its number, or a negated error.
+    fn open(&mut self, owner: usize, width: u32, height: u32, title: &[u8]) -> i64;
+    /// Records into a window `owner` owns: the count it holds, or a
+    /// negated error and nothing drawn.
+    fn draw(
+        &mut self,
+        owner: usize,
+        window: u64,
+        flags: u64,
+        records: &[[u8; RECORD_BYTES]],
+    ) -> i64;
+    /// Process `owner` has ended: what it owned stays on the desktop, but
+    /// no later process in that slot may draw into it.
+    fn release(&mut self, owner: usize);
 }
 
 /// Why a process is not running.
@@ -695,6 +722,8 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         process::PIPE => pipe(table, index),
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
         process::SPAWN => spawn(machine, services, table, index, arguments),
+        process::WINDOW => window(table, index, services, arguments),
+        process::DRAW => draw(table, index, services, arguments),
         process::WAIT => {
             let child = arguments[0] as usize;
             let known = child < process::PROCESSES
@@ -717,6 +746,56 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         _ => error(ENOSYS),
     };
     answer(table, index, result);
+}
+
+/// `WINDOW`: relayed to the display with the process's slot as the owner;
+/// the title is the payload area's first `arguments[2]` bytes.
+fn window(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    arguments: [u64; 4],
+) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let Some(display) = services.display.as_deref_mut() else {
+        return error(ENODEV);
+    };
+    let (Ok(width), Ok(height)) = (u32::try_from(arguments[0]), u32::try_from(arguments[1])) else {
+        return error(EINVAL);
+    };
+    let length = (arguments[2] as usize).min(28);
+    let mut title = [0_u8; 28];
+    for (offset, byte) in title.iter_mut().take(length).enumerate() {
+        *byte = process.domain.core().read_payload(offset);
+    }
+    display.open(index, width, height, &title[..length]) as u64
+}
+
+/// `DRAW`: the block area's first `arguments[1]` records go to the display
+/// as they are; the display decides whether they are permitted.
+fn draw(table: &mut Table, index: usize, services: &mut Services<'_>, arguments: [u64; 4]) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let Some(display) = services.display.as_deref_mut() else {
+        return error(ENODEV);
+    };
+    let count = arguments[1] as usize;
+    if count > process::DRAW_RECORDS {
+        return error(EINVAL);
+    }
+    let mut records = [[0_u8; RECORD_BYTES]; process::DRAW_RECORDS];
+    for (number, record) in records.iter_mut().take(count).enumerate() {
+        for (offset, byte) in record.iter_mut().enumerate() {
+            *byte = process
+                .domain
+                .core()
+                .read_block(number * RECORD_BYTES + offset);
+        }
+    }
+    display.draw(index, arguments[0], arguments[2], &records[..count]) as u64
 }
 
 fn block(table: &mut Table, index: usize, state: State) {
@@ -743,6 +822,9 @@ fn end(
     };
     process.state = State::Ended(exit);
     machine.reclaim(process.domain.frames());
+    if let Some(display) = services.display.as_deref_mut() {
+        display.release(index);
+    }
     if index != 0 && !matches!(exit, Exit::Status(_)) {
         let mut line = Line::new();
         let _ = line.write_str("process ");

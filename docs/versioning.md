@@ -217,6 +217,14 @@ promise.
   a CMOS driver domain that holds only its two ports; pointer packets are
   coalesced into one repaint. The desktop test clicks the launcher and the
   dock.
+  `v0.2.51` gives a process a window: the process protocol's `window` and
+  `draw` requests, a `Display` trait the graphical workshop implements,
+  every record checked against the window's content before it is painted
+  and kept by the supervisor so the window is repainted with the desktop
+  and outlives its process, a close control and `:close N`,
+  `<agel/window.h>` in the C library and a `chart` program; the desktop
+  test draws two windows and closes them, the C library test requires
+  `-ENODEV` without a display on all three machines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

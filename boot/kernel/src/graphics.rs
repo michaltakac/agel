@@ -22,11 +22,11 @@ const RECORD_BYTES: usize = 64;
 const STREAM_HEADER_BYTES: usize = 16;
 const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
-const MAX_SCENE_COMMANDS: usize = 160;
+const MAX_SCENE_COMMANDS: usize = 224;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :save :reload | :exec NAME [ROOT] :fs-format :fs-mkdir :fs-ls | :revision :rollback :shutdown";
+const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :save :reload | :exec NAME [ROOT] :close N :fs-format :fs-mkdir :fs-ls | :revision :rollback :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 26;
 
@@ -38,6 +38,9 @@ const FACE_NAMES: [&[u8]; FACE_COUNT] = [b"fira-sans", b"fira-sans-medium", b"fi
 const SPRITE_SHEET: &[u8] = b"sprites";
 /// Sprite ids in the sheet `scripts/build-sprites.py` draws.
 const SPRITE_CURSOR: u32 = 0;
+const SPRITE_CLOSE: u32 = 10;
+const SPRITE_COUNT: u32 = 12;
+const SPRITE_SIZE: u32 = 32;
 pub const FACE_SANS: u32 = 0;
 pub const FACE_SANS_MEDIUM: u32 = 1;
 pub const FACE_MONO: u32 = 2;
@@ -142,6 +145,15 @@ fn label_record(
     record
 }
 
+/// An opaque rectangle with square corners.
+fn rect_record(x: u32, y: u32, width: u32, height: u32, color: u32) -> [u8; RECORD_BYTES] {
+    let mut record = [0; RECORD_BYTES];
+    for (index, word) in [2, x, y, width, height, 0, color].iter().enumerate() {
+        put_u32(&mut record, index, *word);
+    }
+    record
+}
+
 /// A rounded box blended over what is below it.
 fn surface_record(
     x: u32,
@@ -185,6 +197,325 @@ struct Scene {
     hover: Hover,
     /// The Applications launcher, when open: the program table's names.
     launcher: Option<Launcher>,
+    /// Windows processes asked for, kept after their process ended until
+    /// closed; drawn after the workshop and under the launcher.
+    windows: [Option<Window>; crate::world::process::WINDOWS],
+}
+
+const WINDOW_HEADER: u32 = 40;
+const WINDOW_RADIUS: u32 = 8;
+const WINDOW_SHADOW: u32 = 24;
+const EBADF: i64 = 9;
+const EBUSY: i64 = 16;
+const EINVAL: i64 = 22;
+const ENOSPC: i64 = 28;
+
+/// A window a process asked for: its content box on the screen (the
+/// header sits above it), its title, and the records the supervisor
+/// accepted into it, kept relative to the content so the desktop repaints
+/// them with everything else.
+#[derive(Clone, Copy)]
+struct Window {
+    title: [u8; 28],
+    title_len: u8,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    records: [[u8; RECORD_BYTES]; crate::world::process::WINDOW_RECORDS],
+    count: u8,
+    /// The process slot that may draw into it, while its process runs.
+    owner: Option<u8>,
+}
+
+impl Window {
+    /// The box the window occupies: header and content.
+    fn outer(&self) -> (u32, u32, u32, u32) {
+        (
+            self.x,
+            self.y - WINDOW_HEADER,
+            self.width,
+            self.height + WINDOW_HEADER,
+        )
+    }
+
+    /// The close control at the header's right.
+    fn close_bounds(&self) -> (u32, u32, u32, u32) {
+        (
+            self.x + self.width - 40,
+            self.y - WINDOW_HEADER + 4,
+            SPRITE_SIZE,
+            SPRITE_SIZE,
+        )
+    }
+
+    fn title(&self) -> &[u8] {
+        &self.title[..usize::from(self.title_len)]
+    }
+
+    /// Whether a process may draw `record` here: one of the operations a
+    /// window admits, lying wholly inside the content. Colours are 24-bit,
+    /// alphas at most 255, as the compositor requires, so a refused record
+    /// never reaches it.
+    fn permits(&self, record: &[u8; RECORD_BYTES]) -> bool {
+        let word = |index: usize| record_u32(record, index);
+        let colour = |value: u32| value <= 0xff_ff_ff;
+        let inside = |x: u32, y: u32, width: u32, height: u32| {
+            width > 0
+                && height > 0
+                && x.checked_add(width)
+                    .is_some_and(|right| right <= self.width)
+                && y.checked_add(height)
+                    .is_some_and(|bottom| bottom <= self.height)
+        };
+        let (x, y) = (word(1), word(2));
+        match word(0) {
+            2 | 3 | 7 => {
+                let (width, height, radius) = (word(3), word(4), word(5));
+                let second = match word(0) {
+                    2 => colour(word(6)),
+                    3 => colour(word(6)) && colour(word(7)),
+                    _ => colour(word(6)) && word(7) <= 255,
+                };
+                inside(x, y, width, height) && radius <= width.min(height) / 2 && second
+            }
+            4 => {
+                let (rx, ry) = (word(3), word(4));
+                rx > 0
+                    && ry > 0
+                    && x >= rx
+                    && y >= ry
+                    && inside(x - rx, y - ry, 2 * rx, 2 * ry)
+                    && colour(word(5))
+            }
+            6 => {
+                let (face, size, length) = (word(3), word(4), word(8) as usize);
+                face < FACE_COUNT as u32
+                    && (1..=64).contains(&size)
+                    && colour(word(5))
+                    && word(6) <= 255
+                    && length <= 28
+                    && inside(
+                        x,
+                        y,
+                        measure(face, size, &record[36..36 + length]).max(1),
+                        line_height(face, size),
+                    )
+            }
+            9 => {
+                word(3) < SPRITE_COUNT
+                    && colour(word(4))
+                    && word(5) <= 255
+                    && inside(x, y, SPRITE_SIZE, SPRITE_SIZE)
+            }
+            _ => false,
+        }
+    }
+}
+
+/// A window's records for the frame: its shadow when asked, its surface
+/// and header, the title, the close control, then what the process drew,
+/// moved to the content's origin.
+fn window_records(
+    frame: &mut Frame,
+    window: &Window,
+    hover_close: bool,
+    shadow: bool,
+) -> Result<(), &'static str> {
+    let (x, y, width, height) = window.outer();
+    if shadow {
+        let mut record = [0; RECORD_BYTES];
+        for (field, word) in [8, x, y, width, height, WINDOW_RADIUS, WINDOW_SHADOW, 140]
+            .iter()
+            .enumerate()
+        {
+            put_u32(&mut record, field, *word);
+        }
+        frame.push(record)?;
+    }
+    frame.push(surface_record(
+        x,
+        y,
+        width,
+        height,
+        WINDOW_RADIUS,
+        0x1b_1b_1b,
+        255,
+    ))?;
+    frame.push(surface_record(
+        x,
+        y,
+        width,
+        WINDOW_HEADER,
+        WINDOW_RADIUS,
+        0x26_26_26,
+        255,
+    ))?;
+    frame.push(rect_record(
+        x,
+        y + WINDOW_RADIUS,
+        width,
+        WINDOW_HEADER - WINDOW_RADIUS,
+        0x26_26_26,
+    ))?;
+    let title_width = measure(FACE_SANS_MEDIUM, 16, window.title());
+    frame.push(label_record(
+        x + width.saturating_sub(title_width) / 2,
+        centred_top(FACE_SANS_MEDIUM, 16, y, WINDOW_HEADER),
+        FACE_SANS_MEDIUM,
+        16,
+        0xde_de_de,
+        window.title(),
+    ))?;
+    let (cx, cy, _, _) = window.close_bounds();
+    if hover_close {
+        frame.push(surface_record(
+            cx,
+            cy,
+            SPRITE_SIZE,
+            SPRITE_SIZE,
+            16,
+            0xff_ff_ff,
+            40,
+        ))?;
+    }
+    frame.push(sprite_record(
+        cx,
+        cy,
+        SPRITE_CLOSE,
+        if hover_close { 0xde_de_de } else { 0x9e_9e_9e },
+    ))?;
+    for record in &window.records[..usize::from(window.count)] {
+        let mut moved = *record;
+        put_u32(&mut moved, 1, record_u32(record, 1) + window.x);
+        put_u32(&mut moved, 2, record_u32(record, 2) + window.y);
+        frame.push(moved)?;
+    }
+    Ok(())
+}
+
+/// The desktop as a process sees it through `WINDOW` and `DRAW`: the
+/// windows of the scene, painted as they change. What a process may draw
+/// is decided here and nowhere else.
+struct Desk<'a, 'b> {
+    compositor: &'a mut arch::Domain,
+    inputs: Option<&'a mut Inputs<'b>>,
+    windows: &'a mut [Option<Window>; crate::world::process::WINDOWS],
+    pointer: Option<(u32, u32)>,
+}
+
+impl Desk<'_, '_> {
+    /// Repaint one window where it is: with its shadow when it is new,
+    /// otherwise only its box, so the shadow is never blended twice.
+    fn paint(&mut self, slot: usize, shadow: bool) {
+        let Some(window) = self.windows[slot] else {
+            return;
+        };
+        let mut frame = Frame::empty();
+        if window_records(&mut frame, &window, false, shadow).is_err() {
+            return;
+        }
+        let (x, y, width, height) = window.outer();
+        let region = if shadow {
+            (
+                x.saturating_sub(WINDOW_SHADOW),
+                y.saturating_sub(WINDOW_SHADOW),
+                width + 2 * WINDOW_SHADOW,
+                height + 2 * WINDOW_SHADOW,
+            )
+        } else {
+            (x, y, width, height)
+        };
+        if let Some((px, py)) = self.pointer {
+            let _ = frame.push(sprite_record(px, py, SPRITE_CURSOR, 0));
+        }
+        let _ = render_region(self.compositor, self.inputs.as_deref_mut(), &frame, region);
+    }
+}
+
+impl crate::process::Display for Desk<'_, '_> {
+    fn open(&mut self, owner: usize, width: u32, height: u32, title: &[u8]) -> i64 {
+        use crate::world::process::{WINDOW_MAX, WINDOW_MIN};
+        if width < WINDOW_MIN.0
+            || height < WINDOW_MIN.1
+            || width > WINDOW_MAX.0
+            || height > WINDOW_MAX.1
+        {
+            return -EINVAL;
+        }
+        if self
+            .windows
+            .iter()
+            .flatten()
+            .any(|window| window.owner == Some(owner as u8))
+        {
+            return -EBUSY;
+        }
+        let Some(slot) = self.windows.iter().position(Option::is_none) else {
+            return -EBUSY;
+        };
+        // Cascaded from the workshop's upper left, kept on the screen.
+        let step = 64 * slot as u32;
+        let x = (560 + step).min(crate::world::SCENE_WIDTH - width - WINDOW_SHADOW);
+        let y = (120 + WINDOW_HEADER + step)
+            .min(crate::world::SCENE_DRAWABLE_HEIGHT - height - WINDOW_SHADOW)
+            .max(WINDOW_HEADER + 48);
+        let mut window = Window {
+            title: [0; 28],
+            title_len: title.len().min(28) as u8,
+            x,
+            y,
+            width,
+            height,
+            records: [[0; RECORD_BYTES]; crate::world::process::WINDOW_RECORDS],
+            count: 0,
+            owner: Some(owner as u8),
+        };
+        window.title[..usize::from(window.title_len)]
+            .copy_from_slice(&title[..usize::from(window.title_len)]);
+        self.windows[slot] = Some(window);
+        self.paint(slot, true);
+        slot as i64
+    }
+
+    fn draw(
+        &mut self,
+        owner: usize,
+        window: u64,
+        flags: u64,
+        records: &[[u8; RECORD_BYTES]],
+    ) -> i64 {
+        let slot = window as usize;
+        let Some(Some(target)) = self.windows.get_mut(slot) else {
+            return -EBADF;
+        };
+        if target.owner != Some(owner as u8) {
+            return -EBADF;
+        }
+        if records.iter().any(|record| !target.permits(record)) {
+            return -EINVAL;
+        }
+        let kept = if flags & crate::world::process::DRAW_CLEAR != 0 {
+            0
+        } else {
+            usize::from(target.count)
+        };
+        if kept + records.len() > target.records.len() {
+            return -ENOSPC;
+        }
+        target.records[kept..kept + records.len()].copy_from_slice(records);
+        target.count = (kept + records.len()) as u8;
+        self.paint(slot, false);
+        i64::from(self.windows[slot].map_or(0, |window| window.count))
+    }
+
+    fn release(&mut self, owner: usize) {
+        for window in self.windows.iter_mut().flatten() {
+            if window.owner == Some(owner as u8) {
+                window.owner = None;
+            }
+        }
+    }
 }
 
 /// Minutes and the date, as the panel shows them.
@@ -230,6 +561,9 @@ enum Hover {
     Applications,
     Dock(u8),
     Launcher(u8),
+    /// A window's body: a click there is the window's, not the desktop's.
+    Window(u8),
+    WindowClose(u8),
 }
 
 const DOCK_TILES: u32 = 7;
@@ -249,6 +583,10 @@ impl Hover {
                     48,
                 )
             }),
+            Hover::Window(_) => None,
+            Hover::WindowClose(slot) => scene.windows[usize::from(slot)]
+                .as_ref()
+                .map(Window::close_bounds),
         }
     }
 
@@ -259,6 +597,20 @@ impl Hover {
                 && (LAUNCHER_Y + 56..LAUNCHER_Y + 56 + launcher.count as u32 * 48).contains(&y)
             {
                 return Hover::Launcher(((y - LAUNCHER_Y - 56) / 48) as u8);
+            }
+        }
+        // The last window opened is on top.
+        for (slot, window) in scene.windows.iter().enumerate().rev() {
+            let Some(window) = window else {
+                continue;
+            };
+            let (cx, cy, cw, ch) = window.close_bounds();
+            if (cx..cx + cw).contains(&x) && (cy..cy + ch).contains(&y) {
+                return Hover::WindowClose(slot as u8);
+            }
+            let (wx, wy, ww, wh) = window.outer();
+            if (wx..wx + ww).contains(&x) && (wy..wy + wh).contains(&y) {
+                return Hover::Window(slot as u8);
             }
         }
         if y < 40 && (8..128).contains(&x) {
@@ -402,6 +754,7 @@ impl Scene {
             clock: None,
             hover: Hover::Nothing,
             launcher: None,
+            windows: [None; crate::world::process::WINDOWS],
         }
     }
 }
@@ -880,7 +1233,7 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
             let x = 716 + u32::from(tile) * 72;
             frame.push(surface_record(x, 936, 56, 56, 14, 0xff_ff_ff, 60))?;
         }
-        Hover::Launcher(_) | Hover::Nothing => {}
+        Hover::Launcher(_) | Hover::Window(_) | Hover::WindowClose(_) | Hover::Nothing => {}
     }
     // The terminal panel: processes' output, or a hint when nothing ran.
     frame.push(surface_record(452, 292, 1360, 508, 16, 0x1b_1b_1b, 255))?;
@@ -910,6 +1263,12 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
                 let x = 476 + measure(FACE_MONO, 16, &text[..piece * 28]);
                 frame.push(label_record(x, y, FACE_MONO, 16, 0xde_de_de, chunk))?;
             }
+        }
+    }
+    for (slot, window) in scene.windows.iter().enumerate() {
+        if let Some(window) = window {
+            let hover_close = scene.hover == Hover::WindowClose(slot as u8);
+            window_records(&mut frame, window, hover_close, true)?;
         }
     }
     if let Some(launcher) = scene.launcher {
@@ -1455,8 +1814,36 @@ fn execute_workshop(
             serial,
             terminal: &mut current.terminal,
         };
-        crate::workshop::exec_program(machine, Some(storage), filesystem, &mut tee, rest);
+        let mut desk = Desk {
+            compositor,
+            inputs,
+            windows: &mut current.windows,
+            pointer: current.pointer,
+        };
+        crate::workshop::exec_program(
+            machine,
+            Some(storage),
+            filesystem,
+            &mut tee,
+            Some(&mut desk),
+            rest,
+        );
         return StatusLine::new(b"PROCESS ENDED");
+    }
+    if let Some(rest) = line.strip_prefix(b":close ") {
+        let slot = match trim(rest) {
+            [digit @ b'0'..=b'9'] => usize::from(digit - b'0'),
+            _ => return StatusLine::new(b"USAGE :close N"),
+        };
+        return match current.windows.get_mut(slot) {
+            Some(window) if window.is_some() => {
+                *window = None;
+                let mut status = StatusLine::new(b"WINDOW CLOSED ");
+                status.number(slot as u8);
+                status
+            }
+            _ => StatusLine::new(b"NO SUCH WINDOW"),
+        };
     }
     if line == b":fs-format"
         || line == b":fs-ls"
@@ -1803,7 +2190,12 @@ fn execute(
             candidate.title = title;
             candidate.title_len = length;
         }
-        Intent::Rollback => candidate = *previous,
+        Intent::Rollback => {
+            candidate = *previous;
+            // What processes made is not part of the scene transaction.
+            candidate.windows = current.windows;
+            candidate.terminal = current.terminal;
+        }
         Intent::Inspect | Intent::Help => unreachable!(),
     }
     match commit_scene(compositor, inputs, current, previous, revision, candidate) {
@@ -2195,13 +2587,20 @@ fn interactive(
                             _ => b"(accent violet)",
                         }),
                         Hover::Dock(6) => command.push(b":help"),
-                        Hover::Dock(_) | Hover::Nothing => {}
+                        Hover::WindowClose(slot) => {
+                            command.push(b":close ");
+                            command.number(slot);
+                        }
+                        Hover::Dock(_) | Hover::Window(_) | Hover::Nothing => {}
                     }
                     if close_launcher {
                         current.launcher = None;
                         current.hover = Hover::Nothing;
                     }
                     if command.len > 0 {
+                        // Echoed as if typed, so the console shows the
+                        // command a click became.
+                        console::write_bytes(command.get());
                         line[..command.len].copy_from_slice(command.get());
                         length = command.len;
                         b'\n'

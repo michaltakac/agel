@@ -419,6 +419,7 @@ pub fn run() -> ! {
                         storage.as_mut(),
                         filesystem.as_mut(),
                         &mut driver,
+                        None,
                         rest,
                     );
                 } else if source == b":fs-format" {

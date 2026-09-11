@@ -932,6 +932,13 @@ def c_test(image: str, architecture: str, disk: str) -> None:
             ":exec c-cat",
             [b"cat: notes: errno 2", b"process c-cat exited with status 2"],
         )
+        # The serial workshop has no display: a window is refused with
+        # ENODEV, and the program says so.
+        run_program(
+            boot,
+            ":exec c-chart",
+            [b"chart: no display (errno 19)", b"process c-chart exited with status 3"],
+        )
         boot.send("(+ 20 22)", "42", 1)
         shutdown(boot)
     finally:

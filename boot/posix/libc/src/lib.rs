@@ -8,7 +8,7 @@
 //! authority; a path resolves through the namespace the process was given.
 #![no_std]
 
-use core::ffi::{c_char, c_int, c_long, c_ulong, c_void};
+use core::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use agel_process_abi::Process;
@@ -230,6 +230,65 @@ pub unsafe extern "C" fn agel_spawn(
         descriptor(stdout_fd),
         flags as u64,
     )) as c_int
+}
+
+// ---------------------------------------------------------------------------
+// agel/window.h
+// ---------------------------------------------------------------------------
+
+/// A window on the desktop: its number, or -1 with `errno` (`ENODEV`
+/// where there is no display).
+///
+/// # Safety
+/// `title` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn agel_window(width: c_uint, height: c_uint, title: *const c_char) -> c_int {
+    let length = unsafe { strlen(title) };
+    let bytes = unsafe { core::slice::from_raw_parts(title as *const u8, length) };
+    outcome(process().window(width, height, bytes)) as c_int
+}
+
+/// Draw `count` records into `window`, eight per request, clearing it
+/// first with `AGEL_DRAW_CLEAR`: the records the window holds, or -1 with
+/// `errno` and the request's records undrawn (`EINVAL` for one the window
+/// does not permit).
+///
+/// # Safety
+/// `records` must point to `count` records of 64 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn agel_draw(
+    window: c_int,
+    records: *const c_void,
+    count: c_uint,
+    flags: c_uint,
+) -> c_int {
+    if window < 0 {
+        return outcome(-9) as c_int;
+    }
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            records as *const u8,
+            count as usize * agel_process_abi::RECORD_BYTES,
+        )
+    };
+    let mut flags = u64::from(flags);
+    let mut held = 0;
+    let mut sent = 0;
+    while sent < bytes.len() || (sent == 0 && flags != 0) {
+        let take = (bytes.len() - sent)
+            .min(agel_process_abi::DRAW_RECORDS * agel_process_abi::RECORD_BYTES);
+        let result = process().draw(window as u64, &bytes[sent..sent + take], flags);
+        if result < 0 {
+            return outcome(result) as c_int;
+        }
+        held = result;
+        flags &= !agel_process_abi::DRAW_CLEAR;
+        sent += take;
+        if take == 0 {
+            break;
+        }
+    }
+    held as c_int
 }
 
 // ---------------------------------------------------------------------------

@@ -60,6 +60,23 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         assert "secret  11 bytes" in listing, listing
         after = panel(machine)
         assert after != before, "the terminal panel did not change"
+        # A process owns a window: the chart asks for one, is refused a
+        # rectangle past its edge, and draws its bars, which the supervisor
+        # keeps and paints; the bars' colour is on the screen inside the
+        # window's box and nowhere before it.
+        def bar_pixels(x, y, width, height):
+            return panel_region(machine, x, y, width, height).count(b"\x63\xd0\xdf")
+        assert bar_pixels(560, 120, 480, 320) == 0, "bar colour before any window"
+        response = machine.submit(":exec c-chart -- 3 7 5 9 outside")
+        assert "chart: a rectangle outside the window was refused (errno 22)" in response, response
+        assert "chart: window 0 shows 4 bars" in response, response
+        assert "process c-chart exited with status 0" in response, response
+        assert bar_pixels(560, 120, 480, 320) > 2000, "no bars in the first window"
+        response = machine.submit(":exec c-chart -- 1 2")
+        assert "chart: window 1 shows 2 bars" in response, response
+        assert bar_pixels(624, 184, 480, 320) > 2000, "no bars in the second window"
+        assert bar_pixels(1040, 184, 64, 320) > 0, "the second window's last bar is missing"
+        Path("target/desktop-windows.png").write_bytes(machine.frame())
         # The clock driver answered at boot.
         assert "clock: 20" in machine.boot, machine.boot
         # The desktop responds to the pointer: Applications opens the
@@ -97,6 +114,16 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         response = machine.until_prompt().decode()
         assert "app/" in response and "etc/" in response, response
         assert frame_with_launcher != panel_region(machine, 24, 48, 384, 400), "the launcher did not close"
+        # The second window's close control, at its header's right, closes
+        # it as a typed :close; the first goes by the command itself.
+        move_to(1080, 204)
+        click()
+        response = machine.until_prompt().decode()
+        assert ":close 1" in response and "WINDOW CLOSED 1" in response, response
+        assert bar_pixels(1040, 184, 64, 320) == 0, "the second window is still painted"
+        assert "WINDOW CLOSED 0" in machine.submit(":close 0")
+        assert bar_pixels(560, 120, 480, 320) == 0, "the first window is still painted"
+        assert "NO SUCH WINDOW" in machine.submit(":close 0")
         # The workshop is still whole, and the frame is a real image.
         assert "42" in machine.submit("(+ 20 22)")
         assert machine.frame().startswith(b"\x89PNG\r\n\x1a\n")
