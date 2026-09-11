@@ -101,13 +101,13 @@ pub struct FrameLedger {
 
 impl FrameLedger {
     /// Reclamation exists where restart exists: the self-test builds and the
-    /// serial workshop replace domains and account for their frames; the
-    /// graphics workshop never replaces one, so there the ledger is a single
-    /// word and the image keeps within its slot budget.
+    /// serial workshop replace domains and account for their frames. The
+    /// graphics workshop never replaces one, but its compositor holds the
+    /// font atlases as extra pages, so its ledger is the larger.
     #[cfg(not(feature = "native-graphics"))]
     pub const CAPACITY: usize = 160;
     #[cfg(feature = "native-graphics")]
-    pub const CAPACITY: usize = 1;
+    pub const CAPACITY: usize = 512;
 
     pub const EMPTY: Self = Self {
         frames: [0; Self::CAPACITY],
@@ -122,8 +122,8 @@ impl FrameLedger {
 
     #[cfg_attr(feature = "native-graphics", allow(dead_code))]
     /// Add a frame allocated after the domain was built, so it is reclaimed
-    /// with the rest: a loaded process's code and data pages.
-    #[cfg(feature = "process")]
+    /// with the rest: a loaded process's code and data pages, or an asset.
+    #[cfg(feature = "pages")]
     pub fn push(&mut self, frame: u64) -> Result<(), MemoryError> {
         self.record(frame)
     }

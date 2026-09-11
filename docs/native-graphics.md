@@ -45,6 +45,49 @@ isolated evaluator, with 256 UTF-8 bytes per input. Source and the host
 transcript preserve Unicode; the seed framebuffer font uses `?` for unsupported
 bytes. Characters such as `≤` are not automatically new language operators.
 
+## Typography, surfaces and assets (v0.2.47)
+
+![The native desktop at v0.2.47](images/native-desktop-v0.2.47.png)
+
+The compositor draws from three more record operations, each validated
+like the others:
+
+| Operation | Words | What it draws |
+|---|---|---|
+| `label` (6) | x, y, face, size, colour, alpha, length; text at byte 36 | anti-aliased text from a font atlas, blended over what is below |
+| `surface` (7) | x, y, width, height, radius, colour, alpha | a rounded box blended with an alpha, its corners anti-aliased |
+| `shadow` (8) | x, y, width, height, radius, blur, alpha | a linear falloff around a box, drawn as rings, the box itself left alone |
+
+The faces are font atlases in the disk's **asset region** (sectors 3072
+through 6143, a table like the program region's). `scripts/build-font-atlas.py`
+rasterizes a TrueType font with Pillow into `AGF1`: for each pixel size,
+the 96 printable ASCII glyphs with their metrics and 8-bit coverage
+bitmaps. The build installs Fira Sans Regular and Medium (12 to 32 px) and
+Fira Mono (12 to 20 px), bundled under the SIL Open Font License in
+`boot/desktop/fonts`. At boot the graphics supervisor reads each atlas
+through the storage driver domain, checks its CRC-32, maps it read-only
+into the compositor's asset window, and keeps the metrics it needs to lay
+text out; the compositor checks every offset an atlas names against the
+length it was told before reading it. The graphics image refuses to boot
+without its faces.
+
+The scene in `boot/desktop/native-desktop.agel` uses COSMIC's tokens: its
+dark palette (`#1b1b1b`, `#262626`, `#333333`, text `#dedede` and
+`#9e9e9e`, accents `#e79cfe`, `#63d0df`, `#ffad00`), corner radii of 8 and
+16 pixels, spacing in steps of 8. A top panel with workspaces, the workshop
+window with a title bar, a sidebar of spaces and agents, two cards and three
+actions, a floating dock of six tiles, and the command field in Fira Mono.
+The accent intents recolour every accented record.
+
+Drawing is bounded by a **clip rectangle** the supervisor sets in the
+shared page: a keystroke redraws the command field, a pointer that moved
+redraws the union of where it was and where it is, and only a committed
+scene change redraws the screen, so input is not lost to painting.
+
+What this is not yet: the display is 1024×768; there are no icons beyond
+drawn shapes, no windows a process owns, no pointer cursor beyond a square,
+and the shadow is a linear falloff, not a blur.
+
 ## Live Agel forms
 
 The first native scene language is intentionally postcard-sized:
@@ -174,8 +217,9 @@ and every command yields independently so the preemption budget applies.
 
 The graphical tests prove these properties:
 
-1. 31 Agel vector commands produce the fixed framebuffer digest
-   `0x71acd98bb55c3d9f`.
+1. 82 Agel vector commands produce the fixed framebuffer digest
+   `0xdb1898cb6a32adc7` (31 commands and `0x71acd98bb55c3d9f` before the
+   v0.2.47 restyle).
 2. An unknown vector operation is rejected and the digest remains identical.
 3. A deliberate write to supervisor memory page-faults; a replacement display
    domain maps the same device and observes the unchanged last-good digest.

@@ -21,17 +21,128 @@ const RECORD_BYTES: usize = 64;
 const STREAM_HEADER_BYTES: usize = 16;
 const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
-const MAX_SCENE_COMMANDS: usize = 80;
+const MAX_SCENE_COMMANDS: usize = 160;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
 const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :workspace :save :reload :recovery :kernel | :revision :rollback :defs :limits :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
-const DISPLAY_LINE_BYTES: usize = 22;
+const DISPLAY_LINE_BYTES: usize = 26;
 
-const VIOLET: [u32; 3] = [0x92_85_ff, 0x62_54_e7, 0x9b_8c_ff];
-const CYAN: [u32; 3] = [0x57_d8_ff, 0x17_8bb8, 0x71_e6_ff];
-const AMBER: [u32; 3] = [0xff_c857, 0xc77b18, 0xff_d580];
+/// The faces the compositor was given, by slot: regular sans, medium sans,
+/// mono. The supervisor lays text out from their metrics.
+static mut FACES: [crate::assets::Face; shared::FACES] =
+    [crate::assets::Face::EMPTY; shared::FACES];
+const FACE_NAMES: [&[u8]; shared::FACES] = [b"fira-sans", b"fira-sans-medium", b"fira-mono"];
+pub const FACE_SANS: u32 = 0;
+pub const FACE_SANS_MEDIUM: u32 = 1;
+pub const FACE_MONO: u32 = 2;
+
+fn faces() -> &'static [crate::assets::Face; shared::FACES] {
+    // Safety: the supervisor is single-threaded; the faces are written once
+    // at boot before any layout reads them.
+    unsafe { &*core::ptr::addr_of!(FACES) }
+}
+
+/// Map every face into `compositor` and remember its metrics. An absent
+/// or broken atlas is a boot failure: the desktop's text is set in it.
+fn load_faces(
+    machine: &mut arch::Machine,
+    storage: &mut ServiceDomain,
+    compositor: &mut arch::Domain,
+) {
+    for (slot, name) in FACE_NAMES.iter().enumerate() {
+        match crate::assets::load_face(machine, storage, compositor, name, slot) {
+            Ok(face) => {
+                // Safety: as in `faces`.
+                unsafe { (*core::ptr::addr_of_mut!(FACES))[slot] = face };
+                kprint!(
+                    "assets: {} {} sizes, {} bytes\n",
+                    core::str::from_utf8(name).unwrap_or("?"),
+                    face.size_count,
+                    face.bytes
+                );
+            }
+            Err(reason) => {
+                kprint!(
+                    "assets: {} unavailable: {reason}\n",
+                    core::str::from_utf8(name).unwrap_or("?")
+                );
+                failed("a font atlas the desktop needs is missing from the asset region");
+            }
+        }
+    }
+}
+
+/// The width of `text` in `face` at `size`, for layout.
+fn measure(face: u32, size: u32, text: &[u8]) -> u32 {
+    faces()
+        .get(face as usize)
+        .map_or(0, |face| face.measure(size as u16, text))
+}
+
+/// One line's advance in `face` at `size`.
+fn line_height(face: u32, size: u32) -> u32 {
+    faces().get(face as usize).map_or(size + size / 4, |face| {
+        face.line_height(size as u16).max(size)
+    })
+}
+
+/// Where a line box of `height` puts a label's top so its baseline sits
+/// centred: half the space the ascent leaves.
+fn centred_top(face: u32, size: u32, top: u32, height: u32) -> u32 {
+    let ascent = faces()
+        .get(face as usize)
+        .map_or(size, |face| face.ascent(size as u16).max(1));
+    top + height.saturating_sub(ascent + size / 4) / 2
+}
+
+/// A text record set in a font face: anti-aliased, blended, at most 28 bytes.
+fn label_record(
+    x: u32,
+    y: u32,
+    face: u32,
+    size: u32,
+    color: u32,
+    text: &[u8],
+) -> [u8; RECORD_BYTES] {
+    let mut record = [0; RECORD_BYTES];
+    put_u32(&mut record, 0, 6);
+    put_u32(&mut record, 1, x);
+    put_u32(&mut record, 2, y);
+    put_u32(&mut record, 3, face);
+    put_u32(&mut record, 4, size);
+    put_u32(&mut record, 5, color);
+    put_u32(&mut record, 6, 255);
+    let length = text.len().min(28);
+    put_u32(&mut record, 8, length as u32);
+    record[36..36 + length].copy_from_slice(&text[..length]);
+    record
+}
+
+/// A rounded box blended over what is below it.
+fn surface_record(
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    radius: u32,
+    color: u32,
+    alpha: u32,
+) -> [u8; RECORD_BYTES] {
+    let mut record = [0; RECORD_BYTES];
+    for (index, word) in [7, x, y, width, height, radius, color, alpha]
+        .iter()
+        .enumerate()
+    {
+        put_u32(&mut record, index, *word);
+    }
+    record
+}
+
+const VIOLET: [u32; 3] = [0xe7_9c_fe, 0xcf_7d_ff, 0xe7_9c_fe];
+const CYAN: [u32; 3] = [0x63_d0_df, 0x3e_88_ff, 0x63_d0_df];
+const AMBER: [u32; 3] = [0xff_ad_00, 0xfe_db_40, 0xff_ad_00];
 
 #[derive(Clone, Copy)]
 struct Scene {
@@ -367,37 +478,9 @@ fn put_u32(record: &mut [u8; RECORD_BYTES], word: usize, value: u32) {
     record[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
-fn text_record(x: u32, y: u32, scale: u32, color: u32, text: &[u8]) -> [u8; RECORD_BYTES] {
-    let mut record = [0; RECORD_BYTES];
-    put_u32(&mut record, 0, 5);
-    put_u32(&mut record, 1, x);
-    put_u32(&mut record, 2, y);
-    put_u32(&mut record, 3, scale);
-    put_u32(&mut record, 4, color);
-    let length = text.len().min(28);
-    put_u32(&mut record, 8, length as u32);
-    for (index, byte) in text[..length].iter().enumerate() {
-        // The seed font has ASCII glyphs. Keep UTF-8 in language source, but
-        // never pass unsupported bytes to the strict compositor protocol.
-        record[36 + index] = if byte.is_ascii_graphic() || *byte == b' ' {
-            *byte
-        } else {
-            b'?'
-        };
-    }
-    record
-}
-
 fn panel_record() -> [u8; RECORD_BYTES] {
-    let mut record = [0; RECORD_BYTES];
-    put_u32(&mut record, 0, 2);
-    put_u32(&mut record, 1, 246);
-    put_u32(&mut record, 2, 694);
-    put_u32(&mut record, 3, 758);
-    put_u32(&mut record, 4, 62);
-    put_u32(&mut record, 5, 12);
-    put_u32(&mut record, 6, 0x18_1c_2a);
-    record
+    // Opaque: keystrokes redraw only this field and what is on it.
+    surface_record(24, 692, 976, 64, 12, 0x26_26_26, 255)
 }
 
 fn palette(accent: u8) -> [u32; 3] {
@@ -415,6 +498,8 @@ fn replace_accent(record: &mut [u8; RECORD_BYTES], accent: [u32; 3]) {
         3 => &[6, 7],
         4 => &[5],
         5 => &[4],
+        6 => &[5],
+        7 => &[6],
         _ => &[],
     };
     for field in fields {
@@ -450,8 +535,17 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
     for source in commands {
         let mut record = *source;
         replace_accent(&mut record, accent);
-        if record_text(&record) == b"WORKSPACE 1" {
+        if record_text(&record) == b"Workspace 1" {
             record[46] = b'0' + scene.workspace;
+            if record_u32(&record, 0) == 6 && record_u32(&record, 1) == 458 {
+                // The panel's label is centred on the screen.
+                let width = measure(
+                    record_u32(&record, 3),
+                    record_u32(&record, 4),
+                    record_text(&record),
+                );
+                put_u32(&mut record, 1, (1024_u32.saturating_sub(width)) / 2);
+            }
         } else if record_text(&record) == b"MOLD THE SYSTEM AS IT RUNS" {
             replace_text(&mut record, &scene.title[..scene.title_len as usize]);
         }
@@ -465,42 +559,62 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         frame.push(record)?;
     }
     if let Some(text) = scene.inspector {
-        let mut panel = panel_record();
-        put_u32(&mut panel, 1, 270);
-        put_u32(&mut panel, 2, 290);
-        put_u32(&mut panel, 3, 720);
-        put_u32(&mut panel, 4, 250);
-        frame.push(panel)?;
-        frame.push(text_record(
+        frame.push(surface_record(270, 280, 720, 300, 16, 0x1b_1b_1b, 246))?;
+        frame.push(label_record(
             292,
-            304,
-            2,
-            0xffffff,
-            b"AGENT SOURCE - ESC TO CLOSE",
+            296,
+            FACE_SANS_MEDIUM,
+            16,
+            0xde_de_de,
+            b"Agent source",
         ))?;
+        frame.push(label_record(
+            420,
+            298,
+            FACE_SANS,
+            14,
+            0x80_80_80,
+            b"Esc closes",
+        ))?;
+        let spacing = line_height(FACE_MONO, 14);
         for (index, chunk) in text.get().chunks(28).enumerate() {
-            frame.push(text_record(
+            frame.push(label_record(
                 292,
-                330 + index as u32 * 22,
-                2,
-                0xae_b6_d0,
+                330 + index as u32 * spacing,
+                FACE_MONO,
+                14,
+                0x9e_9e_9e,
                 chunk,
             ))?;
         }
     }
     if let Some(line) = line {
         let mut prompt = [b' '; 28];
-        prompt[..6].copy_from_slice(b"AGEL> ");
+        prompt[..2].copy_from_slice(b"> ");
         let shown = if line.len() > DISPLAY_LINE_BYTES {
             &line[line.len() - DISPLAY_LINE_BYTES..]
         } else {
             line
         };
         let length = shown.len();
-        prompt[6..6 + length].copy_from_slice(shown);
+        prompt[2..2 + length].copy_from_slice(shown);
         frame.push(panel_record())?;
-        frame.push(text_record(270, 706, 2, accent[2], &prompt[..6 + length]))?;
-        frame.push(text_record(270, 732, 2, 0xae_b6_d0, status))?;
+        frame.push(label_record(
+            44,
+            centred_top(FACE_MONO, 16, 692, 34),
+            FACE_MONO,
+            16,
+            accent[2],
+            &prompt[..2 + length],
+        ))?;
+        frame.push(label_record(
+            44,
+            centred_top(FACE_SANS, 14, 724, 30),
+            FACE_SANS,
+            14,
+            0x9e_9e_9e,
+            status,
+        ))?;
     }
     if let Some((x, y)) = scene.pointer {
         let mut cursor = [0; RECORD_BYTES];
@@ -632,6 +746,25 @@ fn render(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'static str> 
         request(domain, shared::COMMAND_DISPLAY_DRAW)?;
     }
     Ok(())
+}
+
+/// Redraw the whole frame, but only the pixels inside `region`: what a
+/// pointer that moved or a widget that changed needs, at the cost of that
+/// area rather than the screen.
+fn render_region(
+    domain: &mut arch::Domain,
+    frame: &Frame,
+    region: (u32, u32, u32, u32),
+) -> Result<(), &'static str> {
+    let (x, y, width, height) = region;
+    let core = domain.core();
+    core.write_shared(shared::CLIP_X, u64::from(x));
+    core.write_shared(shared::CLIP_Y, u64::from(y));
+    core.write_shared(shared::CLIP_WIDTH, u64::from(width.max(1)));
+    core.write_shared(shared::CLIP_HEIGHT, u64::from(height.max(1)));
+    let outcome = render(domain, frame);
+    domain.core().write_shared(shared::CLIP_WIDTH, 0);
+    outcome
 }
 
 fn render_overlay(domain: &mut arch::Domain, frame: &Frame) -> Result<(), &'static str> {
@@ -1283,24 +1416,13 @@ fn synchronize_language_scene(
 fn interactive(
     machine: &mut arch::Machine,
     compositor: &mut arch::Domain,
+    mut storage: ServiceDomain,
     mut current: Scene,
     mut previous: Scene,
 ) -> ! {
     let evaluator_entry = crate::user::agel_evaluator_main as *const () as usize as u64;
     let mut evaluator = machine
         .create_evaluator_world(evaluator_entry, 20)
-        .unwrap_or_else(|reason| failed(reason));
-    let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
-    let mut storage = machine
-        .create_storage_world(storage_entry, crate::world::STORAGE_TICKS)
-        .map(|domain| {
-            ServiceDomain::new(
-                domain,
-                ServiceKind::Storage,
-                storage_entry,
-                crate::world::STORAGE_TICKS,
-            )
-        })
         .unwrap_or_else(|reason| failed(reason));
     let mut recovery = match LiveRecovery::load(&mut storage) {
         Ok(recovery) => Some(recovery),
@@ -1387,6 +1509,7 @@ fn interactive(
         let byte = match input {
             Input::Byte(byte) => byte,
             Input::Pointer(pressed) => {
+                let before = current.pointer;
                 current.pointer = Some((pointer.x as u32, pointer.y as u32));
                 if pressed && pointer.y < 684 && current.inspector.is_none() && length == 0 {
                     let mut command = StatusLine::new(b"(point ");
@@ -1400,7 +1523,15 @@ fn interactive(
                 } else {
                     let frame = materialize(current, Some(&line[..length]), status.get())
                         .unwrap_or_else(|reason| failed(reason));
-                    render(compositor, &frame).unwrap_or_else(|reason| failed(reason));
+                    // Only where the pointer was and where it is now.
+                    let (nx, ny) = (pointer.x as u32, pointer.y as u32);
+                    let (ox, oy) = before.unwrap_or((nx, ny));
+                    let left = nx.min(ox).saturating_sub(2);
+                    let top = ny.min(oy).saturating_sub(2);
+                    let right = nx.max(ox) + 10;
+                    let bottom = ny.max(oy) + 10;
+                    render_region(compositor, &frame, (left, top, right - left, bottom - top))
+                        .unwrap_or_else(|reason| failed(reason));
                     continue;
                 }
             }
@@ -1518,6 +1649,19 @@ pub fn run() -> ! {
     }
 
     let mut machine = arch::Machine::bring_up().unwrap_or_else(|reason| failed(reason));
+    // The storage driver comes first: the compositor's fonts are on the disk.
+    let storage_entry = crate::user::agel_storage_main as *const () as usize as u64;
+    let mut storage = machine
+        .create_storage_world(storage_entry, crate::world::STORAGE_TICKS)
+        .map(|domain| {
+            ServiceDomain::new(
+                domain,
+                ServiceKind::Storage,
+                storage_entry,
+                crate::world::STORAGE_TICKS,
+            )
+        })
+        .unwrap_or_else(|reason| failed(reason));
     let entry = crate::display_user::agel_compositor_main as *const () as usize as u64;
     if !arch::user_text_range().contains(&entry) {
         failed("compositor entry is outside user-executable text");
@@ -1532,6 +1676,7 @@ pub fn run() -> ! {
         logical_width,
         logical_height,
     );
+    load_faces(&mut machine, &mut storage, &mut compositor);
     let initial = Scene::initial();
     let frame = materialize(initial, None, b"").unwrap_or_else(|reason| failed(reason));
     if frame.count != count {
@@ -1619,6 +1764,7 @@ pub fn run() -> ! {
         logical_width,
         logical_height,
     );
+    load_faces(&mut machine, &mut storage, &mut replacement);
     if checksum(&mut replacement).unwrap_or_else(|reason| failed(reason)) != stable {
         failed("replacement compositor did not inherit the last good frame");
     }
@@ -1638,5 +1784,5 @@ pub fn run() -> ! {
     if cfg!(feature = "graphics-selftest") {
         arch::exit(true);
     }
-    interactive(&mut machine, &mut replacement, initial, initial)
+    interactive(&mut machine, &mut replacement, storage, initial, initial)
 }

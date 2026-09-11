@@ -20,9 +20,12 @@ contract-memory = ["agel-kernel-abi/memory"]
 # Loadable processes: the serial workshop can load a static ELF from the
 # disk's program region into a fresh domain. The graphics image does not
 # carry it; its 254-sector budget is spent.
-process = []
+# Extra pages mapped into a domain after it is built: a loaded process's
+# image, the compositor's font and icon assets.
+pages = []
+process = ["pages"]
 isolated-repl = ["isolation-selftest", "process"]
-native-graphics = ["isolation-selftest"]
+native-graphics = ["isolation-selftest", "pages"]
 graphics-selftest = ["native-graphics"]
 
 [profile.dev]

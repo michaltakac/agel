@@ -1134,6 +1134,31 @@ robin with no notion of fairness beyond one entry per pass.
 Not claimed: the library is not audited against a C standard, and the
 breadth is what the tests exercise.
 
+## v0.2.47
+
+- **Assets are data the compositor bounds:** a font atlas is read from the
+  asset region, checked against its CRC-32, and mapped read-only into the
+  compositor at a fixed window; the compositor checks every offset the
+  atlas names against the length it was told before reading it, so a
+  broken or hostile atlas draws nothing and reads nothing outside itself.
+  The supervisor parses only the metrics it needs for layout, with the same
+  bounds, before any frame is drawn.
+- **The compositor still holds nothing but pages:** the atlases are more
+  read-only pages in a domain that already had only its framebuffer as a
+  device; blending reads the framebuffer it could already write. The record
+  format grew three operations, each validated as the others are.
+- **The seed carries its fonts:** the build installs the atlases on every
+  rebuild and the graphics image refuses to boot without them, rather than
+  drawing with a wrong or absent face; the serial images ignore the region.
+- **Fira Sans and Fira Mono** are bundled under the SIL Open Font License
+  with the license text beside them; the atlases are derived works of the
+  fonts and carry no other code.
+
+Not claimed: the desktop is not yet at its native resolution, has no icons
+beyond drawn shapes, no windows a process owns, and no pointer cursor that
+is more than a square; the look is a first pass at COSMIC's, not a port of
+it.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

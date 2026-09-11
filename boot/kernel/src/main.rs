@@ -39,6 +39,8 @@ mod native_session;
 #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
 mod recovery;
 
+#[cfg(feature = "native-graphics")]
+mod assets;
 #[cfg(feature = "isolation-selftest")]
 mod contract;
 #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
@@ -58,6 +60,8 @@ mod memory;
 mod pointer;
 #[cfg(feature = "process")]
 mod process;
+#[cfg(feature = "pages")]
+mod region;
 #[cfg(feature = "isolation-selftest")]
 mod service;
 #[cfg(feature = "isolation-selftest")]

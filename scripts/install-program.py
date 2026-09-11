@@ -16,9 +16,13 @@ import sys
 import zlib
 
 SECTOR = 512
-TABLE = 2048
-LAST = 3071
-MAGIC = b"AGELPR1\0"
+# The program region and, since v0.2.47, the asset region the compositor's
+# fonts and icons live in: the same table shape, a different magic.
+REGIONS = {
+    "programs": (2048, 3071, b"AGELPR1\0"),
+    "assets": (3072, 6143, b"AGELAS1\0"),
+}
+TABLE, LAST, MAGIC = REGIONS["programs"]
 NAME_BYTES = 16
 ROW = 32
 MAX_ROWS = (SECTOR - 16) // ROW
@@ -63,28 +67,48 @@ def write_table(image: str, rows: list[dict]) -> None:
 
 
 def install(image: str, name: str, elf: bytes) -> dict:
+    """Add or replace NAME, repacking the region so replaced entries leave
+    no holes: every other entry is read back and laid out again from the
+    first sector after the table, in table order, then the new one."""
     if not name or len(name) > NAME_BYTES or not name.isascii():
         raise ValueError("a program name is 1 to 16 ASCII bytes")
-    rows = [row for row in read_table(image) if row["name"] != name]
-    if len(rows) >= MAX_ROWS:
+    kept = [row for row in read_table(image) if row["name"] != name]
+    if len(kept) >= MAX_ROWS:
         raise ValueError("the program table is full")
+    contents = []
+    with open(image, "rb") as disk:
+        for row in kept:
+            disk.seek(row["start"] * SECTOR)
+            data = disk.read(row["length"])
+            if len(data) != row["length"] or (zlib.crc32(data) & 0xFFFFFFFF) != row["crc"]:
+                raise ValueError(f"entry {row['name']} on the disk does not match its table row")
+            contents.append((row["name"], data))
+    contents.append((name, elf))
+    rows = []
     next_free = TABLE + 1
-    for row in rows:
-        next_free = max(next_free, row["start"] + -(-row["length"] // SECTOR))
-    sectors = -(-len(elf) // SECTOR)
-    if next_free + sectors - 1 > LAST:
-        raise ValueError("the program region is full")
     with open(image, "r+b") as disk:
-        disk.seek(next_free * SECTOR)
-        disk.write(elf.ljust(sectors * SECTOR, b"\0"))
+        for entry_name, data in contents:
+            sectors = -(-len(data) // SECTOR)
+            if next_free + sectors - 1 > LAST:
+                raise ValueError("the program region is full")
+            disk.seek(next_free * SECTOR)
+            disk.write(data.ljust(sectors * SECTOR, b"\0"))
+            rows.append({"name": entry_name, "start": next_free, "length": len(data), "crc": zlib.crc32(data) & 0xFFFFFFFF})
+            next_free += sectors
         disk.flush()
-    row = {"name": name, "start": next_free, "length": len(elf), "crc": zlib.crc32(elf) & 0xFFFFFFFF}
-    rows.append(row)
     write_table(image, rows)
-    return row
+    return rows[-1]
 
 
 def main() -> int:
+    global TABLE, LAST, MAGIC
+    if "--region" in sys.argv:
+        index = sys.argv.index("--region")
+        if index + 1 >= len(sys.argv) or sys.argv[index + 1] not in REGIONS:
+            print("--region needs one of: " + ", ".join(REGIONS), file=sys.stderr)
+            return 2
+        TABLE, LAST, MAGIC = REGIONS[sys.argv[index + 1]]
+        del sys.argv[index : index + 2]
     if len(sys.argv) == 3 and sys.argv[2] == "--list":
         for row in read_table(sys.argv[1]):
             print(f"{row['name']:16} sectors {row['start']}.. {row['length']} bytes crc {row['crc']:08x}")

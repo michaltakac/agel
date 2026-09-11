@@ -179,8 +179,9 @@ then tries valid generations newest-first. If the newest slot is torn, corrupt,
 or cannot be evaluated, the preceding slot is replayed automatically. CRC detects accidental
 damage; it is not a cryptographic signature or protection from a malicious disk.
 
-`./scripts/build-boot.sh` replaces only sectors 0 through 511 (the BIOS stage
-and kernel slot A) and preserves the workspace region. Thus rebuilding or rerunning `./scripts/run-qemu.sh` keeps
+`./scripts/build-boot.sh` replaces sectors 0 through 511 (the BIOS stage and
+kernel slot A) and, since v0.2.47, the asset region's font atlases, and
+preserves the workspace region. Thus rebuilding or rerunning `./scripts/run-qemu.sh` keeps
 your cells. `./scripts/test-native-persistence.sh` uses a temporary disk and
 proves edit → save → reboot → reject a checksummed but semantically invalid
 newest slot → corrupt it → simulate an invalidated/partially written slot →

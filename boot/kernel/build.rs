@@ -86,6 +86,43 @@ fn compile_native_desktop() {
                 }
                 put(&mut record, 5, color(&tokens, &mut cursor));
             }
+            "label" => {
+                // x y face size color text: anti-aliased text from a font
+                // atlas the compositor was given; face 0 is the regular
+                // sans, 1 the medium sans, 2 the mono.
+                put(&mut record, 0, 6);
+                for field in 1..=4 {
+                    put(&mut record, field, number(&tokens, &mut cursor));
+                }
+                put(&mut record, 5, color(&tokens, &mut cursor));
+                put(&mut record, 6, 255);
+                let text = take(&tokens, &mut cursor).as_bytes();
+                assert!(text.len() <= 28, "native vector label exceeds 28 bytes");
+                assert!(
+                    text.iter().all(u8::is_ascii),
+                    "native vector label must be ASCII"
+                );
+                put(&mut record, 8, text.len() as u32);
+                record[36..36 + text.len()].copy_from_slice(text);
+            }
+            "surface" => {
+                // x y width height radius color alpha: a rounded box blended
+                // over what is below, with anti-aliased corners.
+                put(&mut record, 0, 7);
+                for field in 1..=5 {
+                    put(&mut record, field, number(&tokens, &mut cursor));
+                }
+                put(&mut record, 6, color(&tokens, &mut cursor));
+                put(&mut record, 7, number(&tokens, &mut cursor));
+            }
+            "shadow" => {
+                // x y width height radius blur alpha: a soft shadow around
+                // a box, drawn before the box.
+                put(&mut record, 0, 8);
+                for field in 1..=7 {
+                    put(&mut record, field, number(&tokens, &mut cursor));
+                }
+            }
             "text" => {
                 put(&mut record, 0, 5);
                 put(&mut record, 1, number(&tokens, &mut cursor));

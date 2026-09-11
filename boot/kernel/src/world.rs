@@ -159,6 +159,23 @@ pub mod shared {
     pub const DISPLAY_LOGICAL_WIDTH: usize = 52;
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
     pub const DISPLAY_LOGICAL_HEIGHT: usize = 53;
+    /// The compositor's font faces: for face `i` in 0..3, the address the
+    /// atlas is mapped at and its length in bytes, zero for no face. Words
+    /// 54 to 59.
+    #[cfg(feature = "native-graphics")]
+    pub const FACE_WORDS: usize = 54;
+    #[cfg(feature = "native-graphics")]
+    pub const FACES: usize = 3;
+    /// A clip rectangle for drawing: x, y, width, height in physical pixels;
+    /// a zero width means the whole surface. Words 60 to 63.
+    #[cfg(feature = "native-graphics")]
+    pub const CLIP_X: usize = 60;
+    #[cfg(feature = "native-graphics")]
+    pub const CLIP_Y: usize = 61;
+    #[cfg(feature = "native-graphics")]
+    pub const CLIP_WIDTH: usize = 62;
+    #[cfg(feature = "native-graphics")]
+    pub const CLIP_HEIGHT: usize = 63;
     /// Divide by zero. Only x86-64 traps on this; RISC-V defines a result and
     /// AArch64 has no integer divide exception at all, so the command exists
     /// only where a machine can actually be provoked by it.

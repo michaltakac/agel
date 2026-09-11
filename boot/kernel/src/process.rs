@@ -16,6 +16,7 @@
 
 use crate::arch;
 use crate::memory::Access;
+use crate::region::{Entry, Region};
 use crate::service::{ServiceDomain, ServiceError, ServiceHandle, ServiceWriter};
 use crate::workspace::read_sector;
 use crate::world::{fs, process, Fault, Stop, BLOCK_BYTES, PAYLOAD_BYTES};
@@ -115,65 +116,24 @@ const ESTALE: i64 = 116;
 pub const TABLE_SECTOR: u32 = 2048;
 /// Last sector of the program region, inclusive.
 pub const LAST_SECTOR: u32 = 3071;
-const MAGIC: &[u8; 8] = b"AGELPR1\0";
-const ENTRY_BYTES: usize = 32;
-const MAX_PROGRAMS: usize = (512 - 16) / ENTRY_BYTES;
+const REGION: Region = Region {
+    table: TABLE_SECTOR,
+    last: LAST_SECTOR,
+    magic: b"AGELPR1\0",
+};
 /// Program names are short and ASCII; the table pads them with zeros.
-pub const NAME_BYTES: usize = 16;
-/// The most a program image may occupy: the region minus its table.
-const MAX_LENGTH: u32 = (LAST_SECTOR - TABLE_SECTOR) * 512;
+pub const NAME_BYTES: usize = crate::region::NAME_BYTES;
 const MAX_SEGMENTS: usize = 8;
 /// Pages a process may be built from, code, data and zero fill together.
 const MAX_PAGES: usize = 128;
 const PAGE: u64 = 4096;
 
 /// One row of the program table.
-#[derive(Clone, Copy)]
-pub struct Program {
-    pub start: u32,
-    pub length: u32,
-    pub checksum: u32,
-}
+pub type Program = Entry;
 
 /// Look a program up by name.
 pub fn find(storage: &mut ServiceDomain, name: &[u8]) -> Result<Option<Program>, &'static str> {
-    if name.is_empty() || name.len() > NAME_BYTES {
-        return Ok(None);
-    }
-    let mut table = [0_u8; 512];
-    read_sector(storage, TABLE_SECTOR, &mut table)?;
-    if table[..8] != MAGIC[..] {
-        return Ok(None);
-    }
-    let count =
-        (u32::from_le_bytes([table[8], table[9], table[10], table[11]]) as usize).min(MAX_PROGRAMS);
-    for index in 0..count {
-        let entry = &table[16 + index * ENTRY_BYTES..16 + (index + 1) * ENTRY_BYTES];
-        let stored = &entry[..NAME_BYTES];
-        let stored_len = stored
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(NAME_BYTES);
-        if &stored[..stored_len] != name {
-            continue;
-        }
-        let start = u32::from_le_bytes([entry[16], entry[17], entry[18], entry[19]]);
-        let length = u32::from_le_bytes([entry[20], entry[21], entry[22], entry[23]]);
-        let checksum = u32::from_le_bytes([entry[24], entry[25], entry[26], entry[27]]);
-        if start <= TABLE_SECTOR
-            || length == 0
-            || length > MAX_LENGTH
-            || u64::from(start) + u64::from(length).div_ceil(512) > u64::from(LAST_SECTOR) + 1
-        {
-            return Err("program table entry is outside the program region");
-        }
-        return Ok(Some(Program {
-            start,
-            length,
-            checksum,
-        }));
-    }
-    Ok(None)
+    REGION.find(storage, name)
 }
 
 /// How a process ended.

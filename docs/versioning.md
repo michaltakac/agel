@@ -189,6 +189,14 @@ promise.
   and `O_APPEND`, `ctype`, and the wider `string` and `stdlib`; an
   unmodified public-domain SHA-256 builds and its digest agrees with the
   host's, on all three machines (`scripts/test-breadth.sh`).
+  `v0.2.47` begins the desktop's move to COSMIC's design language: a font
+  atlas format and an asset region on the disk (sectors 3072–6143) that the
+  graphics supervisor maps read-only into the compositor; anti-aliased,
+  alpha-blended text in Fira Sans and Fira Mono; alpha-blended rounded
+  surfaces with anti-aliased corners and soft shadows; and a desktop scene
+  restyled with COSMIC's dark palette, radii and spacing: a top panel, a
+  workshop window with a sidebar and cards, a floating dock and a command
+  field. The image grows to 6,144 sectors; the frame budget to 160 records.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

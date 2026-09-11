@@ -562,10 +562,10 @@ fn validate_name(name: &[u8]) -> Result<(), &'static str> {
 
 /// CRC-32 over data supplied in pieces: the loader checks a program image
 /// sector by sector without holding it.
-#[cfg(feature = "process")]
+#[cfg(feature = "pages")]
 pub struct Crc(u32);
 
-#[cfg(feature = "process")]
+#[cfg(feature = "pages")]
 impl Crc {
     pub fn new() -> Self {
         Self(0xffff_ffff)

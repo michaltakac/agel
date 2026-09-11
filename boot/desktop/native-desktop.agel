@@ -1,39 +1,107 @@
-; v0.2.4 native vector baseline. This is ordinary Agel syntax compiled into the
-; boot image by the bounded native-vector build adapter. The unprivileged
-; compositor validates every 64-byte command again before touching its device.
-; Live semantic Agel forms create transactional derived frames from this value.
+; The native desktop's still frame, in ordinary Agel syntax, compiled into the
+; boot image by the bounded native-vector build adapter and revalidated by the
+; unprivileged compositor before it touches the framebuffer. Live semantic
+; forms derive frames from this value: the workspace number, the title, the
+; accent, the prompt and the status are replaced at run time.
+;
+; The look follows COSMIC's design tokens: neutral surfaces from its dark
+; palette, 8 and 16 pixel corner radii, 8/16/24 pixel spacing, Fira Sans for
+; the interface and Fira Mono for the workshop's input.
 (native-vector-frame 1024 768
-  (background-gradient "#10131f" "#1c2033")
-  (ellipse 820 180 260 210 "#252b4d")
-  (ellipse 940 650 210 180 "#33285a")
-  (rounded-rectangle 0 0 1024 48 0 "#24293a")
-  (text 24 15 3 "#f6f7ff" "AGEL")
-  (text 112 17 2 "#aeb6d0" "AGENTS ALL THE WAY DOWN")
+  ; Wallpaper: a dusk gradient with two soft glows.
+  (background-gradient "#1d2636" "#0c0f16")
+  (surface 640 0 440 440 220 "#2f4a7a" 44)
+  (surface 720 60 300 300 150 "#39598f" 36)
+  (surface 0 460 380 380 190 "#3b2a5e" 44)
 
-  (rounded-rectangle 20 68 210 616 16 "#24293a")
-  (rounded-rectangle 246 68 758 616 16 "#24293a")
-  (text 42 94 2 "#f6f7ff" "SPACES")
-  (gradient-rounded-rectangle 38 138 174 62 12 "#9285ff" "#6254e7")
-  (text 72 160 2 "#ffffff" "WORKSPACE 1")
-  (rounded-rectangle 38 214 174 54 12 "#30364a")
-  (text 76 233 2 "#d9dded" "PROJECTS")
-  (rounded-rectangle 38 282 174 54 12 "#30364a")
-  (text 66 301 2 "#d9dded" "WORKSHOP")
-  (rounded-rectangle 38 350 174 54 12 "#30364a")
-  (text 76 369 2 "#d9dded" "SETTINGS")
+  ; Top panel.
+  (surface 0 0 1024 36 0 "#1b1b1b" 236)
+  (surface 0 36 1024 1 0 "#2e2e2e" 255)
+  (label 16 8 1 14 "#dedede" "Applications")
+  (label 118 8 1 14 "#dedede" "Workspaces")
+  (surface 214 7 22 22 6 "#e79cfe" 255)
+  (label 221 10 1 14 "#1b1b1b" "1")
+  (label 246 8 0 14 "#9e9e9e" "2")
+  (label 268 8 0 14 "#9e9e9e" "3")
+  (label 458 8 1 14 "#dedede" "Workspace 1")
+  (surface 921 12 12 12 6 "#e79cfe" 255)
+  (label 942 8 0 14 "#dedede" "Agel")
 
-  (text 282 104 2 "#9b8cff" "LIVE AGENTIC WORKSPACE")
-  (text 282 148 3 "#f6f7ff" "MOLD THE SYSTEM AS IT RUNS")
-  (text 282 198 2 "#aeb6d0" "VECTOR DESKTOP")
-  (gradient-rounded-rectangle 282 548 210 82 14 "#9285ff" "#6254e7")
-  (text 318 579 2 "#ffffff" "ASK AGEL")
-  (rounded-rectangle 508 548 210 82 14 "#30364a")
-  (text 544 579 2 "#f6f7ff" "TERMINAL")
-  (rounded-rectangle 734 548 234 82 14 "#30364a")
-  (text 774 579 2 "#f6f7ff" "INSPECT SYSTEM")
+  ; The workshop window: a shadow, the frame, a title bar with controls.
+  (shadow 24 60 976 548 16 24 110)
+  (surface 24 60 976 548 16 "#1b1b1b" 250)
+  (surface 25 61 974 546 15 "#262626" 255)
+  (surface 24 60 976 44 16 "#1f1f1f" 255)
+  (surface 24 88 976 16 0 "#1f1f1f" 255)
+  (surface 24 103 976 1 0 "#333333" 255)
+  (label 44 71 1 16 "#dedede" "Workshop")
+  (label 130 73 0 14 "#808080" "agents all the way down")
+  (surface 900 82 12 2 1 "#9e9e9e" 255)
+  (surface 936 76 12 12 2 "#9e9e9e" 255)
+  (surface 938 78 8 8 1 "#1f1f1f" 255)
+  (label 970 72 1 14 "#9e9e9e" "x")
 
-  (gradient-rounded-rectangle 286 258 132 132 28 "#71e6ff" "#8b6cff")
-  (ellipse 352 324 28 28 "#20263a")
-  (rounded-rectangle 438 258 522 132 20 "#20263a")
-  (text 472 288 2 "#f6f7ff" "3 AGENTS READY")
-  (text 472 330 2 "#aeb6d0" "SAFE PREVIEW ACTIVE"))
+  ; Sidebar: spaces.
+  (surface 40 120 216 472 8 "#1f1f1f" 255)
+  (label 56 132 1 12 "#808080" "SPACES")
+  (surface 48 156 200 40 8 "#e79cfe" 255)
+  (label 64 166 1 14 "#1b1b1b" "Workspace 1")
+  (label 64 215 0 14 "#dedede" "Projects")
+  (label 64 259 0 14 "#dedede" "Workshop")
+  (label 64 303 0 14 "#dedede" "Settings")
+  (surface 48 344 200 1 0 "#333333" 255)
+  (label 56 358 1 12 "#808080" "AGENTS")
+  (surface 64 384 8 8 4 "#5edb8c" 255)
+  (label 84 378 0 14 "#dedede" "planner")
+  (surface 64 412 8 8 4 "#5edb8c" 255)
+  (label 84 406 0 14 "#dedede" "editor")
+  (surface 64 440 8 8 4 "#9e9e9e" 255)
+  (label 84 434 0 14 "#9e9e9e" "recovery")
+
+  ; Content: a heading, then two cards.
+  (label 288 124 0 14 "#e79cfe" "LIVE AGENTIC WORKSPACE")
+  (label 288 146 1 32 "#ffffff" "MOLD THE SYSTEM AS IT RUNS")
+  (label 288 194 0 14 "#9e9e9e" "Say what should change.")
+
+  (surface 288 232 336 152 16 "#1f1f1f" 255)
+  (gradient-rounded-rectangle 308 252 56 56 14 "#e79cfe" "#cf7dff")
+  (ellipse 336 280 10 10 "#1b1b1b")
+  (label 380 258 1 16 "#dedede" "3 agents ready")
+  (label 380 282 0 14 "#9e9e9e" "Safe preview active")
+  (label 308 336 0 14 "#808080" "Committed as revision 0")
+
+  (surface 648 232 336 152 16 "#1f1f1f" 255)
+  (label 668 250 1 16 "#dedede" "Kernel")
+  (label 668 276 0 14 "#9e9e9e" "Slot A trusted, no candidate")
+  (label 668 300 0 14 "#9e9e9e" "Contract v1.0; four backends")
+  (label 668 336 0 14 "#808080" "evaluator, storage, display")
+
+  ; Actions.
+  (surface 288 520 160 40 20 "#e79cfe" 255)
+  (label 322 530 1 14 "#1b1b1b" "Ask Agel")
+  (surface 464 520 148 40 20 "#333333" 255)
+  (label 500 530 0 14 "#dedede" "Terminal")
+  (surface 628 520 176 40 20 "#333333" 255)
+  (label 660 530 0 14 "#dedede" "Inspect system")
+
+  ; The dock: a floating bar with six tiles.
+  (shadow 302 620 420 60 16 16 90)
+  (surface 302 620 420 60 16 "#1b1b1b" 236)
+  (gradient-rounded-rectangle 316 630 40 40 12 "#e79cfe" "#cf7dff")
+  (ellipse 336 650 7 7 "#1b1b1b")
+  (surface 372 630 40 40 12 "#2b2b2b" 255)
+  (label 383 640 2 16 "#dedede" ">_")
+  (surface 428 630 40 40 12 "#e79cfe" 255)
+  (surface 434 642 28 20 4 "#1b1b1b" 255)
+  (surface 434 638 12 6 2 "#1b1b1b" 255)
+  (surface 484 630 40 40 12 "#5edb8c" 255)
+  (surface 494 640 20 3 1 "#1b1b1b" 255)
+  (surface 494 648 20 3 1 "#1b1b1b" 255)
+  (surface 494 656 14 3 1 "#1b1b1b" 255)
+  (surface 540 630 40 40 12 "#ffad00" 255)
+  (ellipse 560 650 10 10 "#1b1b1b")
+  (ellipse 560 650 4 4 "#ffad00")
+  (surface 596 630 40 40 12 "#ff9cb1" 255)
+  (label 608 638 1 20 "#1b1b1b" "?")
+  (surface 652 630 40 40 12 "#2b2b2b" 255)
+  (label 667 640 1 16 "#dedede" "A"))

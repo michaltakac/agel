@@ -25,10 +25,11 @@ began, and because a reproducible 256 KiB boot seed is a useful thing to have.
    evaluator's world banks.
 
 The linker keeps `.text.entry` first so helper-function reordering cannot move
-the address called by the BIOS stage. The complete raw image is 3,072 sectors
-(1.5 MiB), laid out as follows since v0.2.42; the same layout is used on the
-virtio disks of the AArch64 and RISC-V machines, which have no BIOS stage and
-no kernel slots but keep everything from sector 1024 on in the same place.
+the address called by the BIOS stage. The x86-64 image is 6,144 sectors
+(3 MiB), laid out as follows since v0.2.42 with the asset region added at
+v0.2.47; the virtio disks of the AArch64 and RISC-V machines are 3,072
+sectors, have no BIOS stage, kernel slots or assets, and keep everything from
+sector 1024 to 3071 in the same place.
 
 | Sectors | Contents |
 |---|---|
@@ -40,6 +41,7 @@ no kernel slots but keep everything from sector 1024 on in the same place.
 | 1057 | the v0.2.30 kernel slot selector |
 | 1536–2047 | reserved for the filesystem the POSIX personality's next stratum adds |
 | 2048–3071 | the v0.2.41 program region: a table sector and static ELF images |
+| 3072–6143 | the v0.2.47 asset region: a table sector and the compositor's font atlases; the x86-64 image is 6,144 sectors (3 MiB) to hold it |
 
 Rebuilding installs the new kernel as slot A, clears the selector so that
 kernel is what boots, and preserves everything else. Before v0.2.42 a kernel

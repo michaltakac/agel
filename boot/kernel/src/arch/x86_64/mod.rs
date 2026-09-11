@@ -16,6 +16,8 @@ mod memory;
 
 #[cfg(feature = "isolation-selftest")]
 pub use domain::Domain;
+#[cfg(feature = "native-graphics")]
+pub use domain::{ASSET_BASE, ASSET_SLOT_BYTES};
 #[cfg(feature = "process")]
 pub use domain::{PROCESS_BASE, PROCESS_BYTES};
 /// The ELF `e_machine` of programs built for this machine.
@@ -250,9 +252,10 @@ impl Machine {
         .map_err(|error| error.name())
     }
 
-    /// Give a process domain one more page at `virtual_address`, and return
-    /// the frame behind it for the loader to fill.
-    #[cfg(feature = "process")]
+    /// Give a domain one more page at `virtual_address`, and return the
+    /// frame behind it for the loader to fill: a process's image, or the
+    /// compositor's assets.
+    #[cfg(feature = "pages")]
     pub fn map_process_page(
         &mut self,
         domain: &mut Domain,

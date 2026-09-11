@@ -46,6 +46,11 @@ fn window_access(rights: agel_kernel_abi::Rights) -> Access {
 /// stack, shared page and frame window, inside the domain's private region.
 #[cfg(feature = "process")]
 pub const PROCESS_BASE: u64 = DOMAIN_BASE + 0x1000_0000;
+/// Where the compositor sees its assets: one slot per face, read-only.
+#[cfg(feature = "native-graphics")]
+pub const ASSET_BASE: u64 = DOMAIN_BASE + 0x2000_0000;
+#[cfg(feature = "native-graphics")]
+pub const ASSET_SLOT_BYTES: u64 = 0x0020_0000;
 #[cfg(feature = "process")]
 pub const PROCESS_BYTES: u64 = 0x0100_0000;
 
@@ -249,7 +254,7 @@ impl Domain {
     /// recording it with the domain's frames. How a loaded process gets its
     /// code, data and zero-filled pages; the frame is identity mapped for
     /// the supervisor, which fills it before the domain ever runs.
-    #[cfg(feature = "process")]
+    #[cfg(feature = "pages")]
     pub fn map_extra(
         &mut self,
         pool: &mut FramePool,

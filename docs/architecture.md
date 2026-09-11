@@ -326,6 +326,12 @@ Each rung must be runnable and differentially testable against the rung below:
    descriptor set in place of `fork`, pipes, and `wait`. Breadth began at
    v0.2.46: arguments, a real heap, streams, and a third-party C source
    built unmodified.
+51. **A desktop of COSMIC's quality (started at v0.2.47):** the native
+   compositor draws anti-aliased text from font atlases in an asset region
+   of the disk, blended surfaces with soft shadows, and a scene styled with
+   COSMIC's palette, radii and spacing. Still to come: the display at its
+   native resolution, icons, windows a process can own, a pointer that is
+   an arrow, and the workshop as one window among others.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

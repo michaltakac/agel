@@ -4,7 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.46: C programs take arguments, allocate from a heap that gives memory
+The current repository is **v0.2.47: the native desktop draws anti-aliased Fira Sans and Fira Mono from
+font atlases in a new asset region of the disk, blends rounded surfaces with soft shadows, and is
+styled with COSMIC's dark palette, radii and spacing, a first step toward a desktop of that quality; C programs take arguments, allocate from a heap that gives memory
 back, read and write files through streams with seek and append, and an unmodified public-domain
 SHA-256 source builds and runs with the digest the host computes; a process starts another by name with exactly the descriptors
 and the namespace it chooses to give, never by `fork`, pipes are supervisor queues and `wait` blocks,
