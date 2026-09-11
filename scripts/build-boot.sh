@@ -61,28 +61,15 @@ dd if=/dev/zero of="$disk_image" bs=512 seek=1057 count=1 conv=notrunc 2>/dev/nu
 dd if="$boot_bin" of="$disk_image" conv=notrunc 2>/dev/null
 dd if="$kernel_bin" of="$disk_image" bs=512 seek=1 conv=notrunc 2>/dev/null
 
-# The asset region (sectors 3072-6143) holds the compositor's font atlases,
-# rasterized from the fonts under boot/desktop/fonts by Pillow. They are
-# part of the seed: the graphics image refuses to boot without them, and a
-# rebuild installs them fresh so the image never carries stale ones.
-assets_dir="$build_dir/assets"
-mkdir -p "$assets_dir"
-fonts_dir="$project_dir/boot/desktop/fonts"
-atlas() {
-  name=$1; font=$2; sizes=$3
-  out="$assets_dir/$name.agf"
-  if test ! -f "$out" || test "$fonts_dir/$font" -nt "$out" || test "$project_dir/scripts/build-font-atlas.py" -nt "$out"; then
-    python3 "$project_dir/scripts/build-font-atlas.py" "$fonts_dir/$font" "$out" --sizes "$sizes" >/dev/null
-  fi
-  python3 "$project_dir/scripts/install-asset.py" "$disk_image" "$name" "$out" >/dev/null
-}
-atlas fira-sans FiraSans-Regular.ttf 12,14,16,20,24,32
-atlas fira-sans-medium FiraSans-Medium.ttf 12,14,16,20,24,32
-atlas fira-mono FiraMono-Regular.ttf 12,14,16,20
-sprites="$assets_dir/sprites.agi"
-if test ! -f "$sprites" || test "$project_dir/scripts/build-sprites.py" -nt "$sprites"; then
-  python3 "$project_dir/scripts/build-sprites.py" "$sprites" >/dev/null
-fi
-python3 "$project_dir/scripts/install-asset.py" "$disk_image" sprites "$sprites" >/dev/null
+# The asset region (sectors 3072-6143) holds the compositor's font atlases
+# and sprite sheet, committed under boot/desktop/assets so that every build
+# installs the same bytes (scripts/build-assets.sh regenerates them from the
+# fonts and drawings). They are part of the seed: the graphics image refuses
+# to boot without them, and a rebuild installs them fresh.
+assets_dir="$project_dir/boot/desktop/assets"
+for asset in fira-sans.agf fira-sans-medium.agf fira-mono.agf sprites.agi; do
+  test -f "$assets_dir/$asset" || { printf '%s\n' "missing $assets_dir/$asset; run scripts/build-assets.sh" >&2; exit 1; }
+  python3 "$project_dir/scripts/install-asset.py" "$disk_image" "${asset%.*}" "$assets_dir/$asset" >/dev/null
+done
 
 printf '%s\n' "$disk_image"

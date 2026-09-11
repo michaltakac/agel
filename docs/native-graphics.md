@@ -64,9 +64,13 @@ The faces are font atlases in the disk's **asset region** (sectors 3072
 through 6143, a table like the program region's). `scripts/build-font-atlas.py`
 rasterizes a TrueType font with Pillow into `AGF1`: for each pixel size,
 the 96 printable ASCII glyphs with their metrics and 8-bit coverage
-bitmaps. The build installs Fira Sans Regular and Medium (12 to 32 px) and
-Fira Mono (12 to 20 px), bundled under the SIL Open Font License in
-`boot/desktop/fonts`. At boot the graphics supervisor reads each atlas
+bitmaps. Fira Sans Regular and Medium (12 to 32 px) and Fira Mono (12 to
+20 px), bundled under the SIL Open Font License in `boot/desktop/fonts`,
+are rasterized by `scripts/build-assets.sh` into `boot/desktop/assets`,
+which is committed: every build and every CI run installs the same bytes,
+so the self-test's frozen digest means the same thing everywhere, and no
+build needs Pillow. Change a font, a size or a sprite, run the script,
+refreeze the digest. At boot the graphics supervisor reads each atlas
 through the storage driver domain, checks its CRC-32, maps it read-only
 into the compositor's asset window, and keeps the metrics it needs to lay
 text out; the compositor checks every offset an atlas names against the
