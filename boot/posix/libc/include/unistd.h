@@ -14,6 +14,17 @@ ssize_t write(int descriptor, const void *buffer, size_t count);
 int close(int descriptor);
 void _exit(int status) __attribute__((noreturn));
 
+int unlink(const char *path);
+int rmdir(const char *path);
+
+/* getopt, in the library's C: optind, optarg, opterr and optopt as usual;
+   an option string of letters, a colon after one that takes an argument;
+   "--" ends the options; an unknown or argument-less option prints to
+   stderr unless opterr is zero and answers '?'. */
+extern int optind, opterr, optopt;
+extern char *optarg;
+int getopt(int argc, char *const argv[], const char *options);
+
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2

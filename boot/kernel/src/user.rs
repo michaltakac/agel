@@ -2173,6 +2173,78 @@ impl Filesystem {
         Ok(length)
     }
 
+    /// Remove what `path` names from `root`: a file, or a directory with
+    /// nothing in it. The extent's sectors keep their bytes; the entry is
+    /// what makes them a file, and it is gone.
+    #[link_section = ".user_text"]
+    unsafe fn unlink(&mut self, root: u16, path: &[u8]) -> Result<(), u64> {
+        use crate::world::fs;
+        let (index, _, kind) = unsafe { self.open(root, 0, path)? };
+        if index == 0 || index == usize::from(root) {
+            return Err(fs::EACCES);
+        }
+        if kind == fs::KIND_DIRECTORY as u8
+            && self
+                .entries
+                .iter()
+                .any(|entry| entry.kind != 0 && entry.parent == index as u16)
+        {
+            return Err(fs::ENOTEMPTY);
+        }
+        if let Some(slot) = self.entries.get_mut(index) {
+            *slot = Entry::EMPTY;
+        }
+        unsafe { self.flush_entry(index) }
+    }
+
+    /// Give what `old` names the name and place `new` spells, both from
+    /// `root`; the destination must not exist, and a directory cannot be
+    /// moved into itself.
+    #[link_section = ".user_text"]
+    unsafe fn rename(&mut self, root: u16, old: &[u8], new: &[u8]) -> Result<(), u64> {
+        use crate::world::fs;
+        let (index, _, kind) = unsafe { self.open(root, 0, old)? };
+        if index == 0 || index == usize::from(root) {
+            return Err(fs::EACCES);
+        }
+        let trimmed = new.strip_suffix(b"/").unwrap_or(new);
+        let (directory, name) = match trimmed.iter().rposition(|byte| *byte == b'/') {
+            Some(at) => (&trimmed[..at], &trimmed[at + 1..]),
+            None => (&trimmed[..0], trimmed),
+        };
+        if name.is_empty() || name.len() > agelfs::NAME_BYTES || name == b"." || name == b".." {
+            return Err(fs::EINVAL);
+        }
+        let (parent, _, parent_kind) = unsafe { self.open(root, fs::O_DIRECTORY_BIT, directory)? };
+        if parent_kind != fs::KIND_DIRECTORY as u8 {
+            return Err(fs::ENOTDIR);
+        }
+        // Climbing from the destination's directory must not reach the
+        // entry being moved: a directory inside itself is unreachable.
+        let mut ancestor = parent;
+        while ancestor != 0 {
+            if ancestor == index {
+                return Err(fs::EINVAL);
+            }
+            ancestor = usize::from(self.entry(ancestor)?.parent);
+            if kind != fs::KIND_DIRECTORY as u8 {
+                break;
+            }
+        }
+        if self.child(parent as u16, name).is_some() {
+            return Err(fs::EEXIST);
+        }
+        if let Some(slot) = self.entries.get_mut(index) {
+            slot.name = [0; agelfs::NAME_BYTES];
+            for (stored, byte) in slot.name.iter_mut().zip(name.iter()) {
+                *stored = *byte;
+            }
+            slot.name_len = name.len() as u8;
+            slot.parent = parent as u16;
+        }
+        unsafe { self.flush_entry(index) }
+    }
+
     /// The `position`-th child of `directory`.
     #[link_section = ".user_text"]
     unsafe fn list(&mut self, directory: u16, position: u64) -> Result<(usize, u8, u32), u64> {
@@ -2246,6 +2318,21 @@ pub unsafe extern "C" fn agel_fs_main(shared_page: u64) -> ! {
         } else if command == fs::COMMAND_LIST {
             unsafe { filesystem.list(arguments[0] as u16, arguments[1]) }
                 .map(|(entry, kind, length)| [entry as u64, u64::from(kind), u64::from(length)])
+        } else if command == fs::COMMAND_UNLINK || command == fs::COMMAND_RENAME {
+            let first = (arguments[1] as usize).min(crate::world::PAYLOAD_BYTES);
+            let second = (arguments[2] as usize).min(crate::world::PAYLOAD_BYTES - first);
+            let payload = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *const u8;
+            let mut paths = [0_u8; crate::world::PAYLOAD_BYTES];
+            for (offset, byte) in paths.iter_mut().enumerate().take(first + second) {
+                *byte = unsafe { payload.add(offset).read_volatile() };
+            }
+            let old = paths.get(..first).unwrap_or(&[]);
+            let new = paths.get(first..first + second).unwrap_or(&[]);
+            if command == fs::COMMAND_UNLINK {
+                unsafe { filesystem.unlink(arguments[0] as u16, old) }.map(|()| [0, 0, 0])
+            } else {
+                unsafe { filesystem.rename(arguments[0] as u16, old, new) }.map(|()| [0, 0, 0])
+            }
         } else if command == shared::COMMAND_FAULT_WRITE {
             unsafe { (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead) };
             Err(fs::EINVAL)

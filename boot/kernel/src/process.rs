@@ -818,6 +818,10 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
             _ => error(EBADF),
         },
         process::OPEN => open(table, index, services, arguments[0], arguments[1]),
+        process::UNLINK | process::RENAME | process::STAT => {
+            name_request(table, index, services, kind, arguments)
+        }
+        process::READDIR => read_directory(table, index, services, arguments[0]),
         process::CLOSE => close(table, index, arguments[0]),
         process::PIPE => pipe(table, index),
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
@@ -1106,6 +1110,104 @@ fn open(
             }
             number as u64
         }
+        Err(number) => error(number),
+    }
+}
+
+/// `unlink`, `rename` and `stat`: requests on names, bounded by the
+/// namespace before the service sees them (removing and moving need
+/// `write`, asking needs `read`) and resolved by the service from the
+/// namespace's root.
+fn name_request(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    kind: u64,
+    arguments: [u64; 4],
+) -> u64 {
+    let Some(filesystem) = services.filesystem.as_deref_mut() else {
+        return error(ENOSYS);
+    };
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let namespace = process.namespace;
+    let changes = kind != process::STAT;
+    if (changes && !namespace.write) || (!changes && !namespace.read) {
+        return error(EACCES);
+    }
+    let first = (arguments[0] as usize).min(PAYLOAD_BYTES);
+    let second = if kind == process::RENAME {
+        (arguments[1] as usize).min(PAYLOAD_BYTES - first)
+    } else {
+        0
+    };
+    let mut paths = [0_u8; PAYLOAD_BYTES];
+    for (offset, byte) in paths.iter_mut().enumerate().take(first + second) {
+        *byte = process.domain.core().read_payload(offset);
+    }
+    filesystem.write_payload(paths.get(..first + second).unwrap_or(&[]));
+    let handle = filesystem.handle();
+    let (command, request) = match kind {
+        process::UNLINK => (
+            fs::COMMAND_UNLINK,
+            [u64::from(namespace.root), first as u64, 0],
+        ),
+        process::RENAME => (
+            fs::COMMAND_RENAME,
+            [u64::from(namespace.root), first as u64, second as u64],
+        ),
+        _ => (
+            fs::COMMAND_OPEN,
+            [u64::from(namespace.root), 0, first as u64],
+        ),
+    };
+    let outcome = filesystem.filesystem_request(handle, services.storage, command, request);
+    match service_error(outcome) {
+        Ok([_, length, entry_kind]) if kind == process::STAT => (length << 8) | entry_kind,
+        Ok(_) => 0,
+        Err(number) => error(number),
+    }
+}
+
+/// `readdir`: the next child of the directory open at `descriptor`, its
+/// name copied into the process's payload area; the descriptor's offset
+/// is the position, so each call gives the next.
+fn read_directory(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    descriptor: u64,
+) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
+        return error(EBADF);
+    };
+    if slot.kind != Kind::File || !slot.readable {
+        return error(EBADF);
+    }
+    let Some(filesystem) = services.filesystem.as_deref_mut() else {
+        return error(ENOSYS);
+    };
+    let outcome = filesystem.filesystem_request(
+        slot.handle,
+        services.storage,
+        fs::COMMAND_LIST,
+        [u64::from(slot.entry), slot.offset, 0],
+    );
+    match service_error(outcome) {
+        Ok([_, entry_kind, length]) => {
+            let name_length = (filesystem.name_length() as usize).min(PAYLOAD_BYTES);
+            for offset in 0..name_length {
+                let byte = filesystem.read_payload(offset);
+                process.domain.core().write_payload(offset, byte);
+            }
+            slot.offset += 1;
+            entry_kind | ((name_length as u64) << 8) | (length << 16)
+        }
+        Err(number) if number == fs::ENOENT as i64 => 0,
         Err(number) => error(number),
     }
 }

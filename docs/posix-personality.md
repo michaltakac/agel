@@ -84,6 +84,10 @@ and resumes the process.
 | `8` wait | child id | the child's exit status, or `0x100` with a signal number in the low byte when the machine stopped it (`11` a fault, `9` a budget or a deadlock); blocks until the child ends; `-ECHILD` for a child that is not the caller's; stratum 3 |
 | `9` seek | descriptor, offset, whence (0 start, 1 current, 2 end) | the new offset; `-ESPIPE` for a pipe or the console; stratum 4 |
 | `10` window | width, height, title length ≤ 28 | a window's number, or `-ENODEV` where there is no display, `-EBUSY` when every window is taken or the process has one, `-EINVAL` for a size outside 64×48..1280×720; the title is in the payload area; not POSIX, see [`native-graphics.md`](native-graphics.md) |
+| `13` unlink | path length | 0; the payload path removed from the namespace, a file or an empty directory (`-ENOTEMPTY` otherwise); needs `write`; stratum 4 |
+| `14` rename | old length, new length | 0; the payload's first path moved to the second, which must not exist (`-EEXIST`); a directory cannot be moved into itself; needs `write`; stratum 4 |
+| `15` stat | path length | the kind in the low byte (`1` a file, `2` a directory) and the length above it; needs `read`; stratum 4 |
+| `16` readdir | descriptor | the next child of the directory open there: its name in the payload area, the kind in the low byte, the name's length in the next, the child's length above; 0 past the last; the descriptor's offset counts the children given; stratum 4 |
 | `12` event | window, wait | the next event for a window the process owns, packed: the kind in the top byte (`1` a press, with content coordinates in bits 32–48 and 16–32; `2` a key, with its byte in the low eight; `3` the release and `4` the pointer's motion after a press, with coordinates like a press), 0 when there is none; with `wait` set the process sleeps until there is one and the desktop runs meanwhile; `-ENODEV` without a display (and a sleeping process is stopped as blocked where nothing can deliver), `-EBADF` for a window not its own; not POSIX |
 | `11` draw | window, record count ≤ 8, flags (`1` clears first) | the records the window holds after this; the records are 64-byte compositor records in the block area, relative to the window's content; `-EINVAL` and nothing drawn when any is not permitted or reaches outside the content, `-ENOSPC` past 24 records, `-EBADF` for a window the process does not own; not POSIX |
 
@@ -183,8 +187,11 @@ on the disk and a new boot or a restarted service reads them.
 The supervisor speaks to the service by command: format, open (a root
 entry, flags, a path in the payload area; answers entry, length, kind),
 read and write (entry, offset, length; the data crosses in the block area),
-and list (a directory and a position; answers the entry and leaves its name
-in the payload). The service resolves a path from the root it was given,
+list (a directory and a position; answers the entry and leaves its name
+in the payload), and, since v0.2.58, unlink (a root and a path: a file or
+an empty directory) and rename (a root and two paths, back to back in the
+payload; the destination must not exist, and a directory cannot be moved
+into itself). The service resolves a path from the root it was given,
 component by component, refusing `..` at that root; the supervisor passes a
 process's namespace root, so the service never sees a path the process
 could not have named.
@@ -440,6 +447,28 @@ What this step adds:
   program around it, and the test compares its digest of a file with the
   host's.
 
+**Names (v0.2.58).** `unlink`, `rmdir` (the same request: the service
+removes an empty directory as it removes a file), `rename`, `stat` (a
+`struct stat` of `st_size` and `st_mode`, the mode a fixed `0644` with
+`S_IFREG` or `S_IFDIR`), `mkdir` (an `open` for creation with
+`O_DIRECTORY`, closed at once; the mode is ignored), and `<dirent.h>`'s
+`opendir`, `readdir` and `closedir` over a descriptor opened on the
+directory, four directories open at once. The service gains `unlink` and
+`rename` commands; the process protocol gains `unlink`, `rename`, `stat`
+and `readdir`, each bounded by the namespace's rights before the service
+sees a path. `unlink` leaves the extent's sectors as they were: the entry
+is what made them a file. `dir.c` exercises all of it in a namespace
+rooted at `app`, and again read-only, where `mkdir` is `EACCES`.
+
+**`sscanf`, `fscanf`, `scanf`** with `%d %i %u %x %X %o %s %c %%`, a
+width, the `l`, `ll` and `h` modifiers, whitespace in the format matching
+any amount in the input, and `%n`; no floating point, no `%[`. A stream
+scanner keeps one character of pushback.
+
+**`getopt`** as POSIX describes it: `optind`, `optarg`, `opterr`,
+`optopt`, letters with a colon for an argument, `--` to end the options,
+`?` for an unknown one.
+
 **Windows, which are not POSIX.** `<agel/window.h>` declares
 `agel_window(width, height, title)` and `agel_draw(window, records, count,
 flags)` over the `10` and `11` requests, with inline builders for the
@@ -456,9 +485,9 @@ machines, and `scripts/test-desktop-process.sh` the windows themselves.
 How the desktop keeps and checks what a process draws is in
 [`native-graphics.md`](native-graphics.md).
 
-What it does not add: no `scanf` family, no `time`, no `signal`, no
-`setjmp`, no `math`, no environment, no `getopt`, no `stat`, no
-`opendir`, no `unlink` or `rename` (the filesystem has none), no floating
-point in the formatter, no locale, no threads. `qsort` is quadratic. The
+What it does not add: no `time`, no `signal`, no `setjmp`, no `math`, no
+environment, no floating point in the formatter or the scanner, no
+locale, no threads, no `chdir` (paths are always from the namespace's
+root), no `truncate`, no `%[` in the scanner. `qsort` is quadratic. The
 heap is one arena and never grows. Each is a step this stratum takes when
 a program needs it, with a test.

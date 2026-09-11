@@ -257,6 +257,11 @@ promise.
   UART, the GIC-400 and the SD host controller, `kernel_2712.img` from
   `build-kernel.sh raspi5`; linted with every release, never run, waiting
   for the board.
+  `v0.2.58` gives the POSIX personality names: `unlink`, `rmdir`,
+  `rename`, `stat`, `mkdir`, `opendir`, `readdir` and `closedir` over new
+  service commands and process requests, each bounded by the namespace;
+  `sscanf`, `fscanf` and `scanf`; `getopt`; a `dir` program exercises
+  them on all three machines, in a full and a read-only namespace.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

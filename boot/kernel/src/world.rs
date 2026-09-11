@@ -470,6 +470,23 @@ pub mod process {
     /// process waits until there is one and the desktop runs meanwhile.
     /// `-ENODEV` without a display, `-EBADF` for a window not its own.
     pub const EVENT: u64 = 12;
+    /// Remove the payload path (`arguments[0]` bytes) in the namespace:
+    /// a file, or an empty directory (`-ENOTEMPTY` otherwise). Needs
+    /// `write`.
+    pub const UNLINK: u64 = 13;
+    /// Move the payload's first `arguments[0]` bytes (a path) to the next
+    /// `arguments[1]` bytes (another) in the namespace; `-EEXIST` when the
+    /// destination is there. Needs `write`.
+    pub const RENAME: u64 = 14;
+    /// What the payload path (`arguments[0]` bytes) is: the kind in the
+    /// low byte (`1` a file, `2` a directory) and the length above it.
+    /// Needs `read`.
+    pub const STAT: u64 = 15;
+    /// The next child of the directory open at descriptor `arguments[0]`:
+    /// its name in the payload area, the answer's low byte its kind, the
+    /// next byte the name's length, the length of the child above; 0 past
+    /// the last. The descriptor's offset counts the children given.
+    pub const READDIR: u64 = 16;
     /// An event's kind is its top byte; a press carries the content
     /// coordinates in bits 32..48 and 16..32, a key its byte in the low
     /// eight bits.
@@ -556,6 +573,13 @@ pub mod fs {
     /// the payload, values: entry, kind, length, or status `not found` past
     /// the last.
     pub const COMMAND_LIST: u64 = 0xb400;
+    /// Remove the payload path (length `arguments[1]`) from directory
+    /// `arguments[0]`: a file, or a directory with nothing in it.
+    pub const COMMAND_UNLINK: u64 = 0xb500;
+    /// Move the payload's first `arguments[1]` bytes (a path) to the
+    /// following `arguments[2]` bytes (another), both from `arguments[0]`;
+    /// the destination must not exist.
+    pub const COMMAND_RENAME: u64 = 0xb600;
     /// Sector request words the service fills before it yields mid-command:
     /// operation (0 none, 1 read, 2 write), sector, and the answer.
     pub const DISK_OPERATION: usize = 72;
@@ -582,6 +606,8 @@ pub mod fs {
     pub const EINVAL: u64 = 22;
     pub const EFBIG: u64 = 27;
     pub const ENOSPC: u64 = 28;
+    pub const EEXIST: u64 = 17;
+    pub const ENOTEMPTY: u64 = 39;
     /// `open` flag bits the service interprets, the POSIX values.
     pub const O_WRONLY_BIT: u64 = 0o1;
     pub const O_RDWR_BIT: u64 = 0o2;

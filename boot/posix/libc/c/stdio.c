@@ -21,6 +21,8 @@ struct __agel_file {
     size_t out_used;
     size_t in_used;
     size_t in_at;
+    /* One character given back by the scanner; -1 when none. */
+    int pushback;
     char out[STREAM_BUFFER];
     char in[STREAM_BUFFER];
 };
@@ -204,10 +206,24 @@ static int fill(FILE *stream) {
 
 int fgetc(FILE *stream) {
     streams_init();
+    if (stream->pushback > 0) {
+        int character = stream->pushback - 1;
+        stream->pushback = 0;
+        return character;
+    }
     if (!fill(stream)) {
         return EOF;
     }
     return (unsigned char)stream->in[stream->in_at++];
+}
+
+int ungetc(int character, FILE *stream) {
+    if (character == EOF || stream->pushback > 0) {
+        return EOF;
+    }
+    stream->pushback = (unsigned char)character + 1;
+    stream->eof = 0;
+    return (unsigned char)character;
 }
 
 int getc(FILE *stream) {
@@ -526,4 +542,302 @@ void perror(const char *prefix) {
     } else {
         fprintf(stderr, "%s\n", strerror(errno));
     }
+}
+
+/* ------------------------------------------------------------------------
+   The scanner: %d %i %u %x %X %o %s %c %% %n, a width, the l, ll and h
+   modifiers, whitespace in the format matching any amount of input
+   whitespace. It reads one character at a time from a source that can give
+   one back: a string, or a stream through ungetc.
+   ------------------------------------------------------------------------ */
+
+struct source {
+    const char *text;
+    FILE *stream;
+    int consumed;
+};
+
+static int take(struct source *source) {
+    int character;
+    if (source->text) {
+        character = (unsigned char)*source->text;
+        if (character == 0) {
+            return EOF;
+        }
+        source->text++;
+    } else {
+        character = fgetc(source->stream);
+        if (character == EOF) {
+            return EOF;
+        }
+    }
+    source->consumed++;
+    return character;
+}
+
+static void give_back(struct source *source, int character) {
+    if (character == EOF) {
+        return;
+    }
+    if (source->text) {
+        source->text--;
+    } else {
+        ungetc(character, source->stream);
+    }
+    source->consumed--;
+}
+
+static int is_space(int character) {
+    return character == ' ' || character == '\t' || character == '\n' || character == '\r' ||
+           character == '\f' || character == '\v';
+}
+
+static int digit_value(int character, unsigned base) {
+    unsigned value;
+    if (character >= '0' && character <= '9') {
+        value = (unsigned)(character - '0');
+    } else if (character >= 'a' && character <= 'z') {
+        value = (unsigned)(character - 'a' + 10);
+    } else if (character >= 'A' && character <= 'Z') {
+        value = (unsigned)(character - 'A' + 10);
+    } else {
+        return -1;
+    }
+    return value < base ? (int)value : -1;
+}
+
+static void skip_space(struct source *source) {
+    int character;
+    while ((character = take(source)) != EOF && is_space(character)) {
+    }
+    give_back(source, character);
+}
+
+/* A number in `base` (0 for %i's choice), at most `width` characters:
+   1 when one was read, 0 when the input did not start one, -1 at the end. */
+static int scan_number(struct source *source, unsigned base, int width, unsigned long long *value,
+                       int *negative) {
+    int character = take(source);
+    int used = 0;
+    *negative = 0;
+    *value = 0;
+    if (character == EOF) {
+        return -1;
+    }
+    if ((character == '-' || character == '+') && width != 1) {
+        *negative = character == '-';
+        character = take(source);
+        used++;
+    }
+    if (base == 0 || base == 16) {
+        if (character == '0' && (width < 0 || used + 1 < width)) {
+            int next = take(source);
+            if (next == 'x' || next == 'X') {
+                base = 16;
+                character = take(source);
+                used += 2;
+            } else {
+                give_back(source, next);
+                if (base == 0) {
+                    base = 8;
+                }
+            }
+        } else if (base == 0) {
+            base = 10;
+        }
+    }
+    int digits = 0;
+    while (character != EOF && (width < 0 || used < width)) {
+        int digit = digit_value(character, base);
+        if (digit < 0) {
+            break;
+        }
+        *value = *value * base + (unsigned)digit;
+        digits++;
+        used++;
+        character = take(source);
+    }
+    give_back(source, character);
+    return digits > 0 ? 1 : 0;
+}
+
+static int scan(struct source *source, const char *format, va_list arguments) {
+    int assigned = 0;
+    for (const char *at = format; *at; at++) {
+        if (is_space((unsigned char)*at)) {
+            skip_space(source);
+            continue;
+        }
+        if (*at != '%') {
+            int character = take(source);
+            if (character != (unsigned char)*at) {
+                give_back(source, character);
+                return assigned;
+            }
+            continue;
+        }
+        at++;
+        int suppress = 0;
+        if (*at == '*') {
+            suppress = 1;
+            at++;
+        }
+        int width = -1;
+        while (*at >= '0' && *at <= '9') {
+            width = (width < 0 ? 0 : width * 10) + (*at - '0');
+            at++;
+        }
+        int longs = 0;
+        int shorts = 0;
+        while (*at == 'l' || *at == 'h' || *at == 'z') {
+            if (*at == 'l' || *at == 'z') {
+                longs++;
+            } else {
+                shorts++;
+            }
+            at++;
+        }
+        char conversion = *at;
+        if (conversion == 0) {
+            return assigned;
+        }
+        if (conversion == '%') {
+            skip_space(source);
+            int character = take(source);
+            if (character != '%') {
+                give_back(source, character);
+                return assigned;
+            }
+            continue;
+        }
+        if (conversion == 'n') {
+            if (!suppress) {
+                *va_arg(arguments, int *) = source->consumed;
+            }
+            continue;
+        }
+        if (conversion == 'c') {
+            int count = width < 0 ? 1 : width;
+            char *out = suppress ? NULL : va_arg(arguments, char *);
+            for (int index = 0; index < count; index++) {
+                int character = take(source);
+                if (character == EOF) {
+                    return assigned == 0 && index == 0 ? EOF : assigned;
+                }
+                if (out) {
+                    out[index] = (char)character;
+                }
+            }
+            if (!suppress) {
+                assigned++;
+            }
+            continue;
+        }
+        skip_space(source);
+        if (conversion == 's') {
+            char *out = suppress ? NULL : va_arg(arguments, char *);
+            int used = 0;
+            int character = take(source);
+            if (character == EOF) {
+                return assigned == 0 ? EOF : assigned;
+            }
+            while (character != EOF && !is_space(character) && (width < 0 || used < width)) {
+                if (out) {
+                    out[used] = (char)character;
+                }
+                used++;
+                character = take(source);
+            }
+            give_back(source, character);
+            if (out) {
+                out[used] = 0;
+            }
+            if (!suppress) {
+                assigned++;
+            }
+            continue;
+        }
+        unsigned base;
+        int is_signed = 0;
+        switch (conversion) {
+        case 'd': base = 10; is_signed = 1; break;
+        case 'i': base = 0; is_signed = 1; break;
+        case 'u': base = 10; break;
+        case 'x': case 'X': base = 16; break;
+        case 'o': base = 8; break;
+        default: return assigned;
+        }
+        unsigned long long value;
+        int negative;
+        int got = scan_number(source, base, width, &value, &negative);
+        if (got < 0) {
+            return assigned == 0 ? EOF : assigned;
+        }
+        if (got == 0) {
+            return assigned;
+        }
+        if (suppress) {
+            continue;
+        }
+        if (is_signed) {
+            long long number = negative ? -(long long)value : (long long)value;
+            if (longs >= 2) {
+                *va_arg(arguments, long long *) = number;
+            } else if (longs == 1) {
+                *va_arg(arguments, long *) = (long)number;
+            } else if (shorts) {
+                *va_arg(arguments, short *) = (short)number;
+            } else {
+                *va_arg(arguments, int *) = (int)number;
+            }
+        } else {
+            unsigned long long number = negative ? (unsigned long long)-(long long)value : value;
+            if (longs >= 2) {
+                *va_arg(arguments, unsigned long long *) = number;
+            } else if (longs == 1) {
+                *va_arg(arguments, unsigned long *) = (unsigned long)number;
+            } else if (shorts) {
+                *va_arg(arguments, unsigned short *) = (unsigned short)number;
+            } else {
+                *va_arg(arguments, unsigned *) = (unsigned)number;
+            }
+        }
+        assigned++;
+    }
+    return assigned;
+}
+
+int vsscanf(const char *text, const char *format, va_list arguments) {
+    struct source source = {text, NULL, 0};
+    return scan(&source, format, arguments);
+}
+
+int sscanf(const char *text, const char *format, ...) {
+    va_list arguments;
+    va_start(arguments, format);
+    int result = vsscanf(text, format, arguments);
+    va_end(arguments);
+    return result;
+}
+
+int vfscanf(FILE *stream, const char *format, va_list arguments) {
+    streams_init();
+    struct source source = {NULL, stream, 0};
+    return scan(&source, format, arguments);
+}
+
+int fscanf(FILE *stream, const char *format, ...) {
+    va_list arguments;
+    va_start(arguments, format);
+    int result = vfscanf(stream, format, arguments);
+    va_end(arguments);
+    return result;
+}
+
+int scanf(const char *format, ...) {
+    va_list arguments;
+    va_start(arguments, format);
+    int result = vfscanf(stdin, format, arguments);
+    va_end(arguments);
+    return result;
 }

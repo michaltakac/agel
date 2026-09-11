@@ -45,8 +45,14 @@ mkdir -p "$out"
 # shellcheck disable=SC2086
 cflags="--target=$triple $arch_flags -ffreestanding -nostdlib -fno-builtin -fno-stack-protector \
   -fno-asynchronous-unwind-tables -O2 -Wall -Wextra -Werror -I$posix_dir/libc/include"
-# shellcheck disable=SC2086
-"$clang" $cflags -c "$posix_dir/libc/c/stdio.c" -o "$out/stdio.o"
+# The library's own C, one object each.
+library_objects=""
+for source in "$posix_dir"/libc/c/*.c; do
+  object="$out/libc_$(basename "$source" .c).o"
+  # shellcheck disable=SC2086
+  "$clang" $cflags -c "$source" -o "$object"
+  library_objects="$library_objects $object"
+done
 # shellcheck disable=SC2086
 "$clang" $cflags -c "$posix_dir/c/$name.c" -o "$out/$name.o"
 # A program may list further sources, one per line relative to c/, in
@@ -64,5 +70,5 @@ fi
 # shellcheck disable=SC2086
 "$clang" --target=$triple -fuse-ld=lld -nostdlib -static -Wl,--gc-sections -Wl,-z,max-page-size=4096 \
   -Wl,-T,"$posix_dir/linker/$architecture.ld" -o "$out/$name" \
-  $objects "$out/stdio.o" "$archive"
+  $objects $library_objects "$archive"
 printf '%s\n' "$out/$name"

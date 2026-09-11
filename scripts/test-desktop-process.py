@@ -107,10 +107,15 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
             time.sleep(0.3)
             machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": False, "button": "left"}}]})
             time.sleep(0.3)
+        launcher_closed = panel_region(machine, 24, 48, 384, 400)
         move_to(60, 20)
         click()
-        time.sleep(1.0)
-        frame_with_launcher = panel_region(machine, 24, 48, 384, 400)
+        # The launcher is painted after the click's command; under load
+        # that takes longer than a fixed pause, so wait for the pixels.
+        deadline = time.monotonic() + 20
+        while (frame_with_launcher := panel_region(machine, 24, 48, 384, 400)) == launcher_closed:
+            assert time.monotonic() < deadline, "the launcher did not open"
+            time.sleep(0.5)
         move_to(200, 128)
         click()
         response = machine.until_prompt().decode()

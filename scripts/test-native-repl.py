@@ -953,6 +953,35 @@ def c_test(image: str, architecture: str, disk: str) -> None:
             ":exec c-cat",
             [b"cat: notes: errno 2", b"process c-cat exited with status 2"],
         )
+        # Names: mkdir, stat, rename, opendir and readdir, unlink and rmdir
+        # in a namespace rooted at app; sscanf and getopt on the arguments.
+        run_program(
+            boot,
+            ":exec c-dir /app -- -v -o out.txt notes",
+            [
+                b"dir: verbose 1, output out.txt, name notes",
+                b"dir: notes is a file of 18 bytes",
+                b"dir: logs is a directory",
+                b"dir: .: logs/",
+                b"dir: logs: kept",
+                b"dir: rmdir logs while full: errno 39",
+                b"dir: stat after unlink: errno 2",
+                b"dir: rename of nothing: errno 2",
+                b"dir: sscanf 4 fields: 42 255 hello x",
+                b"process c-dir exited with status 0",
+            ],
+        )
+        # A read-only namespace refuses the names that change.
+        run_program(
+            boot,
+            ":exec c-dir /etc ro -- secret",
+            [
+                b"dir: verbose 0, output none, name secret",
+                b"dir: secret is a file of 11 bytes",
+                b"dir: mkdir logs: errno 13",
+                b"process c-dir exited with status 1",
+            ],
+        )
         # The serial workshop has no display: a window is refused with
         # ENODEV, and the program says so.
         run_program(

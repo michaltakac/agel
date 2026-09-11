@@ -350,6 +350,10 @@ Each rung must be runnable and differentially testable against the rung below:
    (two device windows above 4 GiB), unrun until the board arrives; the
    mailbox framebuffer and the device tree follow, each a release with a
    test.
+53. **Names (v0.2.58):** the POSIX personality's fourth stratum gains
+   `unlink`, `rename`, `stat`, `mkdir` and directory reading, each a
+   request bounded by the namespace before the filesystem service sees a
+   path, plus `scanf` and `getopt` in the C library.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

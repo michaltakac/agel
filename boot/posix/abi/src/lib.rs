@@ -32,6 +32,12 @@ pub const EVENT_PRESS: u64 = 1 << 56;
 pub const EVENT_KEY: u64 = 2 << 56;
 pub const EVENT_RELEASE: u64 = 3 << 56;
 pub const EVENT_MOTION: u64 = 4 << 56;
+/// Names in the namespace: remove, move, ask; and the next child of an
+/// open directory.
+pub const UNLINK: u64 = 13;
+pub const RENAME: u64 = 14;
+pub const STAT: u64 = 15;
+pub const READDIR: u64 = 16;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;
@@ -225,6 +231,70 @@ impl Process {
     /// packed event, 0 when there is none, or a negated error number.
     pub fn event(&self, window: u64, wait: bool) -> i64 {
         self.request(EVENT, [window, u64::from(wait), 0, 0]) as i64
+    }
+
+    /// Put `first` and `second` in the payload area, back to back.
+    fn place_paths(&self, first: &[u8], second: &[u8]) -> (usize, usize) {
+        let payload = (self.page as usize + PAYLOAD_OFFSET) as *mut u8;
+        let take = first.len().min(PAYLOAD_BYTES);
+        let more = second.len().min(PAYLOAD_BYTES - take);
+        for (offset, byte) in first
+            .iter()
+            .take(take)
+            .chain(second.iter().take(more))
+            .enumerate()
+        {
+            unsafe { payload.add(offset).write_volatile(*byte) };
+        }
+        (take, more)
+    }
+
+    /// Remove `path`: a file, or an empty directory. 0, or a negated error.
+    pub fn unlink(&self, path: &[u8]) -> i64 {
+        let (take, _) = self.place_paths(path, &[]);
+        self.request(UNLINK, [take as u64, 0, 0, 0]) as i64
+    }
+
+    /// Move `old` to `new`, which must not exist. 0, or a negated error.
+    pub fn rename(&self, old: &[u8], new: &[u8]) -> i64 {
+        let (take, more) = self.place_paths(old, new);
+        self.request(RENAME, [take as u64, more as u64, 0, 0]) as i64
+    }
+
+    /// What `path` is: the kind (1 a file, 2 a directory) and the length,
+    /// or a negated error.
+    pub fn stat(&self, path: &[u8]) -> Result<(u8, u64), i64> {
+        let (take, _) = self.place_paths(path, &[]);
+        let result = self.request(STAT, [take as u64, 0, 0, 0]) as i64;
+        if result < 0 {
+            Err(result)
+        } else {
+            Ok(((result & 0xff) as u8, (result as u64) >> 8))
+        }
+    }
+
+    /// The next child of the directory open at `descriptor`: its name
+    /// copied into `name`, its kind and length; `None` past the last, or
+    /// a negated error.
+    pub fn readdir(
+        &self,
+        descriptor: u64,
+        name: &mut [u8],
+    ) -> Result<Option<(usize, u8, u64)>, i64> {
+        let result = self.request(READDIR, [descriptor, 0, 0, 0]) as i64;
+        if result < 0 {
+            return Err(result);
+        }
+        if result == 0 {
+            return Ok(None);
+        }
+        let result = result as u64;
+        let length = ((result >> 8) & 0xff) as usize;
+        let payload = (self.page as usize + PAYLOAD_OFFSET) as *const u8;
+        for (offset, byte) in name.iter_mut().take(length).enumerate() {
+            *byte = unsafe { payload.add(offset).read_volatile() };
+        }
+        Ok(Some((length, (result & 0xff) as u8, result >> 16)))
     }
 
     /// Wait for child `id` to end: its exit status, `WAIT_SIGNALED` with a

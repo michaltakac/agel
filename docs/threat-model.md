@@ -1356,6 +1356,30 @@ DMA, card removal while running.
 
 Not claimed: anything about the Pi 5 beyond the build.
 
+## v0.2.58
+
+- **A name request is bounded before it is a path:** `unlink` and
+  `rename` need the namespace's `write`, `stat` its `read`, checked in
+  the supervisor before the service is asked, as `open` has always been;
+  a read-only namespace cannot remove or move anything however the path
+  is spelled.
+- **The service resolves from the root it is given:** `unlink`, `rename`
+  and `stat` resolve like `open`, refusing `..` at the root, so a process
+  cannot name what its namespace does not hold; a directory cannot be
+  moved under itself, the root cannot be removed or moved, and only an
+  empty directory goes.
+- **`readdir` is a descriptor's:** the directory was opened through the
+  namespace, and each child comes through the same payload path as a
+  name from `list`, bounded to 32 bytes.
+- **Removed bytes remain:** `unlink` clears the entry and leaves the
+  extent's sectors; a later file in that slot starts at length 0 and
+  reads nothing past its length, but the sectors are not zeroed, which a
+  raw reader of the disk would see.
+
+Not claimed: no timestamps, no permissions beyond the namespace's three
+rights, no `chdir`, no atomicity across a power cut inside `rename`
+(one entry sector is written).
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

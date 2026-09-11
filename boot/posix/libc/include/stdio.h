@@ -31,6 +31,7 @@ int puts(const char *text);
 size_t fwrite(const void *data, size_t size, size_t count, FILE *stream);
 
 int fgetc(FILE *stream);
+int ungetc(int character, FILE *stream);
 int getc(FILE *stream);
 int getchar(void);
 char *fgets(char *buffer, int size, FILE *stream);
@@ -45,5 +46,15 @@ int vfprintf(FILE *stream, const char *format, va_list arguments);
 int vsprintf(char *buffer, const char *format, va_list arguments);
 int vsnprintf(char *buffer, size_t capacity, const char *format, va_list arguments);
 void perror(const char *prefix);
+int rename(const char *old, const char *new);
+
+/* The scanner handles %d %i %u %x %X %o %s %c %% with a width and the
+   l, ll and h modifiers, whitespace in the format matching any amount of
+   input whitespace; no floating point, no %[. */
+int vsscanf(const char *text, const char *format, va_list arguments);
+int sscanf(const char *text, const char *format, ...);
+int vfscanf(FILE *stream, const char *format, va_list arguments);
+int fscanf(FILE *stream, const char *format, ...);
+int scanf(const char *format, ...);
 
 #endif

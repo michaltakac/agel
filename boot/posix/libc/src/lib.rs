@@ -233,6 +233,170 @@ pub unsafe extern "C" fn agel_spawn(
 }
 
 // ---------------------------------------------------------------------------
+// unistd.h, stdio.h, sys/stat.h, dirent.h: names in the namespace
+// ---------------------------------------------------------------------------
+
+/// # Safety
+/// `path` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn unlink(path: *const c_char) -> c_int {
+    let bytes = unsafe { core::slice::from_raw_parts(path as *const u8, strlen(path)) };
+    outcome(process().unlink(bytes)) as c_int
+}
+
+/// `rmdir` is `unlink` here: the service removes an empty directory the
+/// same way.
+///
+/// # Safety
+/// `path` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn rmdir(path: *const c_char) -> c_int {
+    unsafe { unlink(path) }
+}
+
+/// # Safety
+/// Both must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn rename(old: *const c_char, new: *const c_char) -> c_int {
+    let old = unsafe { core::slice::from_raw_parts(old as *const u8, strlen(old)) };
+    let new = unsafe { core::slice::from_raw_parts(new as *const u8, strlen(new)) };
+    outcome(process().rename(old, new)) as c_int
+}
+
+/// `<sys/stat.h>`'s `struct stat`, as C lays it out: what the service
+/// knows, which is a kind and a length.
+#[repr(C)]
+pub struct stat {
+    pub st_size: c_long,
+    pub st_mode: c_uint,
+}
+
+const S_IFREG: c_uint = 0o100000;
+const S_IFDIR: c_uint = 0o040000;
+
+/// # Safety
+/// `path` must be NUL-terminated and `buffer` valid.
+#[no_mangle]
+pub unsafe extern "C" fn stat(path: *const c_char, buffer: *mut stat) -> c_int {
+    let bytes = unsafe { core::slice::from_raw_parts(path as *const u8, strlen(path)) };
+    match process().stat(bytes) {
+        Ok((kind, length)) => {
+            unsafe {
+                (*buffer).st_size = length as c_long;
+                (*buffer).st_mode = if kind == 2 { S_IFDIR } else { S_IFREG } | 0o644;
+            }
+            0
+        }
+        Err(number) => outcome(number) as c_int,
+    }
+}
+
+/// `mkdir`: an `open` for creation with `O_DIRECTORY`, closed at once.
+/// The mode has no meaning here.
+///
+/// # Safety
+/// `path` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn mkdir(path: *const c_char, _mode: c_uint) -> c_int {
+    let descriptor = unsafe {
+        open(
+            path,
+            (agel_process_abi::O_CREAT | agel_process_abi::O_DIRECTORY) as c_int,
+        )
+    };
+    if descriptor < 0 {
+        return -1;
+    }
+    close(descriptor)
+}
+
+/// `<dirent.h>`'s `struct dirent`: the name and the kind.
+#[repr(C)]
+pub struct dirent {
+    pub d_type: c_uint,
+    pub d_name: [c_char; 33],
+}
+
+/// An open directory: the descriptor and the entry `readdir` hands back.
+#[repr(C)]
+pub struct DIR {
+    descriptor: c_int,
+    entry: dirent,
+}
+
+const DT_DIR: c_uint = 4;
+const DT_REG: c_uint = 8;
+const OPEN_DIRECTORIES: usize = 4;
+static mut DIRECTORIES: [DIR; OPEN_DIRECTORIES] = [const {
+    DIR {
+        descriptor: -1,
+        entry: dirent {
+            d_type: 0,
+            d_name: [0; 33],
+        },
+    }
+}; OPEN_DIRECTORIES];
+
+/// # Safety
+/// `path` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn opendir(path: *const c_char) -> *mut DIR {
+    let directories = core::ptr::addr_of_mut!(DIRECTORIES).cast::<DIR>();
+    let Some(slot) =
+        (0..OPEN_DIRECTORIES).find(|slot| unsafe { (*directories.add(*slot)).descriptor } < 0)
+    else {
+        unsafe { ERRNO = 24 };
+        return core::ptr::null_mut();
+    };
+    let descriptor = unsafe { open(path, agel_process_abi::O_DIRECTORY as c_int) };
+    if descriptor < 0 {
+        return core::ptr::null_mut();
+    }
+    unsafe {
+        let directory = directories.add(slot);
+        (*directory).descriptor = descriptor;
+        directory
+    }
+}
+
+/// # Safety
+/// `directory` must come from `opendir` and be open.
+#[no_mangle]
+pub unsafe extern "C" fn readdir(directory: *mut DIR) -> *mut dirent {
+    let descriptor = unsafe { (*directory).descriptor };
+    if descriptor < 0 {
+        unsafe { ERRNO = 9 };
+        return core::ptr::null_mut();
+    }
+    let mut name = [0_u8; 32];
+    match process().readdir(descriptor as u64, &mut name) {
+        Ok(Some((length, kind, _))) => unsafe {
+            let entry = core::ptr::addr_of_mut!((*directory).entry);
+            (*entry).d_type = if kind == 2 { DT_DIR } else { DT_REG };
+            for (offset, byte) in name.iter().take(length).enumerate() {
+                (*entry).d_name[offset] = *byte as c_char;
+            }
+            (*entry).d_name[length] = 0;
+            entry
+        },
+        Ok(None) => core::ptr::null_mut(),
+        Err(number) => {
+            outcome(number);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+/// # Safety
+/// `directory` must come from `opendir`.
+#[no_mangle]
+pub unsafe extern "C" fn closedir(directory: *mut DIR) -> c_int {
+    let descriptor = unsafe { (*directory).descriptor };
+    unsafe { (*directory).descriptor = -1 };
+    close(descriptor)
+}
+
+// ---------------------------------------------------------------------------
 // agel/window.h
 // ---------------------------------------------------------------------------
 
