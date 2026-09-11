@@ -23,7 +23,7 @@ if test "$status" -ne 33; then
   exit 1
 fi
 
-grep -q 'graphics\[x86_64\]: 1920x1080x32, 66 Agel vector commands, digest 0x3627cfc44f535b36' "$output"
+grep -q 'graphics\[x86_64\]: 1920x1080x32, 66 Agel vector commands, digest 0x5a2398dd70437c00' "$output"
 grep -q '^assets: sprites 12 sprites' "$output"
 grep -q '^assets: fira-sans 6 sizes' "$output"
 grep -q '^assets: fira-sans-medium 6 sizes' "$output"

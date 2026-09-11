@@ -288,6 +288,31 @@ sheet has the controls; nothing answers them), no motion events without
 a press, no modifier keys; windows cannot be moved over the panel or off
 the screen.
 
+## Depth (v0.2.54)
+
+Three things COSMIC's surfaces have that the desktop's lacked:
+
+- **A shadow that tails off.** The compositor's shadow record paints
+  rings of a black box growing outward; each ring's weight is now the
+  square of its distance from the edge rather than linear, so a pixel
+  `d` out carries the sum of the rings beyond it: dense at the box,
+  tailing off softly, as a Gaussian blur of the box would. Windows and
+  the launcher use a 32-pixel blur. The graphics self-test's digest is
+  refrozen for the new falloff.
+- **An edge.** A window and the launcher sit on a lighter box one pixel
+  larger, so their edge reads against a dark surface below them, as
+  COSMIC's one-pixel border does.
+- **Press states.** The control under a held button darkens: a dock
+  tile, "Applications", a launcher entry. The scene keeps what is
+  pressed until the release, and the release repaints only that control.
+  `scripts/test-desktop-process.sh` holds the button on the files tile,
+  requires its brightness to drop by more than a tenth while held and to
+  recover on release.
+
+What this is not: a real Gaussian (the rings are a radial sum, not a
+separable convolution), and no frosted or translucent panels, which need
+a blur of what is beneath that the compositor does not have.
+
 ## Live Agel forms
 
 The first native scene language is intentionally postcard-sized:

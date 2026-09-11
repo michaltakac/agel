@@ -238,6 +238,11 @@ promise.
   window's content the owner receives the pointer's motion and release;
   the desktop test drags the dot, drags the window and raises it from
   under another.
+  `v0.2.54` adds depth: the shadow's rings fall off by the square of the
+  distance, windows and the launcher get a one-pixel lighter edge, and
+  the control under a held button darkens until the release; the
+  graphics digest is refrozen and the desktop test measures the pressed
+  tile.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

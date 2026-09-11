@@ -885,13 +885,16 @@ unsafe fn draw(surface: Surface, page: *mut u64, record: *const u8, bytes: usize
             }
             unsafe { surface_box(surface, bounds, radius, sixth, alpha) };
         } else {
-            // A shadow: rings of a black box growing outward, each fainter,
-            // so the falloff is linear over `blur` pixels; the box itself
-            // is left for whatever is drawn on top.
+            // A shadow: rings of a black box growing outward, each fainter
+            // by the square of its distance, so a pixel `d` out of `blur`
+            // carries the sum of the rings beyond it: dense at the box,
+            // tailing off softly, as a Gaussian blur of the box would.
+            // The box itself is left for whatever is drawn on top.
             let blur = sixth;
             if blur == 0 || blur > 64 {
                 return false;
             }
+            let total = blur * (blur + 1) * (2 * blur + 1) / 6 + 1;
             let mut step = blur;
             while step > 0 {
                 let outer = Bounds {
@@ -900,7 +903,8 @@ unsafe fn draw(surface: Surface, page: *mut u64, record: *const u8, bytes: usize
                     width: bounds.width + 2 * step,
                     height: bounds.height + 2 * step,
                 };
-                let ring_alpha = alpha * (blur + 1 - step) / (blur * (blur + 1) / 2 + 1);
+                let weight = (blur + 1 - step) * (blur + 1 - step);
+                let ring_alpha = alpha * weight / total;
                 unsafe { surface_ring(surface, outer, radius + step, 0, ring_alpha.max(1)) };
                 step -= 1;
             }

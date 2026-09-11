@@ -96,6 +96,12 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
                 move_to.at = (move_to.at[0] + dx, move_to.at[1] + dy)
                 time.sleep(0.25)
             time.sleep(0.6)
+        def press():
+            machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": True, "button": "left"}}]})
+            time.sleep(0.4)
+        def release():
+            machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": False, "button": "left"}}]})
+            time.sleep(0.4)
         def click():
             machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": True, "button": "left"}}]})
             time.sleep(0.3)
@@ -109,11 +115,22 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         click()
         response = machine.until_prompt().decode()
         assert "writer: wrote etc/secret and app/notes" in response, response
+        # The files tile lists the root; while the button is held the tile
+        # is drawn pressed (darker), and the release restores it.
+        def brightness(x, y, width, height):
+            return sum(panel_region(machine, x, y, width, height))
         move_to(888, 964)
-        click()
+        tile_before = brightness(860, 940, 56, 48)
+        press()
         response = machine.until_prompt().decode()
         assert "app/" in response and "etc/" in response, response
         assert frame_with_launcher != panel_region(machine, 24, 48, 384, 400), "the launcher did not close"
+        tile_pressed = brightness(860, 940, 56, 48)
+        assert tile_pressed < tile_before * 9 // 10, (tile_before, tile_pressed)
+        release()
+        time.sleep(1.0)
+        tile_after = brightness(860, 940, 56, 48)
+        assert tile_after > tile_pressed, (tile_pressed, tile_after)
         # The second window's close control, at its header's right, closes
         # it as a typed :close; the first goes by the command itself.
         move_to(1080, 204)
@@ -144,12 +161,6 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         def dot_pixels(x, y, width, height):
             return panel_region(machine, x, y, width, height).count(b"\xe7\x9c\xfe")
         assert dot_pixels(740, 280, 40, 40) == 0, "a dot before any press"
-        def press():
-            machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": True, "button": "left"}}]})
-            time.sleep(0.4)
-        def release():
-            machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": False, "button": "left"}}]})
-            time.sleep(0.4)
         move_to(760, 300)
         press()
         until_text(b"sketch: press at 200,140")

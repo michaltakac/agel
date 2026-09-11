@@ -4,7 +4,7 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.53: windows move by their header, come to the front when clicked, and hand a process
+The current repository is **v0.2.54: soft shadows, one-pixel edges and press states give the desktop depth; windows move by their header, come to the front when clicked, and hand a process
 the pointer's motion and release after a press; a window listens, so a process waits for presses and keys in it while the desktop
 keeps running, through a process table that runs in passes; a process owns a window on the desktop, drawing records the supervisor checks
 against the window's content and keeps, so the window outlives its process, with a close control and a C header for it; the desktop responds to the pointer, with a launcher over the program

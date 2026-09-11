@@ -210,6 +210,8 @@ struct Scene {
     /// The window whose content took a press, until the button is released:
     /// motion and the release are its.
     grab: Option<u8>,
+    /// The control under a held button, drawn pressed until the release.
+    pressed: Hover,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -228,7 +230,9 @@ fn raise(order: &mut [u8; crate::world::process::WINDOWS], slot: u8) {
 
 const WINDOW_HEADER: u32 = 40;
 const WINDOW_RADIUS: u32 = 8;
-const WINDOW_SHADOW: u32 = 24;
+const WINDOW_SHADOW: u32 = 32;
+/// The one-pixel lighter edge around a window and the launcher.
+const OUTLINE: u32 = 0x3d_3d_3d;
 const EBADF: i64 = 9;
 const EBUSY: i64 = 16;
 const EINVAL: i64 = 22;
@@ -405,7 +409,7 @@ fn window_records(
     let (x, y, width, height) = window.outer();
     if shadow {
         let mut record = [0; RECORD_BYTES];
-        for (field, word) in [8, x, y, width, height, WINDOW_RADIUS, WINDOW_SHADOW, 140]
+        for (field, word) in [8, x, y, width, height, WINDOW_RADIUS, WINDOW_SHADOW, 170]
             .iter()
             .enumerate()
         {
@@ -413,6 +417,16 @@ fn window_records(
         }
         frame.push(record)?;
     }
+    // The edge: a lighter box one pixel larger, under the surface.
+    frame.push(surface_record(
+        x - 1,
+        y - 1,
+        width + 2,
+        height + 2,
+        WINDOW_RADIUS + 1,
+        OUTLINE,
+        255,
+    ))?;
     frame.push(surface_record(
         x,
         y,
@@ -883,6 +897,7 @@ impl Scene {
             order: [0, 1],
             drag: None,
             grab: None,
+            pressed: Hover::Nothing,
         }
     }
 }
@@ -1367,6 +1382,17 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         | Hover::WindowClose(_)
         | Hover::Nothing => {}
     }
+    // The control under a held button darkens, as COSMIC's do.
+    match scene.pressed {
+        Hover::Applications => {
+            frame.push(surface_record(8, 4, 120, 32, 8, 0x00_00_00, 80))?;
+        }
+        Hover::Dock(tile) => {
+            let x = 716 + u32::from(tile) * 72;
+            frame.push(surface_record(x, 936, 56, 56, 14, 0x00_00_00, 80))?;
+        }
+        _ => {}
+    }
     // The terminal panel: processes' output, or a hint when nothing ran.
     frame.push(surface_record(452, 292, 1360, 508, 16, 0x1b_1b_1b, 255))?;
     frame.push(label_record(
@@ -1414,8 +1440,8 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
             LAUNCHER_WIDTH,
             height,
             16,
-            24,
-            120,
+            WINDOW_SHADOW,
+            170,
         ]
         .iter()
         .enumerate()
@@ -1423,6 +1449,15 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
             put_u32(&mut shadow, field, *word);
         }
         frame.push(shadow)?;
+        frame.push(surface_record(
+            LAUNCHER_X - 1,
+            LAUNCHER_Y - 1,
+            LAUNCHER_WIDTH + 2,
+            height + 2,
+            17,
+            OUTLINE,
+            255,
+        ))?;
         frame.push(surface_record(
             LAUNCHER_X,
             LAUNCHER_Y,
@@ -1453,13 +1488,14 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         for entry in 0..launcher.count {
             let y = LAUNCHER_Y + 56 + entry as u32 * 48;
             if scene.hover == Hover::Launcher(entry as u8) {
+                let pressed = scene.pressed == scene.hover;
                 frame.push(surface_record(
                     LAUNCHER_X + 8,
                     y,
                     LAUNCHER_WIDTH - 16,
                     48,
                     8,
-                    0x33_33_33,
+                    if pressed { 0x11_11_11 } else { 0x33_33_33 },
                     255,
                 ))?;
             }
@@ -2798,6 +2834,10 @@ fn interactive(
                 current.pointer = Some((px, py));
                 let released = held && !pointer.down();
                 held = pointer.down();
+                let pressed_before = current.pressed;
+                if released {
+                    current.pressed = Hover::Nothing;
+                }
                 // A window taken hold of by its header follows the pointer
                 // while the button is held; the old and new places are
                 // repainted together.
@@ -2859,6 +2899,12 @@ fn interactive(
                     // as a typed command, so the console shows it too.
                     let mut command = StatusLine::new(b"");
                     let mut close_launcher = true;
+                    if matches!(
+                        over,
+                        Hover::Applications | Hover::Dock(_) | Hover::Launcher(_)
+                    ) {
+                        current.pressed = over;
+                    }
                     match over {
                         Hover::Applications | Hover::Dock(0) | Hover::Dock(5) => {
                             if current.launcher.is_none() {
@@ -2986,8 +3032,8 @@ fn interactive(
                     let mut top = ny.min(oy).saturating_sub(2);
                     let mut right = nx.max(ox) + 26;
                     let mut bottom = ny.max(oy) + 34;
-                    if hovered_before != over {
-                        for hover in [hovered_before, over] {
+                    if hovered_before != over || pressed_before != current.pressed {
+                        for hover in [hovered_before, over, pressed_before] {
                             if let Some((x, y, width, height)) = hover.bounds(&current) {
                                 left = left.min(x);
                                 top = top.min(y);

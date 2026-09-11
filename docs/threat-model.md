@@ -1295,6 +1295,17 @@ Not claimed: no resize; a process's window can be dragged over another
 process's window, which is the operator's doing and covers it; no
 modifier keys.
 
+## v0.2.54
+
+- **Pixels only:** the shadow's falloff, the edges and the press states
+  change what the compositor paints and nothing about what any domain
+  may do; the compositor still validates every record, the shadow's
+  blur is still bounded at 64, and a process still cannot request a
+  shadow.
+- **A press state is the scene's:** it is set by the operator's press on
+  a control the desktop owns and cleared by the release; no process can
+  set or read it.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a
