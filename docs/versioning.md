@@ -150,6 +150,12 @@ promise.
   domain carries the frames behind its budget, the page tables follow the
   object table after each memory operation, and the research kernels publish
   v1.1 and reproduce its transcript. No contract change; seL4 stays v1.0.
+  `v0.2.41` starts the POSIX personality: the serial workshop loads a static
+  ELF from the disk's program region (sectors 1024–2047, a table plus images)
+  into a fresh protection domain and serves its `write` and `exit` requests
+  through the shared page. Two programs under `boot/posix` and
+  `scripts/test-process.sh` prove it on all three machines. The disk layout
+  grows; earlier images have an empty program region.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

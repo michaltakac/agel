@@ -27,6 +27,8 @@ jobs:
           rustup target add riscv64imac-unknown-none-elf
       - run: cargo fmt --all -- --check
       - run: cargo fmt --manifest-path boot/kernel/Cargo.toml -- --check
+      - run: cargo fmt --manifest-path boot/posix/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path boot/posix/Cargo.toml --target x86_64-unknown-none --release -- -D warnings
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
@@ -47,6 +49,9 @@ jobs:
       - run: ./scripts/test-power-cut.sh
       - run: ./scripts/test-power-cut.sh aarch64
       - run: ./scripts/test-power-cut.sh riscv64
+      - run: ./scripts/test-process.sh
+      - run: ./scripts/test-process.sh aarch64
+      - run: ./scripts/test-process.sh riscv64
       - run: ./scripts/test-kernel-rollback.sh
       - run: ./scripts/test-graphics.sh
       - run: ./scripts/test-live-desktop.sh

@@ -1,0 +1,15 @@
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+# The x86-64 process window is at 512 GiB, outside what absolute 32-bit
+# relocations can reach, so programs are position-independent code linked
+# at their fixed base into a static executable: every reference is
+# RIP-relative and nothing needs relocating at load time.
+rustflags = ["-C", "relocation-model=pic", "-C", "link-arg=-no-pie", "-C", "link-arg=-Tlinker/x86_64.ld", "-C", "target-feature=-sse,-sse2"]
+
+[target.aarch64-unknown-none-softfloat]
+rustflags = ["-C", "relocation-model=static", "-C", "link-arg=-Tlinker/aarch64.ld"]
+
+[target.riscv64imac-unknown-none-elf]
+rustflags = ["-C", "relocation-model=static", "-C", "link-arg=-Tlinker/riscv64.ld"]

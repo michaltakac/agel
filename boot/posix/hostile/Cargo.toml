@@ -1,0 +1,9 @@
+[package]
+name = "hostile"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "hostile"
+path = "src/main.rs"

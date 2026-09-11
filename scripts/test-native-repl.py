@@ -790,6 +790,40 @@ def power_cut_test(image: str, architecture: str, disk: str) -> None:
     print(f"  {cuts} sector writes cut, one boot each; every reboot found a whole generation")
 
 
+def exec_test(image: str, architecture: str, disk: str) -> None:
+    """Programs loaded from the disk into protection domains."""
+    boot = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        boot.expect_until(b"AGEL_NATIVE_READY")
+        boot.expect_until(b"agel-native[0]> ")
+        boot.send_bytes(":exec hello")
+        assert boot.process.stdin is not None
+        boot.process.stdin.write(b"\n")
+        boot.process.stdin.flush()
+        boot.expect_exact(
+            b"\r\nhello from a loaded process\r\nprocess hello exited with status 42\r\nagel-native[0]> "
+        )
+        # Loading again proves the first process's frames came back and
+        # nothing of it lingers.
+        boot.send_bytes(":exec hello")
+        boot.process.stdin.write(b"\n")
+        boot.process.stdin.flush()
+        boot.expect_exact(
+            b"\r\nhello from a loaded process\r\nprocess hello exited with status 42\r\nagel-native[0]> "
+        )
+        boot.send_bytes(":exec hostile")
+        boot.process.stdin.write(b"\n")
+        boot.process.stdin.flush()
+        boot.expect_exact(b"\r\nhostile process about to write where it may not\r\nprocess hostile faulted: page-fault at ")
+        boot.expect_until(b"; contained\r\nagel-native[0]> ")
+        boot.send(":exec nothing", "no program named nothing", 0)
+        # The workshop is still whole after all of that.
+        boot.send("(+ 20 22)", "42", 1)
+        shutdown(boot)
+    finally:
+        boot.close()
+
+
 def send_kernel_healthy(
     harness: Harness, line: str, expected: str, slot: str, revision: int
 ) -> None:
@@ -878,10 +912,23 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
+    if len(arguments) == 2 and arguments[1] == "--exec":
+        if disk is None:
+            print("loading programs needs a disk; pass --disk", file=sys.stderr)
+            return 2
+        try:
+            exec_test(arguments[0], architecture, disk)
+        except Exception as error:
+            print(f"process test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print(f"Agel processes [{architecture}]: load from disk -> run in a domain -> exit, contained, or absent [ok]")
+        return 0
     if len(arguments) == 2 and arguments[1] == "--power-cut":
         if disk is None:
             print("a power cut needs a disk; pass --disk", file=sys.stderr)

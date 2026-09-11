@@ -42,6 +42,13 @@ fn window_access(rights: agel_kernel_abi::Rights) -> Access {
     }
 }
 
+/// Where a loaded process's segments live: a 16 MiB window well above the
+/// stack, shared page and frame window, inside the domain's private region.
+#[cfg(feature = "process")]
+pub const PROCESS_BASE: u64 = DOMAIN_BASE + 0x1000_0000;
+#[cfg(feature = "process")]
+pub const PROCESS_BYTES: u64 = 0x0100_0000;
+
 /// An unprivileged world.
 pub struct Domain {
     space: AddressSpace,
@@ -96,7 +103,7 @@ impl Domain {
     }
 
     /// The frames this domain was built from.
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     pub fn frames(&self) -> &FrameLedger {
         &self.frames
     }
@@ -236,6 +243,23 @@ impl Domain {
                 self.window[page] = desired;
             }
         }
+    }
+
+    /// Allocate a frame and map it into this domain at `virtual_address`,
+    /// recording it with the domain's frames. How a loaded process gets its
+    /// code, data and zero-filled pages; the frame is identity mapped for
+    /// the supervisor, which fills it before the domain ever runs.
+    #[cfg(feature = "process")]
+    pub fn map_extra(
+        &mut self,
+        pool: &mut FramePool,
+        virtual_address: u64,
+        access: Access,
+    ) -> Result<u64, MemoryError> {
+        let frame = pool.allocate()?;
+        self.frames.push(frame)?;
+        self.space.map(pool, virtual_address, frame, access)?;
+        Ok(frame)
     }
 
     /// Ask the world to do something it is not allowed to do, and report how it

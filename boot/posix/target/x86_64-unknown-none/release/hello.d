@@ -1,0 +1,1 @@
+/Users/michaltakac/projects/agel/boot/posix/target/x86_64-unknown-none/release/hello: /Users/michaltakac/projects/agel/boot/posix/hello/src/abi.rs /Users/michaltakac/projects/agel/boot/posix/hello/src/main.rs

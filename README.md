@@ -4,7 +4,10 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.40: the kernel contract's memory group is real on all three research
+The current repository is **v0.2.41: the POSIX personality has its first stratum, a program loaded from
+the disk into a fresh protection domain on any of the three research machines, writing to the console and
+exiting through a request protocol on its shared page, with a hostile program contained and its frames
+reclaimed; the kernel contract's memory group is real on all three research
 kernels, where a world's frame mappings are page-table entries the supervisor reconciles with the
 object table after every operation, so a read-only mapping refuses a write and an unmapped page
 faults; contract v1.1 specifies that group, both hosted implementations answer it identically across

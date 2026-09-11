@@ -14,6 +14,11 @@ mod domain;
 mod memory;
 
 pub use domain::Domain;
+#[cfg(feature = "process")]
+pub use domain::{PROCESS_BASE, PROCESS_BYTES};
+/// The ELF `e_machine` of programs built for this machine.
+#[cfg(feature = "process")]
+pub const ELF_MACHINE: u16 = 0xb7;
 #[cfg(feature = "contract-memory")]
 pub use domain::FRAME_WINDOW_BASE;
 
@@ -217,6 +222,35 @@ impl Machine {
         .map_err(|error| error.name())
     }
 
+    /// Build the domain a loaded process runs in: a private stack, a shared
+    /// page, and nothing else until the loader maps its segments.
+    #[cfg(feature = "process")]
+    pub fn create_process_world(&mut self, entry: u64) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            crate::world::process::TICKS,
+            DeviceGrant::Nothing,
+            crate::world::process::STACK_PAGES,
+        )
+        .map_err(|error| error.name())
+    }
+
+    /// Give a process domain one more page at `virtual_address`, and return
+    /// the frame behind it for the loader to fill.
+    #[cfg(feature = "process")]
+    pub fn map_process_page(
+        &mut self,
+        domain: &mut Domain,
+        virtual_address: u64,
+        access: crate::memory::Access,
+    ) -> Result<u64, &'static str> {
+        domain
+            .map_extra(&mut self.pool, virtual_address, access)
+            .map_err(|error| error.name())
+    }
+
     /// Build a domain with the fixed stack budget required by the native evaluator.
     pub fn create_evaluator_world(
         &mut self,
@@ -278,7 +312,7 @@ impl Machine {
     /// Give a dead domain's frames back to the pool. The caller promises the
     /// domain will never run again; it is stopped, and the frames are handed
     /// out zeroed to whoever allocates next.
-    #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
+    #[cfg(not(feature = "native-graphics"))]
     pub fn reclaim(&mut self, frames: &crate::memory::FrameLedger) {
         self.pool.reclaim(frames);
     }

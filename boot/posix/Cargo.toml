@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["hello", "hostile"]
+
+# Programs the Agel supervisor loads into protection domains: static ELF
+# images built for one of the three research machines, speaking the process
+# protocol in docs/posix-personality.md. They depend on nothing in the
+# kernel; the ABI is the document.
+[profile.release]
+panic = "abort"
+opt-level = "s"
+codegen-units = 1
+lto = true
+
+[profile.dev]
+panic = "abort"

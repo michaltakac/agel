@@ -375,6 +375,32 @@ impl DomainCore {
 /// clean timeout status rather than the driver.
 pub const STORAGE_TICKS: u32 = 300;
 
+/// The request block a loaded process fills in its shared page before it
+/// yields to its supervisor. It sits past the handshake words the supervisor
+/// owns and before the payload area, and the process's data travels in the
+/// block area. Nothing here is a contract operation: it is the supervisor's
+/// service protocol, like a driver's, and the process holds no authority
+/// beyond what the supervisor answers.
+#[cfg(feature = "process")]
+pub mod process {
+    /// What the process is asking for.
+    pub const KIND: usize = 64;
+    /// First of four argument words.
+    pub const ARGUMENTS: usize = 65;
+    /// The supervisor's answer: a result or a negated error.
+    pub const RESULT: usize = 69;
+    /// Leave with the status in the first argument word.
+    pub const EXIT: u64 = 1;
+    /// Write the block area's first `arguments[1]` bytes to descriptor
+    /// `arguments[0]`. Descriptors 1 and 2 are the console.
+    pub const WRITE: u64 = 2;
+    /// Stack pages a process is built with.
+    pub const STACK_PAGES: u64 = 16;
+    /// Tick budget per entry: a process that computes for longer yields
+    /// nothing and is stopped like any world that never yields.
+    pub const TICKS: u32 = 100;
+}
+
 /// Byte offset in the shared page where console payload bytes begin.
 ///
 /// The handshake words occupy the start of the page; bytes a domain is asked to

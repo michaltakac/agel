@@ -186,7 +186,7 @@ pub fn run() -> ! {
         match source {
             b":help" => driver_line(
                 &mut driver,
-                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart/reap | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :cut-power N :shutdown",
+                b"forms: quote if begin def fn | builtins: + - * / = < eval | agents: spawn send step run inspect/restart/reap | workspace: :edit NAME :run NAME :show NAME :delete NAME :cells :workspace :save :reload | recovery: :revision :rollback :defs :limits :recovery-status :verify :promote :fault :kernel-status :kernel-promote :kernel-fault :cut-power N | processes: :exec NAME | :shutdown",
             ),
             b":revision" => {
                 let mut out = ServiceWriter::new(&mut driver);
@@ -393,7 +393,9 @@ pub fn run() -> ! {
             }
             b"" => {}
             _ => {
-                if let Some(name) = command_argument(source, b":edit ") {
+                if let Some(name) = command_argument(source, b":exec ") {
+                    exec_program(&mut machine, storage.as_mut(), &mut driver, name);
+                } else if let Some(name) = command_argument(source, b":edit ") {
                     if name.len() > MAX_CELL_NAME {
                         driver_line(&mut driver, b"error: cell name exceeds native limit");
                     } else {
@@ -706,6 +708,61 @@ fn report_workspace(driver: &mut ServiceDomain, count: usize, generation: u64, d
         "workspace generation {generation}, {count} cells, {}",
         if dirty { "staged changes" } else { "clean" }
     );
+    out.flush();
+}
+
+/// Load a program from the disk's program region into a fresh domain, run it
+/// to its end serving its requests, and say how it ended.
+fn exec_program(
+    machine: &mut arch::Machine,
+    storage: Option<&mut ServiceDomain>,
+    driver: &mut ServiceDomain,
+    name: &[u8],
+) {
+    let Some(storage) = storage else {
+        driver_line(driver, b"denied: no storage device to load a program from");
+        return;
+    };
+    let program = match crate::process::find(storage, name) {
+        Ok(Some(program)) => program,
+        Ok(None) => {
+            driver_text_error(driver, b"no program named ", name);
+            return;
+        }
+        Err(reason) => {
+            driver_text_error(driver, b"program table unreadable: ", reason.as_bytes());
+            return;
+        }
+    };
+    let outcome = match crate::process::exec(machine, storage, driver, program) {
+        Ok(outcome) => outcome,
+        Err(reason) => {
+            driver_text_error(driver, b"cannot load program: ", reason.as_bytes());
+            return;
+        }
+    };
+    let mut out = ServiceWriter::new(driver);
+    let _ = out.write_str("process ");
+    for byte in name {
+        let _ = out.write_char(char::from(*byte));
+    }
+    match outcome {
+        crate::process::Exit::Status(status) => {
+            let _ = writeln!(out, " exited with status {status}");
+        }
+        crate::process::Exit::Faulted(fault) => {
+            let _ = writeln!(
+                out,
+                " faulted: {} at {:#x} touching {:#x}; contained",
+                fault.name(),
+                fault.pc,
+                fault.address
+            );
+        }
+        crate::process::Exit::BudgetExhausted => {
+            let _ = writeln!(out, " never yielded; tick budget exhausted; stopped");
+        }
+    }
     out.flush();
 }
 

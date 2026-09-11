@@ -119,6 +119,7 @@ definition without rebooting the VM.
 :kernel-promote    make a kernel slot verified by a healthy boot the trusted one
 :kernel-fault      give the candidate kernel up; the next boot loads the trusted slot
 :cut-power N       fault injection: tear the N-th sector write from now and halt
+:exec NAME         load a program from the disk's program region into a fresh domain and run it
 :shutdown          leave QEMU when the debug-exit device is present
 ```
 

@@ -975,6 +975,36 @@ no operation that crosses domains. The seL4 backend still publishes v1.0.
 The x86-64 workshop images link the implementation without the memory group
 and publish v1.0.
 
+## v0.2.41
+
+- **Code that did not come from the kernel image:** every world so far ran
+  code the kernel was built with. A process is code read from the disk,
+  and the loader treats it as what it is: the image's CRC is checked
+  against the table before any byte of it is believed, the ELF must be a
+  static executable for this machine, every segment must lie inside the
+  process window, be page-congruent with its file offset, share no page
+  with another and never ask to be writable and executable, and the entry
+  must lie inside the window. Anything else is refused with the reason,
+  and the domain is never built.
+- **A process that misbehaves:** it is a protection domain like every
+  other. The hostile program writes where it was never mapped and is
+  contained with the same page fault, on all three machines; a process
+  that never yields is stopped by the tick budget.
+- **A request protocol on a shared page:** the process's words are data.
+  The supervisor bounds the write length to the block area, serves only the
+  console descriptors, and answers everything else `-ENOSYS`; a process
+  cannot name a path, a device or another domain, because there is nothing
+  in the protocol that would.
+- **Frames that come back:** a process's pages are recorded with its
+  domain's frames and reclaimed when it ends, and the test loads the same
+  program twice to show it.
+
+Not claimed: the program region is unsigned and unverified beyond a CRC, so
+whoever writes the disk chooses what runs, exactly as for the workspace and
+the kernel's trusted slot. There is no capability set: a process can write
+to the console and nothing else, and that is policy in the supervisor, not
+a capability the process holds. No files, no namespaces, no C library.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

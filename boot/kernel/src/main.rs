@@ -56,6 +56,8 @@ mod isolation;
 mod memory;
 #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
 mod pointer;
+#[cfg(feature = "process")]
+mod process;
 #[cfg(feature = "isolation-selftest")]
 mod service;
 #[cfg(feature = "isolation-selftest")]

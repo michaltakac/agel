@@ -309,10 +309,14 @@ Each rung must be runnable and differentially testable against the rung below:
 48. **Live system:** signed workspace generations, the trusted slot checked
    before it runs, and kernel-image selection on the machines without a BIOS
    stage, whose kernels QEMU loads as ELFs.
-49. **POSIX personality:** a Rust C library and the filesystem and process
-   services beneath it, running unprivileged above the contract, so that
-   Unix-like software builds and runs on Agel. A path resolves through a
-   namespace capability; there is no ambient root.
+49. **POSIX personality (started at v0.2.41):** a Rust C library and the
+   filesystem and process services beneath it, running unprivileged above
+   the contract, so that Unix-like software builds and runs on Agel. A path
+   resolves through a namespace capability; there is no ambient root. The
+   first stratum exists: a static ELF loaded from the disk into a fresh
+   domain on all three research machines, speaking a request protocol for
+   `write` and `exit`; see [`posix-personality.md`](posix-personality.md)
+   for the strata that follow.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

@@ -207,7 +207,7 @@ fn storage_message(error: ServiceError) -> &'static str {
     }
 }
 
-fn read_sector(
+pub(crate) fn read_sector(
     storage: &mut ServiceDomain,
     lba: u32,
     sector: &mut [u8; 512],
@@ -558,6 +558,26 @@ fn validate_name(name: &[u8]) -> Result<(), &'static str> {
         return Err("cell name contains an unsupported byte");
     }
     Ok(())
+}
+
+/// CRC-32 over data supplied in pieces: the loader checks a program image
+/// sector by sector without holding it.
+#[cfg(feature = "process")]
+pub struct Crc(u32);
+
+#[cfg(feature = "process")]
+impl Crc {
+    pub fn new() -> Self {
+        Self(0xffff_ffff)
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.0 = checksum_update(self.0, bytes);
+    }
+
+    pub fn finish(self) -> u32 {
+        !self.0
+    }
 }
 
 fn checksum_parts(first: &[u8], second: &[u8]) -> u32 {
