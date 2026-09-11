@@ -46,6 +46,17 @@ fn window_access(rights: agel_kernel_abi::Rights) -> Access {
     }
 }
 
+/// Where the compositor sees the framebuffer: room for 16 MiB below the
+/// process window.
+#[cfg(feature = "native-graphics")]
+pub const DISPLAY_BASE: u64 = DOMAIN_BASE + 0x0400_0000;
+/// Where the compositor sees its assets: four slots of 2 MiB, above the
+/// process window.
+#[cfg(feature = "native-graphics")]
+pub const ASSET_BASE: u64 = DOMAIN_BASE + 0x2000_0000;
+#[cfg(feature = "native-graphics")]
+pub const ASSET_SLOT_BYTES: u64 = 0x0020_0000;
+
 /// Where a loaded process's segments live: a 16 MiB window well above the
 /// stack, shared page and frame window, inside the domain's private region.
 #[cfg(feature = "process")]
@@ -92,6 +103,52 @@ impl Domain {
             }
             Err(error) => {
                 // Nothing of a half-built domain is live; its frames go back.
+                pool.reclaim(&frames);
+                Err(error)
+            }
+        }
+    }
+
+    /// Build the compositor's domain: an ordinary world with the framebuffer
+    /// mapped at the display window, as normal uncached memory. The pages
+    /// are never allocated from the pool and no other domain receives
+    /// translations for them. Answers the domain and where the framebuffer
+    /// starts inside it.
+    #[cfg(feature = "native-graphics")]
+    pub fn new_display(
+        pool: &mut FramePool,
+        identity: IdentityWindow,
+        entry: u64,
+        tick_budget: u32,
+        physical: u64,
+        bytes: u64,
+    ) -> Result<(Self, u64), MemoryError> {
+        pool.open_ledger();
+        let page_offset = physical & (PAGE - 1);
+        let built = Self::build(pool, identity, entry, tick_budget, DeviceGrant::Nothing, 8)
+            .and_then(|mut domain| {
+                let start = physical - page_offset;
+                let pages = page_offset
+                    .checked_add(bytes)
+                    .ok_or(MemoryError::OutsideDomainWindow)?
+                    .div_ceil(PAGE);
+                for page in 0..pages {
+                    domain.space.map(
+                        pool,
+                        DISPLAY_BASE + page * PAGE,
+                        start + page * PAGE,
+                        Access::UserFramebuffer,
+                    )?;
+                }
+                Ok(domain)
+            });
+        let frames = pool.close_ledger();
+        match built {
+            Ok(mut domain) => {
+                domain.frames = frames;
+                Ok((domain, DISPLAY_BASE + page_offset))
+            }
+            Err(error) => {
                 pool.reclaim(&frames);
                 Err(error)
             }

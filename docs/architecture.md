@@ -365,6 +365,11 @@ Each rung must be runnable and differentially testable against the rung below:
 56. **Files beyond one block (v0.2.61):** the filesystem service's second
    on-disk shape, a bitmap of 4 KiB blocks and sixteen per entry, blocks
    zeroed when taken and given back on cut or removal.
+57. **The desktop on a board (v0.2.62):** the graphics image on AArch64,
+   its framebuffer from the Raspberry Pi firmware's mailbox and mapped
+   into the compositor domain as normal uncached memory; the keyboard
+   controller, the clock and the kernel slots are x86-64's alone, and a
+   board's input is its serial console.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

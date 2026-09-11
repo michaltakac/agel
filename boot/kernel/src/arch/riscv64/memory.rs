@@ -58,7 +58,7 @@ const fn leaf_bits(access: Access) -> u64 {
         // Sv39 leaves have no cache or ordering attributes, so a device page
         // differs from ordinary data only in what is behind it. The ordering
         // that a UART needs comes from the volatile accesses in the driver.
-        Access::UserDevice => common | READ | WRITE,
+        Access::UserDevice | Access::UserFramebuffer => common | READ | WRITE,
     }
 }
 

@@ -313,6 +313,17 @@ What this is not: a real Gaussian (the rings are a radial sum, not a
 separable convolution), and no frosted or translucent panels, which need
 a blur of what is beneath that the compositor does not have.
 
+## The desktop on a board (v0.2.62)
+
+The graphics image builds for AArch64 and runs on QEMU's Raspberry Pi 4:
+the framebuffer from the firmware's mailbox, the compositor domain with
+the framebuffer mapped as normal uncached memory, the scene and the
+assets as on x86-64, input from the serial console only. What the
+machine decides is in one place per machine: how the framebuffer is
+found (VBE and the display interface on x86-64, the mailbox on a board),
+whether there is a keyboard controller and a clock. See
+[`raspberry-pi.md`](raspberry-pi.md).
+
 ## Live Agel forms
 
 The first native scene language is intentionally postcard-sized:

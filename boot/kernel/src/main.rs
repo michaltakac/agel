@@ -43,9 +43,15 @@ mod recovery;
 mod assets;
 #[cfg(feature = "isolation-selftest")]
 mod contract;
-#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    feature = "native-graphics"
+))]
 mod display_user;
-#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    feature = "native-graphics"
+))]
 mod graphics;
 #[cfg(feature = "isolated-repl")]
 mod isolated_repl;
@@ -56,7 +62,10 @@ mod isolated_repl;
 mod isolation;
 #[cfg(feature = "isolation-selftest")]
 mod memory;
-#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    feature = "native-graphics"
+))]
 mod pointer;
 #[cfg(feature = "process")]
 mod process;
@@ -147,7 +156,7 @@ pub fn agel_main() -> ! {
     }
 
     #[cfg(all(
-        target_arch = "x86_64",
+        any(target_arch = "x86_64", target_arch = "aarch64"),
         feature = "native-graphics",
         not(any(
             feature = "selftest",

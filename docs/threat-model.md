@@ -1444,6 +1444,26 @@ Not claimed: no recovery of leaked blocks after a cut, no free-space
 accounting beyond the bitmap, and a region formatted before v0.2.61 is
 `EIO` until formatted again.
 
+## v0.2.62
+
+- **The firmware is asked once, by the supervisor:** the mailbox message
+  is built and sent at bring-up before any world exists, from a static
+  the supervisor owns; no domain can reach the mailbox, whose page is in
+  the supervisor's device window only. The answer is checked (the size,
+  depth and order asked for; a pitch and a buffer that hold the frame)
+  and refused otherwise.
+- **The framebuffer is the compositor's alone**, as on x86-64: mapped
+  into one domain, never allocated from the pool, never executable;
+  normal uncached memory rather than device memory, so the compositor's
+  pixel writes cannot fault on alignment and the display sees them.
+- **What a board lacks is absent, not stubbed:** no input driver domain
+  and no clock driver are created; the desktop's paths for them are
+  compiled only on x86-64, and the serial console is the one input.
+
+Not claimed: the firmware itself (it allocates the buffer from memory it
+reserves; the kernel trusts the address it answers, as every Pi kernel
+does), and HDMI on a real board, which has not been seen.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

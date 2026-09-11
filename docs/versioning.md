@@ -276,6 +276,12 @@ promise.
   block bitmap in the superblock and sixteen block numbers per entry,
   blocks zeroed when taken and freed on cut or removal, files of 64 KiB
   in a region of 63 blocks; `big.c` proves it on all three machines.
+  `v0.2.62` runs the desktop on QEMU's Raspberry Pi 4: the framebuffer
+  from the firmware's mailbox, the compositor domain on AArch64 with the
+  framebuffer as normal uncached memory, the x86-only keyboard
+  controller, clock and kernel slots made conditional, input from the
+  serial console; `scripts/test-raspi4-desktop.sh` reads the frame back
+  and runs a program from the card.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

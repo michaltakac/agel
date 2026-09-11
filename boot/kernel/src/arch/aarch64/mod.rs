@@ -12,9 +12,13 @@ pub mod hal;
 pub mod board;
 pub mod cpu;
 mod domain;
+#[cfg(feature = "native-graphics")]
+mod mailbox;
 mod memory;
 
 pub use domain::Domain;
+#[cfg(feature = "native-graphics")]
+pub use domain::{ASSET_BASE, ASSET_SLOT_BYTES};
 #[cfg(feature = "process")]
 pub use domain::{PROCESS_BASE, PROCESS_BYTES};
 /// The ELF `e_machine` of programs built for this machine.
@@ -95,6 +99,16 @@ pub fn exit(success: bool) -> ! {
 /// Stop this processor permanently with interrupts masked.
 pub fn halt() -> ! {
     hal::halt()
+}
+
+/// The board's framebuffer at `width` by `height`, from the firmware's
+/// mailbox: physical address, pitch, bytes. A board without a mailbox has
+/// no display.
+#[cfg(feature = "native-graphics")]
+pub fn framebuffer(width: u32, height: u32) -> Option<(u64, u32, u64)> {
+    let base = board::MAILBOX?;
+    // Safety: bring-up mapped the device window; no world runs yet.
+    unsafe { mailbox::framebuffer(base, width, height) }
 }
 
 /// Microseconds since the counter started, which is before bring-up.
@@ -256,6 +270,19 @@ impl Machine {
     ) -> Result<u64, &'static str> {
         domain
             .map_extra(&mut self.pool, virtual_address, access)
+            .map_err(|error| error.name())
+    }
+
+    /// Build the one domain granted the framebuffer.
+    #[cfg(feature = "native-graphics")]
+    pub fn create_display_world(
+        &mut self,
+        entry: u64,
+        ticks: u32,
+        physical: u64,
+        bytes: u64,
+    ) -> Result<(Domain, u64), &'static str> {
+        Domain::new_display(&mut self.pool, self.identity, entry, ticks, physical, bytes)
             .map_err(|error| error.name())
     }
 

@@ -70,11 +70,13 @@ def connect(path):
 
 
 class Machine:
-    def __init__(self, image, directory, snapshot=False):
+    def __init__(self, image, directory, snapshot=False, qemu=None):
         self.directory = Path(directory)
         self.serial_lock = threading.Lock()
         self.qmp_lock = threading.Lock()
-        self.process = subprocess.Popen([
+        # The x86-64 desktop by default; a board passes its own QEMU line,
+        # which must open the same QMP and serial sockets in `directory`.
+        command = qemu if qemu is not None else [
             "qemu-system-x86_64", "-machine", "pc,accel=tcg", "-m", "64M",
             "-display", "none", "-no-reboot", "-vga", "std",
             "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
@@ -83,7 +85,8 @@ class Machine:
             "-serial", "chardev:serial0", "-boot", "order=c,strict=on",
             "-drive", f"format=raw,file={image},if=ide,index=0,media=disk" +
             (",snapshot=on" if snapshot else ""),
-        ], stdin=subprocess.DEVNULL)
+        ]
+        self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL)
         try:
             self.serial = connect(self.directory / "serial")
             self.qmp = connect(self.directory / "qmp")

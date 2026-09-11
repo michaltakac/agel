@@ -77,6 +77,51 @@ program on it, boots the board with the card, runs the program from the
 card, stages and saves a cell, boots the board again on the same card and
 requires the cell restored and the workspace clean.
 
+## The desktop (v0.2.62)
+
+The graphical workshop runs on the board: `build-kernel.sh raspi4
+--features native-graphics` is the desktop as a flat image.
+
+- **The framebuffer comes from the firmware.** The supervisor sends one
+  property message through the mailbox at bring-up, before any world
+  runs: the physical and virtual size (1920×1080), the depth (32), the
+  pixel order (blue in the low byte, as the compositor paints), an
+  allocation aligned to a page, and the pitch. The firmware answers a
+  bus address, whose top two bits name a cache alias; the rest is the
+  physical address. The message lives in a static the supervisor cleans
+  from the cache around the call, so the firmware reads what was written
+  and the supervisor reads the answer.
+- **The compositor domain is the same world.** `agel_compositor_main`,
+  in the user text section on this machine too, is given the framebuffer
+  at a display window mapped as **normal uncached memory** (a third
+  memory attribute), not device memory: pixels are written at whatever
+  width the painter chooses, which device memory would fault on, and the
+  display sees them as written. The asset windows and the process window
+  are where they are on x86-64.
+- **Input is the serial console.** A board has no 8042 keyboard
+  controller and this one has no USB stack, so the input driver domain
+  and the pointer are absent: keys come from the console driver as the
+  serial harness has always sent them, and nothing points. The panel's
+  clock is absent too (no CMOS): it shows the workspace.
+- **Everything else is unchanged:** the scene, the assets from the
+  card's asset region, the terminal panel, `:exec` from the card's
+  program region, windows a process asks for.
+
+`scripts/test-raspi4-desktop.sh` builds the image, makes a card with the
+desktop's fonts, sprites and `c-hello`, boots the board with the card,
+requires `AGEL_GRAPHICS_OK` on the serial console, reads the frame back
+through QEMU's screendump (1920×1080; the panel's grey, the workspace
+pill's exact violet, which also proves the colour order), commits
+`(accent cyan)` and sees the pill turn cyan, runs `c-hello` from the
+card and reads its output, and saves the frame. Where QEMU has no
+`raspi4b` the test skips itself.
+
+What this is not: no pointer and no keyboard but the serial line, so the
+launcher, the dock and the windows' controls cannot be clicked on the
+board; no HDMI timing or mode setting beyond what the firmware does for
+the size asked; the Pi 5's mailbox address is in `board-raspi5`,
+unverified like the rest of it.
+
 ## Toward the Pi 5
 
 What the Pi 5 changes, from its datasheet and the Linux device tree:
@@ -88,7 +133,7 @@ What the Pi 5 changes, from its datasheet and the Linux device tree:
 | interrupts | GIC-400 at `0x10_7fff_9000` (distributor), `0x10_7fff_a000` (CPU interface) |
 | devices | the `0x10_0000_0000` window: the SoC's peripherals are above 4 GiB, so `TCR_EL1.IPS` (40 bits today) suffices but the device window moves to a top-level entry of its own |
 | disk | SDHCI at `0x10_00ff_f000`, the same register set the driver already speaks |
-| display | the firmware's framebuffer through the mailbox at `0x10_7c01_3880`, HDMI |
+| display | the firmware's framebuffer through the mailbox at `0x10_7c01_3880`, HDMI; the same message as the Pi 4's |
 | device tree | passed in `x0` at entry; not read yet |
 
 The `board-raspi5` layout exists (v0.2.57) with exactly the addresses
@@ -98,9 +143,9 @@ mailbox and the GIC are in the second), the same entry, page tables,
 drivers and workshop. **No emulator models the Pi 5, so this image has
 never run.** It is built and linted with every release; the board will
 be the first to run it, and its first words on the debug UART, or their
-absence, are the next test. The order of work after that: the mailbox
-framebuffer, so the graphical workshop paints on HDMI; the device tree,
-so one image serves both boards. The SD driver (v0.2.56) needs the board
+absence, are the next test. The order of work after that: the device tree, so one image serves both
+boards; a USB keyboard and mouse, which need a host controller driver
+the kernel does not have. The SD driver (v0.2.56) needs the board
 to confirm it drives the real controller, whose clock and pins the
 firmware sets up before the kernel runs.
 

@@ -143,26 +143,26 @@ pub mod shared {
     pub const COMMAND_EVALUATOR_REBUILD: u64 = 0x8a00;
     pub const COMMAND_EVALUATOR_STAGE: u64 = 0x8b00;
     /// Rasterize one validated 64-byte native vector record.
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const COMMAND_DISPLAY_DRAW: u64 = 0x9000;
     /// Hash the visible framebuffer from inside its owning domain.
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const COMMAND_DISPLAY_CHECKSUM: u64 = 0x9100;
     /// Deliberately touch supervisor memory to prove display fault containment.
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const COMMAND_DISPLAY_FAULT: u64 = 0x9200;
 
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const DISPLAY_ADDRESS: usize = 48;
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const DISPLAY_WIDTH: usize = 49;
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const DISPLAY_HEIGHT: usize = 50;
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const DISPLAY_PITCH: usize = 51;
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const DISPLAY_LOGICAL_WIDTH: usize = 52;
-    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    #[cfg(feature = "native-graphics")]
     pub const DISPLAY_LOGICAL_HEIGHT: usize = 53;
     /// The compositor's assets: for slot `i` in 0..4, the address the asset
     /// is mapped at and its length in bytes, zero for none. Slots 0 to 2

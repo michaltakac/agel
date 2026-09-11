@@ -31,8 +31,10 @@ mod layout {
     pub const KERNEL_PROBE_ADDRESS: u64 = 0x4008_0000;
     /// The `virt` machine's virtio-mmio transports: 32 slots of 0x200 bytes.
     pub const VIRTIO_MMIO: Option<(u64, u64, u64)> = Some((0x0a00_0000, 32, 0x200));
-    /// No SD host controllers.
+    /// No SD host controllers, and no firmware mailbox.
     pub const SDHCI: &[u64] = &[];
+    #[cfg(feature = "native-graphics")]
+    pub const MAILBOX: Option<u64> = None;
     /// PSCI is how this machine is switched off.
     pub const PSCI: bool = true;
 }
@@ -61,6 +63,9 @@ mod layout {
     /// where QEMU's model puts the card. The one reporting a card is
     /// granted to the storage driver.
     pub const SDHCI: &[u64] = &[0xfe34_0000, 0xfe30_0000];
+    /// The firmware's mailbox, for a framebuffer.
+    #[cfg(feature = "native-graphics")]
+    pub const MAILBOX: Option<u64> = Some(0xfe00_b880);
     /// No PSCI without firmware at EL3: the machine is halted instead.
     pub const PSCI: bool = false;
 }
@@ -83,6 +88,8 @@ mod layout {
     pub const VIRTIO_MMIO: Option<(u64, u64, u64)> = None;
     /// The SD slot's host controller.
     pub const SDHCI: &[u64] = &[0x10_00ff_f000];
+    #[cfg(feature = "native-graphics")]
+    pub const MAILBOX: Option<u64> = Some(0x10_7c01_3880);
     pub const PSCI: bool = false;
 }
 

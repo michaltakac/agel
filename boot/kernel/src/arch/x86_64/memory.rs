@@ -42,7 +42,9 @@ const fn leaf_bits(access: Access) -> u64 {
         // so a device grant here is a bitmap entry in the task-state segment,
         // not a page. The variant exists for the other two architectures; a
         // mapping request for it would be a caller confusing the two.
-        Access::UserDevice => PRESENT | WRITABLE | USER | NO_EXECUTE | CACHE_DISABLE,
+        Access::UserDevice | Access::UserFramebuffer => {
+            PRESENT | WRITABLE | USER | NO_EXECUTE | CACHE_DISABLE
+        }
     }
 }
 

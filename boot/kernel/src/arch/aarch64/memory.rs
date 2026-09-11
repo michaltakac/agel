@@ -38,8 +38,11 @@ const USER_EXECUTE_NEVER: u64 = 1 << 54;
 const ADDRESS_MASK: u64 = 0x0000_ffff_ffff_f000;
 
 /// `MAIR_EL1`: attribute 0 is normal write-back memory, attribute 1 is
-/// device-nGnRnE. Two attributes are all a kernel with one UART needs.
-const MAIR: u64 = 0xff;
+/// device-nGnRnE, attribute 2 is normal memory that is not cached: a
+/// framebuffer, written at any width and seen by the display as written.
+const MAIR: u64 = 0x0044_00ff;
+const ATTR_FRAMEBUFFER: u64 = 2 << 2;
+const SH_OUTER: u64 = 2 << 8;
 
 /// `TCR_EL1` for a 39-bit `TTBR0` space with 4 KiB granules, inner-shareable
 /// write-back walks, a 40-bit physical size, and `TTBR1` walks disabled.
@@ -78,6 +81,14 @@ const fn leaf_bits(access: Access) -> u64 {
         // combine accesses.
         Access::UserDevice => {
             common | ATTR_DEVICE | AP_RW_ANY | PRIVILEGED_EXECUTE_NEVER | USER_EXECUTE_NEVER
+        }
+        Access::UserFramebuffer => {
+            common
+                | ATTR_FRAMEBUFFER
+                | SH_OUTER
+                | AP_RW_ANY
+                | PRIVILEGED_EXECUTE_NEVER
+                | USER_EXECUTE_NEVER
         }
     }
 }

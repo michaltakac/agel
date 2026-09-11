@@ -8,14 +8,25 @@ use crate::arch;
 use crate::console;
 use crate::kprint;
 use crate::native_session::{replay as replay_workspace, request as evaluator_request};
-use crate::recovery::{slot_name, Admission, BootPlan, KernelRecovery, LiveRecovery};
+#[cfg(target_arch = "x86_64")]
+use crate::recovery::{slot_name, Admission, KernelRecovery};
+use crate::recovery::{BootPlan, LiveRecovery};
+
+/// Kernel slots need the BIOS stage: a board has none, and the selector's
+/// place in the workshop stays empty.
+#[cfg(not(target_arch = "x86_64"))]
+#[allow(dead_code)]
+struct KernelRecovery;
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};
 use core::fmt::Write;
 
+#[cfg(target_arch = "x86_64")]
 const BOOT_GRAPHICS_MARKER: *const u32 = 0x6ff0 as *const u32;
+#[cfg(target_arch = "x86_64")]
 const MODE_INFO: usize = 0x7000;
+#[cfg(target_arch = "x86_64")]
 const BOOT_GRAPHICS_MAGIC: u32 = 0xa6e1_0fb0;
 const MAX_FRAMEBUFFER_BYTES: u64 = 16 * 1024 * 1024;
 const RECORD_BYTES: usize = 64;
@@ -656,6 +667,7 @@ struct Clock {
 }
 
 impl Clock {
+    #[cfg(target_arch = "x86_64")]
     fn from_packed(packed: u64) -> Self {
         Self {
             minutes: (packed >> 8) as u8,
@@ -1128,16 +1140,26 @@ struct Framebuffer {
 /// The Bochs display interface QEMU's standard VGA exposes: an index port
 /// and a data port through which the resolution can be set directly, with
 /// the linear framebuffer staying where the BIOS mode put it.
+#[cfg(target_arch = "x86_64")]
 const DISPI_INDEX: u16 = 0x1ce;
+#[cfg(target_arch = "x86_64")]
 const DISPI_DATA: u16 = 0x1cf;
+#[cfg(target_arch = "x86_64")]
 const DISPI_ID: u16 = 0;
+#[cfg(target_arch = "x86_64")]
 const DISPI_XRES: u16 = 1;
+#[cfg(target_arch = "x86_64")]
 const DISPI_YRES: u16 = 2;
+#[cfg(target_arch = "x86_64")]
 const DISPI_BPP: u16 = 3;
+#[cfg(target_arch = "x86_64")]
 const DISPI_ENABLE: u16 = 4;
+#[cfg(target_arch = "x86_64")]
 const DISPI_VIRT_WIDTH: u16 = 6;
+#[cfg(target_arch = "x86_64")]
 const DISPI_ENABLED_LFB: u16 = 0x41;
 
+#[cfg(target_arch = "x86_64")]
 fn dispi_write(index: u16, value: u16) {
     // Safety: the Bochs interface's two ports; writing them configures the
     // emulated display and nothing else.
@@ -1147,6 +1169,7 @@ fn dispi_write(index: u16, value: u16) {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 fn dispi_read(index: u16) -> u16 {
     // Safety: as in `dispi_write`; reading has no side effect.
     unsafe {
@@ -1155,6 +1178,36 @@ fn dispi_read(index: u16) -> u16 {
     }
 }
 
+impl Framebuffer {
+    /// The framebuffer this machine gives: on x86-64 the BIOS mode's
+    /// linear framebuffer, switched to the scene's size through the display
+    /// interface when there is one; on a board, what the firmware's mailbox
+    /// answers for the scene's size.
+    #[cfg(target_arch = "x86_64")]
+    fn acquire() -> Option<Self> {
+        let framebuffer = Self::discover()?;
+        Some(framebuffer.native().unwrap_or(framebuffer))
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn acquire() -> Option<Self> {
+        let width = crate::world::SCENE_WIDTH;
+        let height = crate::world::SCENE_HEIGHT;
+        let (physical, pitch, bytes) = arch::framebuffer(width, height)?;
+        if bytes > MAX_FRAMEBUFFER_BYTES {
+            return None;
+        }
+        Some(Self {
+            physical,
+            width,
+            height,
+            pitch,
+            bytes,
+        })
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
 impl Framebuffer {
     /// The display at the scene's native size, when the Bochs interface is
     /// there to set it: the mode the BIOS stage chose is replaced by
@@ -1234,15 +1287,18 @@ impl Framebuffer {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 fn read_u8(address: usize) -> u8 {
     // Safety: the VBE mode block is a fixed BIOS handoff in low memory.
     unsafe { (address as *const u8).read_volatile() }
 }
 
+#[cfg(target_arch = "x86_64")]
 fn read_u16(address: usize) -> u16 {
     u16::from_le_bytes([read_u8(address), read_u8(address + 1)])
 }
 
+#[cfg(target_arch = "x86_64")]
 fn read_u32(address: usize) -> u32 {
     u32::from_le_bytes([
         read_u8(address),
@@ -1798,6 +1854,7 @@ impl StatusLine {
 }
 
 /// The kernel's own A/B state on the serial log at boot.
+#[cfg(target_arch = "x86_64")]
 fn report_kernel_slot(kernel: &KernelRecovery) {
     let Some(booted) = kernel.booted() else {
         kprint!("kernel: boot stage has no slot selector; slot A loaded\n");
@@ -2205,6 +2262,7 @@ fn execute_workshop(
         }
         return status;
     }
+    #[cfg(target_arch = "x86_64")]
     if line == b":kernel" {
         let Some(kernel) = kernel.as_ref() else {
             return StatusLine::new(b"KERNEL SELECTOR UNAVAILABLE");
@@ -2315,6 +2373,7 @@ fn execute_workshop(
                 );
             }
         }
+        #[cfg(target_arch = "x86_64")]
         if let Some(kernel) = kernel.as_mut() {
             if let Ok(Some(slot)) = kernel.healthy(storage) {
                 kprint!(
@@ -2323,6 +2382,8 @@ fn execute_workshop(
                 );
             }
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = &kernel;
     }
     status
 }
@@ -2437,14 +2498,15 @@ enum Input {
 const INPUT_QUEUE: usize = 256;
 
 struct Inputs<'a> {
-    driver: &'a mut ServiceDomain,
+    /// The 8042 driver domain; a board without one has an empty queue.
+    driver: Option<&'a mut ServiceDomain>,
     queue: [(bool, u8); INPUT_QUEUE],
     head: usize,
     length: usize,
 }
 
 impl<'a> Inputs<'a> {
-    fn new(driver: &'a mut ServiceDomain) -> Self {
+    fn new(driver: Option<&'a mut ServiceDomain>) -> Self {
         Self {
             driver,
             queue: [(false, 0); INPUT_QUEUE],
@@ -2455,9 +2517,16 @@ impl<'a> Inputs<'a> {
 
     /// Read whatever the driver has, up to a bounded burst, into the queue.
     fn drain(&mut self) {
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = &self.driver;
+        #[cfg(target_arch = "x86_64")]
+        let Some(driver) = self.driver.as_deref_mut() else {
+            return;
+        };
+        #[cfg(target_arch = "x86_64")]
         for _ in 0..32 {
-            let handle = self.driver.handle();
-            match self.driver.read_input(handle) {
+            let handle = driver.handle();
+            match driver.read_input(handle) {
                 Ok(Some(pair)) => {
                     if self.length == INPUT_QUEUE {
                         return;
@@ -2600,6 +2669,9 @@ fn interactive(
             None
         }
     };
+    #[cfg(not(target_arch = "x86_64"))]
+    let mut kernel: Option<KernelRecovery> = None;
+    #[cfg(target_arch = "x86_64")]
     let mut kernel = match KernelRecovery::load(&mut storage) {
         Ok(mut kernel) => {
             match kernel.admit(&mut storage) {
@@ -2638,11 +2710,16 @@ fn interactive(
         .create_console_world(console_entry, 8)
         .map(|domain| ServiceDomain::new(domain, ServiceKind::Console, console_entry, 8))
         .unwrap_or_else(|reason| failed(reason));
+    // The keyboard and pointer: an 8042 driver domain on x86-64; a board
+    // has no such controller, and its keyboard is the serial console.
+    #[cfg(target_arch = "x86_64")]
     let input_entry = crate::user::agel_input_main as *const () as usize as u64;
+    #[cfg(target_arch = "x86_64")]
     let mut input_driver = machine
         .create_input_world(input_entry, 50)
         .map(|domain| ServiceDomain::new(domain, ServiceKind::Input, input_entry, 50))
         .unwrap_or_else(|reason| failed(reason));
+    #[cfg(target_arch = "x86_64")]
     match input_driver.enable_pointer(input_driver.handle()) {
         Ok(true) => {}
         Ok(false) => console::write("pointer unavailable; keyboard remains active\n"),
@@ -2667,11 +2744,16 @@ fn interactive(
     };
     // The clock driver: the CMOS clock behind two ports, read at boot and
     // then while idle, so the panel's time is the machine's.
+    #[cfg(target_arch = "x86_64")]
     let clock_entry = crate::user::agel_clock_main as *const () as usize as u64;
+    #[cfg(target_arch = "x86_64")]
     let mut clock_driver = machine
         .create_clock_world(clock_entry, 8)
         .map(|domain| ServiceDomain::new(domain, ServiceKind::Clock, clock_entry, 8))
         .ok();
+    #[cfg(not(target_arch = "x86_64"))]
+    kprint!("clock: none on this board; the panel shows the workspace\n");
+    #[cfg(target_arch = "x86_64")]
     if let Some(driver) = clock_driver.as_mut() {
         let handle = driver.handle();
         match driver.read_clock(handle) {
@@ -2691,7 +2773,10 @@ fn interactive(
             _ => kprint!("clock: unavailable\n"),
         }
     }
-    let mut inputs = Inputs::new(&mut input_driver);
+    #[cfg(target_arch = "x86_64")]
+    let mut inputs = Inputs::new(Some(&mut input_driver));
+    #[cfg(not(target_arch = "x86_64"))]
+    let mut inputs = Inputs::new(None);
     synchronize_language_scene(&mut evaluator, compositor, Some(&mut inputs), &mut current)
         .unwrap_or_else(|reason| failed(reason));
     let mut line = [0; INPUT_BYTES];
@@ -2784,6 +2869,7 @@ fn interactive(
                 }
             }
             idle = idle.wrapping_add(1);
+            #[cfg(target_arch = "x86_64")]
             if idle.is_multiple_of(200_000) {
                 // While idle, the clock: repainted only when its minute turns.
                 if let Some(driver) = clock_driver.as_mut() {
@@ -3169,8 +3255,8 @@ fn interactive(
 
 /// Draw the Agel-authored desktop in a contained compositor domain.
 pub fn run() -> ! {
-    let framebuffer = Framebuffer::discover().unwrap_or_else(|| failed("no valid VBE framebuffer"));
-    let framebuffer = framebuffer.native().unwrap_or(framebuffer);
+    let framebuffer =
+        Framebuffer::acquire().unwrap_or_else(|| failed("no framebuffer on this machine"));
     if VECTOR_STREAM.get(0..4) != Some(STREAM_MAGIC) {
         failed("native vector stream has the wrong magic");
     }

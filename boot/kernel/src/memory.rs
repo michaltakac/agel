@@ -36,6 +36,15 @@ pub enum Access {
     /// other two architectures grant devices by mapping them.
     #[cfg_attr(target_arch = "x86_64", allow(dead_code))]
     UserDevice,
+    /// A framebuffer granted to the compositor: read/write, never
+    /// executable, and ordinary memory rather than a device register
+    /// window, since pixels are written with whatever width and alignment
+    /// the painter chooses; uncached where the machine distinguishes.
+    #[cfg_attr(
+        not(all(target_arch = "aarch64", feature = "native-graphics")),
+        allow(dead_code)
+    )]
+    UserFramebuffer,
 }
 
 /// What a domain on a machine with memory-mapped devices is granted beyond
