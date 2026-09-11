@@ -10,8 +10,9 @@
 use super::hal;
 use crate::memory::{read_entry, table_index, write_entry, Access, FramePool, MemoryError, PAGE};
 
-/// Physical base of the device window: the UART and the interrupt controller.
-const DEVICE_BASE: u64 = super::board::DEVICE_BASE;
+/// Physical bases of the device windows, a gibibyte each: the UART, the
+/// interrupt controller and the rest of the board's peripherals.
+const DEVICE_BASES: [u64; 2] = super::board::DEVICE_BASES;
 /// Physical base of RAM.
 const RAM_BASE: u64 = super::board::RAM_BASE;
 /// How much RAM the identity window describes.
@@ -101,7 +102,7 @@ const DEVICE_BLOCK: u64 =
 /// The shared supervisor window: device memory, RAM, and the kernel image.
 #[derive(Clone, Copy)]
 pub struct IdentityWindow {
-    device: u64,
+    devices: [u64; 2],
     ram: u64,
 }
 
@@ -126,11 +127,9 @@ impl AddressSpace {
         let root = pool.allocate()?;
         // Safety: `root` is a freshly zeroed frame inside the identity window.
         unsafe {
-            write_entry(
-                root,
-                table_index(DEVICE_BASE, 2),
-                identity.device | VALID | TABLE_OR_PAGE,
-            );
+            for (base, table) in DEVICE_BASES.iter().zip(identity.devices) {
+                write_entry(root, table_index(*base, 2), table | VALID | TABLE_OR_PAGE);
+            }
             write_entry(
                 root,
                 table_index(RAM_BASE, 2),
@@ -240,19 +239,23 @@ pub fn build_identity_window(
         return Err(MemoryError::Misaligned);
     }
 
-    // Device memory: the whole first gibibyte, so the UART and the interrupt
-    // controller are reachable without a probe. Nothing here is executable and
-    // nothing here is reachable from EL0.
-    let device = pool.allocate()?;
-    for block in 0..512_u64 {
-        // Safety: freshly zeroed, identity mapped, index below 512.
-        unsafe {
-            write_entry(
-                device,
-                block as usize,
-                (DEVICE_BASE + block * BLOCK) | DEVICE_BLOCK,
-            )
-        };
+    // Device memory: the board's gibibytes of peripherals, whole, so the
+    // UART and the interrupt controller are reachable without a probe.
+    // Nothing here is executable and nothing here is reachable from EL0.
+    let mut devices = [0; 2];
+    for (base, table) in DEVICE_BASES.iter().zip(devices.iter_mut()) {
+        let device = pool.allocate()?;
+        for block in 0..512_u64 {
+            // Safety: freshly zeroed, identity mapped, index below 512.
+            unsafe {
+                write_entry(
+                    device,
+                    block as usize,
+                    (base + block * BLOCK) | DEVICE_BLOCK,
+                )
+            };
+        }
+        *table = device;
     }
 
     // RAM, as supervisor blocks, with the kernel image's block split into pages.
@@ -281,7 +284,7 @@ pub fn build_identity_window(
         block += BLOCK;
     }
 
-    Ok(IdentityWindow { device, ram })
+    Ok(IdentityWindow { devices, ram })
 }
 
 /// Install the translation registers and turn the MMU on.

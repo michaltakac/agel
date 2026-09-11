@@ -3,17 +3,20 @@
 //! `board-raspi4` feature selects the Raspberry Pi 4's layout (BCM2711),
 //! which QEMU also models and which shares its boot shape with the Pi 5:
 //! a flat image at `0x80000`, RAM from zero, entry at EL2, no virtio.
+//! `board-raspi5` selects the Pi 5's (BCM2712), from its documentation and
+//! device tree, unverified until the board says otherwise.
 //!
-//! Nothing here is probed. A board is a compile-time fact, and a kernel
-//! built for one board says so in its name rather than guessing on
-//! another.
+//! Nothing here is probed but the card. A board is a compile-time fact,
+//! and a kernel built for one board says so in its name rather than
+//! guessing on another.
 
-#[cfg(not(feature = "board-raspi4"))]
+#[cfg(not(any(feature = "board-raspi4", feature = "board-raspi5")))]
 mod layout {
     pub const NAME: &str = "aarch64";
-    /// Physical base of the device window: one gibibyte holding the
-    /// UART, the interrupt controller and the virtio transports.
-    pub const DEVICE_BASE: u64 = 0x0000_0000;
+    /// Physical bases of the device windows, a gibibyte each: the first
+    /// holds the UART, the interrupt controller and the virtio transports;
+    /// the second is the same gibibyte again, since one is all there is.
+    pub const DEVICE_BASES: [u64; 2] = [0x0000_0000, 0x0000_0000];
     /// Physical base of RAM.
     pub const RAM_BASE: u64 = 0x4000_0000;
     /// PL011 UART.
@@ -39,7 +42,7 @@ mod layout {
     pub const NAME: &str = "aarch64-raspi4";
     /// The last gibibyte of the low 4 GiB: the peripherals at
     /// `0xfc00_0000` and the GIC-400 at `0xff84_0000` are in it.
-    pub const DEVICE_BASE: u64 = 0xc000_0000;
+    pub const DEVICE_BASES: [u64; 2] = [0xc000_0000, 0xc000_0000];
     /// RAM starts at zero; the firmware places the image at `0x80000`.
     pub const RAM_BASE: u64 = 0x0000_0000;
     /// PL011 UART0, the debug console on the 40-pin header (GPIO 14/15).
@@ -59,6 +62,27 @@ mod layout {
     /// granted to the storage driver.
     pub const SDHCI: &[u64] = &[0xfe34_0000, 0xfe30_0000];
     /// No PSCI without firmware at EL3: the machine is halted instead.
+    pub const PSCI: bool = false;
+}
+
+#[cfg(feature = "board-raspi5")]
+mod layout {
+    pub const NAME: &str = "aarch64-raspi5";
+    /// The BCM2712's peripherals: two gibibytes from 64 GiB. The SD host
+    /// controller is in the first, the debug UART, the mailbox and the
+    /// GIC-400 in the second.
+    pub const DEVICE_BASES: [u64; 2] = [0x10_0000_0000, 0x10_4000_0000];
+    pub const RAM_BASE: u64 = 0x0000_0000;
+    /// The PL011 on the 3-pin debug connector.
+    pub const UART_BASE: u64 = 0x10_7d00_1000;
+    pub const GIC_DISTRIBUTOR: u64 = 0x10_7fff_9000;
+    pub const GIC_CPU: u64 = 0x10_7fff_a000;
+    pub const POOL_START: u64 = 0x0100_0000;
+    pub const POOL_END: u64 = 0x0400_0000;
+    pub const KERNEL_PROBE_ADDRESS: u64 = 0x0008_0000;
+    pub const VIRTIO_MMIO: Option<(u64, u64, u64)> = None;
+    /// The SD slot's host controller.
+    pub const SDHCI: &[u64] = &[0x10_00ff_f000];
     pub const PSCI: bool = false;
 }
 

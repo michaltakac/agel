@@ -46,7 +46,7 @@ pub const CONSOLE_DEVICE_VADDR: u64 = domain::DEVICE_BASE;
 pub const STORAGE_DEVICE_VADDR: u64 = domain::STORAGE_DEVICE_BASE;
 /// The DMA page: only the virtio driver has a use for it; the SD driver
 /// moves sectors by programmed I/O.
-#[cfg(not(feature = "board-raspi4"))]
+#[cfg(not(any(feature = "board-raspi4", feature = "board-raspi5")))]
 pub const STORAGE_DMA_VADDR: u64 = domain::DMA_BASE;
 
 /// A supervisor-only address a world may try to write: the kernel's own text.

@@ -29,6 +29,9 @@ graphics-selftest = ["native-graphics"]
 # The AArch64 kernel laid out for the Raspberry Pi 4 (BCM2711), which QEMU
 # models: a flat image at 0x80000, RAM from zero, entry at EL2, no virtio.
 board-raspi4 = []
+# The Pi 5's (BCM2712) layout, from its documentation and device tree;
+# no emulator models it, so it is built here and verified on the board.
+board-raspi5 = []
 
 [profile.dev]
 panic = "abort"

@@ -91,12 +91,40 @@ What the Pi 5 changes, from its datasheet and the Linux device tree:
 | display | the firmware's framebuffer through the mailbox at `0x10_7c01_3880`, HDMI |
 | device tree | passed in `x0` at entry; not read yet |
 
-The order of work, each a release with a test: a `board-raspi5` layout
-with the addresses above, which needs the board to verify; the mailbox
+The `board-raspi5` layout exists (v0.2.57) with exactly the addresses
+above: two device windows (the Pi 5's peripherals span two gibibytes from
+64 GiB, and the SD host controller is in the first while the UART, the
+mailbox and the GIC are in the second), the same entry, page tables,
+drivers and workshop. **No emulator models the Pi 5, so this image has
+never run.** It is built and linted with every release; the board will
+be the first to run it, and its first words on the debug UART, or their
+absence, are the next test. The order of work after that: the mailbox
 framebuffer, so the graphical workshop paints on HDMI; the device tree,
-so one image serves both boards. The SD driver is done (v0.2.56) and
-needs the board to confirm it drives the real controller, whose clock and
-pins the firmware sets up before the kernel runs.
+so one image serves both boards. The SD driver (v0.2.56) needs the board
+to confirm it drives the real controller, whose clock and pins the
+firmware sets up before the kernel runs.
+
+## Running on a Pi 5
+
+```sh
+./scripts/build-kernel.sh raspi5 --features isolated-repl
+```
+
+prints `boot/kernel/target/raspi5/kernel_2712.img`. On a card with the
+Pi 5's firmware files, a `config.txt` of
+
+```text
+arm_64bit=1
+enable_uart=1
+kernel=kernel_2712.img
+kernel_address=0x80000
+```
+
+names it and the load address the image is linked for. The console is
+the PL011 on the 3-pin debug connector at 115200 baud. What to expect:
+`Agel research kernel: aarch64-raspi5` first, then either the workshop
+or nothing. Nothing means the entry or the UART address; the workshop
+without `storage:` means the card came up. Report what the UART says.
 
 ## Running on a Pi 4 today
 

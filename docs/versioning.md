@@ -252,6 +252,11 @@ promise.
   programmed I/O, the board's two controllers probed once for a card, and
   the board test loads a program from the card and persists a cell across
   two boots.
+  `v0.2.57` adds the Raspberry Pi 5's layout, compile-only: two device
+  windows in the identity map, the BCM2712's addresses for the debug
+  UART, the GIC-400 and the SD host controller, `kernel_2712.img` from
+  `build-kernel.sh raspi5`; linted with every release, never run, waiting
+  for the board.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

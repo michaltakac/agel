@@ -1343,6 +1343,19 @@ Not claimed: the real controller (the sequence is the standard one and
 QEMU's model accepts it; the board will say), multi-block transfers,
 DMA, card removal while running.
 
+## v0.2.57
+
+- **An unrun image is labelled as one:** the Pi 5 layout is built and
+  linted, and every document that names it says it has never executed.
+  Its addresses come from the board's documentation and device tree, not
+  from a probe, so a wrong one fails at the first UART byte rather than
+  silently mapping something else.
+- **Two device windows, both supervisor-only:** the second gibibyte of
+  peripherals is mapped like the first, device memory that no EL0 world
+  can reach; a driver still receives one page.
+
+Not claimed: anything about the Pi 5 beyond the build.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

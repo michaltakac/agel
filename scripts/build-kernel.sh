@@ -11,7 +11,7 @@
 set -eu
 
 if test "$#" -lt 1; then
-  printf '%s\n' "usage: build-kernel.sh <x86_64|aarch64|riscv64|raspi4> [extra cargo args]" >&2
+  printf '%s\n' "usage: build-kernel.sh <x86_64|aarch64|riscv64|raspi4|raspi5> [extra cargo args]" >&2
   exit 2
 fi
 architecture=$1
@@ -25,15 +25,15 @@ case "$architecture" in
     ;;
   aarch64) target=aarch64-unknown-none-softfloat ;;
   riscv64) target=riscv64imac-unknown-none-elf ;;
-  raspi4)
+  raspi4 | raspi5)
     target=aarch64-unknown-none-softfloat
     rustup target add "$target" >/dev/null
-    out="$kernel_dir/target/raspi4"
+    out="$kernel_dir/target/$architecture"
     mkdir -p "$out"
     # A separate target directory: the same triple with another board's
     # layout must not share an incremental build with the `virt` kernel.
     (cd "$kernel_dir" && cargo build --release --target "$target" --target-dir "$out" \
-      --features isolation-selftest,contract-memory,board-raspi4 "$@")
+      --features "isolation-selftest,contract-memory,board-$architecture" "$@")
     # Any objcopy that knows AArch64 ELF makes the flat image: LLVM's (the
     # Homebrew llvm on macOS, whose rust-objcopy lacks its library), GNU's,
     # or the toolchain's own.
@@ -48,8 +48,14 @@ case "$architecture" in
     else
       objcopy="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/rust-objcopy"
     fi
-    "$objcopy" -O binary "$out/$target/release/agel-boot" "$out/kernel8.img"
-    printf '%s\n' "$out/kernel8.img"
+    # The firmware's name for a 64-bit image: kernel8.img on the Pi 4,
+    # kernel_2712.img on the Pi 5.
+    case "$architecture" in
+      raspi4) image=kernel8.img ;;
+      raspi5) image=kernel_2712.img ;;
+    esac
+    "$objcopy" -O binary "$out/$target/release/agel-boot" "$out/$image"
+    printf '%s\n' "$out/$image"
     exit 0
     ;;
   *)

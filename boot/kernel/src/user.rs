@@ -1092,7 +1092,7 @@ pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
 // device behind a modern virtio-mmio transport, driven by polling.
 // ---------------------------------------------------------------------------
 
-#[cfg(not(feature = "board-raspi4"))]
+#[cfg(not(any(feature = "board-raspi4", feature = "board-raspi5")))]
 #[cfg(not(target_arch = "x86_64"))]
 mod virtio {
     pub const MAGIC: u64 = 0x000;
@@ -1167,13 +1167,16 @@ unsafe fn mmio_write(base: u64, offset: u64, value: u32) {
     unsafe { ((base + offset) as *mut u32).write_volatile(value) }
 }
 
-#[cfg(all(not(target_arch = "x86_64"), not(feature = "board-raspi4")))]
+#[cfg(all(
+    not(target_arch = "x86_64"),
+    not(any(feature = "board-raspi4", feature = "board-raspi5"))
+))]
 #[inline(always)]
 fn fence() {
     core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
 }
 
-#[cfg(not(feature = "board-raspi4"))]
+#[cfg(not(any(feature = "board-raspi4", feature = "board-raspi5")))]
 /// Bring the block device up: acknowledge it, negotiate the modern feature
 /// bit (and flush, if offered), and give it the one queue in the DMA page.
 /// Returns whether flush was negotiated.
@@ -1236,7 +1239,7 @@ unsafe fn virtio_initialize(mmio: u64, dma_physical: u64) -> Result<bool, u64> {
     }
 }
 
-#[cfg(not(feature = "board-raspi4"))]
+#[cfg(not(any(feature = "board-raspi4", feature = "board-raspi5")))]
 /// Write one descriptor into the DMA page.
 #[cfg(not(target_arch = "x86_64"))]
 #[link_section = ".user_text"]
@@ -1250,7 +1253,7 @@ unsafe fn descriptor(dma: u64, index: u64, address: u64, length: u32, flags: u16
     }
 }
 
-#[cfg(not(feature = "board-raspi4"))]
+#[cfg(not(any(feature = "board-raspi4", feature = "board-raspi5")))]
 /// Submit one request already laid out in the DMA page and wait for the
 /// device to retire it. `last_used` is the driver's copy of the used index.
 #[cfg(not(target_arch = "x86_64"))]
@@ -1303,7 +1306,10 @@ unsafe fn virtio_submit(mmio: u64, dma: u64, last_used: &mut u16) -> u64 {
 /// Entered by the architecture's return-from-exception instruction with a
 /// private stack, a valid shared page, the device page and the DMA page
 /// mapped.
-#[cfg(all(not(target_arch = "x86_64"), not(feature = "board-raspi4")))]
+#[cfg(all(
+    not(target_arch = "x86_64"),
+    not(any(feature = "board-raspi4", feature = "board-raspi5"))
+))]
 #[no_mangle]
 #[link_section = ".user_text"]
 pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
@@ -1434,7 +1440,7 @@ pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {
 /// access is a whole 32-bit word: the Arasan controller on the Pi takes
 /// nothing narrower, so the 8- and 16-bit registers are reached through the
 /// word that holds them.
-#[cfg(feature = "board-raspi4")]
+#[cfg(any(feature = "board-raspi4", feature = "board-raspi5"))]
 mod sdhci {
     /// Block size (low half) and block count (high half).
     pub const BLOCK: u64 = 0x04;
@@ -1506,7 +1512,7 @@ mod sdhci {
 }
 
 /// What the card said about itself at initialization.
-#[cfg(feature = "board-raspi4")]
+#[cfg(any(feature = "board-raspi4", feature = "board-raspi5"))]
 #[derive(Clone, Copy)]
 struct Card {
     /// In 512-byte sectors.
@@ -1517,7 +1523,7 @@ struct Card {
 
 /// Wait until `mask` is set in the interrupt status, clear it, and say
 /// so; an error interrupt or the poll limit is the failure it names.
-#[cfg(feature = "board-raspi4")]
+#[cfg(any(feature = "board-raspi4", feature = "board-raspi5"))]
 #[link_section = ".user_text"]
 unsafe fn sd_wait(mmio: u64, mask: u32) -> Result<(), u64> {
     let mut polls = 0;
@@ -1539,7 +1545,7 @@ unsafe fn sd_wait(mmio: u64, mask: u32) -> Result<(), u64> {
 }
 
 /// Issue one command and return its first response word.
-#[cfg(feature = "board-raspi4")]
+#[cfg(any(feature = "board-raspi4", feature = "board-raspi5"))]
 #[link_section = ".user_text"]
 unsafe fn sd_command(
     mmio: u64,
@@ -1572,7 +1578,7 @@ unsafe fn sd_command(
 }
 
 /// Set the SD clock divider with the clock stopped, and wait for it.
-#[cfg(feature = "board-raspi4")]
+#[cfg(any(feature = "board-raspi4", feature = "board-raspi5"))]
 #[link_section = ".user_text"]
 unsafe fn sd_clock(mmio: u64, divider: u32) -> Result<(), u64> {
     unsafe {
@@ -1598,7 +1604,7 @@ unsafe fn sd_clock(mmio: u64, divider: u32) -> Result<(), u64> {
 
 /// Bring the controller and the card up: reset, power, a slow clock, then
 /// the identification sequence, then a faster clock and 512-byte blocks.
-#[cfg(feature = "board-raspi4")]
+#[cfg(any(feature = "board-raspi4", feature = "board-raspi5"))]
 #[link_section = ".user_text"]
 unsafe fn sd_initialize(mmio: u64) -> Result<Card, u64> {
     unsafe { mmio_write(mmio, sdhci::CLOCK_CONTROL, sdhci::RESET_ALL) };
@@ -1709,7 +1715,7 @@ unsafe fn sd_initialize(mmio: u64) -> Result<Card, u64> {
 
 /// Move one sector between the card and the block area, a word at a time
 /// through the controller's buffer.
-#[cfg(feature = "board-raspi4")]
+#[cfg(any(feature = "board-raspi4", feature = "board-raspi5"))]
 #[link_section = ".user_text"]
 unsafe fn sd_transfer(mmio: u64, card: Card, lba: u64, block: *mut u8, reading: bool) -> u64 {
     let address = if card.high_capacity {
@@ -1771,7 +1777,7 @@ unsafe fn sd_transfer(mmio: u64, card: Card, lba: u64, block: *mut u8, reading: 
 /// # Safety
 /// Entered by the architecture's return-from-exception instruction with a
 /// private stack, a valid shared page and the device page mapped.
-#[cfg(feature = "board-raspi4")]
+#[cfg(any(feature = "board-raspi4", feature = "board-raspi5"))]
 #[no_mangle]
 #[link_section = ".user_text"]
 pub unsafe extern "C" fn agel_storage_main(shared_page: u64) -> ! {

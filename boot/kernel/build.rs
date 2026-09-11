@@ -14,7 +14,9 @@ fn main() {
     embed_trust_key();
     // A board that loads the image somewhere else tells the linker script
     // so; the script's default is QEMU's `virt` machine.
-    if env::var_os("CARGO_FEATURE_BOARD_RASPI4").is_some() {
+    if env::var_os("CARGO_FEATURE_BOARD_RASPI4").is_some()
+        || env::var_os("CARGO_FEATURE_BOARD_RASPI5").is_some()
+    {
         println!("cargo:rustc-link-arg=--defsym=AGEL_LOAD=0x80000");
     }
 }

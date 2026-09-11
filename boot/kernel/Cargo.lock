@@ -12,8 +12,8 @@ dependencies = [
 
 [[package]]
 name = "agel-integrity"
-version = "0.2.56"
+version = "0.2.57"
 
 [[package]]
 name = "agel-kernel-abi"
-version = "0.2.56"
+version = "0.2.57"
