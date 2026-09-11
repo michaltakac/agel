@@ -124,6 +124,42 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         assert "WINDOW CLOSED 0" in machine.submit(":close 0")
         assert bar_pixels(560, 120, 480, 320) == 0, "the first window is still painted"
         assert "NO SUCH WINDOW" in machine.submit(":close 0")
+        # A window that listens: sketch waits for events, so the workshop
+        # gets its prompt back while the process lives; a click in the
+        # content becomes a dot and a console line, a key ends it.
+        def until_text(wanted, timeout=30):
+            result = bytearray()
+            deadline = time.monotonic() + timeout
+            while wanted not in result:
+                if time.monotonic() > deadline or len(result) > 65536:
+                    raise TimeoutError(f"Agel did not write {wanted!r}: {bytes(result)!r}")
+                byte = machine.serial.recv(1)
+                if not byte:
+                    raise RuntimeError("Agel stopped")
+                result.extend(byte)
+            return bytes(result)
+        response = machine.submit(":exec c-sketch")
+        assert "PROCESS LISTENING" in response, response
+        assert "exited" not in response, response
+        def dot_pixels(x, y, width, height):
+            return panel_region(machine, x, y, width, height).count(b"\xe7\x9c\xfe")
+        assert dot_pixels(740, 280, 40, 40) == 0, "a dot before any press"
+        move_to(760, 300)
+        click()
+        until_text(b"sketch: press at 200,140")
+        time.sleep(1.0)
+        assert dot_pixels(740, 280, 40, 40) > 300, "no dot where the press landed"
+        Path("target/desktop-sketch.png").write_bytes(machine.frame())
+        # The window has the keyboard: a serial byte reaches the process,
+        # not the workshop's line.
+        machine.serial.sendall(b"q")
+        response = until_text(b"live-desktop> ")
+        assert "sketch: quit after 1 dots" in response.decode(), response
+        assert "process c-sketch exited with status 0" in response.decode(), response
+        assert "PROCESS ENDED" in response.decode(), response
+        # Its window stays, with the dot, until closed.
+        assert dot_pixels(740, 280, 40, 40) > 300, "the dot vanished with the process"
+        assert "WINDOW CLOSED 0" in machine.submit(":close 0")
         # The workshop is still whole, and the frame is a real image.
         assert "42" in machine.submit("(+ 20 22)")
         assert machine.frame().startswith(b"\x89PNG\r\n\x1a\n")

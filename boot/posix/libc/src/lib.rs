@@ -291,6 +291,46 @@ pub unsafe extern "C" fn agel_draw(
     held as c_int
 }
 
+/// The next event for `window`, waiting for one when `wait` is nonzero:
+/// 1 with the event in `*event`, 0 when there is none, or -1 with `errno`.
+///
+/// # Safety
+/// `event` must be a valid pointer.
+#[no_mangle]
+pub unsafe extern "C" fn agel_event(
+    window: c_int,
+    event: *mut agel_window_event,
+    wait: c_int,
+) -> c_int {
+    if window < 0 {
+        return outcome(-9) as c_int;
+    }
+    let packed = process().event(window as u64, wait != 0);
+    if packed < 0 {
+        return outcome(packed) as c_int;
+    }
+    if packed == 0 {
+        return 0;
+    }
+    let packed = packed as u64;
+    unsafe {
+        (*event).kind = (packed >> 56) as c_int;
+        (*event).x = ((packed >> 32) & 0xffff) as c_int;
+        (*event).y = ((packed >> 16) & 0xffff) as c_int;
+        (*event).key = (packed & 0xff) as c_int;
+    }
+    1
+}
+
+/// `<agel/window.h>`'s `agel_window_event`, as C lays it out.
+#[repr(C)]
+pub struct agel_window_event {
+    pub kind: c_int,
+    pub x: c_int,
+    pub y: c_int,
+    pub key: c_int,
+}
+
 // ---------------------------------------------------------------------------
 // fcntl.h
 // ---------------------------------------------------------------------------

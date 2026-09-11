@@ -25,6 +25,11 @@ pub const SEEK: u64 = 9;
 pub const WINDOW: u64 = 10;
 pub const DRAW: u64 = 11;
 pub const DRAW_CLEAR: u64 = 1;
+/// The next event for a window: a press with content coordinates in bits
+/// 32..48 and 16..32, or a key with its byte in the low eight bits.
+pub const EVENT: u64 = 12;
+pub const EVENT_PRESS: u64 = 1 << 56;
+pub const EVENT_KEY: u64 = 2 << 56;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;
@@ -212,6 +217,12 @@ impl Process {
             unsafe { block.add(offset).write_volatile(*byte) };
         }
         self.request(DRAW, [window, count as u64, flags, 0]) as i64
+    }
+
+    /// The next event for `window`, waiting for one when `wait`: the
+    /// packed event, 0 when there is none, or a negated error number.
+    pub fn event(&self, window: u64, wait: bool) -> i64 {
+        self.request(EVENT, [window, u64::from(wait), 0, 0]) as i64
     }
 
     /// Wait for child `id` to end: its exit status, `WAIT_SIGNALED` with a

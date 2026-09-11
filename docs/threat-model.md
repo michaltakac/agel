@@ -1245,6 +1245,32 @@ the desktop reads the next input, so a window cannot react or animate;
 the process side's records are trusted only after the check, and the
 compositor still validates every record it receives as before.
 
+## v0.2.52
+
+- **Input reaches a process only through its window:** a press is
+  queued for the window it landed in, in that window's coordinates, and
+  only while a live process owns it; a key goes to the window that has
+  the keyboard, and only while its owner lives. A process never sees the
+  pointer elsewhere, the workshop's line, or another window's events;
+  `event` on a window it does not own is `-EBADF`.
+- **The keyboard is lent, not taken:** a window has it from opening or a
+  click in it, and the workshop takes it back with a click; when the
+  owner ends, keys return to the workshop by themselves. The queue is
+  eight events and drops the oldest, so a process that never reads loses
+  input, never memory.
+- **A listening process cannot hold the desktop:** the table runs in
+  passes with a fixed budget per idle turn, the desktop reads its inputs
+  between them, and a process that only computes still runs to its end as
+  before. On the serial workshop, where nothing delivers events, a
+  process asleep on one is stopped as blocked, as a deadlock is.
+- **The same table, the same rules:** `start`, `step_run` and `finish`
+  are the code `exec` was, split; spawn, pipes, wait and files are served
+  in a pass exactly as before, in either workshop.
+
+Not claimed: one running program at a time; no release, motion or
+modifier events; the budget of sixteen passes is a constant, not a
+scheduler.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

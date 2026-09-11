@@ -84,6 +84,7 @@ and resumes the process.
 | `8` wait | child id | the child's exit status, or `0x100` with a signal number in the low byte when the machine stopped it (`11` a fault, `9` a budget or a deadlock); blocks until the child ends; `-ECHILD` for a child that is not the caller's; stratum 3 |
 | `9` seek | descriptor, offset, whence (0 start, 1 current, 2 end) | the new offset; `-ESPIPE` for a pipe or the console; stratum 4 |
 | `10` window | width, height, title length ≤ 28 | a window's number, or `-ENODEV` where there is no display, `-EBUSY` when every window is taken or the process has one, `-EINVAL` for a size outside 64×48..1280×720; the title is in the payload area; not POSIX, see [`native-graphics.md`](native-graphics.md) |
+| `12` event | window, wait | the next event for a window the process owns, packed: the kind in the top byte (`1` a press, with content coordinates in bits 32–48 and 16–32; `2` a key, with its byte in the low eight), 0 when there is none; with `wait` set the process sleeps until there is one and the desktop runs meanwhile; `-ENODEV` without a display (and a sleeping process is stopped as blocked where nothing can deliver), `-EBADF` for a window not its own; not POSIX |
 | `11` draw | window, record count ≤ 8, flags (`1` clears first) | the records the window holds after this; the records are 64-byte compositor records in the block area, relative to the window's content; `-EINVAL` and nothing drawn when any is not permitted or reaches outside the content, `-ENOSPC` past 24 records, `-EBADF` for a window the process does not own; not POSIX |
 
 Before a process first runs, the supervisor places its arguments in the
@@ -443,9 +444,11 @@ What this step adds:
 `agel_window(width, height, title)` and `agel_draw(window, records, count,
 flags)` over the `10` and `11` requests, with inline builders for the
 records the desktop admits: `agel_rect`, `agel_gradient`, `agel_ellipse`,
-`agel_label`, `agel_surface`, `agel_sprite`. `chart.c` draws a bar for
+`agel_label`, `agel_surface`, `agel_sprite`. `agel_event(window, &event, wait)` over `12` fills an `agel_window_event`
+(`kind`, `x`, `y`, `key`). `chart.c` draws a bar for
 each number on its command line and, given the word `outside`, first asks
-to draw past its window's edge and reports the refusal. On a machine with
+to draw past its window's edge and reports the refusal; `sketch.c` waits
+for events and puts a dot where each press lands until `q`. On a machine with
 no display the request answers `-ENODEV`, which `chart` reports and exits
 with 3; `scripts/test-libc.sh` requires exactly that on all three
 machines, and `scripts/test-desktop-process.sh` the windows themselves.

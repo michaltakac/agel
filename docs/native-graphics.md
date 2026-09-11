@@ -199,11 +199,58 @@ its close control and the first by `:close 0`, and requires the bars
 gone; `scripts/test-libc.sh` requires the `-ENODEV` answer on all three
 machines.
 
-What this is not yet: a window receives no input, so a process cannot
-react to a click or a key in it; a process runs to its end before the
-desktop takes the next input, so a window cannot animate; windows do not
-move, resize, stack by click or overlap the launcher; the workshop is not
+What this was not yet: a window received no input, and a process ran to
+its end before the desktop took the next input. Windows do not move,
+resize, stack by click or overlap the launcher; the workshop is not
 itself a window. Two windows, 24 records each.
+
+## A window that listens (v0.2.52)
+
+A process can wait for its window and keep running beside the desktop:
+
+![The sketch program's window with a dot where the pointer pressed, at v0.2.52](images/native-desktop-v0.2.52.png)
+
+The process protocol gains `12` **event**: the next event queued for a
+window the process owns, packed in one word (the kind in the top byte, a
+press's content coordinates or a key's byte below), 0 when there is
+none; with its second argument set the process **sleeps until there is
+one**. Each window keeps eight events, oldest first; a ninth drops the
+oldest. A press in a window's content queues a press for its owner, and
+the window takes the **keyboard**: from when it opens or is clicked until
+the workshop is clicked, a key typed (serial or PS/2) is an event for
+the window's live owner rather than a byte of the workshop's line. A
+window whose process has ended queues nothing and gives the keyboard
+back.
+
+For this the process table runs in **passes**: `process::start` loads
+the program, `step_run` gives every runnable process one entry and every
+blocked one a chance to be answered, and reports whether something moved,
+whether every live process waits for the desktop, or how the first ended;
+`finish` gives the frames back. The serial workshop loops over passes as
+it always did, and a process that waits for an event there, where nothing
+can deliver one, is stopped as blocked like a deadlock. The graphical
+workshop runs `:exec` to its end as before **unless the program
+listens**: then the command answers `PROCESS LISTENING`, the prompt
+returns, and the desktop runs sixteen passes between inputs while the
+program lives, repainting the terminal panel when the program wrote and
+the whole frame, with the report and a fresh prompt, when it ends. The
+process serves `write`, `draw` and its children the same way in either
+mode; a second `:exec` while one runs is refused with
+`A PROCESS IS RUNNING`.
+
+`boot/posix/c/sketch.c` opens a window, waits for events, puts a dot
+where each press lands and writes the press to the console; a key clears
+the dots, `q` ends it. `scripts/test-desktop-process.sh` runs it,
+requires the prompt back with `PROCESS LISTENING` and no exit, presses in
+the content, reads `sketch: press at 200,140` on the serial console and
+the dot's colour where the press landed, sends `q` on the serial console
+and reads the quit, the exit report and `PROCESS ENDED`, and requires the
+dot still there until `:close 0`.
+
+What this is not yet: no pointer release, motion or modifier events; a
+process that computes without listening still holds the desktop until it
+ends; one running program at a time; sixteen passes per idle turn is a
+fixed budget, not a scheduler. Windows still do not move or resize.
 
 ## Live Agel forms
 

@@ -464,6 +464,22 @@ pub mod process {
     /// of records the window now holds; `-ENOSPC` when they would exceed
     /// `WINDOW_RECORDS`, `-EBADF` for a window the process does not own.
     pub const DRAW: u64 = 11;
+    /// The next event for window `arguments[0]`, which the process must
+    /// own: a press in its content or a key while it has focus, packed as
+    /// `EVENT_*`; 0 when there is none, or, with `arguments[1]` set, the
+    /// process waits until there is one and the desktop runs meanwhile.
+    /// `-ENODEV` without a display, `-EBADF` for a window not its own.
+    pub const EVENT: u64 = 12;
+    /// An event's kind is its top byte; a press carries the content
+    /// coordinates in bits 32..48 and 16..32, a key its byte in the low
+    /// eight bits.
+    #[cfg(feature = "native-graphics")]
+    pub const EVENT_PRESS: u64 = 1 << 56;
+    #[cfg(feature = "native-graphics")]
+    pub const EVENT_KEY: u64 = 2 << 56;
+    /// Events a window queues before the oldest is dropped.
+    #[cfg(feature = "native-graphics")]
+    pub const WINDOW_EVENTS: usize = 8;
     #[cfg(feature = "native-graphics")]
     pub const DRAW_CLEAR: u64 = 1;
     /// Records one draw request carries: the block area's 512 bytes.

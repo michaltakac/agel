@@ -134,11 +134,11 @@ pub fn filesystem_command(
     }
 }
 
-/// Load a program from the disk's program region into a fresh domain, run it
-/// to its end serving its requests inside a namespace, and say how it ended.
-/// `rest` is `NAME [ROOT] [ro] [-- ARG...]`: the directory the process sees
+/// `:exec NAME [ROOT] [ro] [-- ARG...]`: the program, the directory it sees
 /// as `/`, named from the real root; whether it may only read; its
-/// arguments, one per word.
+/// arguments, one per word. Runs it to its end, serving it and every
+/// process it spawns, and reports how it ended.
+#[cfg(feature = "isolated-repl")]
 #[inline(never)]
 pub fn exec_program(
     machine: &mut arch::Machine,
@@ -152,6 +152,58 @@ pub fn exec_program(
         line(console, b"denied: no storage device");
         return;
     };
+    let mut filesystem = filesystem;
+    let mut display = display;
+    let mut slot = process::RunSlot::UNINIT;
+    let run = slot.prepare();
+    if start_program(
+        machine,
+        storage,
+        filesystem.as_deref_mut(),
+        console,
+        display
+            .as_deref_mut()
+            .map(|display| display as &mut dyn Display),
+        rest,
+        run,
+    )
+    .is_none()
+    {
+        return;
+    }
+    let mut services = Services {
+        storage,
+        console,
+        filesystem,
+        display: display.map(|display| &mut *display as &mut dyn Display),
+    };
+    let exit = loop {
+        match process::step_run(machine, &mut services, run) {
+            process::Progress::Running => {}
+            process::Progress::Listening => {
+                // Nothing here delivers events between passes: a process
+                // that waits for one on this path waits for nothing.
+                break process::abandon(machine, &mut services, run);
+            }
+            process::Progress::Ended(exit) => break exit,
+        }
+    };
+    finish_program(machine, services.console, run, exit);
+}
+
+/// Parse an `:exec` line, resolve the root, find the program and start
+/// it in the prepared `run`: `Some` when it runs, or nothing, with the
+/// reason already on the console.
+#[inline(never)]
+pub fn start_program(
+    machine: &mut arch::Machine,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+    console: &mut dyn Console,
+    display: Option<&mut dyn Display>,
+    rest: &[u8],
+    run: &mut process::Run,
+) -> Option<()> {
     let (options, arguments) = match rest.windows(2).position(|pair| pair == b"--") {
         Some(at)
             if (at == 0 || rest[at - 1] == b' ')
@@ -166,7 +218,7 @@ pub fn exec_program(
         .filter(|word| !word.is_empty());
     let Some(name) = words.next() else {
         line(console, b"usage: :exec NAME [ROOT] [ro] [-- ARG...]");
-        return;
+        return None;
     };
     let mut root_path = words.next();
     let mut read_only = false;
@@ -204,9 +256,7 @@ pub fn exec_program(
                 fs::COMMAND_OPEN,
                 [0, fs::O_DIRECTORY_BIT, root_path.len() as u64],
             );
-            let Some([entry, _, _]) = filesystem_outcome(console, outcome) else {
-                return;
-            };
+            let [entry, _, _] = filesystem_outcome(console, outcome)?;
             entry as u16
         }
         _ => 0,
@@ -220,45 +270,54 @@ pub fn exec_program(
         Ok(Some(program)) => program,
         Ok(None) => {
             text(console, b"no program named ", name);
-            return;
+            return None;
         }
         Err(reason) => {
             text(console, b"program table unreadable: ", reason.as_bytes());
-            return;
+            return None;
         }
     };
-    let outcome = {
-        let mut services = Services {
-            storage,
-            console,
-            filesystem,
-            // Reborrowed, so the trait object's lifetime is the table's.
-            display: display.map(|display| &mut *display as &mut dyn Display),
-        };
-        match process::exec(
-            machine,
-            &mut services,
-            program,
-            name,
-            &block[..block_length],
-            namespace,
-        ) {
-            Ok(outcome) => outcome,
-            Err(reason) => {
-                text(
-                    services.console,
-                    b"cannot load program: ",
-                    reason.as_bytes(),
-                );
-                return;
-            }
-        }
+    let mut services = Services {
+        storage,
+        console,
+        filesystem,
+        // Reborrowed, so the trait object's lifetime is the table's.
+        display: display.map(|display| &mut *display as &mut dyn Display),
     };
+    match process::start(
+        machine,
+        &mut services,
+        program,
+        name,
+        &block[..block_length],
+        namespace,
+        run,
+    ) {
+        Ok(()) => Some(()),
+        Err(reason) => {
+            text(
+                services.console,
+                b"cannot load program: ",
+                reason.as_bytes(),
+            );
+            None
+        }
+    }
+}
+
+/// The one line for how a run's first process ended, and its frames back.
+pub fn finish_program(
+    machine: &mut arch::Machine,
+    console: &mut dyn Console,
+    run: &mut process::Run,
+    exit: process::Exit,
+) {
     let mut out = Line::new();
     let _ = out.write_str("process ");
-    for byte in name {
+    for byte in run.name() {
         let _ = out.write_char(char::from(*byte));
     }
-    process::report(&mut out, outcome);
+    process::report(&mut out, exit);
     console.write(out.get());
+    process::finish(machine, run);
 }

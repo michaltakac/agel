@@ -34,6 +34,24 @@ int agel_window(unsigned width, unsigned height, const char *title);
    errno and nothing of this request drawn. */
 int agel_draw(int window, const agel_record *records, unsigned count, unsigned flags);
 
+/* What a window receives: a press in its content, at x and y relative to
+   the content, or a key while the window has the keyboard (it has it from
+   when it opens or is clicked until the workshop is clicked). */
+#define AGEL_EVENT_PRESS 1
+#define AGEL_EVENT_KEY 2
+
+typedef struct {
+    int kind;
+    int x;
+    int y;
+    int key;
+} agel_window_event;
+
+/* The next event for the window: 1 with it filled in, 0 when there is none
+   and wait is zero, or -1 with errno. With wait nonzero the process sleeps
+   until there is one, and the desktop runs meanwhile. */
+int agel_event(int window, agel_window_event *event, int wait);
+
 /* Record builders; colours are 0xRRGGBB, alphas 0 to 255. */
 static inline agel_record agel_rect(unsigned x, unsigned y, unsigned width, unsigned height,
                                     unsigned radius, unsigned colour) {

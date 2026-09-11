@@ -420,6 +420,9 @@ pub trait Display {
         flags: u64,
         records: &[[u8; RECORD_BYTES]],
     ) -> i64;
+    /// The next event queued for a window `owner` owns: `Ok(None)` when
+    /// there is none yet, `Err` for a window it does not own.
+    fn event(&mut self, owner: usize, window: u64) -> Result<Option<u64>, i64>;
     /// Process `owner` has ended: what it owned stays on the desktop, but
     /// no later process in that slot may draw into it.
     fn release(&mut self, owner: usize);
@@ -441,6 +444,9 @@ enum State {
         descriptor: u64,
         length: u64,
     },
+    /// Waiting for an event in a window; answered when the desktop has
+    /// one for it.
+    Listening(u64),
     Ended(Exit),
 }
 
@@ -487,19 +493,72 @@ struct Table {
     pipes: [Pipe; process::PIPES],
 }
 
-/// Load and run the named program to its end, serving its requests inside
-/// `namespace`, and the requests of every process it spawns. Returns how
-/// the first process ended once every process has; frames go back to the
-/// pool as each process ends.
+/// One `:exec` in flight: its table, and the name for the report. Large
+/// (four domains and four pipes), so it is never a value: it lives in a
+/// `RunSlot` and is built there.
+pub struct Run {
+    table: Table,
+    name: [u8; NAME_BYTES],
+    name_length: usize,
+}
+
+impl Run {
+    pub fn name(&self) -> &[u8] {
+        &self.name[..self.name_length]
+    }
+}
+
+/// Where a run lives: on the serial workshop's stack for one `:exec`, in
+/// a static of the desktop's for a run that outlasts a command.
+pub struct RunSlot(core::mem::MaybeUninit<Run>);
+
+impl RunSlot {
+    pub const UNINIT: Self = Self(core::mem::MaybeUninit::uninit());
+
+    /// An empty run, built in place field by field: built as a value it
+    /// would cross the stack as a copy of its whole size.
+    pub fn prepare(&mut self) -> &mut Run {
+        let run = self.0.as_mut_ptr();
+        // Safety: every field is written before a reference exists, and
+        // nothing is read; `addr_of_mut!` names places without reading.
+        unsafe {
+            for index in 0..process::PROCESSES {
+                core::ptr::addr_of_mut!((*run).table.processes[index]).write(None);
+            }
+            for index in 0..process::PIPES {
+                core::ptr::addr_of_mut!((*run).table.pipes[index]).write(Pipe::EMPTY);
+            }
+            core::ptr::addr_of_mut!((*run).name).write([0; NAME_BYTES]);
+            core::ptr::addr_of_mut!((*run).name_length).write(0);
+            &mut *run
+        }
+    }
+}
+
+/// What a pass over the table found.
+pub enum Progress {
+    /// Something ran or was answered.
+    Running,
+    /// Every live process waits for the desktop: an event for a window.
+    /// Nothing in the table can move until the desktop delivers one.
+    Listening,
+    /// Every process has ended; how the first did.
+    Ended(Exit),
+}
+
+/// Load the named program and place its arguments into a prepared,
+/// empty run: its first process, runnable, with the console as
+/// descriptors 1 and 2.
 #[inline(never)]
-pub fn exec(
+pub fn start(
     machine: &mut arch::Machine,
     services: &mut Services<'_>,
     program: Program,
     name: &[u8],
     arguments: &[u8],
     namespace: Namespace,
-) -> Result<Exit, &'static str> {
+    run: &mut Run,
+) -> Result<(), &'static str> {
     let mut domain = load(machine, services.storage, program)?;
     // The argument block: the name, then each argument, each NUL-terminated,
     // in the payload area, with the count in its word.
@@ -512,14 +571,10 @@ pub fn exec(
         }
     }
     place_arguments(&mut domain, &block[..used]);
-    let mut table = Table {
-        processes: [None, None, None, None],
-        pipes: [Pipe::EMPTY; process::PIPES],
-    };
     let mut descriptors = [Descriptor::FREE; process::DESCRIPTORS];
     descriptors[1] = Descriptor::CONSOLE;
     descriptors[2] = Descriptor::CONSOLE;
-    table.processes[0] = Some(Process {
+    run.table.processes[0] = Some(Process {
         domain,
         descriptors,
         namespace,
@@ -528,17 +583,21 @@ pub fn exec(
         name: padded_name(name),
         name_length: name.len().min(NAME_BYTES),
     });
-    let outcome = serve(machine, services, &mut table);
-    // Whatever is left, waited for or not, gives its frames back now. Ended
-    // processes already did.
-    for slot in table.processes.iter_mut() {
+    run.name = padded_name(name);
+    run.name_length = name.len().min(NAME_BYTES);
+    Ok(())
+}
+
+/// Whatever is left, waited for or not, gives its frames back now. Ended
+/// processes already did.
+pub fn finish(machine: &mut arch::Machine, run: &mut Run) {
+    for slot in run.table.processes.iter_mut() {
         if let Some(process) = slot.take() {
             if !matches!(process.state, State::Ended(_)) {
                 machine.reclaim(process.domain.frames());
             }
         }
     }
-    Ok(outcome)
 }
 
 /// Give a process its arguments: `block` is NUL-terminated strings, and a
@@ -564,80 +623,121 @@ fn place_arguments(domain: &mut arch::Domain, block: &[u8]) {
 }
 
 fn padded_name(name: &[u8]) -> [u8; NAME_BYTES] {
-    let mut padded = [0_u8; NAME_BYTES];
-    for (stored, byte) in padded.iter_mut().zip(name) {
-        *stored = *byte;
-    }
+    let mut padded = [0; NAME_BYTES];
+    let length = name.len().min(NAME_BYTES);
+    padded[..length].copy_from_slice(&name[..length]);
     padded
 }
 
-/// Round-robin over the table: each pass gives every runnable process one
-/// entry and retries every blocked one. Ends when every process has, or
-/// when nothing can make progress, in which case the blocked ones are
-/// stopped as blocked forever.
-#[inline(never)]
-fn serve(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Table) -> Exit {
-    loop {
-        let mut progressed = false;
-        let mut alive = false;
-        for index in 0..process::PROCESSES {
-            let state = match table.processes[index].as_ref() {
-                Some(process) => process.state,
-                None => continue,
-            };
-            match state {
-                State::Ended(_) => continue,
-                State::Runnable => {
-                    alive = true;
-                    progressed = true;
-                    step(machine, services, table, index);
-                }
-                State::Waiting(child) => {
-                    alive = true;
-                    if let Some(code) = reap(table, index, child) {
-                        answer(table, index, code);
-                        progressed = true;
-                    }
-                }
-                State::Reading { descriptor, length } => {
-                    alive = true;
-                    if let Some(result) = pipe_read(table, index, descriptor, length) {
-                        answer(table, index, result);
-                        progressed = true;
-                    }
-                }
-                State::Writing { descriptor, length } => {
-                    alive = true;
-                    if let Some(result) = pipe_write(table, index, descriptor, length) {
-                        answer(table, index, result);
-                        progressed = true;
-                    }
-                }
-            }
-        }
-        if !alive {
-            break;
-        }
-        if !progressed {
-            // Every live process is blocked on something no live process
-            // will do: a wait for a child that waits for it, a read of a
-            // pipe whose writers all wait. Nothing else could resolve it.
-            for index in 0..process::PROCESSES {
-                if let Some(process) = table.processes[index].as_mut() {
-                    if !matches!(process.state, State::Ended(_)) {
-                        end(machine, services, table, index, Exit::Blocked);
-                    }
-                }
-            }
-            break;
-        }
-    }
+/// How the run's first process ended, once nothing is live.
+fn outcome_of(table: &Table) -> Exit {
     match table.processes[0].as_ref().map(|process| process.state) {
         Some(State::Ended(exit)) => exit,
         _ => Exit::Blocked,
     }
 }
 
+/// Every live process is blocked on something no live process will do:
+/// a wait for a child that waits for it, a read of a pipe whose writers
+/// all wait, an event nothing can deliver. Nothing else could resolve it.
+fn stop_all(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Table) {
+    for index in 0..process::PROCESSES {
+        if let Some(process) = table.processes[index].as_mut() {
+            if !matches!(process.state, State::Ended(_)) {
+                end(machine, services, table, index, Exit::Blocked);
+            }
+        }
+    }
+}
+
+/// Stop every live process of a run as blocked: what it waits for will
+/// not come. How the first process ended.
+#[cfg(feature = "isolated-repl")]
+pub fn abandon(machine: &mut arch::Machine, services: &mut Services<'_>, run: &mut Run) -> Exit {
+    stop_all(machine, services, &mut run.table);
+    outcome_of(&run.table)
+}
+
+/// One pass over the table: every runnable process gets one entry, every
+/// blocked one a chance to be answered. Round-robin, so a process that
+/// yields often does not starve one that waits.
+#[inline(never)]
+pub fn step_run(
+    machine: &mut arch::Machine,
+    services: &mut Services<'_>,
+    run: &mut Run,
+) -> Progress {
+    let table = &mut run.table;
+    let mut progressed = false;
+    let mut alive = false;
+    let mut listening = false;
+    for index in 0..process::PROCESSES {
+        let state = match table.processes[index].as_ref() {
+            Some(process) => process.state,
+            None => continue,
+        };
+        match state {
+            State::Ended(_) => continue,
+            State::Runnable => {
+                alive = true;
+                progressed = true;
+                step(machine, services, table, index);
+            }
+            State::Waiting(child) => {
+                alive = true;
+                if let Some(code) = reap(table, index, child) {
+                    answer(table, index, code);
+                    progressed = true;
+                }
+            }
+            State::Reading { descriptor, length } => {
+                alive = true;
+                if let Some(result) = pipe_read(table, index, descriptor, length) {
+                    answer(table, index, result);
+                    progressed = true;
+                }
+            }
+            State::Writing { descriptor, length } => {
+                alive = true;
+                if let Some(result) = pipe_write(table, index, descriptor, length) {
+                    answer(table, index, result);
+                    progressed = true;
+                }
+            }
+            State::Listening(window) => {
+                alive = true;
+                match services.display.as_deref_mut() {
+                    Some(display) => match display.event(index, window) {
+                        Ok(Some(event)) => {
+                            answer(table, index, event);
+                            progressed = true;
+                        }
+                        Ok(None) => listening = true,
+                        Err(number) => {
+                            answer(table, index, error(number));
+                            progressed = true;
+                        }
+                    },
+                    None => {
+                        answer(table, index, error(ENODEV));
+                        progressed = true;
+                    }
+                }
+            }
+        }
+    }
+    if !alive {
+        return Progress::Ended(outcome_of(table));
+    }
+    if progressed {
+        return Progress::Running;
+    }
+    if listening {
+        return Progress::Listening;
+    }
+    stop_all(machine, services, table);
+    Progress::Ended(outcome_of(table))
+}
 /// Write a request's answer and make the process runnable again.
 fn answer(table: &mut Table, index: usize, result: u64) {
     if let Some(process) = table.processes[index].as_mut() {
@@ -724,6 +824,13 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         process::SPAWN => spawn(machine, services, table, index, arguments),
         process::WINDOW => window(table, index, services, arguments),
         process::DRAW => draw(table, index, services, arguments),
+        process::EVENT => match event(table, index, services, arguments) {
+            Some(result) => result,
+            None => {
+                block(table, index, State::Listening(arguments[0]));
+                return;
+            }
+        },
         process::WAIT => {
             let child = arguments[0] as usize;
             let known = child < process::PROCESSES
@@ -796,6 +903,29 @@ fn draw(table: &mut Table, index: usize, services: &mut Services<'_>, arguments:
         }
     }
     display.draw(index, arguments[0], arguments[2], &records[..count]) as u64
+}
+
+/// `EVENT`: the next event for a window the process owns, or, with
+/// `arguments[1]` set, the process waits for one. `Some` is the answer
+/// now; `None` blocks.
+fn event(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    arguments: [u64; 4],
+) -> Option<u64> {
+    if table.processes[index].is_none() {
+        return Some(error(EBADF));
+    }
+    let Some(display) = services.display.as_deref_mut() else {
+        return Some(error(ENODEV));
+    };
+    match display.event(index, arguments[0]) {
+        Ok(Some(event)) => Some(event),
+        Ok(None) if arguments[1] != 0 => None,
+        Ok(None) => Some(0),
+        Err(number) => Some(error(number)),
+    }
 }
 
 fn block(table: &mut Table, index: usize, state: State) {

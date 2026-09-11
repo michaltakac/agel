@@ -200,6 +200,8 @@ struct Scene {
     /// Windows processes asked for, kept after their process ended until
     /// closed; drawn after the workshop and under the launcher.
     windows: [Option<Window>; crate::world::process::WINDOWS],
+    /// The window keys go to, while a live process owns it.
+    focus: Option<u8>,
 }
 
 const WINDOW_HEADER: u32 = 40;
@@ -226,9 +228,41 @@ struct Window {
     count: u8,
     /// The process slot that may draw into it, while its process runs.
     owner: Option<u8>,
+    /// Presses in the content and keys while focused, oldest first,
+    /// waiting for the owner's `EVENT`; the oldest is dropped when full.
+    events: [u64; crate::world::process::WINDOW_EVENTS],
+    event_head: u8,
+    event_count: u8,
 }
 
 impl Window {
+    /// Queue an event for the owner; a full queue loses its oldest.
+    fn queue(&mut self, event: u64) {
+        let capacity = self.events.len();
+        if usize::from(self.event_count) == capacity {
+            self.event_head = ((usize::from(self.event_head) + 1) % capacity) as u8;
+            self.event_count -= 1;
+        }
+        let at = (usize::from(self.event_head) + usize::from(self.event_count)) % capacity;
+        self.events[at] = event;
+        self.event_count += 1;
+    }
+
+    fn take(&mut self) -> Option<u64> {
+        if self.event_count == 0 {
+            return None;
+        }
+        let event = self.events[usize::from(self.event_head)];
+        self.event_head = ((usize::from(self.event_head) + 1) % self.events.len()) as u8;
+        self.event_count -= 1;
+        Some(event)
+    }
+
+    /// Whether a live process may receive events here.
+    fn listens(&self) -> bool {
+        self.owner.is_some()
+    }
+
     /// The box the window occupies: header and content.
     fn outer(&self) -> (u32, u32, u32, u32) {
         (
@@ -401,6 +435,7 @@ struct Desk<'a, 'b> {
     compositor: &'a mut arch::Domain,
     inputs: Option<&'a mut Inputs<'b>>,
     windows: &'a mut [Option<Window>; crate::world::process::WINDOWS],
+    focus: &'a mut Option<u8>,
     pointer: Option<(u32, u32)>,
 }
 
@@ -470,10 +505,15 @@ impl crate::process::Display for Desk<'_, '_> {
             records: [[0; RECORD_BYTES]; crate::world::process::WINDOW_RECORDS],
             count: 0,
             owner: Some(owner as u8),
+            events: [0; crate::world::process::WINDOW_EVENTS],
+            event_head: 0,
+            event_count: 0,
         };
         window.title[..usize::from(window.title_len)]
             .copy_from_slice(&title[..usize::from(window.title_len)]);
         self.windows[slot] = Some(window);
+        // A new window has the keyboard.
+        *self.focus = Some(slot as u8);
         self.paint(slot, true);
         slot as i64
     }
@@ -509,6 +549,13 @@ impl crate::process::Display for Desk<'_, '_> {
         i64::from(self.windows[slot].map_or(0, |window| window.count))
     }
 
+    fn event(&mut self, owner: usize, window: u64) -> Result<Option<u64>, i64> {
+        match self.windows.get_mut(window as usize) {
+            Some(Some(target)) if target.owner == Some(owner as u8) => Ok(target.take()),
+            _ => Err(EBADF),
+        }
+    }
+
     fn release(&mut self, owner: usize) {
         for window in self.windows.iter_mut().flatten() {
             if window.owner == Some(owner as u8) {
@@ -517,6 +564,25 @@ impl crate::process::Display for Desk<'_, '_> {
         }
     }
 }
+
+/// The terminal panel's box on the screen, for repainting it alone.
+const TERMINAL_REGION: (u32, u32, u32, u32) = (452, 292, 1360, 508);
+
+/// Where the desktop's one run lives: a run is four domains and four
+/// pipes, too large for the supervisor's stack beside the frames, and it
+/// outlasts the command that started it when the program listens.
+static mut RUN_SLOT: crate::process::RunSlot = crate::process::RunSlot::UNINIT;
+
+/// A fresh, empty run in the desktop's slot. Called only while no run is
+/// in flight: the reference the last run held is gone by then.
+fn prepare_run() -> &'static mut crate::process::Run {
+    // Safety: a single supervisor, and the caller holds no run.
+    unsafe { (*core::ptr::addr_of_mut!(RUN_SLOT)).prepare() }
+}
+
+/// Passes over a running process's table between two inputs: enough to
+/// keep it moving, few enough that the next key is not kept waiting.
+const PASSES_PER_IDLE: usize = 16;
 
 /// Minutes and the date, as the panel shows them.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -661,6 +727,8 @@ struct Terminal {
     used: usize,
     /// The last byte was a newline: the next byte opens a row.
     line_ended: bool,
+    /// Written since the panel was last painted.
+    dirty: bool,
 }
 
 impl Terminal {
@@ -672,6 +740,7 @@ impl Terminal {
         lengths: [0; Self::ROWS],
         used: 0,
         line_ended: false,
+        dirty: false,
     };
 
     fn is_empty(&self) -> bool {
@@ -693,6 +762,7 @@ impl Terminal {
     /// A newline ends the row; the next row opens when something is written
     /// on it, so a line a process finished does not leave a blank one.
     fn push(&mut self, bytes: &[u8]) {
+        self.dirty = true;
         for byte in bytes {
             match *byte {
                 b'\r' => {}
@@ -755,6 +825,7 @@ impl Scene {
             hover: Hover::Nothing,
             launcher: None,
             windows: [None; crate::world::process::WINDOWS],
+            focus: None,
         }
     }
 }
@@ -1766,6 +1837,7 @@ fn execute_workshop(
     committed_workspace: &mut Workspace,
     generation: &mut u64,
     dirty: &mut bool,
+    running: &mut Option<&'static mut crate::process::Run>,
     line: &[u8],
 ) -> StatusLine {
     let line = trim(line);
@@ -1809,7 +1881,14 @@ fn execute_workshop(
     }
     // Programs and files, answered on the serial console and in the
     // terminal panel; the frame is repainted after, as after any command.
+    // A program runs to its end here, as in the serial workshop, unless it
+    // waits for an event in a window: then the desktop takes the input
+    // back and runs it between inputs, until it ends.
     if let Some(rest) = line.strip_prefix(b":exec ") {
+        if running.is_some() {
+            return StatusLine::new(b"A PROCESS IS RUNNING");
+        }
+        let mut filesystem = filesystem;
         let mut tee = Tee {
             serial,
             terminal: &mut current.terminal,
@@ -1818,17 +1897,42 @@ fn execute_workshop(
             compositor,
             inputs,
             windows: &mut current.windows,
+            focus: &mut current.focus,
             pointer: current.pointer,
         };
-        crate::workshop::exec_program(
+        let run = prepare_run();
+        if crate::workshop::start_program(
             machine,
-            Some(storage),
-            filesystem,
+            storage,
+            filesystem.as_deref_mut(),
             &mut tee,
             Some(&mut desk),
             rest,
-        );
-        return StatusLine::new(b"PROCESS ENDED");
+            run,
+        )
+        .is_none()
+        {
+            return StatusLine::new(b"PROCESS NOT STARTED");
+        }
+        let mut services = crate::process::Services {
+            storage,
+            console: &mut tee,
+            filesystem,
+            display: Some(&mut desk as &mut dyn crate::process::Display),
+        };
+        loop {
+            match crate::process::step_run(machine, &mut services, run) {
+                crate::process::Progress::Running => {}
+                crate::process::Progress::Listening => {
+                    *running = Some(run);
+                    return StatusLine::new(b"PROCESS LISTENING");
+                }
+                crate::process::Progress::Ended(exit) => {
+                    crate::workshop::finish_program(machine, services.console, run, exit);
+                    return StatusLine::new(b"PROCESS ENDED");
+                }
+            }
+        }
     }
     if let Some(rest) = line.strip_prefix(b":close ") {
         let slot = match trim(rest) {
@@ -1838,6 +1942,9 @@ fn execute_workshop(
         return match current.windows.get_mut(slot) {
             Some(window) if window.is_some() => {
                 *window = None;
+                if current.focus == Some(slot as u8) {
+                    current.focus = None;
+                }
                 let mut status = StatusLine::new(b"WINDOW CLOSED ");
                 status.number(slot as u8);
                 status
@@ -2498,6 +2605,8 @@ fn interactive(
     console::write("live-desktop> ");
 
     let mut idle: u32 = 0;
+    // A process that waits for its window's events, run between inputs.
+    let mut running: Option<&'static mut crate::process::Run> = None;
     loop {
         let Some(input) = next_input(
             &mut console_driver,
@@ -2505,6 +2614,62 @@ fn interactive(
             &mut keyboard,
             &mut pointer,
         ) else {
+            if let Some(run) = running.as_mut() {
+                let ended = {
+                    let mut tee = Tee {
+                        serial: &mut console_driver,
+                        terminal: &mut current.terminal,
+                    };
+                    let mut desk = Desk {
+                        compositor,
+                        inputs: Some(&mut inputs),
+                        windows: &mut current.windows,
+                        focus: &mut current.focus,
+                        pointer: current.pointer,
+                    };
+                    let mut services = crate::process::Services {
+                        storage: &mut storage,
+                        console: &mut tee,
+                        filesystem: filesystem.as_mut(),
+                        display: Some(&mut desk as &mut dyn crate::process::Display),
+                    };
+                    let mut ended = None;
+                    for _ in 0..PASSES_PER_IDLE {
+                        match crate::process::step_run(machine, &mut services, run) {
+                            crate::process::Progress::Running => {}
+                            crate::process::Progress::Listening => break,
+                            crate::process::Progress::Ended(exit) => {
+                                crate::workshop::finish_program(
+                                    machine,
+                                    services.console,
+                                    run,
+                                    exit,
+                                );
+                                ended = Some(exit);
+                                break;
+                            }
+                        }
+                    }
+                    ended
+                };
+                if ended.is_some() {
+                    running = None;
+                    status = StatusLine::new(b"PROCESS ENDED");
+                    current.terminal.dirty = false;
+                    let frame = materialize(current, Some(&line[..length]), status.get())
+                        .unwrap_or_else(|reason| failed(reason));
+                    render(compositor, Some(&mut inputs), &frame)
+                        .unwrap_or_else(|reason| failed(reason));
+                    console::write_bytes(status.get());
+                    console::write("\nlive-desktop> ");
+                } else if current.terminal.dirty {
+                    current.terminal.dirty = false;
+                    let frame = materialize(current, Some(&line[..length]), status.get())
+                        .unwrap_or_else(|reason| failed(reason));
+                    render_region(compositor, Some(&mut inputs), &frame, TERMINAL_REGION)
+                        .unwrap_or_else(|reason| failed(reason));
+                }
+            }
             idle = idle.wrapping_add(1);
             if idle.is_multiple_of(200_000) {
                 // While idle, the clock: repainted only when its minute turns.
@@ -2527,7 +2692,18 @@ fn interactive(
             continue;
         };
         let byte = match input {
-            Input::Byte(byte) => byte,
+            Input::Byte(byte) => {
+                // A window with the keyboard and a live owner takes the key.
+                if let Some(window) = current
+                    .focus
+                    .and_then(|slot| current.windows[usize::from(slot)].as_mut())
+                    .filter(|window| window.listens() && running.is_some())
+                {
+                    window.queue(crate::world::process::EVENT_KEY | u64::from(byte));
+                    continue;
+                }
+                byte
+            }
             Input::Pointer(pressed) => {
                 let before = current.pointer;
                 // Motion queued behind this packet moves the pointer before
@@ -2591,7 +2767,24 @@ fn interactive(
                             command.push(b":close ");
                             command.number(slot);
                         }
-                        Hover::Dock(_) | Hover::Window(_) | Hover::Nothing => {}
+                        Hover::Window(slot) => {
+                            // The window's: it takes the keyboard, and a
+                            // press in its content is an event for its
+                            // owner. Nothing on the desktop changes.
+                            current.focus = Some(slot);
+                            if let Some(window) = current.windows[usize::from(slot)].as_mut() {
+                                if window.listens() && px >= window.x && py >= window.y {
+                                    let (x, y) = (px - window.x, py - window.y);
+                                    window.queue(
+                                        crate::world::process::EVENT_PRESS
+                                            | (u64::from(x) << 32)
+                                            | (u64::from(y) << 16),
+                                    );
+                                }
+                            }
+                            continue;
+                        }
+                        Hover::Dock(_) | Hover::Nothing => {}
                     }
                     if close_launcher {
                         current.launcher = None;
@@ -2616,6 +2809,8 @@ fn interactive(
                     && current.inspector.is_none()
                     && length == 0
                 {
+                    // The workshop has the keyboard again.
+                    current.focus = None;
                     let mut command = StatusLine::new(b"(point ");
                     command.number_u64(pointer.x as u64);
                     command.push(b" ");
@@ -2704,8 +2899,10 @@ fn interactive(
                     &mut committed_workspace,
                     &mut generation,
                     &mut dirty,
+                    &mut running,
                     &line[..length],
                 );
+                current.terminal.dirty = false;
                 current.previewing = trim(&line[..length]).starts_with(b":preview ")
                     && status.get().starts_with(b"CANDIDATE VALIDATED");
                 if trim(&line[..length]).starts_with(b":source ") {

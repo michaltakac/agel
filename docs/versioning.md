@@ -225,6 +225,13 @@ promise.
   `<agel/window.h>` in the C library and a `chart` program; the desktop
   test draws two windows and closes them, the C library test requires
   `-ENODEV` without a display on all three machines.
+  `v0.2.52` lets a window listen: the `event` request with presses in the
+  content and keys while the window has the keyboard, the process table
+  split into `start`, `step_run` and `finish` so the graphical workshop
+  runs a listening program between inputs with the prompt returned, the
+  serial workshop unchanged in behaviour, `agel_event` in the C library
+  and a `sketch` program; the desktop test presses in its window, reads
+  the press on the console, sees the dot, and ends it with a key.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
