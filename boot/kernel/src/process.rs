@@ -16,12 +16,14 @@
 
 use crate::arch;
 use crate::memory::Access;
-use crate::service::{ServiceDomain, ServiceError, ServiceHandle};
+use crate::service::{ServiceDomain, ServiceError, ServiceHandle, ServiceWriter};
 use crate::workspace::read_sector;
 use crate::world::{fs, process, Fault, Stop, BLOCK_BYTES, PAYLOAD_BYTES};
+use core::fmt::Write;
 
 /// What a process may do with names: read files, write them, create them.
-/// Granted at `exec` by the operator; a process never widens it.
+/// Granted at `exec` by the operator; a process never widens it, and a
+/// child's is the parent's or narrower.
 #[derive(Clone, Copy)]
 pub struct Namespace {
     /// The directory entry the process sees as `/`; it cannot climb above.
@@ -51,22 +53,56 @@ impl Namespace {
     }
 }
 
-/// An open file: derived from the namespace, never wider than it, and bound
-/// to the filesystem service's generation so a restart fails it closed.
+/// What a descriptor number names.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Free,
+    Console,
+    File,
+    PipeRead,
+    PipeWrite,
+}
+
+/// One entry of a process's descriptor table. A file descriptor is derived
+/// from the namespace, never wider than it, and bound to the filesystem
+/// service's generation so a restart fails it closed; a pipe end names one
+/// of the supervisor's pipes.
 #[derive(Clone, Copy)]
 struct Descriptor {
-    used: bool,
+    kind: Kind,
     entry: u16,
+    pipe: u8,
     offset: u64,
     readable: bool,
     writable: bool,
     handle: ServiceHandle,
 }
 
+impl Descriptor {
+    const FREE: Self = Self {
+        kind: Kind::Free,
+        entry: 0,
+        pipe: 0,
+        offset: 0,
+        readable: false,
+        writable: false,
+        handle: ServiceHandle::NONE,
+    };
+    const CONSOLE: Self = Self {
+        kind: Kind::Console,
+        writable: true,
+        ..Self::FREE
+    };
+}
+
 const EIO: i64 = 5;
 const EBADF: i64 = 9;
+const ECHILD: i64 = 10;
+const EAGAIN: i64 = 11;
 const EACCES: i64 = 13;
+const ENFILE: i64 = 23;
 const EMFILE: i64 = 24;
+const EPIPE: i64 = 32;
 const ENOSYS: i64 = 38;
 const ESTALE: i64 = 116;
 
@@ -136,6 +172,7 @@ pub fn find(storage: &mut ServiceDomain, name: &[u8]) -> Result<Option<Program>,
 }
 
 /// How a process ended.
+#[derive(Clone, Copy)]
 pub enum Exit {
     /// It asked to leave with this status.
     Status(u64),
@@ -143,6 +180,8 @@ pub enum Exit {
     Faulted(Fault),
     /// It never yielded inside one entry's tick budget.
     BudgetExhausted,
+    /// It was blocked on a wait or a pipe that nothing left could answer.
+    Blocked,
 }
 
 #[derive(Clone, Copy)]
@@ -338,79 +377,377 @@ pub struct Services<'a> {
     pub filesystem: Option<&'a mut ServiceDomain>,
 }
 
+/// Why a process is not running.
+#[derive(Clone, Copy)]
+enum State {
+    Runnable,
+    /// Waiting for the child in this slot to end.
+    Waiting(usize),
+    /// A read or write on a pipe that could not complete yet; retried on
+    /// every pass until it can.
+    Reading {
+        descriptor: u64,
+        length: u64,
+    },
+    Writing {
+        descriptor: u64,
+        length: u64,
+    },
+    Ended(Exit),
+}
+
+/// A running process: its domain, what it may name, what it holds.
+struct Process {
+    domain: arch::Domain,
+    descriptors: [Descriptor; process::DESCRIPTORS],
+    namespace: Namespace,
+    /// The slot of the process that spawned it; the `:exec`'d one has none.
+    parent: Option<usize>,
+    state: State,
+    name: [u8; NAME_BYTES],
+    name_length: usize,
+}
+
+/// A pipe: a bounded queue in the supervisor with a count of the read and
+/// write ends that name it, so the last writer closing is the end of the
+/// stream and a write with no reader is `EPIPE`.
+#[derive(Clone, Copy)]
+struct Pipe {
+    used: bool,
+    buffer: [u8; process::PIPE_BYTES],
+    head: usize,
+    length: usize,
+    readers: u8,
+    writers: u8,
+}
+
+impl Pipe {
+    const EMPTY: Self = Self {
+        used: false,
+        buffer: [0; process::PIPE_BYTES],
+        head: 0,
+        length: 0,
+        readers: 0,
+        writers: 0,
+    };
+}
+
+/// The process table for one `:exec`: the process the operator started and
+/// every descendant it makes, all served here until the last has ended.
+struct Table {
+    processes: [Option<Process>; process::PROCESSES],
+    pipes: [Pipe; process::PIPES],
+}
+
 /// Load and run the named program to its end, serving its requests inside
-/// `namespace`. Returns how it ended; the domain's frames go back to the
-/// pool.
+/// `namespace`, and the requests of every process it spawns. Returns how
+/// the first process ended once every process has; frames go back to the
+/// pool as each process ends.
 #[inline(never)]
 pub fn exec(
     machine: &mut arch::Machine,
     services: &mut Services<'_>,
     program: Program,
+    name: &[u8],
     namespace: Namespace,
 ) -> Result<Exit, &'static str> {
-    let mut domain = load(machine, services.storage, program)?;
-    let outcome = serve(&mut domain, services, namespace);
-    machine.reclaim(domain.frames());
+    let domain = load(machine, services.storage, program)?;
+    let mut table = Table {
+        processes: [None, None, None, None],
+        pipes: [Pipe::EMPTY; process::PIPES],
+    };
+    let mut descriptors = [Descriptor::FREE; process::DESCRIPTORS];
+    descriptors[1] = Descriptor::CONSOLE;
+    descriptors[2] = Descriptor::CONSOLE;
+    table.processes[0] = Some(Process {
+        domain,
+        descriptors,
+        namespace,
+        parent: None,
+        state: State::Runnable,
+        name: padded_name(name),
+        name_length: name.len().min(NAME_BYTES),
+    });
+    let outcome = serve(machine, services, &mut table);
+    // Whatever is left, waited for or not, gives its frames back now. Ended
+    // processes already did.
+    for slot in table.processes.iter_mut() {
+        if let Some(process) = slot.take() {
+            if !matches!(process.state, State::Ended(_)) {
+                machine.reclaim(process.domain.frames());
+            }
+        }
+    }
     Ok(outcome)
 }
 
-#[inline(never)]
-fn serve(domain: &mut arch::Domain, services: &mut Services<'_>, namespace: Namespace) -> Exit {
-    let mut descriptors = [Descriptor {
-        used: false,
-        entry: 0,
-        offset: 0,
-        readable: false,
-        writable: false,
-        handle: ServiceHandle::NONE,
-    }; process::DESCRIPTORS];
-    loop {
-        match domain.run() {
-            Stop::Replied => {}
-            Stop::Faulted(fault) => return Exit::Faulted(fault),
-            Stop::BudgetExhausted => return Exit::BudgetExhausted,
-        }
-        let kind = domain.core().read_shared(process::KIND);
-        let arguments = [
-            domain.core().read_shared(process::ARGUMENTS),
-            domain.core().read_shared(process::ARGUMENTS + 1),
-        ];
-        let result = match kind {
-            process::EXIT => return Exit::Status(arguments[0]),
-            process::WRITE => match arguments[0] {
-                1 | 2 => write_console(domain, services.console, arguments[1]),
-                _ => file_write(
-                    domain,
-                    services,
-                    &mut descriptors,
-                    arguments[0],
-                    arguments[1],
-                ),
-            },
-            process::OPEN => open(
-                domain,
-                services,
-                namespace,
-                &mut descriptors,
-                arguments[0],
-                arguments[1],
-            ),
-            process::READ => file_read(
-                domain,
-                services,
-                &mut descriptors,
-                arguments[0],
-                arguments[1],
-            ),
-            process::CLOSE => close(&mut descriptors, arguments[0]),
-            _ => error(ENOSYS),
-        };
-        domain.core().write_shared(process::RESULT, result);
+fn padded_name(name: &[u8]) -> [u8; NAME_BYTES] {
+    let mut padded = [0_u8; NAME_BYTES];
+    for (stored, byte) in padded.iter_mut().zip(name) {
+        *stored = *byte;
     }
+    padded
+}
+
+/// Round-robin over the table: each pass gives every runnable process one
+/// entry and retries every blocked one. Ends when every process has, or
+/// when nothing can make progress, in which case the blocked ones are
+/// stopped as blocked forever.
+#[inline(never)]
+fn serve(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Table) -> Exit {
+    loop {
+        let mut progressed = false;
+        let mut alive = false;
+        for index in 0..process::PROCESSES {
+            let state = match table.processes[index].as_ref() {
+                Some(process) => process.state,
+                None => continue,
+            };
+            match state {
+                State::Ended(_) => continue,
+                State::Runnable => {
+                    alive = true;
+                    progressed = true;
+                    step(machine, services, table, index);
+                }
+                State::Waiting(child) => {
+                    alive = true;
+                    if let Some(code) = reap(table, index, child) {
+                        answer(table, index, code);
+                        progressed = true;
+                    }
+                }
+                State::Reading { descriptor, length } => {
+                    alive = true;
+                    if let Some(result) = pipe_read(table, index, descriptor, length) {
+                        answer(table, index, result);
+                        progressed = true;
+                    }
+                }
+                State::Writing { descriptor, length } => {
+                    alive = true;
+                    if let Some(result) = pipe_write(table, index, descriptor, length) {
+                        answer(table, index, result);
+                        progressed = true;
+                    }
+                }
+            }
+        }
+        if !alive {
+            break;
+        }
+        if !progressed {
+            // Every live process is blocked on something no live process
+            // will do: a wait for a child that waits for it, a read of a
+            // pipe whose writers all wait. Nothing else could resolve it.
+            for index in 0..process::PROCESSES {
+                if let Some(process) = table.processes[index].as_mut() {
+                    if !matches!(process.state, State::Ended(_)) {
+                        end(machine, services, table, index, Exit::Blocked);
+                    }
+                }
+            }
+            break;
+        }
+    }
+    match table.processes[0].as_ref().map(|process| process.state) {
+        Some(State::Ended(exit)) => exit,
+        _ => Exit::Blocked,
+    }
+}
+
+/// Write a request's answer and make the process runnable again.
+fn answer(table: &mut Table, index: usize, result: u64) {
+    if let Some(process) = table.processes[index].as_mut() {
+        process.domain.core().write_shared(process::RESULT, result);
+        process.state = State::Runnable;
+    }
+}
+
+/// One entry of process `index`: run it until it yields or is stopped, and
+/// serve what it asked for.
+fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Table, index: usize) {
+    let (kind, arguments) = {
+        let Some(process) = table.processes[index].as_mut() else {
+            return;
+        };
+        match process.domain.run() {
+            Stop::Replied => {}
+            Stop::Faulted(fault) => {
+                end(machine, services, table, index, Exit::Faulted(fault));
+                return;
+            }
+            Stop::BudgetExhausted => {
+                end(machine, services, table, index, Exit::BudgetExhausted);
+                return;
+            }
+        }
+        let core = process.domain.core();
+        (
+            core.read_shared(process::KIND),
+            [
+                core.read_shared(process::ARGUMENTS),
+                core.read_shared(process::ARGUMENTS + 1),
+                core.read_shared(process::ARGUMENTS + 2),
+                core.read_shared(process::ARGUMENTS + 3),
+            ],
+        )
+    };
+    let result = match kind {
+        process::EXIT => {
+            end(machine, services, table, index, Exit::Status(arguments[0]));
+            return;
+        }
+        process::WRITE => match kind_of(table, index, arguments[0]) {
+            Kind::Console => write_console(table, index, services.console, arguments[1]),
+            Kind::File => file_write(table, index, services, arguments[0], arguments[1]),
+            Kind::PipeWrite => match pipe_write(table, index, arguments[0], arguments[1]) {
+                Some(result) => result,
+                None => {
+                    block(
+                        table,
+                        index,
+                        State::Writing {
+                            descriptor: arguments[0],
+                            length: arguments[1],
+                        },
+                    );
+                    return;
+                }
+            },
+            _ => error(EBADF),
+        },
+        process::READ => match kind_of(table, index, arguments[0]) {
+            Kind::File => file_read(table, index, services, arguments[0], arguments[1]),
+            Kind::PipeRead => match pipe_read(table, index, arguments[0], arguments[1]) {
+                Some(result) => result,
+                None => {
+                    block(
+                        table,
+                        index,
+                        State::Reading {
+                            descriptor: arguments[0],
+                            length: arguments[1],
+                        },
+                    );
+                    return;
+                }
+            },
+            _ => error(EBADF),
+        },
+        process::OPEN => open(table, index, services, arguments[0], arguments[1]),
+        process::CLOSE => close(table, index, arguments[0]),
+        process::PIPE => pipe(table, index),
+        process::SPAWN => spawn(machine, services, table, index, arguments),
+        process::WAIT => {
+            let child = arguments[0] as usize;
+            let known = child < process::PROCESSES
+                && child != index
+                && table.processes[child]
+                    .as_ref()
+                    .is_some_and(|process| process.parent == Some(index));
+            if !known {
+                error(ECHILD)
+            } else {
+                match reap(table, index, child) {
+                    Some(code) => code,
+                    None => {
+                        block(table, index, State::Waiting(child));
+                        return;
+                    }
+                }
+            }
+        }
+        _ => error(ENOSYS),
+    };
+    answer(table, index, result);
+}
+
+fn block(table: &mut Table, index: usize, state: State) {
+    if let Some(process) = table.processes[index].as_mut() {
+        process.state = state;
+    }
+}
+
+/// A process is over: its frames go back, its descriptors close (so a pipe
+/// it wrote ends for its reader), and a stop the machine imposed is
+/// reported on the console, since no `wait` need ever hear of it.
+fn end(
+    machine: &mut arch::Machine,
+    services: &mut Services<'_>,
+    table: &mut Table,
+    index: usize,
+    exit: Exit,
+) {
+    for descriptor in 0..process::DESCRIPTORS as u64 {
+        close(table, index, descriptor);
+    }
+    let Some(process) = table.processes[index].as_mut() else {
+        return;
+    };
+    process.state = State::Ended(exit);
+    machine.reclaim(process.domain.frames());
+    if index != 0 && !matches!(exit, Exit::Status(_)) {
+        let mut out = ServiceWriter::new(services.console);
+        let _ = out.write_str("process ");
+        for byte in &process.name[..process.name_length] {
+            let _ = out.write_char(char::from(*byte));
+        }
+        report(&mut out, exit);
+        out.flush();
+    }
+}
+
+/// The one line the workshop prints for a process that did not exit.
+pub fn report(out: &mut ServiceWriter<'_>, exit: Exit) {
+    match exit {
+        Exit::Status(status) => {
+            let _ = writeln!(out, " exited with status {status}");
+        }
+        Exit::Faulted(fault) => {
+            let _ = writeln!(
+                out,
+                " faulted: {} at {:#x} touching {:#x}; contained",
+                fault.name(),
+                fault.pc,
+                fault.address
+            );
+        }
+        Exit::BudgetExhausted => {
+            let _ = writeln!(out, " never yielded; tick budget exhausted; stopped");
+        }
+        Exit::Blocked => {
+            let _ = writeln!(out, " blocked on what nothing left could answer; stopped");
+        }
+    }
+}
+
+/// If `child` has ended, its slot is freed and its `wait` answer returned.
+fn reap(table: &mut Table, parent: usize, child: usize) -> Option<u64> {
+    let ended = match table.processes[child].as_ref() {
+        Some(process) if process.parent == Some(parent) => match process.state {
+            State::Ended(exit) => exit,
+            _ => return None,
+        },
+        _ => return Some(error(ECHILD)),
+    };
+    table.processes[child] = None;
+    Some(match ended {
+        Exit::Status(status) => status & 0xff,
+        Exit::Faulted(_) => process::WAIT_SIGNALED | process::SIGNAL_FAULT,
+        Exit::BudgetExhausted | Exit::Blocked => process::WAIT_SIGNALED | process::SIGNAL_KILLED,
+    })
 }
 
 fn error(number: i64) -> u64 {
     (-number) as u64
+}
+
+fn kind_of(table: &Table, index: usize, descriptor: u64) -> Kind {
+    table.processes[index]
+        .as_ref()
+        .and_then(|process| process.descriptors.get(descriptor as usize))
+        .map_or(Kind::Free, |descriptor| descriptor.kind)
 }
 
 /// The filesystem service's status word as an errno the process sees.
@@ -423,18 +760,30 @@ fn service_error(outcome: Result<(u64, [u64; 3]), ServiceError>) -> Result<[u64;
     }
 }
 
+/// The lowest free descriptor from 3 up; 0 to 2 keep their meanings.
+fn free_descriptor(descriptors: &[Descriptor; process::DESCRIPTORS]) -> Option<usize> {
+    descriptors
+        .iter()
+        .enumerate()
+        .skip(3)
+        .find_map(|(number, descriptor)| (descriptor.kind == Kind::Free).then_some(number))
+}
+
 #[inline(never)]
 fn open(
-    domain: &mut arch::Domain,
+    table: &mut Table,
+    index: usize,
     services: &mut Services<'_>,
-    namespace: Namespace,
-    descriptors: &mut [Descriptor; process::DESCRIPTORS],
     flags: u64,
     length: u64,
 ) -> u64 {
     let Some(filesystem) = services.filesystem.as_deref_mut() else {
         return error(ENOSYS);
     };
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let namespace = process.namespace;
     let wants_write = flags & (process::O_WRONLY | process::O_RDWR) != 0;
     let wants_create = flags & process::O_CREAT != 0;
     // The namespace's rights bound the request before the service sees it:
@@ -446,17 +795,13 @@ fn open(
     if !wants_write && !namespace.read {
         return error(EACCES);
     }
-    let Some((number, free)) = descriptors
-        .iter_mut()
-        .enumerate()
-        .find(|(_, descriptor)| !descriptor.used)
-    else {
+    let Some(number) = free_descriptor(&process.descriptors) else {
         return error(EMFILE);
     };
     let length = (length as usize).min(PAYLOAD_BYTES);
     let mut path = [0_u8; PAYLOAD_BYTES];
     for (offset, byte) in path.iter_mut().enumerate().take(length) {
-        *byte = domain.core().read_payload(offset);
+        *byte = process.domain.core().read_payload(offset);
     }
     filesystem.write_payload(path.get(..length).unwrap_or(&[]));
     let handle = filesystem.handle();
@@ -471,51 +816,237 @@ fn open(
             if kind == fs::KIND_DIRECTORY && flags & process::O_DIRECTORY == 0 {
                 return error(fs::EISDIR as i64);
             }
-            *free = Descriptor {
-                used: true,
-                entry: entry as u16,
-                offset: 0,
-                readable: !wants_write || flags & process::O_RDWR != 0,
-                writable: wants_write,
-                handle,
-            };
-            (number + 3) as u64
+            if let Some(slot) = process.descriptors.get_mut(number) {
+                *slot = Descriptor {
+                    kind: Kind::File,
+                    entry: entry as u16,
+                    pipe: 0,
+                    offset: 0,
+                    readable: !wants_write || flags & process::O_RDWR != 0,
+                    writable: wants_write,
+                    handle,
+                };
+            }
+            number as u64
         }
         Err(number) => error(number),
     }
 }
 
-/// The open descriptor a process number names: descriptors count from 3,
-/// after the console's.
-fn lookup(
-    descriptors: &mut [Descriptor; process::DESCRIPTORS],
-    descriptor: u64,
-) -> Option<&mut Descriptor> {
-    let index = usize::try_from(descriptor).ok()?.checked_sub(3)?;
-    descriptors.get_mut(index).filter(|slot| slot.used)
+/// Close a descriptor: a pipe end gives its count back, and the last write
+/// end closing is the end of the stream for whoever reads it.
+fn close(table: &mut Table, index: usize, descriptor: u64) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
+        return error(EBADF);
+    };
+    let closed = *slot;
+    if closed.kind == Kind::Free {
+        return error(EBADF);
+    }
+    *slot = Descriptor::FREE;
+    if let Some(pipe) = table.pipes.get_mut(usize::from(closed.pipe)) {
+        match closed.kind {
+            Kind::PipeRead => pipe.readers = pipe.readers.saturating_sub(1),
+            Kind::PipeWrite => pipe.writers = pipe.writers.saturating_sub(1),
+            _ => {}
+        }
+        if pipe.readers == 0 && pipe.writers == 0 {
+            *pipe = Pipe::EMPTY;
+        }
+    }
+    0
 }
 
-fn close(descriptors: &mut [Descriptor; process::DESCRIPTORS], descriptor: u64) -> u64 {
-    match lookup(descriptors, descriptor) {
-        Some(slot) => {
-            slot.used = false;
-            0
-        }
-        None => error(EBADF),
+/// A new pipe with one read end and one write end in this process's table.
+fn pipe(table: &mut Table, index: usize) -> u64 {
+    let Some(number) = table.pipes.iter().position(|pipe| !pipe.used) else {
+        return error(ENFILE);
+    };
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let Some(read_end) = free_descriptor(&process.descriptors) else {
+        return error(EMFILE);
+    };
+    process.descriptors[read_end] = Descriptor {
+        kind: Kind::PipeRead,
+        pipe: number as u8,
+        readable: true,
+        ..Descriptor::FREE
+    };
+    let Some(write_end) = free_descriptor(&process.descriptors) else {
+        process.descriptors[read_end] = Descriptor::FREE;
+        return error(EMFILE);
+    };
+    process.descriptors[write_end] = Descriptor {
+        kind: Kind::PipeWrite,
+        pipe: number as u8,
+        writable: true,
+        ..Descriptor::FREE
+    };
+    table.pipes[number] = Pipe {
+        used: true,
+        readers: 1,
+        writers: 1,
+        ..Pipe::EMPTY
+    };
+    (read_end as u64) | ((write_end as u64) << 16)
+}
+
+/// Read from a pipe into the block area: `None` when the pipe is empty and
+/// a writer remains, so the caller blocks; zero when it is empty for good.
+fn pipe_read(table: &mut Table, index: usize, descriptor: u64, length: u64) -> Option<u64> {
+    let Some(process) = table.processes[index].as_mut() else {
+        return Some(error(EBADF));
+    };
+    let Some(slot) = process.descriptors.get(descriptor as usize).copied() else {
+        return Some(error(EBADF));
+    };
+    if slot.kind != Kind::PipeRead {
+        return Some(error(EBADF));
     }
+    let Some(pipe) = table.pipes.get_mut(usize::from(slot.pipe)) else {
+        return Some(error(EBADF));
+    };
+    if pipe.length == 0 {
+        return (pipe.writers == 0).then_some(0);
+    }
+    let take = (length as usize).min(BLOCK_BYTES).min(pipe.length);
+    for offset in 0..take {
+        let byte = pipe.buffer[(pipe.head + offset) % process::PIPE_BYTES];
+        process.domain.core().write_block(offset, byte);
+    }
+    pipe.head = (pipe.head + take) % process::PIPE_BYTES;
+    pipe.length -= take;
+    Some(take as u64)
+}
+
+/// Write the block area into a pipe: `None` when it is full and a reader
+/// remains, so the caller blocks; `EPIPE` when no reader is left.
+fn pipe_write(table: &mut Table, index: usize, descriptor: u64, length: u64) -> Option<u64> {
+    let Some(process) = table.processes[index].as_mut() else {
+        return Some(error(EBADF));
+    };
+    let Some(slot) = process.descriptors.get(descriptor as usize).copied() else {
+        return Some(error(EBADF));
+    };
+    if slot.kind != Kind::PipeWrite {
+        return Some(error(EBADF));
+    }
+    let Some(pipe) = table.pipes.get_mut(usize::from(slot.pipe)) else {
+        return Some(error(EBADF));
+    };
+    if pipe.readers == 0 {
+        return Some(error(EPIPE));
+    }
+    let room = process::PIPE_BYTES - pipe.length;
+    if room == 0 {
+        return None;
+    }
+    let take = (length as usize).min(BLOCK_BYTES).min(room);
+    for offset in 0..take {
+        let byte = process.domain.core().read_block(offset);
+        pipe.buffer[(pipe.head + pipe.length + offset) % process::PIPE_BYTES] = byte;
+    }
+    pipe.length += take;
+    Some(take as u64)
+}
+
+/// Start a child: the program named in the payload, the descriptors the
+/// parent names for its 0 and 1, the console for its 2, and the parent's
+/// namespace or a read-only view of it. Nothing else crosses.
+#[inline(never)]
+fn spawn(
+    machine: &mut arch::Machine,
+    services: &mut Services<'_>,
+    table: &mut Table,
+    index: usize,
+    arguments: [u64; 4],
+) -> u64 {
+    let Some(free) = table.processes.iter().position(|slot| slot.is_none()) else {
+        return error(EAGAIN);
+    };
+    let (name, name_length, namespace, stdin, stdout) = {
+        let Some(parent) = table.processes[index].as_mut() else {
+            return error(EBADF);
+        };
+        let length = (arguments[0] as usize).min(NAME_BYTES);
+        let mut name = [0_u8; NAME_BYTES];
+        for (offset, byte) in name.iter_mut().enumerate().take(length) {
+            *byte = parent.domain.core().read_payload(offset);
+        }
+        let namespace = if arguments[3] & process::SPAWN_READ_ONLY != 0 {
+            Namespace::read_only(parent.namespace.root)
+        } else {
+            parent.namespace
+        };
+        let mut given = [Descriptor::FREE; 2];
+        for (slot, wanted) in given.iter_mut().zip([arguments[1], arguments[2]]) {
+            if wanted == process::NO_DESCRIPTOR {
+                continue;
+            }
+            match parent.descriptors.get(wanted as usize) {
+                Some(descriptor) if descriptor.kind != Kind::Free => *slot = *descriptor,
+                _ => return error(EBADF),
+            }
+        }
+        (name, length, namespace, given[0], given[1])
+    };
+    let program = match find(services.storage, &name[..name_length]) {
+        Ok(Some(program)) => program,
+        Ok(None) => return error(fs::ENOENT as i64),
+        Err(_) => return error(EIO),
+    };
+    let domain = match load(machine, services.storage, program) {
+        Ok(domain) => domain,
+        Err(_) => return error(EIO),
+    };
+    let mut descriptors = [Descriptor::FREE; process::DESCRIPTORS];
+    descriptors[0] = stdin;
+    descriptors[1] = stdout;
+    descriptors[2] = Descriptor::CONSOLE;
+    // A pipe end handed on is one more end naming the pipe.
+    for descriptor in [stdin, stdout] {
+        if let Some(pipe) = table.pipes.get_mut(usize::from(descriptor.pipe)) {
+            match descriptor.kind {
+                Kind::PipeRead => pipe.readers = pipe.readers.saturating_add(1),
+                Kind::PipeWrite => pipe.writers = pipe.writers.saturating_add(1),
+                _ => {}
+            }
+        }
+    }
+    table.processes[free] = Some(Process {
+        domain,
+        descriptors,
+        namespace,
+        parent: Some(index),
+        state: State::Runnable,
+        name,
+        name_length,
+    });
+    free as u64
 }
 
 #[inline(never)]
 fn file_read(
-    domain: &mut arch::Domain,
+    table: &mut Table,
+    index: usize,
     services: &mut Services<'_>,
-    descriptors: &mut [Descriptor; process::DESCRIPTORS],
     descriptor: u64,
     length: u64,
 ) -> u64 {
-    let Some(slot) = lookup(descriptors, descriptor).filter(|slot| slot.readable) else {
+    let Some(process) = table.processes[index].as_mut() else {
         return error(EBADF);
     };
+    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
+        return error(EBADF);
+    };
+    if slot.kind != Kind::File || !slot.readable {
+        return error(EBADF);
+    }
     let Some(filesystem) = services.filesystem.as_deref_mut() else {
         return error(ENOSYS);
     };
@@ -530,7 +1061,7 @@ fn file_read(
         Ok([count, _, _]) => {
             for offset in 0..(count as usize).min(BLOCK_BYTES) {
                 let byte = filesystem.read_block(offset);
-                domain.core().write_block(offset, byte);
+                process.domain.core().write_block(offset, byte);
             }
             slot.offset += count;
             count
@@ -541,21 +1072,27 @@ fn file_read(
 
 #[inline(never)]
 fn file_write(
-    domain: &mut arch::Domain,
+    table: &mut Table,
+    index: usize,
     services: &mut Services<'_>,
-    descriptors: &mut [Descriptor; process::DESCRIPTORS],
     descriptor: u64,
     length: u64,
 ) -> u64 {
-    let Some(slot) = lookup(descriptors, descriptor).filter(|slot| slot.writable) else {
+    let Some(process) = table.processes[index].as_mut() else {
         return error(EBADF);
     };
+    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
+        return error(EBADF);
+    };
+    if slot.kind != Kind::File || !slot.writable {
+        return error(EBADF);
+    }
     let Some(filesystem) = services.filesystem.as_deref_mut() else {
         return error(ENOSYS);
     };
     let length = length.min(BLOCK_BYTES as u64);
     for offset in 0..length as usize {
-        let byte = domain.core().read_block(offset);
+        let byte = process.domain.core().read_block(offset);
         filesystem.write_block(offset, byte);
     }
     let outcome = filesystem.filesystem_request(
@@ -573,16 +1110,19 @@ fn file_write(
     }
 }
 
-/// Descriptors 1 and 2 are the console, through the console driver domain,
-/// with the terminal's line discipline applied here: a newline becomes a
-/// carriage return and a newline, so the process may write text as text.
+/// The console, through the console driver domain, with the terminal's line
+/// discipline applied here: a newline becomes a carriage return and a
+/// newline, so the process may write text as text.
 #[inline(never)]
-fn write_console(domain: &mut arch::Domain, console: &mut ServiceDomain, length: u64) -> u64 {
+fn write_console(table: &mut Table, index: usize, console: &mut ServiceDomain, length: u64) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
     let length = (length as usize).min(BLOCK_BYTES);
     let mut bytes = [0_u8; BLOCK_BYTES * 2];
     let mut count = 0;
     for offset in 0..length {
-        let byte = domain.core().read_block(offset);
+        let byte = process.domain.core().read_block(offset);
         if byte == b'\n' {
             bytes[count] = b'\r';
             count += 1;
@@ -598,7 +1138,7 @@ fn write_console(domain: &mut arch::Domain, console: &mut ServiceDomain, length:
             .write_console(handle, &bytes[written..written + take])
             .is_err()
         {
-            return (-5_i64) as u64; // EIO
+            return error(EIO);
         }
         written += take;
     }

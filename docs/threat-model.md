@@ -1079,6 +1079,36 @@ Not claimed: the library is not audited against a C standard, `malloc` is
 a bump arena with no reuse and no guard, and `printf` is a subset. None of
 that is a supervisor concern; all of it is a program's.
 
+## v0.2.45
+
+- **No `fork`:** a child receives exactly the two descriptors its parent
+  names and its parent's namespace or a read-only view; nothing is
+  inherited by default, so a parent's open files, pipes and rights do not
+  leak into a child that was not meant to have them. This is the
+  requirement in `deployment-targets.md` that `fork` had to be decided
+  rather than inherited, decided.
+- **A child is bounded by its parent:** it cannot be given a wider
+  namespace, its descriptors are copies of ones the parent held, and the
+  parent's rights on a copied file descriptor are the child's; a child
+  spawning a grandchild passes on no more than it has.
+- **Pipes are the supervisor's:** the queue lives in supervisor memory, a
+  process sees only its block area, and the end counts are the supervisor's
+  arithmetic, so a process cannot forge an end or keep a stream open by
+  lying about what it holds.
+- **Blocking cannot hang the workshop:** a process blocked on a wait or a
+  pipe is retried each pass, and when nothing live can make progress every
+  blocked process is stopped and reported. A child the machine stops is
+  reported at once, and its parent's `wait` answers a signal.
+- **Ids are table slots:** a child id is its slot in a four-entry table for
+  this `:exec`, and `wait` checks that the slot holds the caller's child;
+  a reaped slot may be reused by a later spawn, which is why a parent must
+  not wait twice for the same id.
+
+Not claimed: no arguments or environment cross to a child, so the only
+thing a child learns from its parent is what it reads on descriptor 0;
+there is no way to stop a child from outside; and the scheduler is a round
+robin with no notion of fairness beyond one entry per pass.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

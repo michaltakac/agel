@@ -962,7 +962,7 @@ fn exec_program(
         console: driver,
         filesystem,
     };
-    let outcome = match crate::process::exec(machine, &mut services, program, namespace) {
+    let outcome = match crate::process::exec(machine, &mut services, program, name, namespace) {
         Ok(outcome) => outcome,
         Err(reason) => {
             driver_text_error(driver, b"cannot load program: ", reason.as_bytes());
@@ -974,23 +974,7 @@ fn exec_program(
     for byte in name {
         let _ = out.write_char(char::from(*byte));
     }
-    match outcome {
-        crate::process::Exit::Status(status) => {
-            let _ = writeln!(out, " exited with status {status}");
-        }
-        crate::process::Exit::Faulted(fault) => {
-            let _ = writeln!(
-                out,
-                " faulted: {} at {:#x} touching {:#x}; contained",
-                fault.name(),
-                fault.pc,
-                fault.address
-            );
-        }
-        crate::process::Exit::BudgetExhausted => {
-            let _ = writeln!(out, " never yielded; tick budget exhausted; stopped");
-        }
-    }
+    crate::process::report(&mut out, outcome);
     out.flush();
 }
 

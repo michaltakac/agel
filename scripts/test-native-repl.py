@@ -938,6 +938,41 @@ def c_test(image: str, architecture: str, disk: str) -> None:
         boot.close()
 
 
+def spawn_test(image: str, architecture: str, disk: str) -> None:
+    """Processes that make processes: a pipe, a spawned child, a wait."""
+    boot = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        boot.expect_until(b"AGEL_NATIVE_READY")
+        boot.expect_until(b"agel-native[0]> ")
+        boot.send_bytes(":exec c-pipeline")
+        assert boot.process.stdin is not None
+        boot.process.stdin.write(b"\n")
+        boot.process.stdin.flush()
+        # The child reads the pipe the parent fed and closed, and its exit
+        # status is the byte count the parent reports.
+        boot.expect_exact(b"\r\nHELLO FROM THE PARENT\r\nchild 1 exited with 22\r\n")
+        # A child the machine stops is reported when it happens, and its
+        # parent sees a signal.
+        boot.expect_exact(b"hostile process about to write where it may not\r\nprocess hostile faulted: page-fault at ")
+        boot.expect_until(b"; contained\r\n")
+        boot.expect_exact(
+            b"child 1 stopped by signal 11\r\n"
+            b"spawn nothing: errno 2\r\n"
+            b"wait for no child: errno 10\r\n"
+            b"process c-pipeline exited with status 0\r\nagel-native[0]> "
+        )
+        # Everything came back: the same run again.
+        boot.send_bytes(":exec c-pipeline")
+        boot.process.stdin.write(b"\n")
+        boot.process.stdin.flush()
+        boot.expect_exact(b"\r\nHELLO FROM THE PARENT\r\nchild 1 exited with 22\r\n")
+        boot.expect_until(b"process c-pipeline exited with status 0\r\nagel-native[0]> ")
+        boot.send("(+ 20 22)", "42", 1)
+        shutdown(boot)
+    finally:
+        boot.close()
+
+
 def send_kernel_healthy(
     harness: Harness, line: str, expected: str, slot: str, revision: int
 ) -> None:
@@ -1026,7 +1061,7 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --files | --c | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --files | --c | --spawn | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
@@ -1068,6 +1103,19 @@ def main() -> int:
                 print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
             return 1
         print(f"Agel C library [{architecture}]: build from source -> printf, heap, strings -> files through a namespace [ok]")
+        return 0
+    if len(arguments) == 2 and arguments[1] == "--spawn":
+        if disk is None:
+            print("spawning needs a disk; pass --disk", file=sys.stderr)
+            return 2
+        try:
+            spawn_test(arguments[0], architecture, disk)
+        except Exception as error:
+            print(f"spawn test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print(f"Agel processes [{architecture}]: pipe -> spawn with explicit descriptors -> wait, faults and errors seen by the parent [ok]")
         return 0
     if len(arguments) == 2 and arguments[1] == "--power-cut":
         if disk is None:

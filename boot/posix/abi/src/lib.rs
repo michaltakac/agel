@@ -17,6 +17,15 @@ pub const WRITE: u64 = 2;
 pub const OPEN: u64 = 3;
 pub const READ: u64 = 4;
 pub const CLOSE: u64 = 5;
+pub const SPAWN: u64 = 6;
+pub const PIPE: u64 = 7;
+pub const WAIT: u64 = 8;
+/// A descriptor argument to `spawn` that names none.
+pub const NO_DESCRIPTOR: u64 = 0xffff;
+pub const SPAWN_READ_ONLY: u64 = 1;
+/// Set in a `wait` answer when the child was stopped rather than exiting;
+/// the low byte is then the signal a POSIX parent would see.
+pub const WAIT_SIGNALED: u64 = 0x100;
 /// `open` flags, with POSIX's values.
 pub const O_RDONLY: u64 = 0;
 pub const O_WRONLY: u64 = 0o1;
@@ -103,6 +112,35 @@ impl Process {
 
     pub fn close(&self, descriptor: u64) -> i64 {
         self.request(CLOSE, [descriptor, 0, 0, 0]) as i64
+    }
+
+    /// Start `program` as a child with exactly these descriptors as its 0
+    /// and 1 (`NO_DESCRIPTOR` for none), the console as its 2, and this
+    /// process's namespace, read-only with `SPAWN_READ_ONLY`. The child's
+    /// id, or a negated error number.
+    pub fn spawn(&self, program: &[u8], stdin: u64, stdout: u64, flags: u64) -> i64 {
+        let take = program.len().min(PAYLOAD_BYTES);
+        let payload = (self.page as usize + PAYLOAD_OFFSET) as *mut u8;
+        for (offset, byte) in program.iter().take(take).enumerate() {
+            unsafe { payload.add(offset).write_volatile(*byte) };
+        }
+        self.request(SPAWN, [take as u64, stdin, stdout, flags]) as i64
+    }
+
+    /// A pipe: the read end and the write end, or a negated error number.
+    pub fn pipe(&self) -> Result<(u64, u64), i64> {
+        let result = self.request(PIPE, [0; 4]);
+        if (result as i64) < 0 {
+            Err(result as i64)
+        } else {
+            Ok((result & 0xffff, (result >> 16) & 0xffff))
+        }
+    }
+
+    /// Wait for child `id` to end: its exit status, `WAIT_SIGNALED` with a
+    /// signal number when the machine stopped it, or a negated error.
+    pub fn wait(&self, id: u64) -> i64 {
+        self.request(WAIT, [id, 0, 0, 0]) as i64
     }
 
     /// Write `text`, then the decimal of `number`, then `tail`, to the

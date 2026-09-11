@@ -1,8 +1,8 @@
 # The POSIX personality
 
-Status: started at v0.2.41; stratum 1 at v0.2.43; stratum 2 at v0.2.44.
-This document is the plan, the process ABI, and an honest account of what
-exists.
+Status: started at v0.2.41; stratum 1 at v0.2.43; stratum 2 at v0.2.44;
+stratum 3 at v0.2.45. This document is the plan, the process ABI, and an
+honest account of what exists.
 
 The requirements are in [`deployment-targets.md`](deployment-targets.md):
 the kernel contract contains no POSIX concept; the personality runs
@@ -19,7 +19,7 @@ from source. Everything below is measured against those.
 | 0. Processes | a static ELF loaded from disk into a fresh domain; a request protocol on the shared page; `write` to the console and `exit` | **v0.2.41**, all three research machines |
 | 1. Files and namespaces | an unprivileged filesystem service; a namespace capability per process; `open`, `read`, `write`, `close` on descriptors derived from it | **v0.2.43**, all three research machines |
 | 2. The C library | `agel-libc`, a `no_std` Rust library with a C ABI, so C and Rust programs build for Agel from source | **v0.2.44**, all three research machines |
-| 3. Processes that make processes | `spawn` with an explicit capability set, never `fork`; pipes; `wait` | after 2 |
+| 3. Processes that make processes | `spawn` with an explicit capability set, never `fork`; pipes; `wait` | **v0.2.45**, all three research machines |
 | 4. Breadth | the growing subset of the standard that real programs need: `stdio`, `malloc`, `string`, `errno`, time | ongoing |
 
 Binary compatibility with Linux ELFs is not planned; see the requirements.
@@ -79,6 +79,9 @@ and resumes the process.
 | `3` open | flags, path length ≤ 256 | a descriptor from 3 up, or a negated error; the path is the first `length` bytes of the payload area at byte 128; stratum 1 |
 | `4` read | descriptor, length ≤ 512 | bytes read into the block area, 0 at the end of the file, or a negated error; stratum 1 |
 | `5` close | descriptor | 0, or `-EBADF`; stratum 1 |
+| `6` spawn | name length, stdin descriptor, stdout descriptor, flags | the child's id; the name is in the payload area; `0xffff` names no descriptor; flag `1` gives the child a read-only namespace; stratum 3 |
+| `7` pipe | none | read descriptor in the low sixteen bits, write descriptor in the next sixteen; stratum 3 |
+| `8` wait | child id | the child's exit status, or `0x100` with a signal number in the low byte when the machine stopped it (`11` a fault, `9` a budget or a deadlock); blocks until the child ends; `-ECHILD` for a child that is not the caller's; stratum 3 |
 
 Any other kind answers `-ENOSYS`. Nothing here is a contract operation, and
 nothing here is a path the kernel interprets: the program region is a table
@@ -280,3 +283,91 @@ single-threaded, like the process. Nothing here is POSIX-certified or
 tested against a conformance suite; a real program will find the first
 missing function quickly, and stratum 4 is the answer to that, one function
 at a time, with a test each.
+
+## Stratum 3: processes that make processes
+
+There is no `fork`. A process starts another by name with `spawn`, and the
+child receives exactly what the parent names: one descriptor as its
+standard input, one as its standard output (either may be none), the
+console as its standard error, and the parent's namespace, or a read-only
+view of it. Nothing else crosses; a child holds no descriptor its parent
+did not choose to give it, and cannot reach a wider namespace than its
+parent's.
+
+```text
+agel-native[0]> :exec c-pipeline
+HELLO FROM THE PARENT
+child 1 exited with 22
+hostile process about to write where it may not
+process hostile faulted: page-fault at 0x9000002c touching 0x10; contained
+child 1 stopped by signal 11
+spawn nothing: errno 2
+wait for no child: errno 10
+process c-pipeline exited with status 0
+```
+
+The parent made a pipe, spawned `c-shout` with the pipe's read end as its
+standard input, closed its own copy of that end, wrote a line, closed the
+write end, and waited; the child read to the end of the stream, uppercased
+what it read, and exited with the byte count. Then the parent spawned the
+hostile program, which the machine stopped, and saw a signal; then a name
+the program region does not hold, and a wait for a child it never had.
+
+### The process table
+
+`:exec` now serves a table of up to four processes, the one the operator
+started and every descendant, with a round-robin scheduler: each pass gives
+every runnable process one entry (it runs until it yields a request or is
+stopped) and retries every blocked one. A process blocks on `wait` for a
+child that has not ended, on a `read` of an empty pipe that still has a
+writer, and on a `write` to a full pipe that still has a reader; the
+request is answered on the pass where it can be. When no live process can
+make progress, every process that is left is blocked on something no other
+will do, and they are stopped as blocked forever. `:exec` returns when
+every process has ended, reporting the first one's end; a child the
+machine stops is reported on the console when it happens, since no `wait`
+need ever hear of it.
+
+A process's frames go back to the pool the moment it ends. Its descriptors
+close then too, so the last write end of a pipe closing is the end of the
+stream for whoever reads it. An ended child stays in the table, with its
+exit, until its parent waits for it or the `:exec` ends.
+
+### Pipes
+
+A pipe is a 512-byte queue in the supervisor with a count of the read ends
+and write ends that name it; there are four. `pipe` returns two descriptors
+of the calling process; passing an end to a child at `spawn` is one more end
+naming the pipe, and `close` gives one back. `read` on an empty pipe with no
+writer left answers 0; `write` on a pipe with no reader left answers
+`-EPIPE`. Reads and writes move at most a block, and may move less than
+asked.
+
+### The C library
+
+`<unistd.h>` gains `pipe`, `<sys/wait.h>` has `waitpid` with `WIFEXITED`,
+`WEXITSTATUS`, `WIFSIGNALED` and `WTERMSIG` encoded as POSIX reads them, and
+`<spawn.h>` has Agel's own `agel_spawn(program, stdin_fd, stdout_fd, flags)`
+with `AGEL_SPAWN_READ_ONLY`. It is named for what it is: not
+`posix_spawn`, whose file actions and attributes assume an inherited
+environment this system does not have.
+
+### What is proved
+
+`scripts/test-spawn.sh [arch]` runs the pipeline above on all three
+machines, requires the child's output, the byte count as its status, the
+fault report and the signal the parent sees, `ENOENT` for a missing
+program, `ECHILD` for a child that is not the caller's, and then runs the
+whole thing again to show every process's frames came back.
+
+### What stratum 3 does not claim
+
+A child gets two descriptors and a namespace, never arguments or an
+environment; `main` is still `int main(void)`. The table holds four
+processes and four pipes, and the scheduler is a round robin without
+priorities. A parent cannot give a child a narrower root than its own,
+only a read-only view. There is no `kill`, no signals a process can catch,
+no process groups, no `exec` that replaces a running image, and no
+blocking `read` of the console. Deadlock is detected only when nothing at
+all can run; a process spinning on a pipe it will never fill is stopped by
+its tick budget, not by the detector.

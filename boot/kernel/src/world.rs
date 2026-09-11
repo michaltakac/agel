@@ -404,6 +404,33 @@ pub mod process {
     pub const READ: u64 = 4;
     /// Close descriptor `arguments[0]`.
     pub const CLOSE: u64 = 5;
+    /// Start the program named in the payload area (`arguments[0]` bytes)
+    /// as a child: its descriptor 0 is the parent's `arguments[1]` and its
+    /// descriptor 1 the parent's `arguments[2]` (`NO_DESCRIPTOR` for none),
+    /// its descriptor 2 the console, its namespace the parent's, read-only
+    /// when `arguments[3]` has `SPAWN_READ_ONLY`. Answers the child's id.
+    /// A child receives exactly what is named here; nothing is inherited.
+    pub const SPAWN: u64 = 6;
+    /// Make a pipe; answers the read descriptor in the low sixteen bits and
+    /// the write descriptor in the next sixteen.
+    pub const PIPE: u64 = 7;
+    /// Wait for the child with id `arguments[0]` to end; answers its exit
+    /// status, or `WAIT_SIGNALED` with the signal number when the machine
+    /// stopped it. Blocks the caller until then.
+    pub const WAIT: u64 = 8;
+    /// A descriptor argument that names none.
+    pub const NO_DESCRIPTOR: u64 = 0xffff;
+    pub const SPAWN_READ_ONLY: u64 = 1;
+    /// Set in a `wait` answer when the child did not exit but was stopped:
+    /// the low byte is then the signal a POSIX parent would see.
+    pub const WAIT_SIGNALED: u64 = 0x100;
+    pub const SIGNAL_KILLED: u64 = 9;
+    pub const SIGNAL_FAULT: u64 = 11;
+    /// Processes that may exist at once, the `:exec`'d one included.
+    pub const PROCESSES: usize = 4;
+    /// Pipes that may exist at once, and what one holds.
+    pub const PIPES: usize = 4;
+    pub const PIPE_BYTES: usize = 512;
     /// `open` flags, the POSIX values.
     pub const O_WRONLY: u64 = 0o1;
     pub const O_RDWR: u64 = 0o2;

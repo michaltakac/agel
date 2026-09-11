@@ -176,6 +176,13 @@ promise.
   the string routines, `open`/`read`/`write`/`close` and `errno`;
   `scripts/build-c-program.sh` and `scripts/test-libc.sh` on all three
   machines, with `lld` added to CI.
+  `v0.2.45` is the POSIX personality's processes that make processes:
+  `spawn` by name with exactly the descriptors the parent names and its
+  namespace (never `fork`), pipes as supervisor queues with end counts, and
+  `wait` that blocks; `:exec` serves a four-process table with a round-robin
+  scheduler and stops what can never progress. `agel-libc` gains `pipe`,
+  `waitpid` and `agel_spawn`; `scripts/test-spawn.sh` proves a C pipeline
+  on all three machines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

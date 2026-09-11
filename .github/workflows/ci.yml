@@ -58,6 +58,9 @@ jobs:
       - run: ./scripts/test-libc.sh
       - run: ./scripts/test-libc.sh aarch64
       - run: ./scripts/test-libc.sh riscv64
+      - run: ./scripts/test-spawn.sh
+      - run: ./scripts/test-spawn.sh aarch64
+      - run: ./scripts/test-spawn.sh riscv64
       - run: ./scripts/test-kernel-rollback.sh
       - run: ./scripts/test-graphics.sh
       - run: ./scripts/test-live-desktop.sh

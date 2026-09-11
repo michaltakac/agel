@@ -95,6 +95,84 @@ pub extern "C" fn _exit(status: c_int) -> ! {
     process().exit(status as u64)
 }
 
+/// # Safety
+/// `descriptors` must point to two writable `int`s.
+#[no_mangle]
+pub unsafe extern "C" fn pipe(descriptors: *mut c_int) -> c_int {
+    match process().pipe() {
+        Ok((read_end, write_end)) => {
+            unsafe {
+                descriptors.write(read_end as c_int);
+                descriptors.add(1).write(write_end as c_int);
+            }
+            0
+        }
+        Err(error) => outcome(error) as c_int,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// sys/wait.h and spawn.h
+// ---------------------------------------------------------------------------
+
+/// `waitpid` for the one shape Agel has: a named child, no options. The
+/// status is encoded as POSIX macros read it: an exit status in bits 8-15,
+/// or a signal in the low seven bits when the machine stopped the child.
+///
+/// # Safety
+/// `status` is null or points to a writable `int`.
+#[no_mangle]
+pub unsafe extern "C" fn waitpid(child: c_int, status: *mut c_int, _options: c_int) -> c_int {
+    if child < 0 {
+        return outcome(-10) as c_int; // ECHILD
+    }
+    let answer = process().wait(child as u64);
+    if answer < 0 {
+        return outcome(answer) as c_int;
+    }
+    let answer = answer as u64;
+    let encoded = if answer & agel_process_abi::WAIT_SIGNALED != 0 {
+        (answer & 0x7f) as c_int
+    } else {
+        ((answer & 0xff) << 8) as c_int
+    };
+    if !status.is_null() {
+        unsafe { status.write(encoded) };
+    }
+    child
+}
+
+/// Agel's own: start `program` as a child that gets exactly `stdin_fd` and
+/// `stdout_fd` (`-1` for none) as its descriptors 0 and 1, the console as
+/// 2, and this process's namespace, read-only with `AGEL_SPAWN_READ_ONLY`.
+/// There is no `fork`: a child never inherits what it was not given.
+///
+/// # Safety
+/// `program` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn agel_spawn(
+    program: *const c_char,
+    stdin_fd: c_int,
+    stdout_fd: c_int,
+    flags: c_int,
+) -> c_int {
+    let length = unsafe { strlen(program) };
+    let name = unsafe { core::slice::from_raw_parts(program as *const u8, length) };
+    let descriptor = |number: c_int| {
+        if number < 0 {
+            agel_process_abi::NO_DESCRIPTOR
+        } else {
+            number as u64
+        }
+    };
+    outcome(process().spawn(
+        name,
+        descriptor(stdin_fd),
+        descriptor(stdout_fd),
+        flags as u64,
+    )) as c_int
+}
+
 // ---------------------------------------------------------------------------
 // fcntl.h
 // ---------------------------------------------------------------------------
