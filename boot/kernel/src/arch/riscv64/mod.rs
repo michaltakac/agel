@@ -324,7 +324,6 @@ impl Machine {
     /// Give a dead domain's frames back to the pool. The caller promises the
     /// domain will never run again; it is stopped, and the frames are handed
     /// out zeroed to whoever allocates next.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn reclaim(&mut self, frames: &crate::memory::FrameLedger) {
         self.pool.reclaim(frames);
     }

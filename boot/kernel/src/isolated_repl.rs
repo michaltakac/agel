@@ -414,7 +414,7 @@ pub fn run() -> ! {
             b"" => {}
             _ => {
                 if let Some(rest) = command_argument(source, b":exec ") {
-                    exec_program(
+                    crate::workshop::exec_program(
                         &mut machine,
                         storage.as_mut(),
                         filesystem.as_mut(),
@@ -422,26 +422,26 @@ pub fn run() -> ! {
                         rest,
                     );
                 } else if source == b":fs-format" {
-                    filesystem_command(
+                    crate::workshop::filesystem_command(
                         storage.as_mut(),
                         filesystem.as_mut(),
                         &mut driver,
-                        FilesystemCommand::Format,
+                        crate::workshop::FilesystemCommand::Format,
                     );
                 } else if let Some(path) = command_argument(source, b":fs-mkdir ") {
-                    filesystem_command(
+                    crate::workshop::filesystem_command(
                         storage.as_mut(),
                         filesystem.as_mut(),
                         &mut driver,
-                        FilesystemCommand::MakeDirectory(path),
+                        crate::workshop::FilesystemCommand::MakeDirectory(path),
                     );
                 } else if source == b":fs-ls" || source.starts_with(b":fs-ls ") {
                     let path = command_argument(source, b":fs-ls ").unwrap_or(b"/");
-                    filesystem_command(
+                    crate::workshop::filesystem_command(
                         storage.as_mut(),
                         filesystem.as_mut(),
                         &mut driver,
-                        FilesystemCommand::List(path),
+                        crate::workshop::FilesystemCommand::List(path),
                     );
                 } else if source == b":fs-restart" {
                     match filesystem.as_mut() {
@@ -776,242 +776,6 @@ fn report_workspace(driver: &mut ServiceDomain, count: usize, generation: u64, d
         "workspace generation {generation}, {count} cells, {}",
         if dirty { "staged changes" } else { "clean" }
     );
-    out.flush();
-}
-
-enum FilesystemCommand<'a> {
-    Format,
-    MakeDirectory(&'a [u8]),
-    List(&'a [u8]),
-}
-
-/// Report a filesystem service outcome; the values on success.
-#[inline(never)]
-fn filesystem_outcome(
-    driver: &mut ServiceDomain,
-    outcome: Result<(u64, [u64; 3]), crate::service::ServiceError>,
-) -> Option<[u64; 3]> {
-    match outcome {
-        Ok((0, values)) => Some(values),
-        Ok((status, _)) => {
-            let mut out = ServiceWriter::new(driver);
-            let _ = writeln!(out, "filesystem: error {status}");
-            out.flush();
-            None
-        }
-        Err(error) => {
-            driver_text_error(driver, b"filesystem service: ", error.name().as_bytes());
-            None
-        }
-    }
-}
-
-/// Operator actions on the filesystem service, from the root with every
-/// right: the operator is the namespace everything else is carved from.
-#[inline(never)]
-fn filesystem_command(
-    storage: Option<&mut ServiceDomain>,
-    filesystem: Option<&mut ServiceDomain>,
-    driver: &mut ServiceDomain,
-    command: FilesystemCommand<'_>,
-) {
-    use crate::world::fs;
-    let (Some(storage), Some(filesystem)) = (storage, filesystem) else {
-        driver_line(driver, b"denied: no filesystem service");
-        return;
-    };
-    let handle = filesystem.handle();
-    match command {
-        FilesystemCommand::Format => {
-            let outcome =
-                filesystem.filesystem_request(handle, storage, fs::COMMAND_FORMAT, [0; 3]);
-            if filesystem_outcome(driver, outcome).is_some() {
-                driver_line(driver, b"formatted");
-            }
-        }
-        FilesystemCommand::MakeDirectory(path) => {
-            filesystem.write_payload(path);
-            let flags = fs::O_CREAT_BIT | fs::O_DIRECTORY_BIT;
-            let outcome = filesystem.filesystem_request(
-                handle,
-                storage,
-                fs::COMMAND_OPEN,
-                [0, flags, path.len() as u64],
-            );
-            if filesystem_outcome(driver, outcome).is_some() {
-                driver_text_error(driver, b"directory ready: ", path);
-            }
-        }
-        FilesystemCommand::List(path) => {
-            filesystem.write_payload(path);
-            let outcome = filesystem.filesystem_request(
-                handle,
-                storage,
-                fs::COMMAND_OPEN,
-                [0, fs::O_DIRECTORY_BIT, path.len() as u64],
-            );
-            let Some([directory, _, _]) = filesystem_outcome(driver, outcome) else {
-                return;
-            };
-            let mut position = 0;
-            loop {
-                let outcome = filesystem.filesystem_request(
-                    handle,
-                    storage,
-                    fs::COMMAND_LIST,
-                    [directory, position, 0],
-                );
-                let (entry_kind, length) = match outcome {
-                    Ok((0, [_, entry_kind, length])) => (entry_kind, length),
-                    Ok(_) => break,
-                    Err(error) => {
-                        driver_text_error(driver, b"filesystem service: ", error.name().as_bytes());
-                        return;
-                    }
-                };
-                let name_len = (filesystem.name_length() as usize).min(32);
-                let mut name = [0_u8; 32];
-                for (offset, byte) in name.iter_mut().enumerate().take(name_len) {
-                    *byte = filesystem.read_payload(offset);
-                }
-                let mut out = ServiceWriter::new(driver);
-                for byte in &name[..name_len] {
-                    let _ = out.write_char(char::from(*byte));
-                }
-                if entry_kind == fs::KIND_DIRECTORY {
-                    let _ = writeln!(out, "/");
-                } else {
-                    let _ = writeln!(out, "  {length} bytes");
-                }
-                out.flush();
-                position += 1;
-            }
-            if position == 0 {
-                driver_line(driver, b"(empty)");
-            }
-        }
-    }
-}
-
-/// Load a program from the disk's program region into a fresh domain, run it
-/// to its end serving its requests inside a namespace, and say how it ended.
-/// `rest` is `NAME [ROOT] [ro]`: the directory the process sees as `/`,
-/// which the operator names from the real root, and whether it may only read.
-#[inline(never)]
-fn exec_program(
-    machine: &mut arch::Machine,
-    storage: Option<&mut ServiceDomain>,
-    filesystem: Option<&mut ServiceDomain>,
-    driver: &mut ServiceDomain,
-    rest: &[u8],
-) {
-    use crate::process::Namespace;
-    let Some(storage) = storage else {
-        driver_line(driver, b"denied: no storage device");
-        return;
-    };
-    // `NAME [ROOT] [ro] [-- ARG...]`: everything after `--` is the
-    // program's, one argument per word.
-    let (options, arguments) = match rest.windows(2).position(|pair| pair == b"--") {
-        Some(at)
-            if (at == 0 || rest[at - 1] == b' ')
-                && (at + 2 == rest.len() || rest[at + 2] == b' ') =>
-        {
-            (&rest[..at], &rest[at + 2..])
-        }
-        _ => (rest, &rest[rest.len()..]),
-    };
-    let mut words = options
-        .split(|byte| *byte == b' ')
-        .filter(|word| !word.is_empty());
-    let Some(name) = words.next() else {
-        driver_line(driver, b"usage: :exec NAME [ROOT] [ro] [-- ARG...]");
-        return;
-    };
-    let mut root_path = words.next();
-    let mut read_only = false;
-    if root_path == Some(b"ro") {
-        root_path = None;
-        read_only = true;
-    } else if words.next() == Some(b"ro") {
-        read_only = true;
-    }
-    let mut block = [0_u8; crate::world::PAYLOAD_BYTES];
-    let mut block_length = 0;
-    for word in arguments
-        .split(|byte| *byte == b' ')
-        .filter(|word| !word.is_empty())
-    {
-        for byte in word.iter().chain(&[0]) {
-            if block_length < block.len() {
-                block[block_length] = *byte;
-                block_length += 1;
-            }
-        }
-    }
-    let mut filesystem = filesystem;
-    // No ROOT names the filesystem's root, entry 0, which is the root by
-    // construction: a program that never opens a file runs whether or not
-    // the region is formatted, and one that does is answered by the
-    // service. A named ROOT is resolved now, so a bad one is refused here.
-    let root = match (filesystem.as_deref_mut(), root_path) {
-        (Some(service), Some(root_path)) => {
-            service.write_payload(root_path);
-            let handle = service.handle();
-            let outcome = service.filesystem_request(
-                handle,
-                storage,
-                crate::world::fs::COMMAND_OPEN,
-                [0, crate::world::fs::O_DIRECTORY_BIT, root_path.len() as u64],
-            );
-            let Some([entry, _, _]) = filesystem_outcome(driver, outcome) else {
-                return;
-            };
-            entry as u16
-        }
-        _ => 0,
-    };
-    let namespace = if read_only {
-        Namespace::read_only(root)
-    } else {
-        Namespace::all(root)
-    };
-    let program = match crate::process::find(storage, name) {
-        Ok(Some(program)) => program,
-        Ok(None) => {
-            driver_text_error(driver, b"no program named ", name);
-            return;
-        }
-        Err(reason) => {
-            driver_text_error(driver, b"program table unreadable: ", reason.as_bytes());
-            return;
-        }
-    };
-    let mut services = crate::process::Services {
-        storage,
-        console: driver,
-        filesystem,
-    };
-    let outcome = match crate::process::exec(
-        machine,
-        &mut services,
-        program,
-        name,
-        &block[..block_length],
-        namespace,
-    ) {
-        Ok(outcome) => outcome,
-        Err(reason) => {
-            driver_text_error(driver, b"cannot load program: ", reason.as_bytes());
-            return;
-        }
-    };
-    let mut out = ServiceWriter::new(driver);
-    let _ = out.write_str("process ");
-    for byte in name {
-        let _ = out.write_char(char::from(*byte));
-    }
-    crate::process::report(&mut out, outcome);
     out.flush();
 }
 

@@ -12,6 +12,7 @@ use crate::recovery::{slot_name, Admission, BootPlan, KernelRecovery, LiveRecove
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
 use crate::world::{shared, Stop, PAYLOAD_BYTES};
+use core::fmt::Write;
 
 const BOOT_GRAPHICS_MARKER: *const u32 = 0x6ff0 as *const u32;
 const MODE_INFO: usize = 0x7000;
@@ -25,7 +26,7 @@ const MAX_SCENE_COMMANDS: usize = 160;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :workspace :save :reload :recovery :kernel | :revision :rollback :defs :limits :shutdown";
+const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | Tab/Enter | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :save :reload | :exec NAME [ROOT] :fs-format :fs-mkdir :fs-ls | :revision :rollback :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 26;
 
@@ -176,6 +177,93 @@ struct Scene {
     previewing: bool,
     inspector: Option<StatusLine>,
     pointer: Option<(u32, u32)>,
+    /// What processes wrote, shown in the workshop window.
+    terminal: Terminal,
+}
+
+/// The terminal panel: a bounded scrollback of what processes and the file
+/// commands wrote, one process's console on the desktop. Carriage returns
+/// are ignored, newlines end a row, and the oldest row scrolls away.
+#[derive(Clone, Copy)]
+struct Terminal {
+    rows: [[u8; Terminal::COLUMNS]; Terminal::ROWS],
+    lengths: [u8; Terminal::ROWS],
+    /// Rows holding text, oldest first; the last is the one being written.
+    used: usize,
+    /// The last byte was a newline: the next byte opens a row.
+    line_ended: bool,
+}
+
+impl Terminal {
+    const ROWS: usize = 16;
+    const COLUMNS: usize = 84;
+
+    const EMPTY: Self = Self {
+        rows: [[0; Self::COLUMNS]; Self::ROWS],
+        lengths: [0; Self::ROWS],
+        used: 0,
+        line_ended: false,
+    };
+
+    fn is_empty(&self) -> bool {
+        self.used == 0
+    }
+
+    fn newline(&mut self) {
+        if self.used < Self::ROWS {
+            self.used += 1;
+        } else {
+            self.rows.copy_within(1.., 0);
+            self.lengths.copy_within(1.., 0);
+        }
+        let last = self.used - 1;
+        self.rows[last] = [0; Self::COLUMNS];
+        self.lengths[last] = 0;
+    }
+
+    /// A newline ends the row; the next row opens when something is written
+    /// on it, so a line a process finished does not leave a blank one.
+    fn push(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            match *byte {
+                b'\r' => {}
+                b'\n' => self.line_ended = true,
+                byte => {
+                    if self.used == 0 || self.line_ended {
+                        self.newline();
+                        self.line_ended = false;
+                    }
+                    let last = self.used - 1;
+                    let length = usize::from(self.lengths[last]);
+                    if length >= Self::COLUMNS {
+                        self.newline();
+                    }
+                    let last = self.used - 1;
+                    let length = usize::from(self.lengths[last]);
+                    self.rows[last][length] = if byte.is_ascii_graphic() || byte == b' ' {
+                        byte
+                    } else {
+                        b'?'
+                    };
+                    self.lengths[last] = (length + 1) as u8;
+                }
+            }
+        }
+    }
+}
+
+/// A console that writes to the serial console driver and to the terminal
+/// panel: what the harness reads, and what the desktop shows.
+struct Tee<'a> {
+    serial: &'a mut ServiceDomain,
+    terminal: &'a mut Terminal,
+}
+
+impl crate::process::Console for Tee<'_> {
+    fn write(&mut self, bytes: &[u8]) {
+        crate::process::Console::write(self.serial, bytes);
+        self.terminal.push(bytes);
+    }
 }
 
 impl Scene {
@@ -193,6 +281,7 @@ impl Scene {
             previewing: false,
             inspector: None,
             pointer: None,
+            terminal: Terminal::EMPTY,
         }
     }
 }
@@ -647,6 +736,36 @@ fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame
         }
         frame.push(record)?;
     }
+    // The terminal panel: processes' output, or a hint when nothing ran.
+    frame.push(surface_record(452, 292, 1360, 508, 16, 0x1b_1b_1b, 255))?;
+    frame.push(label_record(
+        476,
+        308,
+        FACE_SANS_MEDIUM,
+        14,
+        0x80_80_80,
+        b"TERMINAL",
+    ))?;
+    if scene.terminal.is_empty() {
+        frame.push(label_record(
+            476,
+            340,
+            FACE_MONO,
+            16,
+            0x63_63_63,
+            b":exec NAME runs a program here",
+        ))?;
+    } else {
+        let spacing = line_height(FACE_MONO, 16).max(24);
+        for row in 0..scene.terminal.used {
+            let text = &scene.terminal.rows[row][..usize::from(scene.terminal.lengths[row])];
+            let y = 340 + row as u32 * spacing;
+            for (piece, chunk) in text.chunks(28).enumerate() {
+                let x = 476 + measure(FACE_MONO, 16, &text[..piece * 28]);
+                frame.push(label_record(x, y, FACE_MONO, 16, 0xde_de_de, chunk))?;
+            }
+        }
+    }
     if let Some(text) = scene.inspector {
         frame.push(surface_record(560, 300, 800, 400, 16, 0x1b_1b_1b, 250))?;
         frame.push(label_record(
@@ -1055,10 +1174,13 @@ fn scene_command(line: &[u8]) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 fn execute_workshop(
+    machine: &mut arch::Machine,
     compositor: &mut arch::Domain,
     inputs: Option<&mut Inputs<'_>>,
     evaluator: &mut arch::Domain,
     storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+    serial: &mut ServiceDomain,
     recovery: &mut Option<LiveRecovery>,
     kernel: &mut Option<KernelRecovery>,
     current: &mut Scene,
@@ -1109,6 +1231,60 @@ fn execute_workshop(
                 StatusLine::new(failure.message().as_bytes())
             }
         };
+    }
+    // Programs and files, answered on the serial console and in the
+    // terminal panel; the frame is repainted after, as after any command.
+    if let Some(rest) = line.strip_prefix(b":exec ") {
+        let mut tee = Tee {
+            serial,
+            terminal: &mut current.terminal,
+        };
+        crate::workshop::exec_program(machine, Some(storage), filesystem, &mut tee, rest);
+        return StatusLine::new(b"PROCESS ENDED");
+    }
+    if line == b":fs-format"
+        || line == b":fs-ls"
+        || line.starts_with(b":fs-ls ")
+        || line.starts_with(b":fs-mkdir ")
+    {
+        let command = if line == b":fs-format" {
+            crate::workshop::FilesystemCommand::Format
+        } else if let Some(path) = line.strip_prefix(b":fs-mkdir ") {
+            crate::workshop::FilesystemCommand::MakeDirectory(path)
+        } else {
+            crate::workshop::FilesystemCommand::List(line.strip_prefix(b":fs-ls ").unwrap_or(b"/"))
+        };
+        let mut tee = Tee {
+            serial,
+            terminal: &mut current.terminal,
+        };
+        crate::workshop::filesystem_command(Some(storage), filesystem, &mut tee, command);
+        return StatusLine::new(b"FILESYSTEM");
+    }
+    if line == b":fs-restart" {
+        let mut tee = Tee {
+            serial,
+            terminal: &mut current.terminal,
+        };
+        let Some(service) = filesystem else {
+            crate::workshop::line(&mut tee, b"denied: no filesystem service");
+            return StatusLine::new(b"FILESYSTEM");
+        };
+        match service.restart(machine) {
+            Ok(()) => {
+                let mut out = crate::process::Line::new();
+                let _ = write!(
+                    out,
+                    "filesystem restarted: generation {}",
+                    service.generation()
+                );
+                crate::workshop::line(&mut tee, out.get());
+            }
+            Err(reason) => {
+                crate::workshop::text(&mut tee, b"filesystem restart failed: ", reason.as_bytes())
+            }
+        }
+        return StatusLine::new(b"FILESYSTEM");
     }
     if line == b":help" {
         return StatusLine::new(HELP_POSTCARD);
@@ -1640,6 +1816,23 @@ fn interactive(
         Ok(false) => console::write("pointer unavailable; keyboard remains active\n"),
         Err(_) => failed("the input driver domain stopped during pointer enable"),
     }
+    // The filesystem service, as the serial workshop has it: an unprivileged
+    // world owning a region of the disk through relayed sector requests.
+    let mut filesystem = {
+        let entry = crate::user::agel_fs_main as *const () as usize as u64;
+        match machine.create_filesystem_world(entry, crate::world::fs::TICKS) {
+            Ok(domain) => Some(ServiceDomain::new(
+                domain,
+                ServiceKind::Filesystem,
+                entry,
+                crate::world::fs::TICKS,
+            )),
+            Err(reason) => {
+                kprint!("filesystem service unavailable: {reason}\n");
+                None
+            }
+        }
+    };
     let mut inputs = Inputs::new(&mut input_driver);
     synchronize_language_scene(&mut evaluator, compositor, Some(&mut inputs), &mut current)
         .unwrap_or_else(|reason| failed(reason));
@@ -1742,10 +1935,13 @@ fn interactive(
                     continue;
                 }
                 status = execute_workshop(
+                    machine,
                     compositor,
                     Some(&mut inputs),
                     &mut evaluator,
                     &mut storage,
+                    filesystem.as_mut(),
+                    &mut console_driver,
                     &mut recovery,
                     &mut kernel,
                     &mut current,
@@ -1863,7 +2059,9 @@ pub fn run() -> ! {
     load_assets(&mut machine, &mut storage, &mut compositor);
     let initial = Scene::initial();
     let frame = materialize(initial, None, b"").unwrap_or_else(|reason| failed(reason));
-    if frame.count != count {
+    // The frame is the compiled scene plus what the supervisor adds for the
+    // terminal panel; the compiled records must all be there.
+    if frame.count < count {
         failed("compiled vector command count disagrees");
     }
     render(&mut compositor, None, &frame).unwrap_or_else(|reason| failed(reason));

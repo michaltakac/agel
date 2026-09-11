@@ -99,7 +99,6 @@ impl Domain {
     }
 
     /// The frames this domain was built from.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn frames(&self) -> &FrameLedger {
         &self.frames
     }

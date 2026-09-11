@@ -65,18 +65,7 @@
   (label 452 184 1 32 "#ffffff" "MOLD THE SYSTEM AS IT RUNS")
   (label 452 236 0 16 "#9e9e9e" "Say what should change.")
 
-  (surface 452 292 664 220 16 "#1f1f1f" 255)
-  (gradient-rounded-rectangle 484 324 72 72 18 "#e79cfe" "#cf7dff")
-  (sprite 504 344 1 "#1b1b1b" 255)
-  (label 580 332 1 20 "#dedede" "3 agents ready")
-  (label 580 364 0 16 "#9e9e9e" "Safe preview active")
-  (label 484 440 0 16 "#808080" "Committed as revision 0")
-
-  (surface 1148 292 664 220 16 "#1f1f1f" 255)
-  (label 1180 324 1 20 "#dedede" "Kernel")
-  (label 1180 360 0 16 "#9e9e9e" "Slot A trusted, no candidate")
-  (label 1180 388 0 16 "#9e9e9e" "Contract v1.0; four backends")
-  (label 1180 440 0 16 "#808080" "evaluator, storage, display")
+  ; The terminal panel is drawn by the supervisor from what processes wrote.
 
   ; Actions.
   (surface 452 828 200 48 24 "#e79cfe" 255)

@@ -7,8 +7,21 @@ image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
 output=$(mktemp "${TMPDIR:-/tmp}/agel-live-desktop.XXXXXX")
 trap 'rm -f "$output"' EXIT
 
+# Each command waits for the workshop's prompt, so boot time and paint time
+# never race the input; the prompts are counted in the serial output.
+prompts() { awk '/live-desktop> /{n++} END{print n+0}' "$output" 2>/dev/null || printf 0; }
+await_prompt() {
+  wanted=$1
+  tries=0
+  while test "$(prompts)" -lt "$wanted"; do
+    tries=$((tries + 1))
+    test "$tries" -lt 600 || exit 1
+    sleep 0.1
+  done
+}
 {
-  sleep 2
+  await_prompt 1
+  seen=1
   for command in \
     '(inspect)' \
     '(accent cyan)' \
@@ -18,7 +31,8 @@ trap 'rm -f "$output"' EXIT
     '(workspace 99)'
   do
     printf '%s\n' "$command"
-    sleep 1
+    seen=$((seen + 1))
+    await_prompt "$seen"
   done
 } | qemu-system-x86_64 \
   -machine pc,accel=tcg -m 64M -display none -monitor none -serial stdio -no-reboot \
@@ -27,7 +41,12 @@ trap 'rm -f "$output"' EXIT
   > "$output" 2>&1 &
 qemu_pid=$!
 
-sleep 9
+tries=0
+until grep -q 'WORKSPACE MUST BE 1 2 OR 3' "$output"; do
+  tries=$((tries + 1))
+  test "$tries" -lt 900 || break
+  sleep 0.1
+done
 kill "$qemu_pid" 2>/dev/null || true
 wait "$qemu_pid" 2>/dev/null || true
 

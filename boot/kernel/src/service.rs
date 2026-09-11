@@ -18,7 +18,6 @@
 //! driver domain is what it prints through.
 
 use crate::arch;
-#[cfg(not(feature = "native-graphics"))]
 use crate::world::PAYLOAD_BYTES;
 use crate::world::{shared, Stop};
 #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
@@ -94,7 +93,6 @@ impl ServiceError {
     }
 
     /// A short name for serial reports.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn name(self) -> &'static str {
         match self {
             Self::Stale => "stale-generation",
@@ -108,14 +106,10 @@ impl ServiceError {
 /// An unprivileged driver domain the supervisor can lose and replace.
 pub struct ServiceDomain {
     domain: arch::Domain,
-    #[cfg(not(feature = "native-graphics"))]
     kind: ServiceKind,
-    #[cfg(not(feature = "native-graphics"))]
     entry: u64,
-    #[cfg(not(feature = "native-graphics"))]
     ticks: u32,
     generation: u32,
-    #[cfg(not(feature = "native-graphics"))]
     restarts: u32,
     /// Fault injection for the persistence suite: how many more sector writes
     /// this machine survives. The write the count lands on is torn, half of
@@ -129,14 +123,10 @@ impl ServiceDomain {
     pub fn new(domain: arch::Domain, _kind: ServiceKind, _entry: u64, _ticks: u32) -> Self {
         Self {
             domain,
-            #[cfg(not(feature = "native-graphics"))]
             kind: _kind,
-            #[cfg(not(feature = "native-graphics"))]
             entry: _entry,
-            #[cfg(not(feature = "native-graphics"))]
             ticks: _ticks,
             generation: 1,
-            #[cfg(not(feature = "native-graphics"))]
             restarts: 0,
             #[cfg(feature = "isolated-repl")]
             power_cut: None,
@@ -395,7 +385,6 @@ impl ServiceDomain {
     }
 
     /// The current generation.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn generation(&self) -> u32 {
         self.generation
     }
@@ -416,7 +405,6 @@ impl ServiceDomain {
     ///
     /// The handle is checked before anything else, so a caller holding a stale
     /// one is refused without the service being entered at all.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn write_console(
         &mut self,
         handle: ServiceHandle,
@@ -458,7 +446,6 @@ impl ServiceDomain {
     /// the translations it still holds to those frames are dead. The
     /// replacement is a different domain with a different address space, not
     /// a resumed one.
-    #[cfg(not(feature = "native-graphics"))]
     pub fn restart(&mut self, machine: &mut arch::Machine) -> Result<(), &'static str> {
         let stopped = *self.domain.frames();
         machine.reclaim(&stopped);
@@ -480,12 +467,12 @@ impl ServiceDomain {
     }
 }
 
+#[cfg(not(feature = "native-graphics"))]
 /// A `core::fmt` sink that prints through a driver domain.
 ///
 /// Text is buffered here rather than in the domain's page so that a restart in
 /// the middle of a line cannot leave half a message in a page that no longer
 /// belongs to anyone.
-#[cfg(not(feature = "native-graphics"))]
 pub struct ServiceWriter<'a> {
     service: &'a mut ServiceDomain,
     handle: ServiceHandle,

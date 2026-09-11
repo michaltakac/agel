@@ -70,6 +70,7 @@ jobs:
       - run: ./scripts/test-graphical-workshop.sh
       - run: ./scripts/test-live-keyboard.sh
       - run: python3 scripts/test-graphical-console.py target/boot/agel-v1.img
+      - run: ./scripts/test-desktop-process.sh
       - run: python3 scripts/test-native-dock.py target/boot/agel-v1.img
       - run: python3 scripts/test-native-workbench.py target/boot/agel-v1.img
       - run: cargo build --release -p agel-jit --example module_workshop

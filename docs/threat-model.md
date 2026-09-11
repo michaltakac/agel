@@ -1178,6 +1178,26 @@ it.
 Not claimed: the fallback mode scales geometry but not text; the sprites
 are the project's own drawings, not COSMIC's icon theme.
 
+## v0.2.49
+
+- **The same loader, the same rules, on the desktop:** the graphical
+  workshop runs a program exactly as the serial one does, through one
+  shared module: the CRC, the ELF checks, the namespace, the frame
+  reclamation and the process table are the same code. The only new
+  surface is where the console output goes: a tee to the serial driver and
+  to a terminal panel the supervisor owns.
+- **The terminal panel is bounded:** sixteen rows of eighty-four bytes,
+  scrolling, with every byte outside printable ASCII shown as `?`; a
+  process cannot write records, colours or positions, only text, and it
+  cannot write past the panel.
+- **Reclamation is compiled into every image now:** the graphics image
+  reclaims a process's frames like the serial one, so a process run twice
+  costs no lasting frames; the size-era gates that left it out are gone.
+
+Not claimed: a process cannot draw into a window of its own, and the
+terminal takes no input from the keyboard for a process (a process's
+descriptor 0 is what it was given at `:exec`, which is nothing).
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

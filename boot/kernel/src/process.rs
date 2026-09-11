@@ -17,7 +17,7 @@
 use crate::arch;
 use crate::memory::Access;
 use crate::region::{Entry, Region};
-use crate::service::{ServiceDomain, ServiceError, ServiceHandle, ServiceWriter};
+use crate::service::{ServiceDomain, ServiceError, ServiceHandle};
 use crate::workspace::read_sector;
 use crate::world::{fs, process, Fault, Stop, BLOCK_BYTES, PAYLOAD_BYTES};
 use core::fmt::Write;
@@ -333,10 +333,66 @@ fn load(
     Ok(domain)
 }
 
+/// Where a process's console output goes: the serial console driver, a
+/// terminal on the desktop, or both.
+pub trait Console {
+    fn write(&mut self, bytes: &[u8]);
+}
+
+impl Console for ServiceDomain {
+    /// The console driver domain, a payload at a time; a driver that has
+    /// stopped loses the text, which the workshop reports on its own path.
+    fn write(&mut self, bytes: &[u8]) {
+        let handle = self.handle();
+        for chunk in bytes.chunks(PAYLOAD_BYTES) {
+            if self.write_console(handle, chunk).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// A line of text assembled with `core::fmt` before it is written whole.
+pub struct Line {
+    bytes: [u8; 160],
+    length: usize,
+}
+
+impl Line {
+    pub const fn new() -> Self {
+        Self {
+            bytes: [0; 160],
+            length: 0,
+        }
+    }
+
+    pub fn get(&self) -> &[u8] {
+        &self.bytes[..self.length]
+    }
+}
+
+impl Default for Line {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Write for Line {
+    fn write_str(&mut self, text: &str) -> core::fmt::Result {
+        for byte in text.bytes() {
+            if self.length < self.bytes.len() {
+                self.bytes[self.length] = byte;
+                self.length += 1;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The services a process's requests are answered through.
 pub struct Services<'a> {
     pub storage: &'a mut ServiceDomain,
-    pub console: &'a mut ServiceDomain,
+    pub console: &'a mut dyn Console,
     /// Absent when the machine has no filesystem service; every file request
     /// then answers `-ENOSYS`.
     pub filesystem: Option<&'a mut ServiceDomain>,
@@ -688,36 +744,40 @@ fn end(
     process.state = State::Ended(exit);
     machine.reclaim(process.domain.frames());
     if index != 0 && !matches!(exit, Exit::Status(_)) {
-        let mut out = ServiceWriter::new(services.console);
-        let _ = out.write_str("process ");
+        let mut line = Line::new();
+        let _ = line.write_str("process ");
         for byte in &process.name[..process.name_length] {
-            let _ = out.write_char(char::from(*byte));
+            let _ = line.write_char(char::from(*byte));
         }
-        report(&mut out, exit);
-        out.flush();
+        report(&mut line, exit);
+        services.console.write(line.get());
     }
 }
 
-/// The one line the workshop prints for a process that did not exit.
-pub fn report(out: &mut ServiceWriter<'_>, exit: Exit) {
+/// The one line the workshop prints for how a process ended, with its
+/// newline as the console driver wants it.
+pub fn report(out: &mut dyn Write, exit: Exit) {
     match exit {
         Exit::Status(status) => {
-            let _ = writeln!(out, " exited with status {status}");
+            let _ = write!(out, " exited with status {status}\r\n");
         }
         Exit::Faulted(fault) => {
-            let _ = writeln!(
+            let _ = write!(
                 out,
-                " faulted: {} at {:#x} touching {:#x}; contained",
+                " faulted: {} at {:#x} touching {:#x}; contained\r\n",
                 fault.name(),
                 fault.pc,
                 fault.address
             );
         }
         Exit::BudgetExhausted => {
-            let _ = writeln!(out, " never yielded; tick budget exhausted; stopped");
+            let _ = write!(out, " never yielded; tick budget exhausted; stopped\r\n");
         }
         Exit::Blocked => {
-            let _ = writeln!(out, " blocked on what nothing left could answer; stopped");
+            let _ = write!(
+                out,
+                " blocked on what nothing left could answer; stopped\r\n"
+            );
         }
     }
 }
@@ -1171,11 +1231,11 @@ fn file_write(
     }
 }
 
-/// The console, through the console driver domain, with the terminal's line
-/// discipline applied here: a newline becomes a carriage return and a
+/// The console, through whatever the workshop gave, with the terminal's
+/// line discipline applied here: a newline becomes a carriage return and a
 /// newline, so the process may write text as text.
 #[inline(never)]
-fn write_console(table: &mut Table, index: usize, console: &mut ServiceDomain, length: u64) -> u64 {
+fn write_console(table: &mut Table, index: usize, console: &mut dyn Console, length: u64) -> u64 {
     let Some(process) = table.processes[index].as_mut() else {
         return error(EBADF);
     };
@@ -1191,17 +1251,6 @@ fn write_console(table: &mut Table, index: usize, console: &mut ServiceDomain, l
         bytes[count] = byte;
         count += 1;
     }
-    let handle = console.handle();
-    let mut written = 0;
-    while written < count {
-        let take = (count - written).min(crate::world::PAYLOAD_BYTES);
-        if console
-            .write_console(handle, &bytes[written..written + take])
-            .is_err()
-        {
-            return error(EIO);
-        }
-        written += take;
-    }
+    console.write(&bytes[..count]);
     length as u64
 }

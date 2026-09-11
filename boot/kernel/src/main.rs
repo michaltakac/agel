@@ -67,6 +67,8 @@ mod service;
 #[cfg(feature = "isolation-selftest")]
 mod user;
 #[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
+mod workshop;
+#[cfg(any(feature = "isolated-repl", feature = "native-graphics"))]
 mod workspace;
 
 #[cfg(feature = "isolation-selftest")]

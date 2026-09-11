@@ -67,7 +67,6 @@ pub enum MemoryError {
     /// The address is not page aligned.
     Misaligned,
     /// A domain would need more frames than a ledger can name.
-    #[cfg_attr(feature = "native-graphics", allow(dead_code))]
     LedgerFull,
 }
 
@@ -93,7 +92,6 @@ impl MemoryError {
 /// tracked partially. It is sized tightly because every domain carries one
 /// and the x86-64 image has a fixed slot budget.
 #[derive(Clone, Copy)]
-#[cfg_attr(feature = "native-graphics", allow(dead_code))]
 pub struct FrameLedger {
     frames: [u64; FrameLedger::CAPACITY],
     count: usize,
@@ -120,7 +118,6 @@ impl FrameLedger {
         self.count
     }
 
-    #[cfg_attr(feature = "native-graphics", allow(dead_code))]
     /// Add a frame allocated after the domain was built, so it is reclaimed
     /// with the rest: a loaded process's code and data pages, or an asset.
     #[cfg(feature = "pages")]
@@ -128,7 +125,6 @@ impl FrameLedger {
         self.record(frame)
     }
 
-    #[cfg_attr(feature = "native-graphics", allow(dead_code))]
     fn record(&mut self, frame: u64) -> Result<(), MemoryError> {
         if self.count >= Self::CAPACITY {
             return Err(MemoryError::LedgerFull);
@@ -147,11 +143,8 @@ impl FrameLedger {
 /// so nothing a dead domain wrote reaches its successor.
 pub struct FramePool {
     next: u64,
-    #[cfg(not(feature = "native-graphics"))]
     free: [u64; FramePool::FREE_CAPACITY],
-    #[cfg(not(feature = "native-graphics"))]
     free_count: usize,
-    #[cfg(not(feature = "native-graphics"))]
     ledger: Option<FrameLedger>,
 }
 
@@ -159,18 +152,14 @@ impl FramePool {
     /// Frames the free list can hold: a replaced driver gives back about ten,
     /// so this is dozens of restarts, and the list is sized for the image
     /// budget rather than for replacing evaluators, which nothing does yet.
-    #[cfg(not(feature = "native-graphics"))]
     const FREE_CAPACITY: usize = 192;
 
     /// A pool covering the whole fixed range this architecture reserves.
     pub const fn new() -> Self {
         Self {
             next: arch::POOL_START,
-            #[cfg(not(feature = "native-graphics"))]
             free: [0; Self::FREE_CAPACITY],
-            #[cfg(not(feature = "native-graphics"))]
             free_count: 0,
-            #[cfg(not(feature = "native-graphics"))]
             ledger: None,
         }
     }
@@ -183,16 +172,12 @@ impl FramePool {
 
     /// Take one zeroed frame, from the free list first.
     pub fn allocate(&mut self) -> Result<u64, MemoryError> {
-        #[cfg(not(feature = "native-graphics"))]
         let frame = if self.free_count > 0 {
             self.free_count -= 1;
             self.free[self.free_count]
         } else {
             self.bump()?
         };
-        #[cfg(feature = "native-graphics")]
-        let frame = self.bump()?;
-        #[cfg(not(feature = "native-graphics"))]
         if let Some(ledger) = self.ledger.as_mut() {
             if let Err(error) = ledger.record(frame) {
                 // The frame is not lost: an unrecorded frame goes straight
@@ -218,20 +203,12 @@ impl FramePool {
 
     /// Start recording the frames handed out, for a domain being built.
     pub fn open_ledger(&mut self) {
-        #[cfg(not(feature = "native-graphics"))]
-        {
-            self.ledger = Some(FrameLedger::EMPTY);
-        }
+        self.ledger = Some(FrameLedger::EMPTY);
     }
 
     /// Stop recording and return what was handed out since the ledger opened.
     pub fn close_ledger(&mut self) -> FrameLedger {
-        #[cfg(not(feature = "native-graphics"))]
-        {
-            self.ledger.take().unwrap_or(FrameLedger::EMPTY)
-        }
-        #[cfg(feature = "native-graphics")]
-        FrameLedger::EMPTY
+        self.ledger.take().unwrap_or(FrameLedger::EMPTY)
     }
 
     /// Give a dead domain's frames back. The caller must have dropped every
@@ -239,15 +216,11 @@ impl FramePool {
     /// allocates next, zeroed, and a domain that still mapped one would be
     /// sharing memory with its successor.
     pub fn reclaim(&mut self, ledger: &FrameLedger) {
-        #[cfg(not(feature = "native-graphics"))]
         for frame in ledger.frames[..ledger.count].iter().rev() {
             self.give_back(*frame);
         }
-        #[cfg(feature = "native-graphics")]
-        let _ = ledger;
     }
 
-    #[cfg(not(feature = "native-graphics"))]
     fn give_back(&mut self, frame: u64) {
         if self.free_count < Self::FREE_CAPACITY {
             self.free[self.free_count] = frame;

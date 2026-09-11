@@ -9,25 +9,46 @@ monitor=$(mktemp "${TMPDIR:-/tmp}/agel-live-keyboard-monitor.XXXXXX")
 frame=$(mktemp "${TMPDIR:-/tmp}/agel-live-keyboard-frame.XXXXXX")
 trap 'rm -f "$serial" "$monitor" "$frame"' EXIT
 
+# Keys go in only once the workshop has shown its prompt, and each form
+# waits for the next prompt, so boot time and paint time never race them.
+prompts() { awk '/live-desktop> /{n++} END{print n+0}' "$serial" 2>/dev/null || printf 0; }
+await_prompt() {
+  wanted=$1
+  tries=0
+  while test "$(prompts)" -lt "$wanted"; do
+    tries=$((tries + 1))
+    test "$tries" -lt 600 || exit 1
+    sleep 0.1
+  done
+}
 {
-  sleep 2
+  await_prompt 1
   for key in shift-9 a c c e n t spc c y a n shift-0 ret
   do
     printf 'sendkey %s\n' "$key"
     sleep 0.08
   done
+  await_prompt 2
   # Quote/eval needs formerly missing apostrophe; comparison needs '<'.
   for key in shift-9 e v a l spc apostrophe shift-9 shift-comma spc 1 spc 2 shift-0 shift-0 ret
   do
     printf 'sendkey %s\n' "$key"
     sleep 0.08
   done
+  await_prompt 3
   # Shifted letters and underscore must survive physical input intact.
-  for key in shift-9 d e f spc shift-a shift-minus shift-b spc 4 2 shift-0 ret shift-a shift-minus shift-b ret
+  for key in shift-9 d e f spc shift-a shift-minus shift-b spc 4 2 shift-0 ret
   do
     printf 'sendkey %s\n' "$key"
     sleep 0.08
   done
+  await_prompt 4
+  for key in shift-a shift-minus shift-b ret
+  do
+    printf 'sendkey %s\n' "$key"
+    sleep 0.08
+  done
+  await_prompt 5
   sleep 2
   printf 'screendump %s\n' "$frame"
   sleep 1

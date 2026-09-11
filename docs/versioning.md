@@ -204,6 +204,12 @@ promise.
   scene is laid out at 1080p and the language's drawing region is 1920×1000;
   painting drains the input driver between records so a slow frame loses
   no keystrokes.
+  `v0.2.49` runs programs on the desktop: the graphics image gains the
+  process loader and the filesystem service, the graphical workshop gets
+  `:exec` and the `:fs-*` commands through a workshop module both
+  workshops share over a console trait, and a terminal panel in the
+  workshop window shows what processes write; `scripts/test-desktop-process.sh`
+  runs a Rust and two C programs there and checks the panel changed.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

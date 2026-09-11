@@ -111,9 +111,11 @@ absent name to be refused, and the workshop to still evaluate afterwards.
 There is no C library yet: the programs are Rust. There are no arguments,
 environment, or processes that make processes. The program table names
 programs but grants nothing; what a process may reach is the namespace
-stratum 1 gives it at `:exec`. The graphics image does not carry the loader;
-it has no command that would reach it. Reclamation of a process's frames is
-the frame pool's, which the serial workshop compiles in.
+stratum 1 gives it at `:exec`. Since v0.2.49 the graphics image carries the
+loader and the filesystem service too: the graphical workshop's `:exec`
+runs a program with its console tee'd to a terminal panel on the desktop.
+Reclamation of a process's frames is the frame pool's, which every workshop
+compiles in.
 
 ## Stratum 1: files through namespaces
 

@@ -48,7 +48,7 @@ bytes. Characters such as `≤` are not automatically new language operators.
 
 ## Typography, surfaces and assets (v0.2.47), native resolution and sprites (v0.2.48)
 
-![The native desktop at v0.2.48](images/native-desktop-v0.2.48.png)
+![The native desktop at v0.2.49](images/native-desktop-v0.2.49.png)
 
 The compositor draws from three more record operations, each validated
 like the others:
@@ -100,8 +100,23 @@ shared page: a keystroke redraws the command field, a pointer that moved
 redraws the union of where it was and where it is, and only a committed
 scene change redraws the screen, so input is not lost to painting.
 
-What this is not yet: no windows a process owns, no launcher behind the
-panel's words, no clock, and the shadow is a linear falloff, not a blur.
+## Programs on the desktop (v0.2.49)
+
+The graphics image carries the process loader and the filesystem service,
+so the graphical workshop runs programs: `:exec NAME [ROOT] [ro] [-- ARG...]`,
+`:fs-format`, `:fs-mkdir PATH`, `:fs-ls [PATH]` and `:fs-restart` mean what
+they mean in the serial workshop, through one shared implementation in the
+kernel's `workshop` module, with the console a trait either workshop
+supplies. On the desktop a process's console is a tee: the serial console
+driver, which the harness reads, and a **terminal panel** in the workshop
+window, sixteen rows of eighty-four columns in Fira Mono, scrolling, drawn
+by the supervisor from the scene like everything else. What a process
+writes appears there as it writes it; how it ended is the last line.
+
+What this is not yet: a process cannot own a window or draw into one; it
+writes text into the workshop's terminal and nothing else. There is no
+launcher behind the panel's words, no clock, and the shadow is a linear
+falloff, not a blur.
 
 ## Live Agel forms
 
