@@ -181,8 +181,15 @@ Exact, because the gap is large:
   privileged instructions, touch ungranted devices, or never yield; plus one
   restartable driver domain with generations and fail-closed stale handles.
 
-Not started: the POSIX personality in any form, local inference, a filesystem,
-network stack, or storage drivers. The fixed native evaluator now lives in a
-protection domain on all three research backends, satisfying the first
-precondition for a POSIX process, but the full hosted agent runtime and process
-services have not followed it yet.
+- **The POSIX personality, three strata of five:** processes loaded from
+  the disk into protection domains (v0.2.41), files through a namespace
+  granted per process and served by an unprivileged filesystem service
+  (v0.2.43), and `agel-libc`, so C programs build from source and run
+  (v0.2.44); see [`posix-personality.md`](posix-personality.md) for what
+  each stratum does not claim.
+- **Storage drivers:** unprivileged ATA and virtio-blk driver domains on the
+  three research machines.
+
+Not started: processes that make processes (`spawn`, pipes, `wait`), the
+breadth of the C library, local inference, and a network stack. The hosted
+agent runtime has not moved into a domain.

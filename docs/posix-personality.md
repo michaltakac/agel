@@ -1,7 +1,8 @@
 # The POSIX personality
 
-Status: started at v0.2.41; stratum 1 at v0.2.43. This document is the
-plan, the process ABI, and an honest account of what exists.
+Status: started at v0.2.41; stratum 1 at v0.2.43; stratum 2 at v0.2.44.
+This document is the plan, the process ABI, and an honest account of what
+exists.
 
 The requirements are in [`deployment-targets.md`](deployment-targets.md):
 the kernel contract contains no POSIX concept; the personality runs
@@ -17,7 +18,7 @@ from source. Everything below is measured against those.
 |---|---|---|
 | 0. Processes | a static ELF loaded from disk into a fresh domain; a request protocol on the shared page; `write` to the console and `exit` | **v0.2.41**, all three research machines |
 | 1. Files and namespaces | an unprivileged filesystem service; a namespace capability per process; `open`, `read`, `write`, `close` on descriptors derived from it | **v0.2.43**, all three research machines |
-| 2. The C library | `agel-libc`, a `no_std` Rust library with a C ABI, so C and Rust programs build for Agel from source | after 1 |
+| 2. The C library | `agel-libc`, a `no_std` Rust library with a C ABI, so C and Rust programs build for Agel from source | **v0.2.44**, all three research machines |
 | 3. Processes that make processes | `spawn` with an explicit capability set, never `fork`; pipes; `wait` | after 2 |
 | 4. Breadth | the growing subset of the standard that real programs need: `stdio`, `malloc`, `string`, `errno`, time | ongoing |
 
@@ -201,7 +202,7 @@ refused, and a reboot after which the reader still finds its file. The
 reader also requires a read past the end of the file to answer 0 and a
 read on a closed descriptor to answer `EBADF`.
 
-### What stratum 1 does not claim
+### What stratum 1 does not claim (before stratum 2)
 
 The stale-descriptor path is implemented and not exercised: a process runs
 to its end within one `:exec`, and there is no way yet to restart the
@@ -215,3 +216,67 @@ directory except by `ro`. The filesystem service is one world for the
 machine and serves one request at a time. The supervisor still holds the
 descriptor table; a stratum with a C library moves what it can into the
 process.
+
+## Stratum 2: the C library
+
+`boot/posix/libc` is `agel-libc`: a `no_std` Rust crate built as a static
+archive with a C ABI, and the headers in `boot/posix/libc/include`. A C
+program compiles with any clang that has the three backends, links the
+archive with lld, and runs as a process like the Rust ones:
+
+```text
+agel-native[0]> :exec c-hello
+hello from C on Agel: a heap string of 13 bytes, 100% sure, ff hex
+process c-hello exited with status 7
+agel-native[0]> :exec c-cat /app
+notes for the app
+process c-cat exited with status 0
+agel-native[0]> :exec c-cat
+cat: notes: errno 2
+process c-cat exited with status 2
+```
+
+`scripts/build-c-program.sh NAME [arch]` builds `boot/posix/c/NAME.c`:
+clang with `-ffreestanding -nostdlib -fno-builtin` and the machine's flags
+(position-independent code without SSE on x86-64, general registers only
+on AArch64, `rv64imac` on RISC-V, since a process gets no floating-point
+state), then `-fuse-ld=lld` with the same linker script as the Rust
+programs. Apple's clang has no RISC-V backend and no lld; Homebrew's `llvm`
+and `lld` do, and `AGEL_CLANG` names a compiler explicitly.
+
+### What the library provides
+
+| Header | Functions | Notes |
+|---|---|---|
+| `unistd.h` | `read`, `write`, `close`, `_exit` | one process request each; `read` and `write` move at most one block per call, as the protocol does |
+| `fcntl.h` | `open` | through the namespace; the C prototype is variadic, the definition takes the two arguments every call passes |
+| `errno.h` | `errno`, the numbers the protocol answers | `errno` is `*__errno_location()`, set from a negated answer |
+| `stdlib.h` | `malloc`, `calloc`, `realloc`, `free`, `exit`, `abort` | a 64 KiB bump arena in the process's own `.bss`; `free` returns nothing |
+| `string.h` | `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, `strcmp`, `strncmp`, `strcpy`, `strchr` | volatile byte loops, so the compiler cannot turn them into calls to themselves |
+| `stdio.h` | `printf`, `puts`, `putchar` | `printf` handles `%s %d %i %u %x %c %p %%` with `l` and `z`; it is C, in `libc/c/stdio.c`, because a C-variadic definition is not stable Rust |
+
+The process entry `_start` is the library's: it keeps the shared page,
+calls `int main(void)` and exits with what it returns. The `unsafe` in the
+library is the C boundary, reading C strings and filling callers' buffers;
+nothing in it holds authority the process was not given.
+
+### What is proved
+
+`scripts/test-libc.sh [arch]` builds `hello.c` and `cat.c` from source for
+the machine and runs them: `printf` with every conversion the program uses,
+`malloc`, `strcpy` and `strlen`, `main`'s return as the exit status; `cat`
+in a namespace rooted at `app` reading `notes` to the end through `open`,
+`read`, `write` and `close`, and at the root finding no `notes`, reporting
+`errno` and exiting with it. CI runs all three machines.
+
+### What stratum 2 does not claim
+
+This is the foundation of source compatibility, not its breadth: no
+`stdio` streams, no `fopen`, no `scanf`, no `sprintf`, no `time`, no
+`signal`, no `math`, no environment, no `argv` (a process still gets no
+arguments), no `errno` strings, no locale. `free` frees nothing. `printf`
+is a subset; a format it does not know is copied through. The library is
+single-threaded, like the process. Nothing here is POSIX-certified or
+tested against a conformance suite; a real program will find the first
+missing function quickly, and stratum 4 is the answer to that, one function
+at a time, with a test each.

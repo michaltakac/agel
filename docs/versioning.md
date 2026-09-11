@@ -170,6 +170,12 @@ promise.
   descriptors derived from it, with `ESTALE` after `:fs-restart`;
   `scripts/test-files.sh` proves it on all three machines, and the programs
   share the `agel-process-abi` crate.
+  `v0.2.44` is the POSIX personality's C library: `agel-libc`, a `no_std`
+  Rust static archive with a C ABI and headers, so C programs build from
+  source with clang and lld and run as processes; `printf`, a bump heap,
+  the string routines, `open`/`read`/`write`/`close` and `errno`;
+  `scripts/build-c-program.sh` and `scripts/test-libc.sh` on all three
+  machines, with `lld` added to CI.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -896,6 +896,48 @@ def files_test(image: str, architecture: str, disk: str) -> None:
         again.close()
 
 
+def c_test(image: str, architecture: str, disk: str) -> None:
+    """C programs built from source against agel-libc, in namespaces."""
+    boot = Harness(image, persistent=True, architecture=architecture, disk=disk)
+    try:
+        boot.expect_until(b"AGEL_NATIVE_READY")
+        boot.expect_until(b"agel-native[0]> ")
+        boot.send(":fs-format", "formatted", 0)
+        boot.send(":fs-mkdir app", "directory ready: app", 0)
+        boot.send(":fs-mkdir etc", "directory ready: etc", 0)
+        run_program(
+            boot,
+            ":exec writer",
+            [b"writer: wrote etc/secret and app/notes", b"process writer exited with status 0"],
+        )
+        # printf, malloc, strcpy and strlen, and main's return as the status.
+        run_program(
+            boot,
+            ":exec c-hello",
+            [
+                b"hello from C on Agel: a heap string of 13 bytes, 100% sure, ff hex",
+                b"process c-hello exited with status 7",
+            ],
+        )
+        # open, read to the end, write, close, in a namespace rooted at app.
+        run_program(
+            boot,
+            ":exec c-cat /app",
+            [b"notes for the app", b"process c-cat exited with status 0"],
+        )
+        # The same program at the root has no `notes` to name: errno through
+        # the C library, and the status main returns.
+        run_program(
+            boot,
+            ":exec c-cat",
+            [b"cat: notes: errno 2", b"process c-cat exited with status 2"],
+        )
+        boot.send("(+ 20 22)", "42", 1)
+        shutdown(boot)
+    finally:
+        boot.close()
+
+
 def send_kernel_healthy(
     harness: Harness, line: str, expected: str, slot: str, revision: int
 ) -> None:
@@ -984,7 +1026,7 @@ def main() -> int:
         return 0
     if len(arguments) not in (1, 2):
         print(
-            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --files | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [--persistence | --power-cut | --exec | --files | --c | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
@@ -1013,6 +1055,19 @@ def main() -> int:
                 print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
             return 1
         print(f"Agel files [{architecture}]: format -> namespaces -> descriptors -> service restart -> reboot [ok]")
+        return 0
+    if len(arguments) == 2 and arguments[1] == "--c":
+        if disk is None:
+            print("C programs need a disk; pass --disk", file=sys.stderr)
+            return 2
+        try:
+            c_test(arguments[0], architecture, disk)
+        except Exception as error:
+            print(f"C test failed: {error}", file=sys.stderr)
+            if LAST_HARNESS is not None:
+                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
+            return 1
+        print(f"Agel C library [{architecture}]: build from source -> printf, heap, strings -> files through a namespace [ok]")
         return 0
     if len(arguments) == 2 and arguments[1] == "--power-cut":
         if disk is None:

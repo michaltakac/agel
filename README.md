@@ -4,7 +4,9 @@ Agel is an experimental agentic Lisp and, eventually, an operating system in
 which agents are first-class values. The project starts as a safe host runtime
 and will progressively replace its host components with code written in Agel.
 
-The current repository is **v0.2.43: a process reaches files only through the namespace it was given,
+The current repository is **v0.2.44: C programs build from source against `agel-libc`, a Rust static
+archive with a C ABI, and run as processes on all three research machines, with `printf`, a heap, the
+string routines and files through their namespace; a process reaches files only through the namespace it was given,
 served by an unprivileged filesystem service that reaches the disk only through the supervisor, with
 descriptors that fail closed when the service restarts, on all three research machines; the disk layout has grown so the kernel can, with 508-sector kernel
 slots loaded by four BIOS transfers and every region after them moved to make room; the POSIX personality has its first stratum, a program loaded from

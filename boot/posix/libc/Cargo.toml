@@ -1,0 +1,12 @@
+[package]
+name = "agel-libc"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["staticlib"]
+
+[dependencies]
+agel-process-abi = { path = "../abi" }

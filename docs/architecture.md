@@ -320,7 +320,8 @@ Each rung must be runnable and differentially testable against the rung below:
    kernel slots, so those strata have room in the image. The second
    stratum (v0.2.43) exists: an unprivileged filesystem service, a
    namespace per process, and descriptors that fail closed across a
-   service restart.
+   service restart. The third (v0.2.44) is `agel-libc`: C programs build
+   from source and run as processes on all three machines.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

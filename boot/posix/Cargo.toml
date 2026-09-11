@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["abi", "hello", "hostile", "writer", "reader"]
+members = ["abi", "libc", "hello", "hostile", "writer", "reader"]
 
 # Programs the Agel supervisor loads into protection domains: static ELF
 # images built for one of the three research machines, speaking the process

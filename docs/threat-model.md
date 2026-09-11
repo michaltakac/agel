@@ -1052,6 +1052,33 @@ a capability the process holds. No files, no namespaces, no C library.
   lengths, never a sector outside the region and never anything in the
   supervisor; the superblock magic is the only integrity check.
 
+## v0.2.44
+
+- **C code in a process is still a process:** a C program built against
+  `agel-libc` runs in the same protection domain as a Rust one, with the
+  same window, the same tick budget, the same namespace. The library adds
+  no authority: every function is a request the supervisor already
+  bounded, and `errno` is the negated answer.
+- **The C boundary is the unsafe part:** the library's `unsafe` is reading
+  a NUL-terminated string and filling a caller's buffer, both of which trust
+  the C program about its own memory. A C program that lies to its own
+  library corrupts its own domain and nothing else; the supervisor reads the
+  request words, never the program's pointers.
+- **Position-independent images on x86-64:** the GOT a position-independent
+  C program carries is placed in the writable segment by the linker script,
+  so no section shares a page with another segment and the loader's checks
+  hold for C exactly as for Rust; an image that violates them is refused
+  with the reason, as `c-hello` was until the script said where the GOT
+  goes.
+- **No floating point:** a process gets no floating-point or vector state,
+  so the C programs are compiled without SSE, NEON or the RISC-V F and D
+  extensions. A program that uses them anyway takes a fault the supervisor
+  contains; the library does not hide that.
+
+Not claimed: the library is not audited against a C standard, `malloc` is
+a bump arena with no reuse and no guard, and `printf` is a subset. None of
+that is a supervisor concern; all of it is a program's.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a
