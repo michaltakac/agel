@@ -1401,6 +1401,29 @@ rights, no `chdir`, no atomicity across a power cut inside `rename`
 Not claimed: no signal delivery, no handlers, no `alarm`; time since
 boot is not time of day.
 
+## v0.2.60
+
+- **A page at the break is fresh:** every `brk` page is a zeroed frame
+  from the pool, mapped user-data only (never executable), inside the
+  process window, and recorded in the domain's ledger so it goes back
+  when the process ends. A guard page between the image and the break
+  makes a run off the data a fault, not a heap write.
+- **Bounded by three things:** the window (16 MiB), the pool, and the
+  ledger (512 frames); a request past any is `-ENOMEM`, and at most 64
+  pages come per request, so one process cannot take the pool in one
+  call.
+- **A grown file is zeros:** `truncate` writes zeros over the bytes a
+  growth adds before the length changes, so an extent's stale sectors
+  never become readable through a longer file.
+- **The working directory is a convenience, not authority:** `chdir`
+  changes a prefix in the library; every request still carries a full
+  path resolved from the namespace's root by the service, so no `..`
+  in a working directory climbs above it.
+
+Not claimed: the ledger does not count page-table frames, which the
+pool allocates as mappings need them and which are not reclaimed with
+the domain's frames (as before); no `mmap`; no shrinking of the break.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

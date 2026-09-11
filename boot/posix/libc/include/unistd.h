@@ -16,6 +16,12 @@ void _exit(int status) __attribute__((noreturn));
 
 unsigned int sleep(unsigned int seconds);
 int usleep(unsigned int microseconds);
+int chdir(const char *path);
+char *getcwd(char *buffer, size_t size);
+int ftruncate(int descriptor, off_t length);
+int truncate(const char *path, off_t length);
+/* The break: pages the supervisor maps for the heap; sbrk(0) is the break. */
+void *sbrk(long increment);
 int unlink(const char *path);
 int rmdir(const char *path);
 

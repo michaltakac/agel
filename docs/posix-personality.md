@@ -91,6 +91,8 @@ and resumes the process.
 | `17` clock | none | microseconds since the machine came up, from its counter (the time-stamp counter calibrated against the timer on x86-64, the generic counter on AArch64, the `time` CSR on RISC-V); stratum 4 |
 | `18` sleep | microseconds | 0, once the clock has passed; the process is asleep meanwhile, the desktop runs, and the serial workshop repeats its pass; stratum 4 |
 | `19` kill | child id, signal | 0; the child, which must be the caller's and alive, ends as killed, and its `wait` answers `0x100` with `9`; `-ESRCH` otherwise, `-EINVAL` for a signal other than `9`; stratum 4 |
+| `20` brk | pages | the address of that many fresh zeroed pages mapped at the process's break, which moves past them, or the break itself for 0; at most 64 per request; `-ENOMEM` when the window, the frame pool or the ledger is exhausted; stratum 4 |
+| `21` ftruncate | descriptor, length | 0; the file's length set through a writable descriptor, at most a file's size, the bytes a growth adds zero-filled; stratum 4 |
 | `12` event | window, wait | the next event for a window the process owns, packed: the kind in the top byte (`1` a press, with content coordinates in bits 32–48 and 16–32; `2` a key, with its byte in the low eight; `3` the release and `4` the pointer's motion after a press, with coordinates like a press), 0 when there is none; with `wait` set the process sleeps until there is one and the desktop runs meanwhile; `-ENODEV` without a display (and a sleeping process is stopped as blocked where nothing can deliver), `-EBADF` for a window not its own; not POSIX |
 | `11` draw | window, record count ≤ 8, flags (`1` clears first) | the records the window holds after this; the records are 64-byte compositor records in the block area, relative to the window's content; `-EINVAL` and nothing drawn when any is not permitted or reaches outside the content, `-ENOSPC` past 24 records, `-EBADF` for a window the process does not own; not POSIX |
 
@@ -415,7 +417,7 @@ heap: reuse, join, realloc, ENOMEM
 formatter: widths, flags, precision, truncation
 strings: strtol, strstr, strrchr, ctype, strcat, qsort
 streams: fopen, fprintf, append, fgets, feof, lseek
-breadth: 23 checks passed
+breadth: 24 checks passed
 process c-breadth exited with status 0
 ```
 
@@ -456,8 +458,8 @@ removes an empty directory as it removes a file), `rename`, `stat` (a
 `S_IFREG` or `S_IFDIR`), `mkdir` (an `open` for creation with
 `O_DIRECTORY`, closed at once; the mode is ignored), and `<dirent.h>`'s
 `opendir`, `readdir` and `closedir` over a descriptor opened on the
-directory, four directories open at once. The service gains `unlink` and
-`rename` commands; the process protocol gains `unlink`, `rename`, `stat`
+directory, four directories open at once. The service gains `unlink`,
+`rename` and (v0.2.60) `truncate` commands; the process protocol gains `unlink`, `rename`, `stat`
 and `readdir`, each bounded by the namespace's rights before the service
 sees a path. `unlink` leaves the extent's sectors as they were: the entry
 is what made them a file. `dir.c` exercises all of it in a namespace
@@ -486,6 +488,25 @@ and requires the clock to have advanced, escapes three frames with
 seconds), is refused `SIGTERM`, kills it, and reads the signal from
 `waitpid`; a second `kill` is `ESRCH`.
 
+**The heap grows (v0.2.60).** The C library's heap is no longer a fixed
+arena in `.bss` but pages the supervisor maps at the process's **break**,
+which starts a guard page past the image: the first `malloc` asks for
+64 pages, and a request nothing fits asks for more (at least 64, or what
+the request needs), which extend the last free block or follow it. A
+program can now hold as much as the process window and the domain's
+frame ledger allow, and the ledger is 512 frames on every build. `sbrk`
+is there for programs that manage their own break; `sbrk(0)` reads it.
+`chdir` and `getcwd` are the library's: the namespace has no working
+directory, so the library keeps one, folds `.` and `..`, checks it with
+`stat`, and joins relative paths to it before every request.
+`ftruncate` sets a file's length through the new service command,
+zero-filling what grows, so a grown file never shows what an earlier
+file left in the extent; `truncate` opens, sets and closes. `heap.c`
+fills and checks sixteen 64 KiB blocks, frees them, takes one megabyte,
+is refused 64 megabytes, changes directory into `app` and reads the
+notes, is refused a directory that is not there, and truncates and
+grows a file.
+
 **Windows, which are not POSIX.** `<agel/window.h>` declares
 `agel_window(width, height, title)` and `agel_draw(window, records, count,
 flags)` over the `10` and `11` requests, with inline builders for the
@@ -505,9 +526,9 @@ How the desktop keeps and checks what a process draws is in
 What it does not add: no calendar time, no signal handlers or signals
 other than `SIGKILL` to a child, no `alarm`, no `math` (the processes
 run without floating point), no floating point in the formatter or the
-scanner, no locale, no threads, no `chdir` (paths are always from the
-namespace's root), no `truncate`, no `%[` in the scanner. A process that
+scanner, no locale, no threads, no `%[` in the scanner, no `mmap`, no
+shared memory. A process that
 sleeps holds the serial workshop's `:exec` until it wakes, as any
 process holds it until it ends; the desktop hands the prompt back. `qsort` is quadratic. The
-heap is one arena and never grows. Each is a step this stratum takes when
+heap grows by whole pages and never shrinks. Each is a step this stratum takes when
 a program needs it, with a test.

@@ -50,9 +50,12 @@ int main(int argc, char **argv) {
     free(a);
     free(e);
     char *big = malloc(200 * 1024);
-    check(big != NULL, "the whole arena is one block again");
+    check(big != NULL, "the whole first heap is one block again");
     free(big);
-    check(malloc(400 * 1024) == NULL && errno == ENOMEM, "ENOMEM past the arena");
+    /* The heap grows by pages the supervisor maps, up to the process
+       window; a request past the window is what ENOMEM is for now. */
+    check(malloc(400 * 1024) != NULL, "the heap grows past its first pages");
+    check(malloc(64 * 1024 * 1024) == NULL && errno == ENOMEM, "ENOMEM past the window");
     printf("heap: reuse, join, realloc, ENOMEM\n");
 
     /* The formatter. */

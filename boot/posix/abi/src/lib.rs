@@ -43,6 +43,11 @@ pub const CLOCK: u64 = 17;
 pub const SLEEP: u64 = 18;
 pub const KILL: u64 = 19;
 pub const SIGNAL_KILLED: u64 = 9;
+/// Pages at the break, and a file's length through a descriptor.
+pub const BRK: u64 = 20;
+/// The most pages one `brk` request maps.
+pub const BRK_PAGES: u64 = 64;
+pub const FTRUNCATE: u64 = 21;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;
@@ -315,6 +320,17 @@ impl Process {
     /// End child `id` with `signal`, which can only be `SIGNAL_KILLED`.
     pub fn kill(&self, id: u64, signal: u64) -> i64 {
         self.request(KILL, [id, signal, 0, 0]) as i64
+    }
+
+    /// Map `pages` fresh pages at the break: their address, or the break
+    /// itself for 0 pages, or a negated error number.
+    pub fn brk(&self, pages: u64) -> i64 {
+        self.request(BRK, [pages, 0, 0, 0]) as i64
+    }
+
+    /// Set the length of the file at `descriptor`. 0, or a negated error.
+    pub fn ftruncate(&self, descriptor: u64, length: u64) -> i64 {
+        self.request(FTRUNCATE, [descriptor, length, 0, 0]) as i64
     }
 
     /// Wait for child `id` to end: its exit status, `WAIT_SIGNALED` with a

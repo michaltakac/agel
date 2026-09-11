@@ -497,6 +497,18 @@ pub mod process {
     /// has ended, `-EINVAL` for any other signal. The child's `wait`
     /// answers `WAIT_SIGNALED` with the signal.
     pub const KILL: u64 = 19;
+    /// Map `arguments[0]` fresh, zeroed pages at the process's break and
+    /// move it past them; answers the address the pages start at, or the
+    /// break itself for 0 pages. `-ENOMEM` when the process window, the
+    /// frame pool or the domain's frame ledger is exhausted: the pages
+    /// mapped before that stay mapped and the break moves past them.
+    pub const BRK: u64 = 20;
+    /// The most pages one `brk` maps.
+    pub const BRK_PAGES: u64 = 64;
+    /// Set the length of the file open at descriptor `arguments[0]` to
+    /// `arguments[1]`, zero-filling what grows; the descriptor must be
+    /// writable. Answers 0.
+    pub const FTRUNCATE: u64 = 21;
     /// An event's kind is its top byte; a press carries the content
     /// coordinates in bits 32..48 and 16..32, a key its byte in the low
     /// eight bits.
@@ -590,6 +602,9 @@ pub mod fs {
     /// following `arguments[2]` bytes (another), both from `arguments[0]`;
     /// the destination must not exist.
     pub const COMMAND_RENAME: u64 = 0xb600;
+    /// Set entry `arguments[0]`'s length to `arguments[1]`, at most a file's
+    /// size, zero-filling the bytes a growth adds.
+    pub const COMMAND_TRUNCATE: u64 = 0xb700;
     /// Sector request words the service fills before it yields mid-command:
     /// operation (0 none, 1 read, 2 write), sector, and the answer.
     pub const DISK_OPERATION: usize = 72;

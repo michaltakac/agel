@@ -267,6 +267,11 @@ promise.
   of one's own child, and the C library's `time.h`, `signal.h`,
   `setjmp.h` and environment; `clock.c` proves each on all three
   machines.
+  `v0.2.60` lets the heap grow: a `brk` request maps pages at the
+  process's break, the C library's heap lives on them and asks for more,
+  the frame ledger is 512 on every build; `chdir` and `getcwd` in the
+  library; `ftruncate` through a service command that zero-fills growth;
+  `heap.c` proves each on all three machines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

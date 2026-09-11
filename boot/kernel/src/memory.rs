@@ -100,11 +100,9 @@ pub struct FrameLedger {
 impl FrameLedger {
     /// Reclamation exists where restart exists: the self-test builds and the
     /// serial workshop replace domains and account for their frames. The
-    /// graphics workshop never replaces one, but its compositor holds the
-    /// font atlases as extra pages, so its ledger is the larger.
-    #[cfg(not(feature = "native-graphics"))]
-    pub const CAPACITY: usize = 160;
-    #[cfg(feature = "native-graphics")]
+    /// compositor holds the font atlases as extra pages and a process holds
+    /// its image and its heap, so the ledger is sized for those: 512 frames,
+    /// two mebibytes.
     pub const CAPACITY: usize = 512;
 
     pub const EMPTY: Self = Self {

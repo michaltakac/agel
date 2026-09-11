@@ -240,8 +240,8 @@ pub unsafe extern "C" fn agel_spawn(
 /// `path` must be NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn unlink(path: *const c_char) -> c_int {
-    let bytes = unsafe { core::slice::from_raw_parts(path as *const u8, strlen(path)) };
-    outcome(process().unlink(bytes)) as c_int
+    let resolved = unsafe { resolve(path) };
+    outcome(process().unlink(resolved.get())) as c_int
 }
 
 /// `rmdir` is `unlink` here: the service removes an empty directory the
@@ -258,9 +258,9 @@ pub unsafe extern "C" fn rmdir(path: *const c_char) -> c_int {
 /// Both must be NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn rename(old: *const c_char, new: *const c_char) -> c_int {
-    let old = unsafe { core::slice::from_raw_parts(old as *const u8, strlen(old)) };
-    let new = unsafe { core::slice::from_raw_parts(new as *const u8, strlen(new)) };
-    outcome(process().rename(old, new)) as c_int
+    let old = unsafe { resolve(old) };
+    let new = unsafe { resolve(new) };
+    outcome(process().rename(old.get(), new.get())) as c_int
 }
 
 /// `<sys/stat.h>`'s `struct stat`, as C lays it out: what the service
@@ -278,8 +278,8 @@ const S_IFDIR: c_uint = 0o040000;
 /// `path` must be NUL-terminated and `buffer` valid.
 #[no_mangle]
 pub unsafe extern "C" fn stat(path: *const c_char, buffer: *mut stat) -> c_int {
-    let bytes = unsafe { core::slice::from_raw_parts(path as *const u8, strlen(path)) };
-    match process().stat(bytes) {
+    let resolved = unsafe { resolve(path) };
+    match process().stat(resolved.get()) {
         Ok((kind, length)) => {
             unsafe {
                 (*buffer).st_size = length as c_long;
@@ -581,13 +581,156 @@ pub struct agel_window_event {
 /// On every machine's calling convention the fixed arguments arrive the same
 /// way whether or not the prototype is variadic.
 ///
+/// The working directory, an absolute path the library keeps: the
+/// namespace has no notion of one, so a relative path is joined to it
+/// here before the request. It starts at the namespace's root.
+const PATH_BYTES: usize = 256;
+static mut CWD: [u8; PATH_BYTES] = [0; PATH_BYTES];
+static mut CWD_LEN: usize = 0;
+
+/// A C path as bytes, joined to the working directory when relative:
+/// what the request carries.
+struct Resolved {
+    bytes: [u8; PATH_BYTES],
+    length: usize,
+}
+
+impl Resolved {
+    fn get(&self) -> &[u8] {
+        &self.bytes[..self.length]
+    }
+}
+
+/// # Safety
+/// `path` must be NUL-terminated.
+unsafe fn resolve(path: *const c_char) -> Resolved {
+    let length = unsafe { strlen(path) };
+    let given = unsafe { core::slice::from_raw_parts(path as *const u8, length) };
+    let mut resolved = Resolved {
+        bytes: [0; PATH_BYTES],
+        length: 0,
+    };
+    // Safety: the working directory is the library's own.
+    let cwd =
+        unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(CWD).cast::<u8>(), CWD_LEN) };
+    let mut push = |byte: u8| {
+        if resolved.length < PATH_BYTES {
+            resolved.bytes[resolved.length] = byte;
+            resolved.length += 1;
+        }
+    };
+    if !given.starts_with(b"/") && !cwd.is_empty() {
+        for byte in cwd {
+            push(*byte);
+        }
+        push(b'/');
+    }
+    for byte in given {
+        push(*byte);
+    }
+    resolved
+}
+
 /// # Safety
 /// `path` must be a NUL-terminated string.
 #[no_mangle]
 pub unsafe extern "C" fn open(path: *const c_char, flags: c_int) -> c_int {
-    let length = unsafe { strlen(path) };
-    let bytes = unsafe { core::slice::from_raw_parts(path as *const u8, length) };
-    outcome(process().open(bytes, flags as u64)) as c_int
+    let resolved = unsafe { resolve(path) };
+    outcome(process().open(resolved.get(), flags as u64)) as c_int
+}
+
+/// `chdir`: the path, resolved and normalized (`.` and `..` folded),
+/// becomes the working directory if it names a directory.
+///
+/// # Safety
+/// `path` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn chdir(path: *const c_char) -> c_int {
+    let resolved = unsafe { resolve(path) };
+    let mut normalized = [0_u8; PATH_BYTES];
+    let mut length = 0;
+    for component in resolved.get().split(|byte| *byte == b'/') {
+        match component {
+            b"" | b"." => {}
+            b".." => {
+                while length > 0 && normalized[length - 1] != b'/' {
+                    length -= 1;
+                }
+                length = length.saturating_sub(1);
+            }
+            name => {
+                if length + 1 + name.len() >= PATH_BYTES {
+                    return outcome(-36) as c_int; // ENAMETOOLONG
+                }
+                normalized[length] = b'/';
+                normalized[length + 1..length + 1 + name.len()].copy_from_slice(name);
+                length += 1 + name.len();
+            }
+        }
+    }
+    let target = if length == 0 {
+        b"/" as &[u8]
+    } else {
+        &normalized[..length]
+    };
+    match process().stat(target) {
+        Ok((2, _)) => {}
+        Ok(_) => return outcome(-20) as c_int, // ENOTDIR
+        Err(number) => return outcome(number) as c_int,
+    }
+    // Safety: the working directory is the library's own.
+    unsafe {
+        let cwd = core::ptr::addr_of_mut!(CWD).cast::<u8>();
+        for (offset, byte) in normalized[..length].iter().enumerate() {
+            cwd.add(offset).write(*byte);
+        }
+        CWD_LEN = length;
+    }
+    0
+}
+
+/// # Safety
+/// `buffer` must hold `size` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn getcwd(buffer: *mut c_char, size: usize) -> *mut c_char {
+    // Safety: the working directory is the library's own.
+    let cwd =
+        unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(CWD).cast::<u8>(), CWD_LEN) };
+    let text: &[u8] = if cwd.is_empty() { b"/" } else { cwd };
+    if size < text.len() + 1 {
+        unsafe { ERRNO = 34 }; // ERANGE
+        return core::ptr::null_mut();
+    }
+    unsafe {
+        for (offset, byte) in text.iter().enumerate() {
+            buffer.add(offset).write(*byte as c_char);
+        }
+        buffer.add(text.len()).write(0);
+    }
+    buffer
+}
+
+#[no_mangle]
+pub extern "C" fn ftruncate(descriptor: c_int, length: c_long) -> c_int {
+    if descriptor < 0 || length < 0 {
+        return outcome(-22) as c_int;
+    }
+    outcome(process().ftruncate(descriptor as u64, length as u64)) as c_int
+}
+
+/// `truncate`: the file opened for writing, its length set, closed.
+///
+/// # Safety
+/// `path` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn truncate(path: *const c_char, length: c_long) -> c_int {
+    let descriptor = unsafe { open(path, agel_process_abi::O_WRONLY as c_int) };
+    if descriptor < 0 {
+        return -1;
+    }
+    let result = ftruncate(descriptor, length);
+    close(descriptor);
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -614,17 +757,20 @@ pub extern "C" fn abort() -> ! {
     _exit(134)
 }
 
-/// The heap: a fixed arena in the process's own `.bss`, managed as a list
-/// of blocks with a header each. `malloc` takes the first free block that
-/// fits, splitting what is left; `free` marks a block free and joins it
-/// with a free neighbour on either side, so memory is reused and does not
-/// fragment into unusable slivers for the patterns small programs have.
-/// Nothing here is thread-safe, because nothing here is threaded.
-const ARENA_BYTES: usize = 256 * 1024;
+/// The heap: pages the supervisor maps at the process's break, managed
+/// as a list of blocks with a header each. `malloc` takes the first free
+/// block that fits, splitting what is left, and asks for more pages when
+/// nothing fits; `free` marks a block free and joins it with a free
+/// neighbour on either side, so memory is reused and does not fragment
+/// into unusable slivers for the patterns small programs have. Nothing
+/// here is thread-safe, because nothing here is threaded.
 const HEADER_BYTES: usize = 16;
 const ALIGN: usize = 16;
-static mut ARENA: [u8; ARENA_BYTES] = [0; ARENA_BYTES];
-static HEAP_READY: AtomicUsize = AtomicUsize::new(0);
+const PAGE_BYTES: usize = 4096;
+/// Pages asked for at a time: the first heap, and each growth at least.
+const HEAP_STEP_PAGES: usize = 64;
+static HEAP_BASE: AtomicUsize = AtomicUsize::new(0);
+static HEAP_BYTES: AtomicUsize = AtomicUsize::new(0);
 
 /// A block header: the payload size in bytes, and whether it is free.
 #[repr(C)]
@@ -634,53 +780,112 @@ struct Header {
 }
 
 fn arena() -> *mut u8 {
-    // The arena is the library's static; every pointer derived stays
-    // inside it, checked against ARENA_BYTES.
-    core::ptr::addr_of_mut!(ARENA).cast::<u8>()
+    HEAP_BASE.load(Ordering::Relaxed) as *mut u8
+}
+
+fn heap_bytes() -> usize {
+    HEAP_BYTES.load(Ordering::Relaxed)
 }
 
 fn header_at(offset: usize) -> *mut Header {
-    // Safety: `offset` is a block boundary inside the arena.
+    // Safety: `offset` is a block boundary inside the heap.
     unsafe { arena().add(offset).cast::<Header>() }
 }
 
-fn heap_init() {
-    if HEAP_READY.swap(1, Ordering::Relaxed) == 0 {
-        // Safety: one block spanning the arena, free.
-        unsafe {
-            header_at(0).write(Header {
-                size: ARENA_BYTES - HEADER_BYTES,
+/// Pages from the supervisor, contiguous with the heap so far: the heap
+/// grows by them, as one larger last block when the last is free.
+fn grow(pages: usize) -> bool {
+    let mut got = 0;
+    while got < pages {
+        let take = (pages - got).min(agel_process_abi::BRK_PAGES as usize);
+        let address = process().brk(take as u64);
+        if address < 0 {
+            break;
+        }
+        got += take;
+    }
+    if got == 0 {
+        return false;
+    }
+    let added = got * PAGE_BYTES;
+    let bytes = heap_bytes();
+    // The last block: extended when free, else a new free block follows it.
+    let mut at = 0;
+    let mut last = None;
+    while at + HEADER_BYTES <= bytes {
+        // Safety: `at` walks block boundaries.
+        let header = unsafe { &*header_at(at) };
+        last = Some(at);
+        at += HEADER_BYTES + header.size;
+    }
+    match last {
+        // Safety: `at` is a boundary; the new pages follow the heap.
+        Some(at) if unsafe { (*header_at(at)).free } == 1 => unsafe {
+            (*header_at(at)).size += added;
+        },
+        _ => unsafe {
+            header_at(bytes).write(Header {
+                size: added - HEADER_BYTES,
                 free: 1,
             })
-        };
+        },
     }
+    HEAP_BYTES.store(bytes + added, Ordering::Relaxed);
+    true
+}
+
+fn heap_init() -> bool {
+    if HEAP_BASE.load(Ordering::Relaxed) != 0 {
+        return true;
+    }
+    let base = process().brk(0);
+    if base <= 0 {
+        return false;
+    }
+    HEAP_BASE.store(base as usize, Ordering::Relaxed);
+    grow(HEAP_STEP_PAGES)
 }
 
 #[no_mangle]
 pub extern "C" fn malloc(size: usize) -> *mut c_void {
-    heap_init();
+    if !heap_init() {
+        // Safety: as in `outcome`.
+        unsafe { ERRNO = 12 };
+        return core::ptr::null_mut();
+    }
     let wanted = (size.max(1) + ALIGN - 1) & !(ALIGN - 1);
-    let mut offset = 0;
-    while offset + HEADER_BYTES <= ARENA_BYTES {
-        // Safety: `offset` walks block boundaries from the first header.
-        let header = unsafe { &mut *header_at(offset) };
-        if header.free == 1 && header.size >= wanted {
-            let rest = header.size - wanted;
-            if rest >= HEADER_BYTES + ALIGN {
-                header.size = wanted;
-                // Safety: the split block lies inside the block just cut.
-                unsafe {
-                    header_at(offset + HEADER_BYTES + wanted).write(Header {
-                        size: rest - HEADER_BYTES,
-                        free: 1,
-                    })
-                };
+    for attempt in 0..2 {
+        let bytes = heap_bytes();
+        let mut offset = 0;
+        while offset + HEADER_BYTES <= bytes {
+            // Safety: `offset` walks block boundaries from the first header.
+            let header = unsafe { &mut *header_at(offset) };
+            if header.free == 1 && header.size >= wanted {
+                let rest = header.size - wanted;
+                if rest >= HEADER_BYTES + ALIGN {
+                    header.size = wanted;
+                    // Safety: the split block lies inside the block just cut.
+                    unsafe {
+                        header_at(offset + HEADER_BYTES + wanted).write(Header {
+                            size: rest - HEADER_BYTES,
+                            free: 1,
+                        })
+                    };
+                }
+                header.free = 0;
+                // Safety: the payload follows the header inside the heap.
+                return unsafe { arena().add(offset + HEADER_BYTES) } as *mut c_void;
             }
-            header.free = 0;
-            // Safety: the payload follows the header inside the arena.
-            return unsafe { arena().add(offset + HEADER_BYTES) } as *mut c_void;
+            offset += HEADER_BYTES + header.size;
         }
-        offset += HEADER_BYTES + header.size;
+        if attempt == 0 {
+            let pages = (wanted + HEADER_BYTES)
+                .div_ceil(PAGE_BYTES)
+                .max(HEAP_STEP_PAGES);
+            if !grow(pages) {
+                break;
+            }
+        }
     }
     // Safety: as in `outcome`.
     unsafe { ERRNO = 12 };
@@ -691,7 +896,7 @@ pub extern "C" fn malloc(size: usize) -> *mut c_void {
 fn block_of(pointer: *mut c_void) -> Option<usize> {
     let address = pointer as usize;
     let base = arena() as usize;
-    if address < base + HEADER_BYTES || address >= base + ARENA_BYTES {
+    if base == 0 || address < base + HEADER_BYTES || address >= base + heap_bytes() {
         return None;
     }
     let offset = address - base - HEADER_BYTES;
@@ -703,12 +908,12 @@ pub extern "C" fn free(pointer: *mut c_void) {
     let Some(offset) = block_of(pointer) else {
         return;
     };
-    heap_init();
+    let bytes = heap_bytes();
     // Walk from the start so the previous block is known; the walk also
     // confirms `offset` is a boundary before anything is written.
     let mut previous: Option<usize> = None;
     let mut at = 0;
-    while at + HEADER_BYTES <= ARENA_BYTES {
+    while at + HEADER_BYTES <= bytes {
         // Safety: `at` walks block boundaries.
         let header = unsafe { &mut *header_at(at) };
         if at == offset {
@@ -717,7 +922,7 @@ pub extern "C" fn free(pointer: *mut c_void) {
             }
             header.free = 1;
             let next = at + HEADER_BYTES + header.size;
-            if next + HEADER_BYTES <= ARENA_BYTES {
+            if next + HEADER_BYTES <= bytes {
                 // Safety: `next` is the following block's boundary.
                 let following = unsafe { &*header_at(next) };
                 if following.free == 1 {
@@ -736,6 +941,24 @@ pub extern "C" fn free(pointer: *mut c_void) {
         previous = Some(at);
         at += HEADER_BYTES + header.size;
     }
+}
+
+/// `sbrk`: pages at the break for `increment` bytes, rounded up to whole
+/// pages; the old break, or -1 with `errno`. `sbrk(0)` is the break.
+#[no_mangle]
+pub extern "C" fn sbrk(increment: isize) -> *mut c_void {
+    if increment < 0 {
+        // Safety: as in `outcome`.
+        unsafe { ERRNO = 22 };
+        return usize::MAX as *mut c_void;
+    }
+    let pages = (increment as usize).div_ceil(PAGE_BYTES) as u64;
+    let result = process().brk(pages);
+    if result < 0 {
+        outcome(result);
+        return usize::MAX as *mut c_void;
+    }
+    result as usize as *mut c_void
 }
 
 #[no_mangle]

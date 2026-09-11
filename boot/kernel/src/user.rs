@@ -2245,6 +2245,39 @@ impl Filesystem {
         unsafe { self.flush_entry(index) }
     }
 
+    /// Set a file's length: shorter keeps the first bytes; longer fills
+    /// the new bytes with zeros, so a grown file never shows what an
+    /// earlier file left in the extent.
+    #[link_section = ".user_text"]
+    unsafe fn truncate(&mut self, index: usize, length: u64) -> Result<(), u64> {
+        use crate::world::fs;
+        unsafe { self.mount()? };
+        let entry = self.entry(index)?;
+        if entry.kind != fs::KIND_FILE as u8 {
+            return Err(fs::EINVAL);
+        }
+        if length > fs::FILE_BYTES {
+            return Err(fs::EFBIG);
+        }
+        let old = u64::from(entry.length);
+        let mut at = old;
+        while at < length {
+            let sector = agelfs::DATA + index as u64 * agelfs::EXTENT_SECTORS + at / 512;
+            let inside = (at % 512) as usize;
+            let take = ((512 - inside) as u64).min(length - at) as usize;
+            unsafe { self.read_sector(sector)? };
+            for byte in self.sector.iter_mut().skip(inside).take(take) {
+                *byte = 0;
+            }
+            unsafe { self.write_sector(sector)? };
+            at += take as u64;
+        }
+        if let Some(slot) = self.entries.get_mut(index) {
+            slot.length = length as u32;
+        }
+        unsafe { self.flush_entry(index) }
+    }
+
     /// The `position`-th child of `directory`.
     #[link_section = ".user_text"]
     unsafe fn list(&mut self, directory: u16, position: u64) -> Result<(usize, u8, u32), u64> {
@@ -2318,6 +2351,8 @@ pub unsafe extern "C" fn agel_fs_main(shared_page: u64) -> ! {
         } else if command == fs::COMMAND_LIST {
             unsafe { filesystem.list(arguments[0] as u16, arguments[1]) }
                 .map(|(entry, kind, length)| [entry as u64, u64::from(kind), u64::from(length)])
+        } else if command == fs::COMMAND_TRUNCATE {
+            unsafe { filesystem.truncate(arguments[0] as usize, arguments[1]) }.map(|()| [0, 0, 0])
         } else if command == fs::COMMAND_UNLINK || command == fs::COMMAND_RENAME {
             let first = (arguments[1] as usize).min(crate::world::PAYLOAD_BYTES);
             let second = (arguments[2] as usize).min(crate::world::PAYLOAD_BYTES - first);

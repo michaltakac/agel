@@ -953,6 +953,24 @@ def c_test(image: str, architecture: str, disk: str) -> None:
             ":exec c-cat",
             [b"cat: notes: errno 2", b"process c-cat exited with status 2"],
         )
+        # The heap grows through brk, the working directory is the
+        # library's, and a file is truncated and grown with zeros. Before
+        # c-dir, which moves the notes away.
+        run_program(
+            boot,
+            ":exec c-heap",
+            [
+                b"heap: 16 chunks of 64 KiB filled and checked",
+                b"heap: one block of 1 MiB, written",
+                b"heap: 64 MiB refused: errno 12",
+                b"heap: the break is known",
+                b"heap: cwd /app, notes has 18 bytes",
+                b"heap: cwd /, chdir nowhere: errno 2",
+                b"heap: truncated to 10, grown to 20, read 20 bytes, the new ones zero",
+                b"heap: truncate to 0 leaves 0 bytes",
+                b"process c-heap exited with status 0",
+            ],
+        )
         # Names: mkdir, stat, rename, opendir and readdir, unlink and rmdir
         # in a namespace rooted at app; sscanf and getopt on the arguments.
         run_program(
@@ -1089,7 +1107,7 @@ def breadth_test(image: str, architecture: str, disk: str) -> None:
                 b"formatter: widths, flags, precision, truncation",
                 b"strings: strtol, strstr, strrchr, ctype, strcat, qsort",
                 b"streams: fopen, fprintf, append, fgets, feof, lseek",
-                b"breadth: 23 checks passed",
+                b"breadth: 24 checks passed",
                 b"process c-breadth exited with status 0",
             ],
         )

@@ -102,6 +102,7 @@ impl Descriptor {
 const EIO: i64 = 5;
 const EBADF: i64 = 9;
 const ESRCH: i64 = 3;
+const ENOMEM: i64 = 12;
 const ECHILD: i64 = 10;
 const ENODEV: i64 = 19;
 const EAGAIN: i64 = 11;
@@ -194,7 +195,7 @@ fn load(
     machine: &mut arch::Machine,
     storage: &mut ServiceDomain,
     program: Program,
-) -> Result<arch::Domain, &'static str> {
+) -> Result<(arch::Domain, u64), &'static str> {
     // The checksum is accidental-corruption detection over the whole image,
     // read once here, before any of it is trusted to describe itself.
     {
@@ -290,7 +291,11 @@ fn load(
     let mut domain = machine.create_process_world(entry)?;
     let mut mapped = [0_u64; MAX_PAGES];
     let mut pages = 0_usize;
+    // The break starts a guard page past the image's last page, so a
+    // program that runs off its data faults before it reaches its heap.
+    let mut image_end = 0_u64;
     for segment in &segments[..count] {
+        image_end = image_end.max((segment.vaddr + segment.memsz + PAGE - 1) & !(PAGE - 1));
         let first = segment.vaddr & !(PAGE - 1);
         let last = (segment.vaddr + segment.memsz - 1) & !(PAGE - 1);
         let mut page = first;
@@ -334,7 +339,7 @@ fn load(
             page += PAGE;
         }
     }
-    Ok(domain)
+    Ok((domain, image_end + PAGE))
 }
 
 /// Where a process's console output goes: the serial console driver, a
@@ -465,6 +470,8 @@ struct Process {
     state: State,
     name: [u8; NAME_BYTES],
     name_length: usize,
+    /// Where the next `brk` page goes: past the image and a guard page.
+    brk: u64,
 }
 
 /// A pipe: a bounded queue in the supervisor with a count of the read and
@@ -566,7 +573,7 @@ pub fn start(
     namespace: Namespace,
     run: &mut Run,
 ) -> Result<(), &'static str> {
-    let mut domain = load(machine, services.storage, program)?;
+    let (mut domain, brk) = load(machine, services.storage, program)?;
     // The argument block: the name, then each argument, each NUL-terminated,
     // in the payload area, with the count in its word.
     let mut block = [0_u8; PAYLOAD_BYTES];
@@ -589,6 +596,7 @@ pub fn start(
         state: State::Runnable,
         name: padded_name(name),
         name_length: name.len().min(NAME_BYTES),
+        brk,
     });
     run.name = padded_name(name);
     run.name_length = name.len().min(NAME_BYTES);
@@ -854,6 +862,8 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
             }
         }
         process::KILL => kill(machine, services, table, index, arguments),
+        process::BRK => brk(machine, table, index, arguments[0]),
+        process::FTRUNCATE => truncate(table, index, services, arguments[0], arguments[1]),
         process::CLOSE => close(table, index, arguments[0]),
         process::PIPE => pipe(table, index),
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
@@ -939,6 +949,66 @@ fn draw(table: &mut Table, index: usize, services: &mut Services<'_>, arguments:
         }
     }
     display.draw(index, arguments[0], arguments[2], &records[..count]) as u64
+}
+
+/// `BRK`: fresh pages at the process's break, which moves past them.
+fn brk(machine: &mut arch::Machine, table: &mut Table, index: usize, pages: u64) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    if pages > process::BRK_PAGES {
+        return error(EINVAL);
+    }
+    let start = process.brk;
+    let end = arch::PROCESS_BASE + arch::PROCESS_BYTES;
+    if start.saturating_add(pages * PAGE) > end {
+        return error(ENOMEM);
+    }
+    for _ in 0..pages {
+        if machine
+            .map_process_page(&mut process.domain, process.brk, Access::UserData)
+            .is_err()
+        {
+            return error(ENOMEM);
+        }
+        process.brk += PAGE;
+    }
+    start
+}
+
+/// `FTRUNCATE`: the file's length set through a writable descriptor.
+fn truncate(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    descriptor: u64,
+    length: u64,
+) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
+        return error(EBADF);
+    };
+    if slot.kind != Kind::File || !slot.writable {
+        return error(EBADF);
+    }
+    let Some(filesystem) = services.filesystem.as_deref_mut() else {
+        return error(ENOSYS);
+    };
+    let outcome = filesystem.filesystem_request(
+        slot.handle,
+        services.storage,
+        fs::COMMAND_TRUNCATE,
+        [u64::from(slot.entry), length, 0],
+    );
+    match service_error(outcome) {
+        Ok(_) => {
+            slot.length = length;
+            0
+        }
+        Err(number) => error(number),
+    }
 }
 
 /// `KILL`: end one of the caller's own children with the one signal there
@@ -1495,8 +1565,8 @@ fn spawn(
         Ok(None) => return error(fs::ENOENT as i64),
         Err(_) => return error(EIO),
     };
-    let mut domain = match load(machine, services.storage, program) {
-        Ok(domain) => domain,
+    let (mut domain, brk) = match load(machine, services.storage, program) {
+        Ok(loaded) => loaded,
         Err(_) => return error(EIO),
     };
     place_arguments(&mut domain, &block[..block_length]);
@@ -1522,6 +1592,7 @@ fn spawn(
         state: State::Runnable,
         name,
         name_length,
+        brk,
     });
     free as u64
 }

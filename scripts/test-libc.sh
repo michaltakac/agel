@@ -14,6 +14,7 @@ chart=$(./scripts/build-c-program.sh chart "$architecture" | tail -n 1)
 dir_program=$(./scripts/build-c-program.sh dir "$architecture" | tail -n 1)
 clock_program=$(./scripts/build-c-program.sh clock "$architecture" | tail -n 1)
 nap=$(./scripts/build-c-program.sh nap "$architecture" | tail -n 1)
+heap=$(./scripts/build-c-program.sh heap "$architecture" | tail -n 1)
 case "$architecture" in
   x86_64)
     image=$(./scripts/build-boot.sh --features isolated-repl | tail -n 1)
@@ -38,4 +39,5 @@ python3 ./scripts/install-program.py "$disk" c-chart "$chart" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-dir "$dir_program" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-clock "$clock_program" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-nap "$nap" >/dev/null
+python3 ./scripts/install-program.py "$disk" c-heap "$heap" >/dev/null
 python3 ./scripts/test-native-repl.py "$kernel" --c --arch "$architecture" --disk "$disk"

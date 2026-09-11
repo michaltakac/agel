@@ -358,6 +358,10 @@ Each rung must be runnable and differentially testable against the rung below:
    machine's counter, a sleeping state the process table wakes, `kill`
    bounded to a process's own child, and `setjmp`, `time.h` and the
    environment in the C library.
+55. **The heap grows (v0.2.60):** a `brk` request maps zeroed pages at a
+   process's break, past a guard page after its image; the C library's
+   heap lives on them and grows on demand; `chdir` is the library's,
+   `ftruncate` the service's, zero-filling what grows.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
