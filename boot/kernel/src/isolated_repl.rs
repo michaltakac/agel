@@ -15,6 +15,7 @@
 //! authority-bearing state.
 
 use crate::arch;
+use crate::console;
 use crate::native_session::{
     replay as replay_workspace, request as evaluator_request_raw, reset as reset_evaluator,
     ReplayFailure,
@@ -1072,33 +1073,13 @@ fn read_form(driver: &mut ServiceDomain, buffer: &mut [u8]) -> usize {
     let mut length = 0;
     loop {
         length += read_line(driver, &mut buffer[length..]);
-        if !needs_more_input(&buffer[..length]) || length == buffer.len() {
+        if !console::needs_more_input(&buffer[..length]) || length == buffer.len() {
             return length;
         }
         buffer[length] = b'\n';
         length += 1;
         echo(driver, b"             ... ");
     }
-}
-
-fn needs_more_input(source: &[u8]) -> bool {
-    let mut depth = 0_u16;
-    let mut comment = false;
-    for byte in source {
-        if comment {
-            if *byte == b'\n' {
-                comment = false;
-            }
-            continue;
-        }
-        match byte {
-            b';' => comment = true,
-            b'(' => depth = depth.saturating_add(1),
-            b')' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-    depth > 0
 }
 
 fn fatal(reason: &str) -> ! {

@@ -6,8 +6,6 @@ use agel_core::{Commit, EvaluationOptions, TransactionError, World};
 pub const NATIVE_COMPILER: &str = include_str!("../native-compiler.agel");
 pub const NATIVE_READER: &str = include_str!("../native-reader.agel");
 pub const NATIVE_MODULES: &str = include_str!("../native-modules.agel");
-pub const NATIVE_AGENT_KERNEL: &str = include_str!("../native-agent-kernel.agel");
-pub const NATIVE_SYSTEM_BUILDER: &str = include_str!("../native-system-builder.agel");
 
 pub const SOURCE: &str = concat!(
     include_str!("../stdlib.agel"),

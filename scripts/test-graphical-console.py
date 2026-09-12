@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Exercise host-composed text against the real graphical Agel evaluator."""
-import importlib.util
 import sys
 import tempfile
 
 from pathlib import Path
+import graphical_console as module
 
-spec = importlib.util.spec_from_file_location("graphical_console", Path(__file__).with_name("graphical-console.py"))
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
 
 with tempfile.TemporaryDirectory(prefix="agel-input-test-", dir="/tmp") as directory:
     machine = module.Machine(sys.argv[1], directory, snapshot=True)

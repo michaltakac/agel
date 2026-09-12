@@ -4,6 +4,7 @@
    and space, a width, a precision, and the l, ll, z and h modifiers. */
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -291,6 +292,12 @@ static void emit(struct sink *sink, char byte) {
     sink->written++;
 }
 
+/* A width or precision digit appended to `value`, held below a bound a
+   buffer here could ever need, so a run of digits cannot overflow an int. */
+static int clamp_digit(int value, int digit) {
+    return value >= 100000 ? value : value * 10 + digit;
+}
+
 struct spec {
     int left;
     int zero;
@@ -383,7 +390,7 @@ static void format(struct sink *sink, const char *format, va_list arguments) {
             at++;
         } else {
             while (*at >= '0' && *at <= '9') {
-                spec.width = spec.width * 10 + (*at++ - '0');
+                spec.width = clamp_digit(spec.width, *at++ - '0');
             }
         }
         if (*at == '.') {
@@ -394,7 +401,7 @@ static void format(struct sink *sink, const char *format, va_list arguments) {
                 at++;
             } else {
                 while (*at >= '0' && *at <= '9') {
-                    spec.precision = spec.precision * 10 + (*at++ - '0');
+                    spec.precision = clamp_digit(spec.precision, *at++ - '0');
                 }
             }
         }
@@ -652,7 +659,12 @@ static int scan_number(struct source *source, unsigned base, int width, unsigned
         if (digit < 0) {
             break;
         }
-        *value = *value * base + (unsigned)digit;
+        /* A number wider than the type saturates rather than wrapping. */
+        if (*value > (ULONG_MAX - (unsigned)digit) / (unsigned)base) {
+            *value = ULONG_MAX;
+        } else {
+            *value = *value * base + (unsigned)digit;
+        }
         digits++;
         used++;
         character = take(source);
@@ -684,7 +696,7 @@ static int scan(struct source *source, const char *format, va_list arguments) {
         }
         int width = -1;
         while (*at >= '0' && *at <= '9') {
-            width = (width < 0 ? 0 : width * 10) + (*at - '0');
+            width = clamp_digit(width < 0 ? 0 : width, *at - '0');
             at++;
         }
         int longs = 0;

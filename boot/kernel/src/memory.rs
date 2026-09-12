@@ -34,7 +34,10 @@ pub enum Access {
     /// device grant there is a task-state-segment bitmap entry rather than a
     /// mapping. The variant is still part of the shared vocabulary because the
     /// other two architectures grant devices by mapping them.
-    #[cfg_attr(target_arch = "x86_64", allow(dead_code))]
+    #[cfg_attr(
+        all(target_arch = "x86_64", not(feature = "native-graphics")),
+        allow(dead_code)
+    )]
     UserDevice,
     /// A framebuffer granted to the compositor: read/write, never
     /// executable, and ordinary memory rather than a device register

@@ -1,33 +1,20 @@
 #!/usr/bin/env python3
 """Prove language-to-frame commits, agent rollback, and persisted dock replay."""
-import importlib.util
-import shutil
 import sys
 import tempfile
 from pathlib import Path
-
-spec = importlib.util.spec_from_file_location("console", Path(__file__).with_name("graphical-console.py"))
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+import graphical_console as module
 
 
 def pixels(machine):
-    frame = machine.directory / "scene.ppm"
-    machine.command("screendump", {"filename": str(frame), "format": "ppm"})
-    header, dimensions, maximum, data = frame.read_bytes().split(b"\n", 3)
-    assert (header, dimensions, maximum) == (b"P6", b"1920 1080", b"255")
     # Exclude the panel, whose clock turns, and the command field below the
     # scene: the language's drawing region is what these comparisons mean.
-    return data[1920 * 40 * 3 : 1920 * 1000 * 3]
+    return machine.region(0, 40, 1920, 960)
 
 
 with tempfile.TemporaryDirectory(prefix="agel-dock-", dir="/tmp") as directory:
-    image = Path(directory) / "disk.img"
-    shutil.copyfile(sys.argv[1], image)
-    with image.open("r+b") as disk:
-        disk.seek(1024 * 512)
-        disk.write(bytes(32 * 512))
-    machine = module.Machine(str(image), directory)
+    image = module.prepared_image(sys.argv[1], directory)
+    machine = module.Machine(image, directory)
     try:
         baseline = pixels(machine)
         sources = [line for line in Path("boot/desktop/dock.agel").read_text().splitlines() if line.startswith("(")]

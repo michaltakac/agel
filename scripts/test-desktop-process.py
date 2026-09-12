@@ -1,50 +1,18 @@
 """Programs run on the desktop: the graphical workshop's :exec and file
 commands, answered on the serial console and drawn in the terminal panel."""
-import importlib.util
-import shutil
 import sys
 import tempfile
 import time
 from pathlib import Path
-
-spec = importlib.util.spec_from_file_location("console", Path(__file__).with_name("graphical-console.py"))
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-
-
-def panel_region(machine, x, y, width, height):
-    path = machine.directory / "frame.ppm"
-    machine.command("screendump", {"filename": str(path), "format": "ppm"})
-    data = path.read_bytes().split(b"\n", 3)[3]
-    rows = []
-    for row in range(y, y + height):
-        start = (row * 1920 + x) * 3
-        rows.append(data[start : start + width * 3])
-    return b"".join(rows)
-
-
-def panel(machine):
-    """The terminal panel's pixels: rows 340 to 780, columns 476 to 1800."""
-    path = machine.directory / "frame.ppm"
-    machine.command("screendump", {"filename": str(path), "format": "ppm"})
-    data = path.read_bytes().split(b"\n", 3)[3]
-    rows = []
-    for y in range(340, 780):
-        start = (y * 1920 + 476) * 3
-        rows.append(data[start : start + (1800 - 476) * 3])
-    return b"".join(rows)
+import graphical_console as module
 
 
 with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as directory:
-    image = Path(directory) / "disk.img"
-    shutil.copyfile(sys.argv[1], image)
-    with image.open("r+b") as disk:
-        # A blank workspace, records and filesystem region.
-        disk.seek(1024 * 512)
-        disk.write(bytes(1024 * 512))
-    machine = module.Machine(str(image), directory)
+    image = module.prepared_image(sys.argv[1], directory, 1024)
+    machine = module.Machine(image, directory)
     try:
-        before = panel(machine)
+        # The terminal panel: rows 340 to 780, columns 476 to 1800.
+        before = machine.region(476, 340, 1324, 440)
         assert "formatted" in machine.submit(":fs-format")
         assert "directory ready: app" in machine.submit(":fs-mkdir app")
         assert "directory ready: etc" in machine.submit(":fs-mkdir etc")
@@ -58,14 +26,14 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         assert "notes for the app" in response, response
         listing = machine.submit(":fs-ls /etc")
         assert "secret  11 bytes" in listing, listing
-        after = panel(machine)
+        after = machine.region(476, 340, 1324, 440)
         assert after != before, "the terminal panel did not change"
         # A process owns a window: the chart asks for one, is refused a
         # rectangle past its edge, and draws its bars, which the supervisor
         # keeps and paints; the bars' colour is on the screen inside the
         # window's box and nowhere before it.
         def bar_pixels(x, y, width, height):
-            return panel_region(machine, x, y, width, height).count(b"\x63\xd0\xdf")
+            return machine.region(x, y, width, height).count(b"\x63\xd0\xdf")
         assert bar_pixels(560, 120, 480, 320) == 0, "bar colour before any window"
         response = machine.submit(":exec c-chart -- 3 7 5 9 outside")
         assert "chart: a rectangle outside the window was refused (errno 22)" in response, response
@@ -107,13 +75,13 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
             time.sleep(0.3)
             machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": False, "button": "left"}}]})
             time.sleep(0.3)
-        launcher_closed = panel_region(machine, 24, 48, 384, 400)
+        launcher_closed = machine.region(24, 48, 384, 400)
         move_to(60, 20)
         click()
         # The launcher is painted after the click's command; under load
         # that takes longer than a fixed pause, so wait for the pixels.
         deadline = time.monotonic() + 20
-        while (frame_with_launcher := panel_region(machine, 24, 48, 384, 400)) == launcher_closed:
+        while (frame_with_launcher := machine.region(24, 48, 384, 400)) == launcher_closed:
             assert time.monotonic() < deadline, "the launcher did not open"
             time.sleep(0.5)
         move_to(200, 128)
@@ -123,13 +91,13 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         # The files tile lists the root; while the button is held the tile
         # is drawn pressed (darker), and the release restores it.
         def brightness(x, y, width, height):
-            return sum(panel_region(machine, x, y, width, height))
+            return sum(machine.region(x, y, width, height))
         move_to(888, 964)
         tile_before = brightness(860, 940, 56, 48)
         press()
         response = machine.until_prompt().decode()
         assert "app/" in response and "etc/" in response, response
-        assert frame_with_launcher != panel_region(machine, 24, 48, 384, 400), "the launcher did not close"
+        assert frame_with_launcher != machine.region(24, 48, 384, 400), "the launcher did not close"
         tile_pressed = brightness(860, 940, 56, 48)
         assert tile_pressed < tile_before * 9 // 10, (tile_before, tile_pressed)
         release()
@@ -164,7 +132,7 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         assert "PROCESS LISTENING" in response, response
         assert "exited" not in response, response
         def dot_pixels(x, y, width, height):
-            return panel_region(machine, x, y, width, height).count(b"\xe7\x9c\xfe")
+            return machine.region(x, y, width, height).count(b"\xe7\x9c\xfe")
         assert dot_pixels(740, 280, 40, 40) == 0, "a dot before any press"
         move_to(760, 300)
         press()
@@ -185,7 +153,7 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         # leaves a pill in the panel, which brings the window back; the
         # corner resizes, and the release tells the process.
         def header_pixel():
-            return panel_region(machine, 10, 60, 1, 1)[:3]
+            return machine.region(10, 60, 1, 1)[:3]
         assert header_pixel() != b"\x26\x26\x26", "the maximized header colour before maximize"
         move_to(904, 140)
         click()
@@ -206,21 +174,21 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         time.sleep(1.0)
         # The window's content is the darker surface; the workshop body
         # beneath it is the lighter one.
-        assert panel_region(machine, 570, 280, 1, 1)[:3] == b"\x26\x26\x26", "the window is still painted"
-        assert panel_region(machine, 380, 6, 200, 28).count(b"\x33\x33\x33") > 200, "no pill in the panel"
+        assert machine.region(570, 280, 1, 1)[:3] == b"\x26\x26\x26", "the window is still painted"
+        assert machine.region(380, 6, 200, 28).count(b"\x33\x33\x33") > 200, "no pill in the panel"
         move_to(400, 20)
         click()
         response = until_text(b"live-desktop> ")
         assert ":restore 0" in response.decode() and "WINDOW RESTORED 0" in response.decode(), response
         time.sleep(1.0)
-        assert panel_region(machine, 570, 280, 1, 1)[:3] == b"\x1b\x1b\x1b", "the window did not come back"
+        assert machine.region(570, 280, 1, 1)[:3] == b"\x1b\x1b\x1b", "the window did not come back"
         move_to(952, 452)
         press()
         move_to(1052, 502)
         release()
         response = until_text(b"sketch: resized to 500x350")
         time.sleep(1.0)
-        assert panel_region(machine, 1050, 280, 1, 1)[:3] == b"\x1b\x1b\x1b", "the window did not grow"
+        assert machine.region(1050, 280, 1, 1)[:3] == b"\x1b\x1b\x1b", "the window did not grow"
         # A press in the header takes hold of the window: it follows the
         # pointer, dot and all, and the place it left is repainted.
         move_to(700, 140)

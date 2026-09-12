@@ -286,6 +286,12 @@ promise.
   to a pill in the panel, a corner that resizes, each a typed command
   underneath, and a resize event to the owner; the README is rewritten
   to read as a summary rather than a history.
+  `v0.2.64` adds `docs/roadmap.md`, done, partial and open line by line
+  with the test behind each; fixes five bugs found by audit (heap size
+  rounding, `realloc` on an unchecked header, `strtoul`, native list
+  rendering at the empty cell, resize events past the window maximum);
+  makes the AArch64 and RISC-V domain layers one `paged` module; and
+  shares what the test scripts repeated. The tree is 850 lines smaller.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

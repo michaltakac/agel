@@ -5,9 +5,8 @@
 //! grant. It owns no scene or desktop policy. Every command is checked again
 //! here even though the build adapter and supervisor already checked it.
 
-use crate::world::{shared, PAYLOAD_OFFSET};
+use crate::world::{shared, PAYLOAD_OFFSET, RECORD_BYTES};
 
-const RECORD_BYTES: usize = 64;
 const MAX_DIMENSION: u32 = 4096;
 const STATUS_OK: u64 = 0;
 const STATUS_REJECTED: u64 = 1;
@@ -512,6 +511,31 @@ unsafe fn surface_ring(surface: Surface, outer: Bounds, radius: u32, color: u32,
     }
 }
 
+/// The asset in `slot`: its address, its size, and the count at byte 4 of
+/// its header, if the slot is filled and the header carries `magic` and at
+/// least `minimum` bytes.
+///
+/// # Safety
+/// `page` is the shared page and the asset words name mapped memory.
+unsafe fn asset_header(
+    page: *const u64,
+    slot: usize,
+    magic: &[u8; 4],
+    minimum: usize,
+) -> Option<(usize, usize, u16)> {
+    let address = unsafe { page.add(slot).read_volatile() } as usize;
+    let bytes = unsafe { page.add(slot + 1).read_volatile() } as usize;
+    if address == 0 || bytes < minimum {
+        return None;
+    }
+    for (index, wanted) in magic.iter().enumerate() {
+        if unsafe { asset_byte(address, bytes, index) } != Some(*wanted) {
+            return None;
+        }
+    }
+    unsafe { asset_u16(address, bytes, 4) }.map(|count| (address, bytes, count))
+}
+
 #[inline(always)]
 unsafe fn asset_byte(address: usize, bytes: usize, offset: usize) -> Option<u8> {
     if offset >= bytes {
@@ -568,21 +592,8 @@ unsafe fn label(surface: Surface, page: *mut u64, record: *const u8, style: Labe
         return false;
     }
     let slot = shared::ASSET_WORDS + 2 * face as usize;
-    let address = unsafe { page.add(slot).read_volatile() } as usize;
-    let bytes = unsafe { page.add(slot + 1).read_volatile() } as usize;
-    if address == 0 || bytes < 12 {
-        return false;
-    }
-    let magic = [
-        unsafe { asset_byte(address, bytes, 0) },
-        unsafe { asset_byte(address, bytes, 1) },
-        unsafe { asset_byte(address, bytes, 2) },
-        unsafe { asset_byte(address, bytes, 3) },
-    ];
-    if magic != [Some(b'A'), Some(b'G'), Some(b'F'), Some(b'1')] {
-        return false;
-    }
-    let Some(size_count) = (unsafe { asset_u16(address, bytes, 4) }) else {
+    let Some((address, bytes, size_count)) = (unsafe { asset_header(page, slot, b"AGF1", 12) })
+    else {
         return false;
     };
     let mut found = None;
@@ -687,21 +698,7 @@ unsafe fn sprite(
     alpha: u32,
 ) -> bool {
     let slot = shared::ASSET_WORDS + 2 * shared::SPRITE_SLOT;
-    let address = unsafe { page.add(slot).read_volatile() } as usize;
-    let bytes = unsafe { page.add(slot + 1).read_volatile() } as usize;
-    if address == 0 || bytes < 8 {
-        return false;
-    }
-    let magic = [
-        unsafe { asset_byte(address, bytes, 0) },
-        unsafe { asset_byte(address, bytes, 1) },
-        unsafe { asset_byte(address, bytes, 2) },
-        unsafe { asset_byte(address, bytes, 3) },
-    ];
-    if magic != [Some(b'A'), Some(b'G'), Some(b'I'), Some(b'1')] {
-        return false;
-    }
-    let Some(count) = (unsafe { asset_u16(address, bytes, 4) }) else {
+    let Some((address, bytes, count)) = (unsafe { asset_header(page, slot, b"AGI1", 8) }) else {
         return false;
     };
     if index >= u32::from(count) {

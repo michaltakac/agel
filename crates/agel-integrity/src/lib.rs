@@ -30,12 +30,7 @@ impl Digest {
 
     #[cfg(feature = "std")]
     pub fn to_hex(self) -> String {
-        let mut output = String::with_capacity(64);
-        for byte in self.0 {
-            use fmt::Write as _;
-            write!(output, "{byte:02x}").expect("writing to a string cannot fail");
-        }
-        output
+        ed25519::encode_hex(&self.0)
     }
 
     #[cfg(feature = "std")]

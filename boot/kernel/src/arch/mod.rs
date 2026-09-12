@@ -12,7 +12,6 @@
 //! console_write_byte       emit one byte
 //! exit(success)            leave the emulator, if it can be left
 //! monotonic_microseconds   time since bring-up, from the machine's counter
-//! user_text_range          bounds of the user-executable section
 //! fault_name(cause)        the shared name for a trap cause
 //! PROVOCATIONS             the misbehaviours this architecture can produce
 //! Machine::bring_up        address spaces, traps, preemption
@@ -36,3 +35,25 @@ pub use aarch64::*;
 pub use riscv64::*;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
+
+/// Bounds of the user-executable section, from the linker script every
+/// architecture shares the symbols of. Only the addresses are taken; the
+/// bytes are never read through these.
+#[cfg(any(not(target_arch = "x86_64"), feature = "isolation-selftest"))]
+pub fn user_text_range() -> core::ops::Range<u64> {
+    extern "C" {
+        static __user_text_start: u8;
+        static __user_text_end: u8;
+    }
+    (&raw const __user_text_start) as u64..(&raw const __user_text_end) as u64
+}
+
+/// Bounds of immutable data readable by evaluator domains.
+#[cfg(feature = "isolation-selftest")]
+pub fn user_rodata_range() -> core::ops::Range<u64> {
+    extern "C" {
+        static __rodata_start: u8;
+        static __rodata_end: u8;
+    }
+    (&raw const __rodata_start) as u64..(&raw const __rodata_end) as u64
+}

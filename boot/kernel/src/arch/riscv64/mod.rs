@@ -12,15 +12,17 @@ pub mod hal;
 pub mod cpu;
 mod domain;
 mod memory;
+#[path = "../paged.rs"]
+mod paged;
 
-pub use domain::Domain;
+pub use paged::Domain;
 #[cfg(feature = "process")]
-pub use domain::{PROCESS_BASE, PROCESS_BYTES};
+pub use paged::{PROCESS_BASE, PROCESS_BYTES};
 /// The ELF `e_machine` of programs built for this machine.
 #[cfg(feature = "process")]
 pub const ELF_MACHINE: u16 = 0xf3;
 #[cfg(feature = "contract-memory")]
-pub use domain::FRAME_WINDOW_BASE;
+pub use paged::FRAME_WINDOW_BASE;
 
 use crate::memory::DeviceGrant;
 
@@ -40,10 +42,10 @@ pub const POOL_END: u64 = 0x8400_0000;
 pub const CONSOLE_DEVICE_PHYSICAL: u64 = 0x1000_0000;
 
 /// Where the driver domain sees the console device in its own address space.
-pub const CONSOLE_DEVICE_VADDR: u64 = domain::DEVICE_BASE;
+pub const CONSOLE_DEVICE_VADDR: u64 = paged::DEVICE_BASE;
 /// Where the storage driver domain sees its device page and its DMA page.
-pub const STORAGE_DEVICE_VADDR: u64 = domain::STORAGE_DEVICE_BASE;
-pub const STORAGE_DMA_VADDR: u64 = domain::DMA_BASE;
+pub const STORAGE_DEVICE_VADDR: u64 = paged::STORAGE_DEVICE_BASE;
+pub const STORAGE_DMA_VADDR: u64 = paged::DMA_BASE;
 
 /// The `virt` machine's virtio-mmio transports: 8 slots of one page each.
 const VIRTIO_MMIO_BASE: u64 = 0x1000_1000;
@@ -93,26 +95,6 @@ pub fn halt() -> ! {
 #[cfg(feature = "process")]
 pub fn monotonic_microseconds() -> u64 {
     hal::read_time() / 10
-}
-
-/// Bounds of the U-mode-executable section.
-pub fn user_text_range() -> core::ops::Range<u64> {
-    extern "C" {
-        static __user_text_start: u8;
-        static __user_text_end: u8;
-    }
-    // Only the addresses are taken; the bytes are never read through these.
-    (&raw const __user_text_start) as u64..(&raw const __user_text_end) as u64
-}
-
-/// Bounds of immutable data readable by evaluator domains.
-#[cfg(feature = "isolation-selftest")]
-pub fn user_rodata_range() -> core::ops::Range<u64> {
-    extern "C" {
-        static __rodata_start: u8;
-        static __rodata_end: u8;
-    }
-    (&raw const __rodata_start) as u64..(&raw const __rodata_end) as u64
 }
 
 /// The shared name for a RISC-V exception code.
@@ -176,6 +158,26 @@ pub struct Machine {
 }
 
 impl Machine {
+    /// A protection domain entered unprivileged at `entry` with the given
+    /// budget, grant and stack; what every `create_*_world` is.
+    fn world(
+        &mut self,
+        entry: u64,
+        ticks: u32,
+        grant: DeviceGrant,
+        stack_pages: u64,
+    ) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            grant,
+            stack_pages,
+        )
+        .map_err(|error| error.name())
+    }
+
     /// Build translation tables the kernel owns, install the trap vector, and
     /// start the preemption timer.
     pub fn bring_up() -> Result<Self, &'static str> {
@@ -188,9 +190,12 @@ impl Machine {
         let mut pool = crate::memory::FramePool::new();
         let kernel_identity =
             memory::build_identity_window(&mut pool, 0..0, 0..0).map_err(|error| error.name())?;
-        let identity =
-            memory::build_identity_window(&mut pool, user_text_range(), user_rodata_range())
-                .map_err(|error| error.name())?;
+        let identity = memory::build_identity_window(
+            &mut pool,
+            super::user_text_range(),
+            super::user_rodata_range(),
+        )
+        .map_err(|error| error.name())?;
         let kernel_space =
             memory::AddressSpace::new(&mut pool, kernel_identity).map_err(|error| error.name())?;
         // Safety: the new tables map the kernel image, its stack, and the
@@ -211,30 +216,24 @@ impl Machine {
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     /// Build a protection domain entered in U-mode at `entry`.
     pub fn create_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             DeviceGrant::Nothing,
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build the domain a loaded process runs in: a private stack, a shared
     /// page, and nothing else until the loader maps its segments.
     #[cfg(feature = "process")]
     pub fn create_process_world(&mut self, entry: u64) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             crate::world::process::TICKS,
             DeviceGrant::Nothing,
             crate::world::process::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Give a process domain one more page at `virtual_address`, and return
@@ -259,15 +258,12 @@ impl Machine {
         entry: u64,
         ticks: u32,
     ) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             DeviceGrant::Nothing,
             crate::world::fs::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build a domain with the fixed stack budget required by the native evaluator.
@@ -276,29 +272,23 @@ impl Machine {
         entry: u64,
         ticks: u32,
     ) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             DeviceGrant::Nothing,
             crate::world::EVALUATOR_STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build a protection domain that is additionally granted the console
     /// device: one page of device memory, and nothing else.
     pub fn create_console_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             DeviceGrant::Console(CONSOLE_DEVICE_PHYSICAL),
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build a protection domain granted the virtio block device and one
@@ -308,9 +298,7 @@ impl Machine {
         let device = find_virtio_block()
             .ok_or("no virtio block device (modern MMIO transport) on this machine")?;
         let page = device & !(crate::memory::PAGE - 1);
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             DeviceGrant::Storage {
@@ -319,7 +307,6 @@ impl Machine {
             },
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]

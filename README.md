@@ -5,8 +5,9 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.63.** Every release is one milestone with honest
-notes; the whole line is in [`docs/versioning.md`](docs/versioning.md).
+**Current release: v0.2.64.** What is done, partial and open is in
+[`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
+honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
 ![The native desktop at v0.2.63: two windows a C program asked for, over the workshop](docs/images/native-desktop-v0.2.63.png)
 
@@ -217,6 +218,7 @@ the compiler bootstrap and the opt-in integer JIT (`cargo run --release -q
 
 ## Documents
 
+- [`docs/roadmap.md`](docs/roadmap.md): what is done, partial and open, line by line, with the test that proves each.
 - [`docs/architecture.md`](docs/architecture.md): the trust boundaries and the bootstrap ladder, one rung per milestone.
 - [`docs/versioning.md`](docs/versioning.md): every release and what it claimed.
 - [`docs/threat-model.md`](docs/threat-model.md): what each release does and does not defend.

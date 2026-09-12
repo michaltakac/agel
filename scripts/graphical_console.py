@@ -7,6 +7,7 @@ No Python packages are required. Only a loopback HTTP endpoint is exposed.
 import argparse
 import json
 import secrets
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -67,6 +68,19 @@ def connect(path):
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"QEMU did not open {path}")
             time.sleep(0.05)
+
+
+def prepared_image(source, directory, blank_sectors=33):
+    """A copy of the disk image for one test, with `blank_sectors` from
+    sector 1024 zeroed: 33 covers both workspace slots and the recovery
+    record, 1024 the filesystem region as well, so a test never sees the
+    developer's workshop."""
+    image = Path(directory) / "disk.img"
+    shutil.copyfile(source, image)
+    with image.open("r+b") as disk:
+        disk.seek(1024 * 512)
+        disk.write(bytes(blank_sectors * 512))
+    return str(image)
 
 
 class Machine:
@@ -149,6 +163,28 @@ class Machine:
         frame = self.directory / "frame.png"
         self.command("screendump", {"filename": str(frame), "format": "png"})
         return frame.read_bytes()
+
+    def pixels(self):
+        """The whole 1920x1080 frame as packed RGB bytes."""
+        path = self.directory / "frame.ppm"
+        self.command("screendump", {"filename": str(path), "format": "ppm"})
+        header, dimensions, maximum, data = path.read_bytes().split(b"\n", 3)
+        assert (header, dimensions, maximum) == (b"P6", b"1920 1080", b"255"), (header, dimensions)
+        return data
+
+    def region(self, x, y, width, height):
+        """The packed RGB bytes of one rectangle of the frame, row by row."""
+        data = self.pixels()
+        rows = []
+        for row in range(y, y + height):
+            start = (row * 1920 + x) * 3
+            rows.append(data[start : start + width * 3])
+        return b"".join(rows)
+
+    def expect(self, form, expected):
+        """Submit a form and require the reply's own line to be `expected`."""
+        result = self.submit(form)
+        assert f"\r\n{expected}\r\n" in result, (form, result)
 
     def close(self):
         if self.process.poll() is None:

@@ -151,7 +151,7 @@ supervisor keeps what it drew:
 
 The process protocol gains two requests, `10` **window** and `11`
 **draw** (the table is in [`posix-personality.md`](posix-personality.md)).
-A window is content of a requested size, 64×48 up to 1280×720, under a
+A window is content of a requested size, 64×48 up to 1920×920, under a
 header the desktop draws: the title in Fira Sans Medium, a close control
 from the sprite sheet, COSMIC's surfaces and radius, a shadow. Windows
 cascade from the workshop's upper left; the desktop keeps two.

@@ -914,13 +914,13 @@ Open architecture decisions needing experiments or ADRs:
 | Every queue is bounded with defined backpressure | `queue-full` at capacity, corpus-tested |
 | A kernel-neutral component contract, in Genode's sense | the shared driver, corpus and world program are architecture-neutral across three machines |
 | Drivers belong in restartable domains, not in the supervisor | the console driver, on three architectures, with generations and fail-closed stale handles |
-| The evaluator does not belong in the privileged kernel | machinery built on three architectures, and now a console it can print through; the evaluator has not moved yet |
+| The evaluator does not belong in the privileged kernel | the native evaluator runs unprivileged on three architectures, with the console, disk, filesystem and compositor as driver domains beside it |
 | seL4 as the assurance backend | running: four PDs on an unmodified kernel, same corpus, same transcript, answered by a second implementation of the contract written independently of the reference model |
 | The contract answered by a server, never by the kernel | the broker PD; seL4 is unmodified and unaware of Agel |
 | Release manifest naming what is proved, assumed and out of scope | [`sel4-manifest.md`](sel4-manifest.md), regenerated and checked in CI |
 | Running a *verified configuration* | no: Microkit ships MCS kernels and MCS proofs are ongoing |
 | Firecracker as an optional outer envelope | not started; Phase 6, and Tier 2 only |
-| The POSIX personality | not started; depends on the evaluator living in a domain first |
+| The POSIX personality | running: processes in domains, a namespace-scoped filesystem service, `agel-libc`, `spawn`, pipes; the open lines are in [`roadmap.md`](roadmap.md) |
 | Local inference | not started; external providers work today |
 
 ## Bottom line

@@ -25,7 +25,7 @@ typedef struct {
 #define AGEL_FACE_SANS_MEDIUM 1u
 #define AGEL_FACE_MONO 2u
 
-/* A window of width by height pixels of content (64x48 up to 1280x720)
+/* A window of width by height pixels of content (64x48 up to 1920x920)
    with a title of at most 28 bytes: its number from 0, or -1 with errno. */
 int agel_window(unsigned width, unsigned height, const char *title);
 

@@ -184,21 +184,22 @@ class Harness:
                     f"protocol mismatch: expected byte {wanted:#x}, received {byte[0]:#x}"
                 )
 
-    def send(self, line: str, expected: str, revision: int) -> None:
+    def send_line(self, line: str) -> None:
+        """Send a line, byte by byte with echo, and end it."""
         self.send_bytes(line)
         assert self.process.stdin is not None
         self.process.stdin.write(b"\n")
         self.process.stdin.flush()
+
+    def send(self, line: str, expected: str, revision: int) -> None:
+        self.send_line(line)
         frame = f"\r\n{expected}\r\nagel-native[{revision}]> ".encode("ascii")
         self.expect_exact(frame)
 
     def query(self, line: str) -> tuple[str, int]:
         """Send a line and return the reply text and the revision the next
         prompt shows, for answers the test cannot predict exactly."""
-        self.send_bytes(line)
-        assert self.process.stdin is not None
-        self.process.stdin.write(b"\n")
-        self.process.stdin.flush()
+        self.send_line(line)
         self.expect_exact(b"\r\n")
         collected = bytearray()
         marker = b"\r\nagel-native["
@@ -245,9 +246,7 @@ class Harness:
             self.expect_exact(bytes([byte]), timeout=2.0)
 
     def continue_form(self, line: str) -> None:
-        self.send_bytes(line)
-        self.process.stdin.write(b"\n")
-        self.process.stdin.flush()
+        self.send_line(line)
         self.expect_exact(b"\r\n             ... ")
 
     def close(self) -> None:
@@ -269,18 +268,12 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
         first.expect_until(b"AGEL_NATIVE_READY")
         first.expect_until(b"workspace: no persisted image; starting empty")
         first.expect_until(b"agel-native[0]> ")
-        first.send_bytes(":edit scratch")
-        assert first.process.stdin is not None
-        first.process.stdin.write(b"\n")
-        first.process.stdin.flush()
+        first.send_line(":edit scratch")
         first.expect_exact(b"\r\nedit[scratch]> ")
         first.send("(+ 1 1)", "cell staged; :run NAME to evaluate, :save to persist", 0)
         first.send(":reload", "workspace reload restored empty state", 0)
         first.send(":cells", "cells (0):", 0)
-        first.send_bytes(":edit boot")
-        assert first.process.stdin is not None
-        first.process.stdin.write(b"\n")
-        first.process.stdin.flush()
+        first.send_line(":edit boot")
         first.expect_exact(b"\r\nedit[boot]> ")
         first.send(
             "(def persisted-answer 42)",
@@ -293,19 +286,14 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
             "workspace generation 1 committed: 1 cells; evaluator rebuilt from cells; previous slot retained",
             2,
         )
-        first.send_bytes(":edit bad")
-        assert first.process.stdin is not None
-        first.process.stdin.write(b"\n")
-        first.process.stdin.flush()
+        first.send_line(":edit bad")
         first.expect_exact(b"\r\nedit[bad]> ")
         first.send(
             "(def broken (/ 1 0))",
             "cell staged; :run NAME to evaluate, :save to persist",
             2,
         )
-        first.send_bytes(":save")
-        first.process.stdin.write(b"\n")
-        first.process.stdin.flush()
+        first.send_line(":save")
         first.expect_exact(
             b"\r\nworkspace save failed: source candidate rejected; live world retained\r\n"
             b"agel-native[2]> "
@@ -329,10 +317,7 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
         second.send(
             ":workspace", "workspace generation 1, 1 cells, clean", 2
         )
-        second.send_bytes(":edit math")
-        assert second.process.stdin is not None
-        second.process.stdin.write(b"\n")
-        second.process.stdin.flush()
+        second.send_line(":edit math")
         second.expect_exact(b"\r\nedit[math]> ")
         second.send(
             "(def double (fn (x) (+ x x)))",
@@ -773,10 +758,7 @@ def power_cut_test(image: str, architecture: str, disk: str) -> None:
                 raise RuntimeError(armed)
             new_value = 100 + write
             edit_cell(boot, "boot", f"(def persisted-answer {new_value})", revision)
-            boot.send_bytes(":save")
-            assert boot.process.stdin is not None
-            boot.process.stdin.write(b"\n")
-            boot.process.stdin.flush()
+            boot.send_line(":save")
             outcome = boot.expect_any([b"power cut injected: sector ", b" committed: 1 cells"])
             if outcome == 0:
                 boot.expect_until(b"torn; halting")
@@ -817,24 +799,17 @@ def exec_test(image: str, architecture: str, disk: str) -> None:
     try:
         boot.expect_until(b"AGEL_NATIVE_READY")
         boot.expect_until(b"agel-native[0]> ")
-        boot.send_bytes(":exec hello")
-        assert boot.process.stdin is not None
-        boot.process.stdin.write(b"\n")
-        boot.process.stdin.flush()
+        boot.send_line(":exec hello")
         boot.expect_exact(
             b"\r\nhello from a loaded process\r\nprocess hello exited with status 42\r\nagel-native[0]> "
         )
         # Loading again proves the first process's frames came back and
         # nothing of it lingers.
-        boot.send_bytes(":exec hello")
-        boot.process.stdin.write(b"\n")
-        boot.process.stdin.flush()
+        boot.send_line(":exec hello")
         boot.expect_exact(
             b"\r\nhello from a loaded process\r\nprocess hello exited with status 42\r\nagel-native[0]> "
         )
-        boot.send_bytes(":exec hostile")
-        boot.process.stdin.write(b"\n")
-        boot.process.stdin.flush()
+        boot.send_line(":exec hostile")
         boot.expect_exact(b"\r\nhostile process about to write where it may not\r\nprocess hostile faulted: page-fault at ")
         boot.expect_until(b"; contained\r\nagel-native[0]> ")
         boot.send(":exec nothing", "no program named nothing", 0)
@@ -847,10 +822,7 @@ def exec_test(image: str, architecture: str, disk: str) -> None:
 
 def run_program(harness: Harness, command: str, lines: list[bytes]) -> None:
     """Send an :exec line and require exactly these output lines, then the prompt."""
-    harness.send_bytes(command)
-    assert harness.process.stdin is not None
-    harness.process.stdin.write(b"\n")
-    harness.process.stdin.flush()
+    harness.send_line(command)
     harness.expect_exact(b"\r\n" + b"".join(line + b"\r\n" for line in lines) + b"agel-native[0]> ")
 
 
@@ -891,14 +863,9 @@ def files_test(image: str, architecture: str, disk: str) -> None:
             ":exec writer /app ro",
             [b"writer: open etc/secret: error 13", b"process writer exited with status 13"],
         )
-        boot.send_bytes(":fs-ls /")
-        assert boot.process.stdin is not None
-        boot.process.stdin.write(b"\n")
-        boot.process.stdin.flush()
+        boot.send_line(":fs-ls /")
         boot.expect_exact(b"\r\napp/\r\netc/\r\nagel-native[0]> ")
-        boot.send_bytes(":fs-ls /etc")
-        boot.process.stdin.write(b"\n")
-        boot.process.stdin.flush()
+        boot.send_line(":fs-ls /etc")
         boot.expect_exact(b"\r\nsecret  11 bytes\r\nagel-native[0]> ")
         boot.send(":exec reader /nowhere", "filesystem: error 2", 0)
         boot.send("(+ 20 22)", "42", 1)
@@ -1052,10 +1019,7 @@ def spawn_test(image: str, architecture: str, disk: str) -> None:
     try:
         boot.expect_until(b"AGEL_NATIVE_READY")
         boot.expect_until(b"agel-native[0]> ")
-        boot.send_bytes(":exec c-pipeline")
-        assert boot.process.stdin is not None
-        boot.process.stdin.write(b"\n")
-        boot.process.stdin.flush()
+        boot.send_line(":exec c-pipeline")
         # The child reads the pipe the parent fed and closed, and its exit
         # status is the byte count the parent reports.
         boot.expect_exact(b"\r\nHELLO FROM THE PARENT\r\nchild 1 exited with 22\r\n")
@@ -1070,9 +1034,7 @@ def spawn_test(image: str, architecture: str, disk: str) -> None:
             b"process c-pipeline exited with status 0\r\nagel-native[0]> "
         )
         # Everything came back: the same run again.
-        boot.send_bytes(":exec c-pipeline")
-        boot.process.stdin.write(b"\n")
-        boot.process.stdin.flush()
+        boot.send_line(":exec c-pipeline")
         boot.expect_exact(b"\r\nHELLO FROM THE PARENT\r\nchild 1 exited with 22\r\n")
         boot.expect_until(b"process c-pipeline exited with status 0\r\nagel-native[0]> ")
         boot.send("(+ 20 22)", "42", 1)
@@ -1127,10 +1089,7 @@ def breadth_test(image: str, architecture: str, disk: str) -> None:
                 b"process c-breadth exited with status 0",
             ],
         )
-        boot.send_bytes(":fs-ls /etc")
-        assert boot.process.stdin is not None
-        boot.process.stdin.write(b"\n")
-        boot.process.stdin.flush()
+        boot.send_line(":fs-ls /etc")
         boot.expect_exact(b"\r\nsecret  11 bytes\r\nlog  14 bytes\r\nagel-native[0]> ")
         boot.send("(+ 20 22)", "42", 1)
         shutdown(boot)
@@ -1142,10 +1101,7 @@ def send_kernel_healthy(
     harness: Harness, line: str, expected: str, slot: str, revision: int
 ) -> None:
     """The first form evaluated after a boot verifies a candidate kernel slot."""
-    harness.send_bytes(line)
-    assert harness.process.stdin is not None
-    harness.process.stdin.write(b"\n")
-    harness.process.stdin.flush()
+    harness.send_line(line)
     harness.expect_exact(
         f"\r\n{expected}\r\nkernel slot {slot} verified by a healthy boot"
         f"\r\nagel-native[{revision}]> ".encode("ascii")
@@ -1156,10 +1112,7 @@ def send_healthy(
     harness: Harness, line: str, expected: str, generation: int, revision: int
 ) -> None:
     """The first form evaluated after a boot verifies an unverified candidate."""
-    harness.send_bytes(line)
-    assert harness.process.stdin is not None
-    harness.process.stdin.write(b"\n")
-    harness.process.stdin.flush()
+    harness.send_line(line)
     harness.expect_exact(
         f"\r\n{expected}\r\ncandidate generation {generation} verified by a healthy boot"
         f"\r\nagel-native[{revision}]> ".encode("ascii")
@@ -1167,19 +1120,13 @@ def send_healthy(
 
 
 def edit_cell(harness: Harness, name: str, source: str, revision: int) -> None:
-    harness.send_bytes(f":edit {name}")
-    assert harness.process.stdin is not None
-    harness.process.stdin.write(b"\n")
-    harness.process.stdin.flush()
+    harness.send_line(f":edit {name}")
     harness.expect_exact(f"\r\nedit[{name}]> ".encode("ascii"))
     harness.send(source, "cell staged; :run NAME to evaluate, :save to persist", revision)
 
 
 def shutdown(harness: Harness) -> None:
-    assert harness.process.stdin is not None
-    harness.send_bytes(":shutdown")
-    harness.process.stdin.write(b"\n")
-    harness.process.stdin.flush()
+    harness.send_line(":shutdown")
     harness.expect_exact(b"\r\n")
     exit_code = harness.process.wait(timeout=harness.remaining(8.0))
     expected = EXPECTED_EXIT[harness.architecture]
@@ -1218,10 +1165,7 @@ def board_test(image: str, architecture: str, disk: str) -> None:
             [b"hello from a loaded process", b"process hello exited with status 42"],
         )
         first.send("(+ 20 22)", "42", 1)
-        first.send_bytes(":edit boot")
-        assert first.process.stdin is not None
-        first.process.stdin.write(b"\n")
-        first.process.stdin.flush()
+        first.send_line(":edit boot")
         first.expect_exact(b"\r\nedit[boot]> ")
         first.send(
             "(def persisted-answer 42)",
@@ -1284,130 +1228,39 @@ def main() -> int:
             return 1
         print("Agel kernel slots: stage -> budgeted boots -> verify, promote, rollback [ok]")
         return 0
-    if len(arguments) not in (1, 2):
+    modes = {
+        "--smoke": (smoke_test, False, "smoke", "boots, evaluates, names what it lacks"),
+        "--board": (board_test, True, "board", "boots from a card, loads a program, persists a cell across boots"),
+        "--exec": (exec_test, True, "process", "load from disk -> run in a domain -> exit, contained, or absent"),
+        "--files": (files_test, True, "files", "format -> namespaces -> descriptors -> service restart -> reboot"),
+        "--c": (c_test, True, "C", "build from source -> printf, heap, strings -> files through a namespace"),
+        "--spawn": (spawn_test, True, "spawn", "pipe -> spawn with explicit descriptors -> wait, faults and errors seen by the parent"),
+        "--breadth": (breadth_test, True, "breadth", "arguments, heap, formatter, streams, an unmodified third-party source"),
+        "--power-cut": (power_cut_test, True, "power cut", "a power cut at every sector write of a save leaves a whole generation"),
+        "--persistence": (persistence_test, True, "native persistence", "edit -> reboot -> semantic, corruption, and torn-write fallback"),
+    }
+    if len(arguments) not in (1, 2) or (len(arguments) == 2 and arguments[1] not in modes):
         print(
-            "usage: test-native-repl.py IMAGE [--smoke | --board | --persistence | --power-cut | --exec | --files | --c | --spawn | --breadth | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
+            "usage: test-native-repl.py IMAGE [" + " | ".join(modes) + " | --kernel-rollback KERNEL] [--arch ARCH] [--disk DISK]",
             file=sys.stderr,
         )
         return 2
-    if len(arguments) == 2 and arguments[1] == "--board":
-        if disk is None:
-            print("a board test needs a card; pass --disk", file=sys.stderr)
-            return 2
-        try:
-            board_test(arguments[0], architecture, disk)
-        except Exception as error:
-            print(f"board test failed: {error}", file=sys.stderr)
-            if LAST_HARNESS is not None:
-                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        print(f"Agel board [{architecture}]: boots from a card, loads a program, persists a cell across boots [ok]")
-        return 0
-    if len(arguments) == 2 and arguments[1] == "--smoke":
-        try:
-            smoke_test(arguments[0], architecture)
-        except Exception as error:
-            print(f"smoke test failed: {error}", file=sys.stderr)
-            if LAST_HARNESS is not None:
-                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        print(f"Agel native serial REPL [{architecture}]: boots, evaluates, names what it lacks [ok]")
-        return 0
-    if len(arguments) == 2 and arguments[1] == "--exec":
-        if disk is None:
-            print("loading programs needs a disk; pass --disk", file=sys.stderr)
-            return 2
-        try:
-            exec_test(arguments[0], architecture, disk)
-        except Exception as error:
-            print(f"process test failed: {error}", file=sys.stderr)
-            if LAST_HARNESS is not None:
-                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        print(f"Agel processes [{architecture}]: load from disk -> run in a domain -> exit, contained, or absent [ok]")
-        return 0
-    if len(arguments) == 2 and arguments[1] == "--files":
-        if disk is None:
-            print("files need a disk; pass --disk", file=sys.stderr)
-            return 2
-        try:
-            files_test(arguments[0], architecture, disk)
-        except Exception as error:
-            print(f"files test failed: {error}", file=sys.stderr)
-            if LAST_HARNESS is not None:
-                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        print(f"Agel files [{architecture}]: format -> namespaces -> descriptors -> service restart -> reboot [ok]")
-        return 0
-    if len(arguments) == 2 and arguments[1] == "--c":
-        if disk is None:
-            print("C programs need a disk; pass --disk", file=sys.stderr)
-            return 2
-        try:
-            c_test(arguments[0], architecture, disk)
-        except Exception as error:
-            print(f"C test failed: {error}", file=sys.stderr)
-            if LAST_HARNESS is not None:
-                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        print(f"Agel C library [{architecture}]: build from source -> printf, heap, strings -> files through a namespace [ok]")
-        return 0
-    if len(arguments) == 2 and arguments[1] == "--spawn":
-        if disk is None:
-            print("spawning needs a disk; pass --disk", file=sys.stderr)
-            return 2
-        try:
-            spawn_test(arguments[0], architecture, disk)
-        except Exception as error:
-            print(f"spawn test failed: {error}", file=sys.stderr)
-            if LAST_HARNESS is not None:
-                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        print(f"Agel processes [{architecture}]: pipe -> spawn with explicit descriptors -> wait, faults and errors seen by the parent [ok]")
-        return 0
-    if len(arguments) == 2 and arguments[1] == "--breadth":
-        if disk is None:
-            print("the breadth test needs a disk; pass --disk", file=sys.stderr)
-            return 2
-        try:
-            breadth_test(arguments[0], architecture, disk)
-        except Exception as error:
-            print(f"breadth test failed: {error}", file=sys.stderr)
-            if LAST_HARNESS is not None:
-                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        print(f"Agel C library breadth [{architecture}]: arguments, heap, formatter, streams, an unmodified third-party source [ok]")
-        return 0
-    if len(arguments) == 2 and arguments[1] == "--power-cut":
-        if disk is None:
-            print("a power cut needs a disk; pass --disk", file=sys.stderr)
-            return 2
-        try:
-            power_cut_test(arguments[0], architecture, disk)
-        except Exception as error:
-            print(f"power cut test failed: {error}", file=sys.stderr)
-            if LAST_HARNESS is not None:
-                print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        print(f"Agel native workspace [{architecture}]: a power cut at every sector write of a save leaves a whole generation [ok]")
-        return 0
     if len(arguments) == 2:
-        if arguments[1] != "--persistence":
-            print("unknown test mode", file=sys.stderr)
-            return 2
-        if disk is None:
-            print("persistence on this machine needs --disk", file=sys.stderr)
+        test, needs_disk, name, claim = modes[arguments[1]]
+        if needs_disk and disk is None:
+            print(f"the {name} test needs a disk; pass --disk", file=sys.stderr)
             return 2
         try:
-            persistence_test(arguments[0], architecture, disk)
+            if needs_disk:
+                test(arguments[0], architecture, disk)
+            else:
+                test(arguments[0], architecture)
         except Exception as error:
-            print(f"native persistence test failed: {error}", file=sys.stderr)
+            print(f"{name} test failed: {error}", file=sys.stderr)
             if LAST_HARNESS is not None:
                 print(LAST_HARNESS.transcript.decode("utf-8", errors="replace"), file=sys.stderr)
             return 1
-        print(
-            "Agel native workspace: edit -> reboot -> semantic, corruption, and torn-write fallback [ok]"
-        )
+        print(f"Agel {name} [{architecture}]: {claim} [ok]")
         return 0
     scratch = None
     if disk is None:

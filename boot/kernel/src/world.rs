@@ -539,11 +539,13 @@ pub mod process {
     pub const WINDOWS: usize = 2;
     #[cfg(feature = "native-graphics")]
     pub const WINDOW_RECORDS: usize = 24;
-    /// The smallest and largest content a window may have.
+    /// The smallest and largest content a window may have: the largest is
+    /// the maximized box, the screen's width below the panel and a header,
+    /// so no size the desktop announces by a resize event is outside it.
     #[cfg(feature = "native-graphics")]
     pub const WINDOW_MIN: (u32, u32) = (64, 48);
     #[cfg(feature = "native-graphics")]
-    pub const WINDOW_MAX: (u32, u32) = (1280, 720);
+    pub const WINDOW_MAX: (u32, u32) = (super::SCENE_WIDTH, super::SCENE_DRAWABLE_HEIGHT - 80);
     /// The number of NUL-terminated arguments the supervisor placed in the
     /// payload area before the process first ran; the first is its name.
     pub const ARGUMENT_COUNT: usize = 70;
@@ -672,6 +674,9 @@ pub const BLOCK_OFFSET: usize = 1024;
 
 /// Bytes in the block area: exactly one disk sector.
 pub const BLOCK_BYTES: usize = 512;
+/// One compositor record: the unit the display driver reads and a window holds.
+#[cfg(feature = "process")]
+pub const RECORD_BYTES: usize = 64;
 
 impl DomainCore {
     /// Write one byte of the console payload area.

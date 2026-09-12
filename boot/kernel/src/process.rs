@@ -19,7 +19,7 @@ use crate::memory::Access;
 use crate::region::{Entry, Region};
 use crate::service::{ServiceDomain, ServiceError, ServiceHandle};
 use crate::workspace::read_sector;
-use crate::world::{fs, process, Fault, Stop, BLOCK_BYTES, PAYLOAD_BYTES};
+use crate::world::{fs, process, Fault, Stop, BLOCK_BYTES, PAYLOAD_BYTES, RECORD_BYTES};
 use core::fmt::Write;
 
 /// What a process may do with names: read files, write them, create them.
@@ -99,21 +99,27 @@ impl Descriptor {
     };
 }
 
-const EIO: i64 = 5;
-const EBADF: i64 = 9;
-const ESRCH: i64 = 3;
-const ENOMEM: i64 = 12;
-const ECHILD: i64 = 10;
-const ENODEV: i64 = 19;
-const EAGAIN: i64 = 11;
-const EACCES: i64 = 13;
-const ENFILE: i64 = 23;
-const EMFILE: i64 = 24;
-const EINVAL: i64 = 22;
-const ESPIPE: i64 = 29;
-const EPIPE: i64 = 32;
-const ENOSYS: i64 = 38;
-const ESTALE: i64 = 116;
+/// Error numbers a request answers with, negated: the POSIX values, which
+/// `boot/posix/libc/include/errno.h` names for C programs.
+pub const ESRCH: i64 = 3;
+pub const EIO: i64 = 5;
+pub const EBADF: i64 = 9;
+pub const ECHILD: i64 = 10;
+pub const EAGAIN: i64 = 11;
+pub const ENOMEM: i64 = 12;
+pub const EACCES: i64 = 13;
+#[cfg(feature = "native-graphics")]
+pub const EBUSY: i64 = 16;
+pub const ENODEV: i64 = 19;
+pub const EINVAL: i64 = 22;
+pub const ENFILE: i64 = 23;
+pub const EMFILE: i64 = 24;
+#[cfg(feature = "native-graphics")]
+pub const ENOSPC: i64 = 28;
+pub const ESPIPE: i64 = 29;
+pub const EPIPE: i64 = 32;
+pub const ENOSYS: i64 = 38;
+pub const ESTALE: i64 = 116;
 
 /// The program region: a table sector followed by the programs it names.
 pub const TABLE_SECTOR: u32 = 2048;
@@ -409,9 +415,6 @@ pub struct Services<'a> {
     /// `-ENODEV`.
     pub display: Option<&'a mut dyn Display>,
 }
-
-/// A compositor record as a process hands it over: 64 bytes.
-pub const RECORD_BYTES: usize = 64;
 
 /// The desktop's side of windows: what serves `WINDOW` and `DRAW`. The
 /// implementation owns the windows and the policy of what may be drawn;
@@ -976,6 +979,38 @@ fn brk(machine: &mut arch::Machine, table: &mut Table, index: usize, pages: u64)
     start
 }
 
+/// The process and the filesystem service behind one of its file
+/// descriptors, for a request in the given direction; the error number
+/// otherwise. `filesystem` is taken apart from the other services so the
+/// caller can still reach the storage driver.
+fn file_request<'a>(
+    table: &'a mut Table,
+    index: usize,
+    filesystem: &'a mut Option<&mut ServiceDomain>,
+    descriptor: u64,
+    writing: bool,
+) -> Result<(&'a mut Process, &'a mut ServiceDomain), i64> {
+    let Some(process) = table.processes[index].as_mut() else {
+        return Err(EBADF);
+    };
+    let Some(slot) = process.descriptors.get(descriptor as usize) else {
+        return Err(EBADF);
+    };
+    if slot.kind != Kind::File
+        || !(if writing {
+            slot.writable
+        } else {
+            slot.readable
+        })
+    {
+        return Err(EBADF);
+    }
+    let Some(filesystem) = filesystem.as_deref_mut() else {
+        return Err(ENOSYS);
+    };
+    Ok((process, filesystem))
+}
+
 /// `FTRUNCATE`: the file's length set through a writable descriptor.
 fn truncate(
     table: &mut Table,
@@ -984,18 +1019,12 @@ fn truncate(
     descriptor: u64,
     length: u64,
 ) -> u64 {
-    let Some(process) = table.processes[index].as_mut() else {
-        return error(EBADF);
-    };
-    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
-        return error(EBADF);
-    };
-    if slot.kind != Kind::File || !slot.writable {
-        return error(EBADF);
-    }
-    let Some(filesystem) = services.filesystem.as_deref_mut() else {
-        return error(ENOSYS);
-    };
+    let (process, filesystem) =
+        match file_request(table, index, &mut services.filesystem, descriptor, true) {
+            Ok(found) => found,
+            Err(number) => return error(number),
+        };
+    let slot = &mut process.descriptors[descriptor as usize];
     let outcome = filesystem.filesystem_request(
         slot.handle,
         services.storage,
@@ -1311,18 +1340,12 @@ fn read_directory(
     services: &mut Services<'_>,
     descriptor: u64,
 ) -> u64 {
-    let Some(process) = table.processes[index].as_mut() else {
-        return error(EBADF);
-    };
-    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
-        return error(EBADF);
-    };
-    if slot.kind != Kind::File || !slot.readable {
-        return error(EBADF);
-    }
-    let Some(filesystem) = services.filesystem.as_deref_mut() else {
-        return error(ENOSYS);
-    };
+    let (process, filesystem) =
+        match file_request(table, index, &mut services.filesystem, descriptor, false) {
+            Ok(found) => found,
+            Err(number) => return error(number),
+        };
+    let slot = &mut process.descriptors[descriptor as usize];
     let outcome = filesystem.filesystem_request(
         slot.handle,
         services.storage,
@@ -1645,18 +1668,12 @@ fn file_write(
     descriptor: u64,
     length: u64,
 ) -> u64 {
-    let Some(process) = table.processes[index].as_mut() else {
-        return error(EBADF);
-    };
-    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
-        return error(EBADF);
-    };
-    if slot.kind != Kind::File || !slot.writable {
-        return error(EBADF);
-    }
-    let Some(filesystem) = services.filesystem.as_deref_mut() else {
-        return error(ENOSYS);
-    };
+    let (process, filesystem) =
+        match file_request(table, index, &mut services.filesystem, descriptor, true) {
+            Ok(found) => found,
+            Err(number) => return error(number),
+        };
+    let slot = &mut process.descriptors[descriptor as usize];
     let length = length.min(BLOCK_BYTES as u64);
     for offset in 0..length as usize {
         let byte = process.domain.core().read_block(offset);

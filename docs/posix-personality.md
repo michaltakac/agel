@@ -83,7 +83,7 @@ and resumes the process.
 | `7` pipe | none | read descriptor in the low sixteen bits, write descriptor in the next sixteen; stratum 3 |
 | `8` wait | child id | the child's exit status, or `0x100` with a signal number in the low byte when the machine stopped it (`11` a fault, `9` a budget or a deadlock); blocks until the child ends; `-ECHILD` for a child that is not the caller's; stratum 3 |
 | `9` seek | descriptor, offset, whence (0 start, 1 current, 2 end) | the new offset; `-ESPIPE` for a pipe or the console; stratum 4 |
-| `10` window | width, height, title length ≤ 28 | a window's number, or `-ENODEV` where there is no display, `-EBUSY` when every window is taken or the process has one, `-EINVAL` for a size outside 64×48..1280×720; the title is in the payload area; not POSIX, see [`native-graphics.md`](native-graphics.md) |
+| `10` window | width, height, title length ≤ 28 | a window's number, or `-ENODEV` where there is no display, `-EBUSY` when every window is taken or the process has one, `-EINVAL` for a size outside 64×48..1920×920 (the largest is the maximized box, so a resize event never announces a size outside the range); the title is in the payload area; not POSIX, see [`native-graphics.md`](native-graphics.md) |
 | `13` unlink | path length | 0; the payload path removed from the namespace, a file or an empty directory (`-ENOTEMPTY` otherwise); needs `write`; stratum 4 |
 | `14` rename | old length, new length | 0; the payload's first path moved to the second, which must not exist (`-EEXIST`); a directory cannot be moved into itself; needs `write`; stratum 4 |
 | `15` stat | path length | the kind in the low byte (`1` a file, `2` a directory) and the length above it; needs `read`; stratum 4 |

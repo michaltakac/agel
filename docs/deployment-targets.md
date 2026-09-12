@@ -181,16 +181,17 @@ Exact, because the gap is large:
   privileged instructions, touch ungranted devices, or never yield; plus one
   restartable driver domain with generations and fail-closed stale handles.
 
-- **The POSIX personality, four strata of five:** processes loaded from
-  the disk into protection domains (v0.2.41), files through a namespace
-  granted per process and served by an unprivileged filesystem service
-  (v0.2.43), `agel-libc`, so C programs build from source and run
-  (v0.2.44), and processes that make processes, with `spawn` in place of
-  `fork`, pipes and `wait` (v0.2.45), with the fifth, breadth, begun:
-  arguments, a free-list heap, streams, seek and append, and an
-  unmodified public-domain C source built and run (v0.2.46); see
-  [`posix-personality.md`](posix-personality.md) for what each stratum
-  does not claim.
+- **The POSIX personality, four strata of five and the fifth under way:**
+  processes loaded from the disk into protection domains (v0.2.41), files
+  through a namespace granted per process and served by an unprivileged
+  filesystem service (v0.2.43), `agel-libc`, so C programs build from
+  source and run (v0.2.44), processes that make processes, with `spawn` in
+  place of `fork`, pipes and `wait` (v0.2.45), and breadth: arguments, a
+  heap that grows at the break, streams, `scanf` and `getopt`, `stat`,
+  `rename`, `unlink`, directories, a monotonic clock, `sleep`, `kill`,
+  `setjmp`, files of 64 KiB, and a window protocol (v0.2.46–v0.2.63);
+  see [`posix-personality.md`](posix-personality.md) for what each
+  stratum does not claim.
 - **Storage drivers:** unprivileged ATA and virtio-blk driver domains on the
   three research machines.
 - **A board:** the AArch64 kernel laid out for the Raspberry Pi 4 boots
@@ -204,4 +205,4 @@ Exact, because the gap is large:
 
 Not started: local inference and a network stack. The C library's breadth
 is begun and far from done. The hosted agent runtime has not moved into a
-domain.
+domain. The line-by-line state is [`roadmap.md`](roadmap.md).

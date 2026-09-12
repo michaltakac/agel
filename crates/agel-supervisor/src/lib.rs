@@ -142,10 +142,6 @@ impl AbSupervisor {
         self
     }
 
-    pub fn trusted_signer(&self) -> Option<VerifyingKey> {
-        self.trusted
-    }
-
     /// Promote with signed evidence. The signer must be the trusted key and
     /// the signature must cover exactly this evidence; then the ordinary
     /// evidence binding applies.
@@ -164,10 +160,6 @@ impl AbSupervisor {
 
     pub fn active(&self) -> &Image {
         &self.active
-    }
-
-    pub fn staged_digest(&self) -> Option<Digest> {
-        self.staged.as_ref().map(|staged| staged.image.digest())
     }
 
     pub fn stage(
@@ -259,10 +251,6 @@ impl AbSupervisor {
         self.previous = Some((replaced_slot, replaced));
         self.staged = None;
         Ok(slot)
-    }
-
-    pub fn discard_staged(&mut self) {
-        self.staged = None;
     }
 }
 

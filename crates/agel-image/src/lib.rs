@@ -128,7 +128,9 @@ impl Image {
         if count > MAX_ENTRIES {
             return Err(ImageError::Limit("too many image entries".into()));
         }
-        let mut entries = Vec::with_capacity(count);
+        // Reserve for what the bytes could hold, not for what the count
+        // claims: each entry is at least its length word and its digest.
+        let mut entries = Vec::with_capacity(count.min(bytes.len() / 40));
         let mut root = initial_digest(&budget, history_limit);
         for _ in 0..count {
             let encoded = reader.bytes()?;

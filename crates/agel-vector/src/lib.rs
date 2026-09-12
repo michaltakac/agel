@@ -558,22 +558,22 @@ fn emit_text(
     let role = symbol(get(command, "role")?, "text role")?;
     let (x, y, anchor, size, weight) = match role {
         "button" => (
-            bounds.x + bounds.width / 2,
-            bounds.y + bounds.height / 2,
+            bounds.x.saturating_add(bounds.width / 2),
+            bounds.y.saturating_add(bounds.height / 2),
             "middle",
             15,
             600,
         ),
         "title" => (
-            bounds.x + 12,
-            bounds.y + bounds.height / 2,
+            bounds.x.saturating_add(12),
+            bounds.y.saturating_add(bounds.height / 2),
             "start",
             14,
             650,
         ),
         _ => (
-            bounds.x + 12,
-            bounds.y + bounds.height / 2,
+            bounds.x.saturating_add(12),
+            bounds.y.saturating_add(bounds.height / 2),
             "start",
             18,
             450,

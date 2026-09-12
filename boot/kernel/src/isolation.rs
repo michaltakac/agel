@@ -442,7 +442,6 @@ fn run_containment(machine: &mut arch::Machine) {
             failed("a stopped world was resumed");
         }
     }
-    let _ = shared::COMMAND_INVOKE;
 }
 
 /// The disk leaves the supervisor too: a driver domain granted exactly the

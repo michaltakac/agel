@@ -1481,6 +1481,33 @@ does), and HDMI on a real board, which has not been seen.
 Not claimed: no keyboard shortcuts, no snapping; the controls are
 sixteen-pixel targets, which a pointer under emulation reaches in steps.
 
+## v0.2.64
+
+- **A size the C library cannot hold is refused, not shrunk:** `malloc`
+  of a size whose rounding wraps answers `ENOMEM`; before, it handed out
+  a small block a program would write past.
+- **`realloc` believes no pointer it cannot find:** the heap is walked
+  from its first header before a size is read, as `free` already did;
+  a pointer into the middle of a block, or one the heap never gave, does
+  nothing.
+- **The native evaluator does not index past its heap:** a list or map
+  chain ending in the empty cell renders and counts as empty instead of
+  reading cell 65535, which would have halted the serial workshop's
+  kernel (the desktop's evaluator is a domain and would have been
+  contained).
+- **A resize event never lies about the protocol:** the largest window
+  is the maximized box, so what a process is told fits what `window`
+  admits.
+- **Decode reserves for the bytes, not the claim:** an image whose header
+  names a million entries no longer allocates for them before one is
+  read.
+
+Not claimed: the world digest that binds verified evidence to a state is
+computed over a debug rendering of the world, so a change in that
+rendering would invalidate stored proposals; a canonical encoding is
+open. No new protection is added; the changes remove ways the existing
+ones could be sidestepped.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a
@@ -1522,5 +1549,8 @@ written list than to remember one. Nothing here is implemented; see
 - **Inference as unbounded work.** A request with no budget and no deadline is a
   denial of service that arrived through the front door.
 
-None of this is mitigated today: there is no POSIX layer, no filesystem, and no
-local inference in this repository.
+The POSIX lines above are now answered by the personality's strata (v0.2.41
+onward): names resolve only through a granted namespace, descriptors carry
+the service generation, and there is no `fork`. The local-inference lines
+are not: there is no local inference in this repository. What each release
+does and does not claim is in [`roadmap.md`](roadmap.md).

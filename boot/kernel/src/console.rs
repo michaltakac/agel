@@ -114,3 +114,37 @@ macro_rules! kprint {
         let _ = write!($crate::console::Writer, $($argument)*);
     }};
 }
+
+/// Whether a form typed so far is still open: an unbalanced parenthesis
+/// outside a `;` comment means the reader should ask for another line.
+#[cfg(any(
+    feature = "isolated-repl",
+    all(
+        target_arch = "x86_64",
+        not(any(
+            feature = "selftest",
+            feature = "monitor-selftest",
+            feature = "native-selftest",
+            feature = "isolation-selftest"
+        ))
+    )
+))]
+pub fn needs_more_input(source: &[u8]) -> bool {
+    let mut depth = 0_u16;
+    let mut comment = false;
+    for byte in source {
+        if comment {
+            if *byte == b'\n' {
+                comment = false;
+            }
+            continue;
+        }
+        match byte {
+            b';' => comment = true,
+            b'(' => depth = depth.saturating_add(1),
+            b')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    depth > 0
+}

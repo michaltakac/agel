@@ -113,34 +113,13 @@ fn read_form(buffer: &mut [u8]) -> usize {
     let mut length = 0;
     loop {
         length += read_line(&mut buffer[length..]);
-        if !needs_more_input(&buffer[..length]) || length == buffer.len() {
+        if !console::needs_more_input(&buffer[..length]) || length == buffer.len() {
             return length;
         }
         buffer[length] = b'\n';
         length += 1;
         console::write("             ... ");
     }
-}
-
-#[cfg(not(feature = "native-selftest"))]
-fn needs_more_input(source: &[u8]) -> bool {
-    let mut depth = 0_u16;
-    let mut comment = false;
-    for byte in source {
-        if comment {
-            if *byte == b'\n' {
-                comment = false;
-            }
-            continue;
-        }
-        match byte {
-            b';' => comment = true,
-            b'(' => depth = depth.saturating_add(1),
-            b')' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-    depth > 0
 }
 
 #[cfg(not(feature = "native-selftest"))]

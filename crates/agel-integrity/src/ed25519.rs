@@ -803,19 +803,13 @@ impl VerifyingKey {
 
 impl fmt::Debug for VerifyingKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        Ok(())
+        fmt_hex(f, &self.0)
     }
 }
 
 impl fmt::Display for VerifyingKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        Ok(())
+        fmt_hex(f, &self.0)
     }
 }
 
@@ -850,20 +844,22 @@ impl Signature {
 
 impl fmt::Debug for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        Ok(())
+        fmt_hex(f, &self.0)
     }
 }
 
 impl fmt::Display for Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0 {
-            write!(f, "{byte:02x}")?;
-        }
-        Ok(())
+        fmt_hex(f, &self.0)
     }
+}
+
+/// Lower-case hex, two digits a byte, into a formatter.
+pub fn fmt_hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
+    for byte in bytes {
+        write!(f, "{byte:02x}")?;
+    }
+    Ok(())
 }
 
 #[cfg(feature = "std")]

@@ -77,6 +77,12 @@ unsafe fn calibrate_counter() {
         }
         let end = hal::rdtsc();
         hal::out8(0x61, gate);
+        if polls == 50_000_000 {
+            // The gate never rose: the clock keeps a guess rather than
+            // nothing, and says so, since every `clock` and `sleep` a
+            // process makes will be off by whatever the guess is.
+            crate::kprint!("clock: PIT channel 2 never signalled; the counter rate is a guess\n");
+        }
         TSC_PER_MICROSECOND = ((end - start) / 10_000).max(1);
     }
 }
@@ -138,27 +144,6 @@ pub fn exit(success: bool) -> ! {
 /// Stop this processor permanently with interrupts masked.
 pub fn halt() -> ! {
     hal::halt()
-}
-
-/// Bounds of the user-executable section.
-#[cfg(feature = "isolation-selftest")]
-pub fn user_text_range() -> core::ops::Range<u64> {
-    extern "C" {
-        static __user_text_start: u8;
-        static __user_text_end: u8;
-    }
-    // Only the addresses are taken; the bytes are never read through these.
-    (&raw const __user_text_start) as u64..(&raw const __user_text_end) as u64
-}
-
-/// Bounds of immutable data readable by evaluator domains.
-#[cfg(feature = "isolation-selftest")]
-pub fn user_rodata_range() -> core::ops::Range<u64> {
-    extern "C" {
-        static __rodata_start: u8;
-        static __rodata_end: u8;
-    }
-    (&raw const __rodata_start) as u64..(&raw const __rodata_end) as u64
 }
 
 /// The shared name for an x86-64 trap vector.
@@ -231,6 +216,26 @@ pub struct Machine {
 
 #[cfg(feature = "isolation-selftest")]
 impl Machine {
+    /// A protection domain entered unprivileged at `entry` with the given
+    /// budget, grant and stack; what every `create_*_world` is.
+    fn world(
+        &mut self,
+        entry: u64,
+        ticks: u32,
+        grant: cpu::PortGrant,
+        stack_pages: u64,
+    ) -> Result<Domain, &'static str> {
+        Domain::new(
+            &mut self.pool,
+            self.identity,
+            entry,
+            ticks,
+            grant,
+            stack_pages,
+        )
+        .map_err(|error| error.name())
+    }
+
     /// Build page tables the kernel owns, install descriptors and trap entry,
     /// and start the preemption timer.
     pub fn bring_up() -> Result<Self, &'static str> {
@@ -241,9 +246,12 @@ impl Machine {
         let mut pool = crate::memory::FramePool::new();
         let kernel_identity =
             memory::build_identity_window(&mut pool, 0..0, 0..0).map_err(|error| error.name())?;
-        let identity =
-            memory::build_identity_window(&mut pool, user_text_range(), user_rodata_range())
-                .map_err(|error| error.name())?;
+        let identity = memory::build_identity_window(
+            &mut pool,
+            super::user_text_range(),
+            super::user_rodata_range(),
+        )
+        .map_err(|error| error.name())?;
         let kernel_space =
             memory::AddressSpace::new(&mut pool, kernel_identity).map_err(|error| error.name())?;
         // Safety: the new space maps every address this code and its stack use.
@@ -268,30 +276,24 @@ impl Machine {
     /// Build a protection domain entered in ring 3 at `entry`.
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn create_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             cpu::PortGrant::None,
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build the domain a loaded process runs in: a private stack, a shared
     /// page, and nothing else until the loader maps its segments.
     #[cfg(feature = "process")]
     pub fn create_process_world(&mut self, entry: u64) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             crate::world::process::TICKS,
             cpu::PortGrant::None,
             crate::world::process::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Give a domain one more page at `virtual_address`, and return the
@@ -317,15 +319,12 @@ impl Machine {
         entry: u64,
         ticks: u32,
     ) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             cpu::PortGrant::None,
             crate::world::fs::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build a domain with the fixed stack budget required by the native evaluator.
@@ -334,74 +333,58 @@ impl Machine {
         entry: u64,
         ticks: u32,
     ) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             cpu::PortGrant::None,
             crate::world::EVALUATOR_STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build a protection domain that is additionally granted the primary ATA
     /// controller: its eight command-block ports and the alternate status
     /// port, and nothing else. The disk is a capability of this one domain.
     pub fn create_storage_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             cpu::PortGrant::Storage,
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build a protection domain that is additionally granted the console
     /// device: on x86-64, eight I/O ports and nothing else.
     pub fn create_console_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             cpu::PortGrant::Console,
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
-    /// Build a protection domain granted the 8042 keyboard controller's two
-    /// ports and nothing else: the keyboard and pointer driver.
-    #[cfg(feature = "native-graphics")]
     /// Build the clock driver's domain: the two CMOS ports and nothing else.
     #[cfg(feature = "native-graphics")]
     pub fn create_clock_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             cpu::PortGrant::Clock,
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
+    /// Build a protection domain granted the 8042 keyboard controller's two
+    /// ports and nothing else: the keyboard and pointer driver.
     #[cfg(feature = "native-graphics")]
     pub fn create_input_world(&mut self, entry: u64, ticks: u32) -> Result<Domain, &'static str> {
-        Domain::new(
-            &mut self.pool,
-            self.identity,
+        self.world(
             entry,
             ticks,
             cpu::PortGrant::Input,
             crate::world::STACK_PAGES,
         )
-        .map_err(|error| error.name())
     }
 
     /// Build the one domain granted the VBE linear framebuffer.

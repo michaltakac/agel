@@ -1069,7 +1069,7 @@ fn render(
         Scalar::List(mut cell) => {
             emit(out, length, b"(")?;
             let mut first = true;
-            loop {
+            while cell != NONE {
                 if !first {
                     emit(out, length, b" ")?;
                 }
@@ -2496,9 +2496,12 @@ fn data_builtin(
             Scalar::Int(match value {
                 Scalar::Nil => 0,
                 Scalar::List(mut cell) => {
-                    let mut count = 1;
-                    while let Scalar::List(next) = heap.cell(cell).cdr {
+                    let mut count = 0;
+                    while cell != NONE {
                         count += 1;
+                        let Scalar::List(next) = heap.cell(cell).cdr else {
+                            break;
+                        };
                         cell = next;
                     }
                     count

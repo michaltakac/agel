@@ -373,6 +373,9 @@ Each rung must be runnable and differentially testable against the rung below:
 58. **Window controls (v0.2.63):** maximize, minimize to a panel pill,
    restore and a corner resize, each a typed command, with a resize
    event to the window's owner.
+59. **A roadmap and a smaller tree (v0.2.64):** the state of every line
+   written down with its proof, five bugs fixed, one paged domain for
+   the two MMU kernels, the scripts sharing their preludes.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

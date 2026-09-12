@@ -886,9 +886,17 @@ unsafe fn port_out16(port: u16, value: u16) {
 pub mod storage_status {
     pub const OK: u64 = 0;
     pub const ABSENT: u64 = 1;
-    /// The ATA controller never became ready; a virtio device has no
-    /// equivalent state, so only x86-64 reports it.
-    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+    /// The controller never became ready: the ATA controller on x86-64,
+    /// the SD host controller on a board; a virtio device has no
+    /// equivalent state.
+    #[cfg_attr(
+        not(any(
+            target_arch = "x86_64",
+            feature = "board-raspi4",
+            feature = "board-raspi5"
+        )),
+        allow(dead_code)
+    )]
     pub const BUSY: u64 = 2;
     pub const DEVICE_ERROR: u64 = 3;
     pub const DATA_TIMEOUT: u64 = 4;
@@ -1834,7 +1842,7 @@ mod agelfs {
     pub const DIRECTORY: u64 = SUPERBLOCK + 1;
     pub const DIRECTORY_SECTORS: u64 = 4;
     /// The first data block's sector: the metadata rounded up to a block.
-    pub const DATA: u64 = SUPERBLOCK + BLOCK_SECTORS;
+    pub const DATA: u64 = (DIRECTORY + DIRECTORY_SECTORS).next_multiple_of(BLOCK_SECTORS);
     pub const BLOCK_SECTORS: u64 = 8;
     pub const BLOCK_BYTES: u64 = 512 * BLOCK_SECTORS;
     /// Data blocks in the region: what is left after the metadata.

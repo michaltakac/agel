@@ -17,9 +17,10 @@ use crate::recovery::{BootPlan, LiveRecovery};
 #[cfg(not(target_arch = "x86_64"))]
 #[allow(dead_code)]
 struct KernelRecovery;
+use crate::process::{EBADF, EBUSY, EINVAL, ENOSPC};
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
-use crate::world::{shared, Stop, PAYLOAD_BYTES};
+use crate::world::{shared, Stop, PAYLOAD_BYTES, RECORD_BYTES};
 use core::fmt::Write;
 
 #[cfg(target_arch = "x86_64")]
@@ -29,7 +30,6 @@ const MODE_INFO: usize = 0x7000;
 #[cfg(target_arch = "x86_64")]
 const BOOT_GRAPHICS_MAGIC: u32 = 0xa6e1_0fb0;
 const MAX_FRAMEBUFFER_BYTES: u64 = 16 * 1024 * 1024;
-const RECORD_BYTES: usize = 64;
 const STREAM_HEADER_BYTES: usize = 16;
 const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
@@ -248,10 +248,6 @@ const WINDOW_RADIUS: u32 = 8;
 const WINDOW_SHADOW: u32 = 32;
 /// The one-pixel lighter edge around a window and the launcher.
 const OUTLINE: u32 = 0x3d_3d_3d;
-const EBADF: i64 = 9;
-const EBUSY: i64 = 16;
-const EINVAL: i64 = 22;
-const ENOSPC: i64 = 28;
 
 /// A window a process asked for: its content box on the screen (the
 /// header sits above it), its title, and the records the supervisor
@@ -1893,10 +1889,20 @@ fn checksum(domain: &mut arch::Domain) -> Result<u64, &'static str> {
 
 fn render(
     domain: &mut arch::Domain,
-    mut inputs: Option<&mut Inputs<'_>>,
+    inputs: Option<&mut Inputs<'_>>,
     frame: &Frame,
 ) -> Result<(), &'static str> {
-    for command in &frame.records[..frame.count] {
+    emit_records(domain, inputs, &frame.records[..frame.count])
+}
+
+/// Hand the compositor each record in turn, draining the input queue
+/// between them so a slow paint loses no keystroke.
+fn emit_records(
+    domain: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
+    records: &[[u8; RECORD_BYTES]],
+) -> Result<(), &'static str> {
+    for command in records {
         for (offset, byte) in command.iter().enumerate() {
             domain.core().write_payload(offset, *byte);
         }
@@ -1933,25 +1939,13 @@ fn render_region(
 
 fn render_overlay(
     domain: &mut arch::Domain,
-    mut inputs: Option<&mut Inputs<'_>>,
+    inputs: Option<&mut Inputs<'_>>,
     frame: &Frame,
 ) -> Result<(), &'static str> {
     // A pointer, when visible, follows the three command-bar records.
     let has_pointer = frame.count > 0 && record_u32(&frame.records[frame.count - 1], 0) == 9;
     let start = frame.count.saturating_sub(if has_pointer { 4 } else { 3 });
-    for command in &frame.records[start..frame.count] {
-        for (offset, byte) in command.iter().enumerate() {
-            domain.core().write_payload(offset, *byte);
-        }
-        domain
-            .core()
-            .write_shared(shared::ARGUMENTS, RECORD_BYTES as u64);
-        request(domain, shared::COMMAND_DISPLAY_DRAW)?;
-        if let Some(inputs) = inputs.as_deref_mut() {
-            inputs.drain();
-        }
-    }
-    Ok(())
+    emit_records(domain, inputs, &frame.records[start..frame.count])
 }
 
 #[derive(Clone, Copy)]

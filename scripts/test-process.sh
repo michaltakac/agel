@@ -7,23 +7,8 @@ set -eu
 architecture=${1:-x86_64}
 hello=$(./scripts/build-program.sh hello "$architecture" | tail -n 1)
 hostile=$(./scripts/build-program.sh hostile "$architecture" | tail -n 1)
-case "$architecture" in
-  x86_64)
-    image=$(./scripts/build-boot.sh --features isolated-repl | tail -n 1)
-    disk=$(mktemp "${TMPDIR:-/tmp}/agel-process.XXXXXX")
-    trap 'rm -f "$disk"' EXIT HUP INT TERM
-    cp "$image" "$disk"
-    dd if=/dev/zero of="$disk" bs=512 seek=1024 count=34 conv=notrunc 2>/dev/null
-    kernel=$disk
-    ;;
-  aarch64 | riscv64)
-    kernel=$(./scripts/build-kernel.sh "$architecture" --features isolated-repl | tail -n 1)
-    disk=$(mktemp "${TMPDIR:-/tmp}/agel-process.XXXXXX")
-    trap 'rm -f "$disk"' EXIT HUP INT TERM
-    dd if=/dev/zero of="$disk" bs=512 count=3072 2>/dev/null
-    ;;
-  *) printf 'unknown architecture: %s\n' "$architecture" >&2; exit 2 ;;
-esac
+. ./scripts/lib.sh
+prepare_machine "$architecture" process 34
 python3 ./scripts/install-program.py "$disk" hello "$hello" >/dev/null
 python3 ./scripts/install-program.py "$disk" hostile "$hostile" >/dev/null
 python3 ./scripts/test-native-repl.py "$kernel" --exec --arch "$architecture" --disk "$disk"

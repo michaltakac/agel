@@ -71,11 +71,16 @@ jobs:
       - run: ./scripts/test-live-desktop.sh
       - run: ./scripts/test-graphical-workshop.sh
       - run: ./scripts/test-live-keyboard.sh
-      - run: python3 scripts/test-graphical-console.py target/boot/agel-v1.img
       - run: ./scripts/test-desktop-process.sh
+      # The Python desktop suites take the image they boot; build it here so
+      # none of them depends on what an earlier step last wrote there.
+      - name: build the desktop image and the module bridge
+        run: |
+          ./scripts/build-boot.sh --features native-graphics
+          cargo build --release -p agel-jit --example module_workshop
+      - run: python3 scripts/test-graphical-console.py target/boot/agel-v1.img
       - run: python3 scripts/test-native-dock.py target/boot/agel-v1.img
       - run: python3 scripts/test-native-workbench.py target/boot/agel-v1.img
-      - run: cargo build --release -p agel-jit --example module_workshop
       - run: python3 scripts/test-native-modules.py target/boot/agel-v1.img
       - run: ./scripts/test-isolation.sh
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none -- -D warnings
@@ -87,9 +92,13 @@ jobs:
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features isolated-repl -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features graphics-selftest -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features isolation-selftest -- -D warnings
+      - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features isolated-repl -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features isolated-repl,board-raspi4 -- -D warnings
+      - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features native-graphics,board-raspi4 -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features isolated-repl,board-raspi5 -- -D warnings
+      - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target aarch64-unknown-none-softfloat --features native-graphics,board-raspi5 -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target riscv64imac-unknown-none-elf --features isolation-selftest -- -D warnings
+      - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target riscv64imac-unknown-none-elf --features isolated-repl -- -D warnings
 
   sel4:
     # The assurance backend: the same contract on an unmodified seL4 kernel.

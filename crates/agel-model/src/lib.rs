@@ -270,7 +270,9 @@ fn run_command(
             },
         )
         .map_err(provider_effect_error)?;
-    let stderr = String::from_utf8(output.stderr).map_err(|_| ProviderError::InvalidUtf8)?;
+    // What the provider said on its error stream is reported, never a reason
+    // to refuse an answer it gave on its output stream.
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if output.status != 0 {
         return Err(ProviderError::Failed {
             code: (output.status >= 0).then_some(output.status),

@@ -46,7 +46,7 @@ if $workbench; then
 fi
 if $web; then
   cargo build --release -q -p agel-jit --example module_workshop
-  exec python3 ./scripts/graphical-console.py "$image" "$@"
+  exec python3 ./scripts/graphical_console.py "$image" "$@"
 fi
 printf '%s\n' 'Direct QEMU input uses a US physical layout. Use --web for Slovak/macOS text composition.'
 printf '%s\n' 'On a fresh empty world, type :workbench. Click a dock icon, or Tab then Enter. QEMU owns its mouse-capture/release shortcut.'

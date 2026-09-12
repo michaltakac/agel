@@ -853,7 +853,18 @@ pub extern "C" fn malloc(size: usize) -> *mut c_void {
         unsafe { ERRNO = 12 };
         return core::ptr::null_mut();
     }
-    let wanted = (size.max(1) + ALIGN - 1) & !(ALIGN - 1);
+    // A size the rounding or the growth arithmetic cannot hold is a request
+    // no heap answers; it is refused before it wraps into a small one.
+    let Some(wanted) = size
+        .max(1)
+        .checked_add(ALIGN - 1)
+        .map(|rounded| rounded & !(ALIGN - 1))
+        .filter(|wanted| wanted.checked_add(HEADER_BYTES + PAGE_BYTES).is_some())
+    else {
+        // Safety: as in `outcome`.
+        unsafe { ERRNO = 12 };
+        return core::ptr::null_mut();
+    };
     for attempt in 0..2 {
         let bytes = heap_bytes();
         let mut offset = 0;
@@ -892,54 +903,62 @@ pub extern "C" fn malloc(size: usize) -> *mut c_void {
     core::ptr::null_mut()
 }
 
-/// The header offset of a block `malloc` handed out, if `pointer` is one.
-fn block_of(pointer: *mut c_void) -> Option<usize> {
+/// The header offset of the block `malloc` handed out at `pointer`, and
+/// the offset of the block before it, if `pointer` is one. The chain is
+/// walked from its first header, so a pointer into the middle of a block,
+/// or one the heap never gave, names no block and nothing is read or
+/// written through it.
+fn block_of(pointer: *mut c_void) -> Option<(usize, Option<usize>)> {
     let address = pointer as usize;
     let base = arena() as usize;
-    if base == 0 || address < base + HEADER_BYTES || address >= base + heap_bytes() {
+    let bytes = heap_bytes();
+    if base == 0 || address < base + HEADER_BYTES || address >= base + bytes {
         return None;
     }
     let offset = address - base - HEADER_BYTES;
-    offset.is_multiple_of(ALIGN).then_some(offset)
+    let mut previous: Option<usize> = None;
+    let mut at = 0;
+    while at + HEADER_BYTES <= bytes {
+        if at == offset {
+            return Some((at, previous));
+        }
+        if at > offset {
+            break;
+        }
+        // Safety: `at` walks block boundaries from the first header.
+        let size = unsafe { (*header_at(at)).size };
+        previous = Some(at);
+        at += HEADER_BYTES + size;
+    }
+    None
 }
 
 #[no_mangle]
 pub extern "C" fn free(pointer: *mut c_void) {
-    let Some(offset) = block_of(pointer) else {
+    let Some((offset, previous)) = block_of(pointer) else {
         return;
     };
     let bytes = heap_bytes();
-    // Walk from the start so the previous block is known; the walk also
-    // confirms `offset` is a boundary before anything is written.
-    let mut previous: Option<usize> = None;
-    let mut at = 0;
-    while at + HEADER_BYTES <= bytes {
-        // Safety: `at` walks block boundaries.
-        let header = unsafe { &mut *header_at(at) };
-        if at == offset {
-            if header.free == 1 {
-                return;
-            }
-            header.free = 1;
-            let next = at + HEADER_BYTES + header.size;
-            if next + HEADER_BYTES <= bytes {
-                // Safety: `next` is the following block's boundary.
-                let following = unsafe { &*header_at(next) };
-                if following.free == 1 {
-                    header.size += HEADER_BYTES + following.size;
-                }
-            }
-            if let Some(before) = previous {
-                // Safety: `before` is the preceding block's boundary.
-                let preceding = unsafe { &mut *header_at(before) };
-                if preceding.free == 1 {
-                    preceding.size += HEADER_BYTES + header.size;
-                }
-            }
-            return;
+    // Safety: `offset` is a block boundary.
+    let header = unsafe { &mut *header_at(offset) };
+    if header.free == 1 {
+        return;
+    }
+    header.free = 1;
+    let next = offset + HEADER_BYTES + header.size;
+    if next + HEADER_BYTES <= bytes {
+        // Safety: `next` is the following block's boundary.
+        let following = unsafe { &*header_at(next) };
+        if following.free == 1 {
+            header.size += HEADER_BYTES + following.size;
         }
-        previous = Some(at);
-        at += HEADER_BYTES + header.size;
+    }
+    if let Some(before) = previous {
+        // Safety: `before` is the preceding block's boundary.
+        let preceding = unsafe { &mut *header_at(before) };
+        if preceding.free == 1 {
+            preceding.size += HEADER_BYTES + header.size;
+        }
     }
 }
 
@@ -978,7 +997,7 @@ pub extern "C" fn calloc(count: usize, size: usize) -> *mut c_void {
 /// `pointer` is null or came from `malloc`.
 #[no_mangle]
 pub unsafe extern "C" fn realloc(pointer: *mut c_void, size: usize) -> *mut c_void {
-    let Some(offset) = block_of(pointer) else {
+    let Some((offset, _)) = block_of(pointer) else {
         return malloc(size);
     };
     // Safety: `offset` is the block's boundary.
@@ -1318,11 +1337,30 @@ pub extern "C" fn strerror(number: c_int) -> *mut c_char {
 /// `text` must be NUL-terminated; `end` is null or points to a writable pointer.
 #[no_mangle]
 pub unsafe extern "C" fn strtol(text: *const c_char, end: *mut *mut c_char, base: c_int) -> c_long {
-    let (value, consumed) = unsafe { parse_integer(text, base) };
+    let parsed = unsafe { parse_integer(text, base) };
     if !end.is_null() {
-        unsafe { end.write(text.add(consumed) as *mut c_char) };
+        unsafe { end.write(text.add(parsed.consumed) as *mut c_char) };
     }
-    value
+    // The magnitude is unsigned; the signed range is one wider below zero.
+    let limit = if parsed.negative {
+        c_long::MIN.unsigned_abs()
+    } else {
+        c_long::MAX as c_ulong
+    };
+    if parsed.overflow || parsed.magnitude > limit {
+        // Safety: as in `outcome`.
+        unsafe { ERRNO = ERANGE };
+        return if parsed.negative {
+            c_long::MIN
+        } else {
+            c_long::MAX
+        };
+    }
+    if parsed.negative {
+        (parsed.magnitude as c_long).wrapping_neg()
+    } else {
+        parsed.magnitude as c_long
+    }
 }
 
 /// # Safety
@@ -1333,26 +1371,50 @@ pub unsafe extern "C" fn strtoul(
     end: *mut *mut c_char,
     base: c_int,
 ) -> c_ulong {
-    unsafe { strtol(text, end, base) as c_ulong }
+    let parsed = unsafe { parse_integer(text, base) };
+    if !end.is_null() {
+        unsafe { end.write(text.add(parsed.consumed) as *mut c_char) };
+    }
+    if parsed.overflow {
+        // Safety: as in `outcome`.
+        unsafe { ERRNO = ERANGE };
+        return c_ulong::MAX;
+    }
+    // As C has it: a negated magnitude, modulo the type.
+    if parsed.negative {
+        parsed.magnitude.wrapping_neg()
+    } else {
+        parsed.magnitude
+    }
 }
 
 /// # Safety
 /// `text` must be NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn atoi(text: *const c_char) -> c_int {
-    unsafe { parse_integer(text, 10).0 as c_int }
+    unsafe { strtol(text, core::ptr::null_mut(), 10) as c_int }
 }
 
 /// # Safety
 /// `text` must be NUL-terminated.
 #[no_mangle]
 pub unsafe extern "C" fn atol(text: *const c_char) -> c_long {
-    unsafe { parse_integer(text, 10).0 }
+    unsafe { strtol(text, core::ptr::null_mut(), 10) }
+}
+
+const ERANGE: c_int = 34;
+
+/// What the integer scanner found: the magnitude, its sign, whether the
+/// magnitude outgrew an unsigned long, and how many bytes were taken.
+struct ParsedInteger {
+    magnitude: c_ulong,
+    negative: bool,
+    overflow: bool,
+    consumed: usize,
 }
 
 /// Leading space, a sign, an optional `0x` for base 16 or 0, digits.
-/// Returns the value and how many bytes were consumed; overflow saturates.
-unsafe fn parse_integer(text: *const c_char, base: c_int) -> (c_long, usize) {
+unsafe fn parse_integer(text: *const c_char, base: c_int) -> ParsedInteger {
     let byte = |at: usize| unsafe { text.add(at).read_volatile() as u8 };
     let mut at = 0;
     while isspace(c_int::from(byte(at))) != 0 {
@@ -1376,7 +1438,8 @@ unsafe fn parse_integer(text: *const c_char, base: c_int) -> (c_long, usize) {
     } else if base == 0 {
         base = if byte(at) == b'0' { 8 } else { 10 };
     }
-    let mut value: c_long = 0;
+    let mut magnitude: c_ulong = 0;
+    let mut overflow = false;
     let start = at;
     loop {
         let digit = match byte(at) {
@@ -1388,15 +1451,21 @@ unsafe fn parse_integer(text: *const c_char, base: c_int) -> (c_long, usize) {
         if digit >= base {
             break;
         }
-        value = value
-            .saturating_mul(c_long::from(base))
-            .saturating_add(c_long::from(digit));
+        match magnitude
+            .checked_mul(c_ulong::from(base))
+            .and_then(|grown| grown.checked_add(c_ulong::from(digit)))
+        {
+            Some(grown) => magnitude = grown,
+            None => overflow = true,
+        }
         at += 1;
     }
-    if at == start {
-        return (0, 0);
+    ParsedInteger {
+        magnitude,
+        negative,
+        overflow,
+        consumed: if at == start { 0 } else { at },
     }
-    (if negative { -value } else { value }, at)
 }
 
 #[no_mangle]
