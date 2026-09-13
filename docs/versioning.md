@@ -325,6 +325,10 @@ promise.
   provider effect and leaving a dataset; the engine's console lines are
   thinned (170 frames per second) and the desktop repaints only a
   game's canvas.
+  `v0.2.73` builds C programs so that CI's lld cannot truncate a data
+  address to 32 bits (direct data access and `--no-relax` on x86-64),
+  which is why DOOM faulted on CI at v0.2.71 and v0.2.72 while running
+  here; `printf` formats `%f`, `%e` and `%g`.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

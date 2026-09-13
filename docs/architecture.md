@@ -397,6 +397,10 @@ Each rung must be runnable and differentially testable against the rung below:
 67. **Agel plays (v0.2.72):** a hosted agent stepping the game through
    the screen and keys, deciding through the model-provider effect,
    leaving a dataset; 170 frames per second with the console quiet.
+68. **Built where CI builds (v0.2.73):** C programs reach data directly
+   and link `--no-relax`, so no linker turns a GOT entry into a 32-bit
+   immediate that cannot hold an address at 512 GiB; `printf` formats
+   floating point.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

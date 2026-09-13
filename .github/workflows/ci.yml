@@ -20,6 +20,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y sbcl binutils clang lld \
             qemu-system-x86 qemu-system-arm qemu-system-misc
+          clang --version && ld.lld --version && qemu-system-x86_64 --version
       - name: Add freestanding targets
         run: |
           rustup target add x86_64-unknown-none

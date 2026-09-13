@@ -1650,6 +1650,22 @@ Not claimed: the model sees what the agent chose to show it; the agent
 is trusted by the operator who runs it; nothing here bounds what a
 provider costs beyond the provider's own limits.
 
+## v0.2.73
+
+- **A toolchain can miscompile a process, never the kernel's guard:** the
+  linker's truncated address made the engine touch a page it had no
+  mapping for, and the domain was stopped with the fault reported and
+  the desktop answering; the kernel is built by Rust with its own
+  relocation model and was not affected. The C flags now leave no
+  relocation for a linker to relax into an immediate.
+- **`printf`'s floating point is bounded:** at most forty fraction
+  digits, a fixed buffer sized for the largest double, and a precision
+  beyond the bound clamped rather than trusted.
+
+Not claimed: the C library is still not tested against a conformance
+suite; the flags are proved by DOOM and the float program on the two
+toolchains that build them, not by every clang.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

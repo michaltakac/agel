@@ -59,6 +59,16 @@ int main(void) {
         check(remove("float.txt") == 0 && stat("float.txt", &info) < 0 && errno == ENOENT,
               "remove", errno);
     }
+    char text[96];
+    snprintf(text, sizeof text, "%.2f|%8.3f|%-7.1f|%f|%.0f", 3.14159, -2.5, 0.05, 1.0 / 3, 9.7);
+    check(strcmp(text, "3.14|  -2.500|0.1    |0.333333|10") == 0, "printf %f", (long)strlen(text));
+    snprintf(text, sizeof text, "%e|%.2E|%g|%g|%g|%g|%G", 12345.678, 0.000123, 0.0001, 100000.0, 1e6, 2.5, 1e-7);
+    check(strcmp(text, "1.234568e+04|1.23E-04|0.0001|100000|1e+06|2.5|1E-07") == 0, "printf %e and %g",
+          (long)strlen(text));
+    double zero = atof("0");
+    snprintf(text, sizeof text, "%+08.2f|%f|%f", 2.5, 1.0 / zero, -(zero / zero));
+    check(strcmp(text, "+0002.50|inf|nan") == 0 || strcmp(text, "+0002.50|inf|-nan") == 0, "printf %f edges",
+          (long)strlen(text));
     printf("float: %d checks passed%s\n", passed, failed ? ", some FAILED" : "");
     return failed ? 1 : 0;
 }

@@ -251,6 +251,22 @@ window on the desktop yet: the agent's reasoning is on the host, and
 the engine's state lines in the terminal are all the desktop shows of
 it. No steering while it runs, no speech.
 
+### Built where CI builds (v0.2.73)
+
+v0.2.71 and v0.2.72 passed every suite here and failed the DOOM suite on
+CI: the engine faulted after `ST_Init`, touching the low 32 bits of a
+data address. The runner's clang 18 references data through the GOT
+(`add S_music@GOTPCREL(%rip), %r15`), and its lld 18, linking a static
+program that is not `-pie`, relaxes that to `add $S_music, %r15`, an
+absolute 32-bit immediate that cannot hold an address at 512 GiB and is
+silently truncated; Homebrew's newer lld keeps the load. The binary the
+runner builds was reproduced in an Ubuntu 24.04 container, faulted on
+QEMU here in `S_ChangeMusic` at the same instruction, and the fix was
+proved there: C programs now compile with data reached directly
+(`-fdirect-access-external-data`) and link `--no-relax`, so no GOT entry
+becomes an immediate on any lld. The same run showed the engine's last
+line printing `%f`, so the library's `printf` now formats floating point.
+
 ## What this is not
 
 Sound is out of scope: the engine is built without it. RISC-V has no

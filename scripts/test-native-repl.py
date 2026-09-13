@@ -1019,7 +1019,7 @@ def c_test(image: str, architecture: str, disk: str) -> None:
             run_program(
                 boot,
                 ":exec c-float",
-                [b"float: 20 checks passed", b"process c-float exited with status 0"],
+                [b"float: 23 checks passed", b"process c-float exited with status 0"],
             )
         # The data region: a large read-only file installed from the host,
         # read through the namespace by its digest, listed, never written.

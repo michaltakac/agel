@@ -13,21 +13,29 @@ case "$architecture" in
   x86_64)
     target=x86_64-unknown-none
     triple=x86_64-unknown-none-elf
-    # The process window is at 512 GiB: position-independent code; the
-    # kernel enables SSE for processes (v0.2.70), so floating point is the
-    # compiler's default
-    # (the kernel does not enable it for a process), no red zone needed.
-    arch_flags="-fPIE"
+    # The process window is at 512 GiB: position-independent code, and
+    # data reached directly rather than through a GOT. With a GOT, clang
+    # references data through `add sym@GOTPCREL(%rip), %reg`, and because
+    # the link is static and not `-pie`, lld 18 relaxes that to an
+    # absolute 32-bit immediate, which cannot hold 0x80_1000_0000 and is
+    # silently truncated (DOOM faulted on the CI runner that way). Function
+    # addresses still come from the GOT, so the link keeps every GOT load
+    # as a load (`--no-relax`). The kernel enables SSE for processes
+    # (v0.2.70), so floating point is the compiler's default.
+    arch_flags="-fPIE -fdirect-access-external-data"
+    link_flags="-Wl,--no-relax"
     ;;
   aarch64)
     target=aarch64-unknown-none-softfloat
     triple=aarch64-unknown-none-elf
     arch_flags=""
+    link_flags=""
     ;;
   riscv64)
     target=riscv64imac-unknown-none-elf
     triple=riscv64-unknown-none-elf
     arch_flags="-march=rv64imac -mabi=lp64 -mcmodel=medany"
+    link_flags=""
     ;;
   *) printf 'unknown architecture: %s\n' "$architecture" >&2; exit 2 ;;
 esac
@@ -76,7 +84,7 @@ if test -f "$posix_dir/c/$name.deps"; then
   done < "$posix_dir/c/$name.deps"
 fi
 # shellcheck disable=SC2086
-"$clang" --target=$triple -fuse-ld=lld -nostdlib -static -Wl,--gc-sections -Wl,-z,max-page-size=4096 \
+"$clang" --target=$triple -fuse-ld=lld -nostdlib -static $link_flags -Wl,--gc-sections -Wl,-z,max-page-size=4096 \
   -Wl,-T,"$posix_dir/linker/$architecture.ld" -o "$out/$name" \
   $objects $library_objects "$archive"
 printf '%s\n' "$out/$name"

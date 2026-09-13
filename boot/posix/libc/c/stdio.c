@@ -1,7 +1,8 @@
 /* Streams and formatting, in C because a C-variadic definition is not stable
    Rust. A FILE is a descriptor with a write buffer and a read buffer; the
-   formatter handles %s %c %d %i %u %x %X %o %p %% with the flags - 0 +
-   and space, a width, a precision, and the l, ll, z and h modifiers. */
+   formatter handles %s %c %d %i %u %x %X %o %p %f %e %g %% with the
+   flags - 0 + and space, a width, a precision, and the l, ll, z and h
+   modifiers. */
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -403,6 +404,206 @@ static void emit_number(struct sink *sink, unsigned long long value, int negativ
     }
 }
 
+/* At most this many digits after the point: a double carries no more
+   information, and it bounds the buffers below. */
+#define FRACTION_MAX 40
+
+/* The digits of a non-negative integral double, most significant first,
+   into `out` (which holds any double: 309 digits). Exact below 2^53, since
+   each quotient is then a correctly rounded division of representable
+   values; beyond that the digits are the double's own approximation. */
+/* The integral part of a non-negative double; one at or above 2^52 is
+   already integral, below that the conversion through long long is exact. */
+static double integral(double value) {
+    return value >= 4503599627370496.0 ? value : (double)(long long)value;
+}
+
+static int whole_digits(double whole, char *out) {
+    char reversed[320];
+    int count = 0;
+    while (whole >= 1 && count < (int)sizeof reversed) {
+        double quotient = integral(whole / 10);
+        if (quotient * 10 > whole) {
+            quotient -= 1;
+        }
+        int digit = (int)(whole - quotient * 10);
+        reversed[count++] = (char)('0' + (digit < 0 ? 0 : digit > 9 ? 9 : digit));
+        whole = quotient;
+    }
+    if (count == 0) {
+        reversed[count++] = '0';
+    }
+    for (int index = 0; index < count; index++) {
+        out[index] = reversed[count - 1 - index];
+    }
+    return count;
+}
+
+/* `precision` digits of a fraction in [0, 1), rounded half up on the digit
+   after them; returns the carry into the units place. */
+static int fraction_digits(double fraction, int precision, char *out) {
+    for (int index = 0; index < precision; index++) {
+        fraction *= 10;
+        int digit = (int)fraction;
+        out[index] = (char)('0' + digit);
+        fraction -= digit;
+    }
+    int carry = fraction >= 0.5;
+    for (int index = precision - 1; carry && index >= 0; index--) {
+        if (out[index] == '9') {
+            out[index] = '0';
+        } else {
+            out[index]++;
+            carry = 0;
+        }
+    }
+    return carry;
+}
+
+static void emit_padded(struct sink *sink, const char *text, int length, int negative, const struct spec *spec,
+                        int zero_ok) {
+    char sign = negative ? '-' : spec->plus ? '+' : spec->space ? ' ' : 0;
+    int total = length + (sign ? 1 : 0);
+    int padding = spec->width > total ? spec->width - total : 0;
+    int zeros = zero_ok && spec->zero && !spec->left;
+    if (!spec->left && !zeros) {
+        pad(sink, padding, ' ');
+    }
+    if (sign) {
+        emit(sink, sign);
+    }
+    if (zeros) {
+        pad(sink, padding, '0');
+    }
+    for (int index = 0; index < length; index++) {
+        emit(sink, text[index]);
+    }
+    if (spec->left) {
+        pad(sink, padding, ' ');
+    }
+}
+
+/* Decimal exponent and mantissa in [1, 10) of a positive finite double. */
+static int decompose(double *value) {
+    int exponent = 0;
+    while (*value >= 10) {
+        *value /= 10;
+        exponent++;
+    }
+    while (*value < 1) {
+        *value *= 10;
+        exponent--;
+    }
+    return exponent;
+}
+
+static int fixed_text(double value, int precision, char *text) {
+    double whole = integral(value);
+    char fraction[FRACTION_MAX];
+    int carry = fraction_digits(value - whole, precision, fraction);
+    int length = whole_digits(whole + carry, text);
+    if (precision > 0) {
+        text[length++] = '.';
+        for (int index = 0; index < precision; index++) {
+            text[length++] = fraction[index];
+        }
+    }
+    return length;
+}
+
+static int exponent_text(double value, int precision, int upper, char *text) {
+    int exponent = value == 0 ? 0 : decompose(&value);
+    int lead = (int)value;
+    char fraction[FRACTION_MAX];
+    if (fraction_digits(value - lead, precision, fraction)) {
+        lead++;
+        if (lead == 10) {
+            lead = 1;
+            exponent++;
+        }
+    }
+    int length = 0;
+    text[length++] = (char)('0' + lead);
+    if (precision > 0) {
+        text[length++] = '.';
+        for (int index = 0; index < precision; index++) {
+            text[length++] = fraction[index];
+        }
+    }
+    text[length++] = upper ? 'E' : 'e';
+    text[length++] = exponent < 0 ? '-' : '+';
+    int magnitude = exponent < 0 ? -exponent : exponent;
+    if (magnitude >= 100) {
+        text[length++] = (char)('0' + magnitude / 100);
+    }
+    text[length++] = (char)('0' + magnitude / 10 % 10);
+    text[length++] = (char)('0' + magnitude % 10);
+    return length;
+}
+
+/* Strip the trailing zeros of a fraction, and the point if nothing follows
+   it, as %g does; an exponent suffix is kept. */
+static int strip_zeros(char *text, int length) {
+    int end = length;
+    while (end > 0 && text[end - 1] != 'e' && text[end - 1] != 'E') {
+        end--;
+    }
+    int mantissa = end > 0 ? end - 1 : length;
+    int has_point = 0;
+    for (int index = 0; index < mantissa; index++) {
+        has_point |= text[index] == '.';
+    }
+    if (!has_point) {
+        return length;
+    }
+    int cut = mantissa;
+    while (cut > 0 && text[cut - 1] == '0') {
+        cut--;
+    }
+    if (cut > 0 && text[cut - 1] == '.') {
+        cut--;
+    }
+    for (int index = mantissa; index < length; index++) {
+        text[cut++] = text[index];
+    }
+    return cut;
+}
+
+static void emit_double(struct sink *sink, double value, char conversion, const struct spec *spec) {
+    int upper = conversion == 'F' || conversion == 'E' || conversion == 'G';
+    int negative = value < 0;
+    if (negative) {
+        value = -value;
+    }
+    if (value != value) {
+        emit_padded(sink, upper ? "NAN" : "nan", 3, 0, spec, 0);
+        return;
+    }
+    if (value > 1.7976931348623157e308) {
+        emit_padded(sink, upper ? "INF" : "inf", 3, negative, spec, 0);
+        return;
+    }
+    int precision = spec->precision < 0 ? 6 : spec->precision > FRACTION_MAX ? FRACTION_MAX : spec->precision;
+    char text[320 + FRACTION_MAX + 8];
+    int length;
+    if (conversion == 'f' || conversion == 'F') {
+        length = fixed_text(value, precision, text);
+    } else if (conversion == 'e' || conversion == 'E') {
+        length = exponent_text(value, precision, upper, text);
+    } else {
+        int significant = precision == 0 ? 1 : precision;
+        double mantissa = value;
+        int exponent = value == 0 ? 0 : decompose(&mantissa);
+        if (exponent < -4 || exponent >= significant) {
+            length = exponent_text(value, significant - 1, upper, text);
+        } else {
+            length = fixed_text(value, significant - 1 - exponent, text);
+        }
+        length = strip_zeros(text, length);
+    }
+    emit_padded(sink, text, length, negative, spec, 1);
+}
+
 static void format(struct sink *sink, const char *format, va_list arguments) {
     for (const char *at = format; *at; at++) {
         if (*at != '%') {
@@ -509,6 +710,14 @@ static void format(struct sink *sink, const char *format, va_list arguments) {
             emit_number(sink, value, 0, base, *at == 'X', &spec);
             break;
         }
+        case 'f':
+        case 'F':
+        case 'e':
+        case 'E':
+        case 'g':
+        case 'G':
+            emit_double(sink, va_arg(arguments, double), *at, &spec);
+            break;
         case 'p': {
             unsigned long long value = (unsigned long long)(size_t)va_arg(arguments, void *);
             emit(sink, '0');

@@ -274,11 +274,15 @@ process c-cat exited with status 2
 
 `scripts/build-c-program.sh NAME [arch]` builds `boot/posix/c/NAME.c`:
 clang with `-ffreestanding -nostdlib -fno-builtin` and the machine's flags
-(position-independent code without SSE on x86-64, general registers only
-on AArch64, `rv64imac` on RISC-V, since a process gets no floating-point
-state), then `-fuse-ld=lld` with the same linker script as the Rust
-programs. Apple's clang has no RISC-V backend and no lld; Homebrew's `llvm`
-and `lld` do, and `AGEL_CLANG` names a compiler explicitly.
+(position-independent code with data reached directly rather than through
+a GOT on x86-64, `rv64imac` on RISC-V; the floating-point unit is the
+process's since v0.2.70), then `-fuse-ld=lld` with the same linker script
+as the Rust programs. On x86-64 the link is `--no-relax`: the program sits
+at 512 GiB, and lld 18 relaxes a GOT-relative `add` or `cmp` in a static,
+non-`pie` link to an absolute 32-bit immediate that cannot hold the
+address, which is how DOOM faulted on CI while running here (v0.2.73).
+Apple's clang has no RISC-V backend and no lld; Homebrew's `llvm` and
+`lld` do, and `AGEL_CLANG` names a compiler explicitly.
 
 ### What the library provides
 
@@ -289,7 +293,7 @@ and `lld` do, and `AGEL_CLANG` names a compiler explicitly.
 | `errno.h` | `errno`, the numbers the protocol answers | `errno` is `*__errno_location()`, set from a negated answer |
 | `stdlib.h` | `malloc`, `calloc`, `realloc`, `free`, `exit`, `abort` | a 64 KiB bump arena in the process's own `.bss`; `free` returns nothing |
 | `string.h` | `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, `strcmp`, `strncmp`, `strcpy`, `strchr` | volatile byte loops, so the compiler cannot turn them into calls to themselves |
-| `stdio.h` | `printf`, `puts`, `putchar` | `printf` handles `%s %d %i %u %x %c %p %%` with `l` and `z`; it is C, in `libc/c/stdio.c`, because a C-variadic definition is not stable Rust |
+| `stdio.h` | `printf`, `puts`, `putchar` | `printf` handles `%s %d %i %u %x %c %p %%` with `l` and `z` (and since v0.2.73 `%f %e %g`); it is C, in `libc/c/stdio.c`, because a C-variadic definition is not stable Rust |
 
 The process entry `_start` is the library's: it keeps the shared page,
 calls `int main(void)` and exits with what it returns. The `unsafe` in the
@@ -462,7 +466,9 @@ What this step adds:
   `snprintf`, `vprintf`, `vfprintf`, `vsprintf`, `vsnprintf`, `perror`.
   `exit` flushes every stream. The formatter handles `%s %c %d %i %u %x
   %X %o %p %%` with `-`, `0`, `+` and space, a width, a precision, `*`,
-  and the `l`, `ll`, `z` and `h` modifiers; no floating point.
+  and the `l`, `ll`, `z` and `h` modifiers; since v0.2.73 also `%f %e
+  %g` (and their capitals), rounding half up on the digit after the
+  precision, `inf` and `nan` spelled, at most forty fraction digits.
 - **Seek and append.** `lseek` with `SEEK_SET`, `SEEK_CUR` and `SEEK_END`
   on file descriptors, `O_APPEND`, and `fopen`'s `a`.
 - **`string.h`, `stdlib.h`, `ctype.h`, `assert.h`, `memory.h`.**
