@@ -63,8 +63,8 @@ is listed here exactly.
 | The program | ~1 MB of code and data | since v0.2.69 the program region is 4 MiB (sectors 2048–10239) in a 32 MiB image |
 | The WAD | `doom1.wad`, the shareware data, 4.2 MB, read by `fopen`/`fseek`/`fread` | since v0.2.69 the data region (25.5 MiB, sectors 13312–65535) holds large read-only files served under `/data`; `agelfs` files stay 64 KiB |
 | Memory | a 6 MB zone plus the WAD's cached lumps | since v0.2.68 a domain may hold any number of the pool's frames (a bitmap ledger) and the x86-64 pool is 46 MiB like the others'; the process window is 16 MiB, of which the top 1 MiB is the canvas |
-| Floating point | `r_main.c` and `v_video.c` use `float` in a few places; `m_config.c` parses one with `atof` | processes run without an FPU (`-msoft-float`); one function returning `float` will not compile that way, and no soft-float runtime is linked |
-| C library | `printf` family, streams, heap, strings, `getopt`, directories, time | `strcasecmp`/`strncasecmp`, `fseek`/`ftell` declarations and `SEEK_*`, `remove`, `atof`, `system` (a stub), `strings.h`, `inttypes.h` |
+| Floating point | `r_main.c` and `v_video.c` use `float` in a few places; `m_config.c` parses one with `atof` | since v0.2.70 the unit is the process's on x86-64 and AArch64, with `math.h` and `atof`; RISC-V stays soft-float |
+| C library | `printf` family, streams, heap, strings, `getopt`, directories, time | closed in v0.2.70: `strcasecmp`, `fseek`/`ftell`/`rewind`, `remove`, `atof`/`strtod`, `system` (`ENOSYS`), `strings.h`, `inttypes.h`, `math.h` |
 | Time | `clock_gettime`, `nanosleep` on a monotonic clock | enough: `DG_GetTicksMs`, `DG_SleepMs` |
 | Sound | none | out of scope; DOOM runs silent |
 | An agent that plays | model providers exist only in the **hosted** runtime, through a typed, audited effect; the native kernel has no network and no local inference | the agent runs hosted and drives the OS through the same QMP and serial channels the tests use, on the machine's own screen and keyboard; a native agent waits on networking or local inference, both open on the roadmap |
@@ -142,7 +142,8 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
 2. Key press and release events (design 2): **v0.2.67**.
 3. Room: the bitmap ledger and the larger pool (**v0.2.68**); the larger
    disk and the data region (**v0.2.69**).
-4. The C library's missing functions and floating point (design 4).
+4. The C library's missing functions and floating point (design 4):
+   **v0.2.70**.
 5. DOOM runs, keyboard-playable on the desktop, `-timedemo` frame rate
    reported (design 5).
 6. Agel plays it, stepping, with the dataset and the run window

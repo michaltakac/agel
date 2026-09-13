@@ -126,6 +126,49 @@ int fileno(FILE *stream) {
     return stream ? stream->descriptor : -1;
 }
 
+/* What the stream has taken from the descriptor and not given out: the
+   read buffer's rest and a character given back. */
+static long unread(FILE *stream) {
+    return (long)(stream->in_used - stream->in_at) + (stream->pushback > 0 ? 1 : 0);
+}
+
+int fseek(FILE *stream, long offset, int whence) {
+    if (stream == NULL || !stream->used) {
+        errno = EBADF;
+        return -1;
+    }
+    if (fflush(stream) != 0) {
+        return -1;
+    }
+    if (whence == SEEK_CUR) {
+        offset -= unread(stream);
+    }
+    stream->in_used = 0;
+    stream->in_at = 0;
+    stream->pushback = 0;
+    stream->eof = 0;
+    return lseek(stream->descriptor, offset, whence) < 0 ? -1 : 0;
+}
+
+long ftell(FILE *stream) {
+    if (stream == NULL || !stream->used) {
+        errno = EBADF;
+        return -1;
+    }
+    long at = lseek(stream->descriptor, 0, SEEK_CUR);
+    if (at < 0) {
+        return -1;
+    }
+    return at - unread(stream) + (long)stream->out_used;
+}
+
+void rewind(FILE *stream) {
+    fseek(stream, 0, SEEK_SET);
+    if (stream != NULL) {
+        stream->error = 0;
+    }
+}
+
 int feof(FILE *stream) {
     return stream->eof;
 }

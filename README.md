@@ -5,7 +5,7 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.69.** What is done, partial and open is in
+**Current release: v0.2.70.** What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
@@ -67,7 +67,8 @@ so C programs build from source and run, `spawn` in place of `fork`, pipes
 and `wait`, a heap that grows through pages mapped at the break, a
 monotonic clock, `sleep` and `kill`, `setjmp`, `scanf` and `getopt`,
 `stat`, `rename`, `unlink`, directories, `chdir` and `truncate`, files of
-64 KiB, and a window protocol for C. Authority comes from the namespace,
+64 KiB, large read-only files under `/data`, floating point with
+`math.h`, and a window protocol for C. Authority comes from the namespace,
 never from a path. See [`docs/posix-personality.md`](docs/posix-personality.md).
 
 **A board.** The AArch64 kernel builds as a flat image for the Raspberry

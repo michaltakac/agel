@@ -128,6 +128,46 @@ mod privileged {
         unsafe { asm!("mov cr3, {}", in(reg) physical_root, options(nostack, preserves_flags)) };
     }
 
+    /// Turn the SSE unit on for every ring: `OSFXSR` and `OSXMMEXCPT` in
+    /// CR4, `MP` set and `EM` and `TS` clear in CR0, so a process may use
+    /// floating point and the supervisor may save and restore its state.
+    /// The supervisor itself is built without SSE and never touches it.
+    ///
+    /// # Safety
+    /// Once, at bring-up.
+    #[cfg(feature = "process")]
+    pub unsafe fn enable_sse() {
+        unsafe {
+            let mut cr4: u64;
+            asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
+            cr4 |= (1 << 9) | (1 << 10);
+            asm!("mov cr4, {}", in(reg) cr4, options(nomem, nostack, preserves_flags));
+            let mut cr0: u64;
+            asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
+            cr0 = (cr0 | (1 << 1)) & !((1 << 2) | (1 << 3));
+            asm!("mov cr0, {}", in(reg) cr0, options(nomem, nostack, preserves_flags));
+        }
+    }
+
+    /// Save the x87 and SSE state to a 512-byte, 16-byte-aligned area.
+    ///
+    /// # Safety
+    /// `area` must be that.
+    #[cfg(feature = "process")]
+    pub unsafe fn fxsave(area: *mut u8) {
+        unsafe { asm!("fxsave [{}]", in(reg) area, options(nostack, preserves_flags)) };
+    }
+
+    /// Restore the x87 and SSE state from an area `fxsave` wrote or
+    /// [`FPU_INIT`] shaped.
+    ///
+    /// # Safety
+    /// `area` must be that.
+    #[cfg(feature = "process")]
+    pub unsafe fn fxrstor(area: *const u8) {
+        unsafe { asm!("fxrstor [{}]", in(reg) area, options(nostack, preserves_flags)) };
+    }
+
     /// Read the faulting address recorded by a page fault.
     #[inline]
     pub fn read_cr2() -> u64 {

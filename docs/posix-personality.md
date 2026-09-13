@@ -560,11 +560,28 @@ machines, and `scripts/test-desktop-process.sh` the windows themselves.
 How the desktop keeps and checks what a process draws is in
 [`native-graphics.md`](native-graphics.md).
 
-What it does not add: no calendar time, no signal handlers or signals
-other than `SIGKILL` to a child, no `alarm`, no `math` (the processes
-run without floating point), no floating point in the formatter or the
-scanner, no locale, no threads, no `%[` in the scanner, no `mmap`, no
-shared memory. A process that
+What it did not add then: no calendar time, no signal handlers or
+signals other than `SIGKILL` to a child, no `alarm`, no locale, no
+threads, no `%[` in the scanner, no `mmap`, no shared memory, and, until
+v0.2.70, no floating point at all.
+
+**Floating point (v0.2.70).** The unit is the process's: the x86-64
+kernel turns SSE on at bring-up and saves and restores each domain's
+x87 and SSE state (`fxsave`, 512 bytes) around every entry; the AArch64
+kernel sets `FPEN` and saves and restores the thirty-two SIMD registers
+and `FPCR`, `FPSR` the same way; the RISC-V machine here has no unit and
+its programs stay soft-float. The supervisor is built without floating
+point and holds no state of its own. C programs are compiled with the
+compiler's defaults again, which is why the x86-64 entry stub now aligns
+the stack before calling the library's entry: vector stores assume it.
+`math.h` (`fabs`, `sqrt`, `floor`, `ceil`, `fmod`, `atan`, `atan2`,
+`sin`, `cos`, `pow` for integer exponents), `strtod` and `atof`, in C
+because the library's Rust side is built for the soft-float targets and
+would return a double where a hard-float caller does not read it; with
+them `fseek`, `ftell`, `rewind`, `remove`, `strcasecmp`, `strncasecmp`,
+`strings.h`, `inttypes.h`, and `system`, which answers `ENOSYS`.
+`float.c` runs twenty checks on x86-64 and AArch64. Still no floating
+point in the formatter or the scanner. A process that
 sleeps holds the serial workshop's `:exec` until it wakes, as any
 process holds it until it ends; the desktop hands the prompt back. `qsort` is quadratic. The
 heap grows by whole pages and never shrinks. Each is a step this stratum takes when

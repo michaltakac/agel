@@ -1013,6 +1013,14 @@ def c_test(image: str, architecture: str, disk: str) -> None:
             ":exec c-canvas",
             [b"canvas: no display (errno 19)", b"process c-canvas exited with status 3"],
         )
+        # The floating-point unit is the process's, with math.h, strtod,
+        # fseek and ftell, remove and strcasecmp; RISC-V has no unit here.
+        if architecture != "riscv64":
+            run_program(
+                boot,
+                ":exec c-float",
+                [b"float: 20 checks passed", b"process c-float exited with status 0"],
+            )
         # The data region: a large read-only file installed from the host,
         # read through the namespace by its digest, listed, never written.
         import hashlib

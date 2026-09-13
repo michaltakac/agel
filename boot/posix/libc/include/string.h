@@ -20,5 +20,7 @@ char *strrchr(const char *text, int wanted);
 char *strstr(const char *haystack, const char *needle);
 char *strdup(const char *text);
 char *strerror(int number);
+int strcasecmp(const char *left, const char *right);
+int strncasecmp(const char *left, const char *right, size_t count);
 
 #endif

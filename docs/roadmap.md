@@ -85,7 +85,7 @@ tests run on all three research machines unless a line says otherwise.
 | Monotonic clock, `sleep`, `setjmp`, environment | done | `scripts/test-libc.sh` |
 | A window protocol for C programs | done | `scripts/test-desktop-process.sh` on x86-64; `-ENODEV` without a display |
 | Calendar time, signal handlers, `alarm` | open | only `SIGKILL` to a child exists |
-| Floating point in the library and `math.h` | open | processes run without an FPU |
+| Floating point in the library and `math.h` | done | `scripts/test-libc.sh` on x86-64 and AArch64; not on RISC-V (no unit); no floating point in `printf` or `scanf` |
 | `mmap`, shared memory, threads, locale, `%[` in the scanner | open | |
 | A filesystem region larger than 256 KiB, files larger than 64 KiB | open | sectors 1536–2047, 63 blocks of 4 KiB, 16 blocks per file |
 | Binary compatibility with Linux ELF programs | open | not planned; source compatibility is the target |
@@ -111,7 +111,7 @@ trained on it.
 | A canvas: a window record backed by pages a process draws and the compositor blits, scaled | done | `scripts/test-desktop-process.sh` reads the program's pixels back; one canvas per window, 640×400 at most, no partial damage |
 | Key press and release events with key codes | done | `scripts/test-desktop-process.sh` reads `keys.c`; the serial console remains characters only |
 | Room: a bitmap frame ledger and pool, a 32 MiB disk, a 4 MiB program region, a data region of large read-only files under `/data` | done | `scripts/test-isolation.sh` counts the frames back; `scripts/test-libc.sh` reads a 100 KB data file by digest on three machines; `agelfs` files stay 64 KiB |
-| The C library's missing functions (`strcasecmp`, `fseek`/`ftell`, `remove`, `atof`) and floating point for processes | open | all 80 `doomgeneric` sources compile against the headers with two shims |
+| The C library's missing functions (`strcasecmp`, `fseek`/`ftell`, `remove`, `atof`, `math.h`) and floating point for processes | done | `scripts/test-libc.sh` runs `float.c` on x86-64 and AArch64; RISC-V has no unit here and stays soft-float |
 | DOOM runs on the desktop, keyboard-playable, `-timedemo` frame rate reported | open | |
 | Agel plays it: a hosted agent stepping the game through the machine's screen and keys, a dataset of frames, state, actions and reasons, a run window on the desktop | open | the agent is hosted; the native kernel has no network or local inference |
 | A trained policy from the dataset; a world model for predictions | open | training is orchestrated through a provider, never performed by the OS |

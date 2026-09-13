@@ -60,11 +60,36 @@ pub const CANVAS_BASE: u64 =
 #[cfg(feature = "process")]
 pub const PROCESS_BYTES: u64 = 0x0100_0000;
 
+/// A process's x87 and SSE state, as `fxsave` lays it out: 512 bytes,
+/// 16-byte aligned, saved when the domain leaves and restored when it
+/// enters, so two processes' floating point never meet. The supervisor
+/// is built without SSE and keeps no state of its own.
+#[cfg(feature = "process")]
+#[repr(C, align(16))]
+pub struct FpuState([u8; 512]);
+
+#[cfg(feature = "process")]
+impl FpuState {
+    /// The state a process starts with: the x87 control word at its
+    /// default (all exceptions masked, extended precision) and `MXCSR`
+    /// at its default (all exceptions masked, round to nearest).
+    pub const INIT: Self = {
+        let mut area = [0_u8; 512];
+        area[0] = 0x7f;
+        area[1] = 0x03;
+        area[24] = 0x80;
+        area[25] = 0x1f;
+        Self(area)
+    };
+}
+
 /// An unprivileged world.
 pub struct Domain {
     space: AddressSpace,
     frame: TrapFrame,
     core: DomainCore,
+    #[cfg(feature = "process")]
+    fpu: FpuState,
     /// Which device this domain is the driver for, if any. The device is
     /// granted for the duration of its entries and withheld for everyone else's.
     grant: PortGrant,
@@ -160,6 +185,8 @@ impl Domain {
             space,
             frame: TrapFrame::user(entry, stack_top, SHARED_BASE),
             core: DomainCore::new(shared_physical, tick_budget),
+            #[cfg(feature = "process")]
+            fpu: FpuState::INIT,
             grant,
             frames: FrameLedger::EMPTY,
             #[cfg(feature = "contract-memory")]
@@ -327,7 +354,11 @@ impl Domain {
             cpu::grant_ports(self.grant);
             self.space.activate();
             CURRENT = self;
+            #[cfg(feature = "process")]
+            super::hal::fxrstor(self.fpu.0.as_ptr());
             cpu::enter_domain(&raw mut self.frame);
+            #[cfg(feature = "process")]
+            super::hal::fxsave(self.fpu.0.as_mut_ptr());
             CURRENT = core::ptr::null_mut();
             restore_kernel_space();
             cpu::grant_ports(PortGrant::None);

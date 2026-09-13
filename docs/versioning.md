@@ -311,6 +311,10 @@ promise.
   adds the data region, large read-only files installed from the host
   and served by the filesystem service under `/data`; a 100 KB file is
   read back by digest on three machines.
+  `v0.2.70` gives processes the floating-point unit on x86-64 and AArch64,
+  saved and restored per domain, and the C library `math.h`, `strtod`,
+  `fseek`, `ftell`, `remove`, `strcasecmp` and the headers DOOM asks for;
+  `float.c` proves them on both machines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

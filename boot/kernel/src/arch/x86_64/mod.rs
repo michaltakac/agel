@@ -242,6 +242,11 @@ impl Machine {
     /// and start the preemption timer.
     pub fn bring_up() -> Result<Self, &'static str> {
         hal::disable_interrupts();
+        // Safety: once, before any domain runs.
+        #[cfg(feature = "process")]
+        unsafe {
+            hal::enable_sse()
+        };
         if !memory::enable_no_execute() {
             return Err("processor does not support the no-execute bit");
         }

@@ -74,12 +74,28 @@ pub const PROCESS_BASE: u64 = DOMAIN_BASE + 0x1000_0000;
 #[cfg(feature = "process")]
 pub const PROCESS_BYTES: u64 = 0x0100_0000;
 
+/// A process's floating-point state on AArch64: the thirty-two SIMD
+/// registers and `FPCR`, `FPSR`, saved when the domain leaves and restored
+/// when it enters. RISC-V's machines here have no floating-point unit, so
+/// the area is unused there and nothing is saved.
+#[cfg(feature = "process")]
+#[repr(C, align(16))]
+pub struct FpuState([u8; 528]);
+
+#[cfg(feature = "process")]
+impl FpuState {
+    pub const INIT: Self = Self([0; 528]);
+}
+
 /// An unprivileged world. The trap handler in the architecture's `domain`
 /// reaches the three it needs through the running-domain pointer.
 pub struct Domain {
     pub(super) space: AddressSpace,
     pub(super) frame: TrapFrame,
     pub(super) core: DomainCore,
+    #[cfg(feature = "process")]
+    #[cfg_attr(target_arch = "riscv64", allow(dead_code))]
+    fpu: FpuState,
     /// Every frame this domain was built from, for reclamation.
     frames: FrameLedger,
     /// The physical frames behind the domain's frame budget, frame 0 first,
@@ -240,6 +256,8 @@ impl Domain {
             space,
             frame: TrapFrame::user(entry, stack_top, SHARED_BASE),
             core,
+            #[cfg(feature = "process")]
+            fpu: FpuState::INIT,
             frames: FrameLedger::EMPTY,
             #[cfg(feature = "contract-memory")]
             window_frames,
@@ -358,7 +376,11 @@ impl Domain {
         unsafe {
             self.space.activate();
             CURRENT = self;
+            #[cfg(all(feature = "process", target_arch = "aarch64"))]
+            super::hal::fp_restore(self.fpu.0.as_ptr());
             cpu::enter_domain(&raw mut self.frame);
+            #[cfg(all(feature = "process", target_arch = "aarch64"))]
+            super::hal::fp_save(self.fpu.0.as_mut_ptr());
             CURRENT = core::ptr::null_mut();
             restore_kernel_space();
         }

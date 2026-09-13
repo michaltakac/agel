@@ -35,6 +35,25 @@ fn outcome(result: i64) -> isize {
     }
 }
 
+// The entry the supervisor jumps to, with the shared page in the first
+// argument register and the stack's top in the stack pointer. On x86-64
+// a function expects to be *called*, its stack eight bytes past a
+// sixteen-byte boundary, and compilers keep vector stores aligned on that
+// promise; the stub makes it true before calling the Rust entry. The
+// other machines align the stack pointer itself and jump straight on.
+#[cfg(target_arch = "x86_64")]
+core::arch::global_asm!(
+    ".globl _start",
+    "_start:",
+    "and rsp, -16",
+    "call __agel_start",
+    "ud2",
+);
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(".globl _start", "_start:", "b __agel_start");
+#[cfg(target_arch = "riscv64")]
+core::arch::global_asm!(".globl _start", "_start:", "j __agel_start");
+
 extern "C" {
     fn main(argc: c_int, argv: *mut *mut c_char) -> c_int;
     /// In `c/stdio.c`: write out every stream's buffer.
@@ -54,7 +73,7 @@ static mut ARGV: [*mut c_char; MAX_ARGUMENTS + 1] = [core::ptr::null_mut(); MAX_
 /// answer, flushing the streams first.
 #[no_mangle]
 #[link_section = ".text.entry"]
-pub extern "C" fn _start(shared_page: u64) -> ! {
+pub extern "C" fn __agel_start(shared_page: u64) -> ! {
     PAGE.store(shared_page as usize, Ordering::Relaxed);
     let (count, block) = process().arguments();
     let argc = count.min(MAX_ARGUMENTS);
@@ -1400,6 +1419,58 @@ pub unsafe extern "C" fn strtoul(
     } else {
         parsed.magnitude
     }
+}
+
+/// Case-insensitive comparison, ASCII only.
+///
+/// # Safety
+/// Both must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn strcasecmp(left: *const c_char, right: *const c_char) -> c_int {
+    unsafe { strncasecmp(left, right, usize::MAX) }
+}
+
+/// # Safety
+/// As `strcasecmp`, or `count` bytes each.
+#[no_mangle]
+pub unsafe extern "C" fn strncasecmp(
+    left: *const c_char,
+    right: *const c_char,
+    count: usize,
+) -> c_int {
+    let mut at = 0;
+    while at < count {
+        let a = unsafe { left.add(at).read_volatile() } as u8;
+        let b = unsafe { right.add(at).read_volatile() } as u8;
+        let (a, b) = (a.to_ascii_lowercase(), b.to_ascii_lowercase());
+        if a != b || a == 0 {
+            return c_int::from(a) - c_int::from(b);
+        }
+        at += 1;
+    }
+    0
+}
+
+/// There is no shell to run a command in: `-1` with `ENOSYS`, and zero
+/// for the C question of whether a processor exists.
+///
+/// # Safety
+/// `command` must be null or NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn system(command: *const c_char) -> c_int {
+    if command.is_null() {
+        return 0;
+    }
+    outcome(-38) as c_int
+}
+
+/// `remove` is `unlink` here, which removes an empty directory too.
+///
+/// # Safety
+/// `path` must be NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn remove(path: *const c_char) -> c_int {
+    unsafe { unlink(path) }
 }
 
 /// # Safety

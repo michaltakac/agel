@@ -13,14 +13,16 @@ case "$architecture" in
   x86_64)
     target=x86_64-unknown-none
     triple=x86_64-unknown-none-elf
-    # The process window is at 512 GiB: position-independent code, no SSE
+    # The process window is at 512 GiB: position-independent code; the
+    # kernel enables SSE for processes (v0.2.70), so floating point is the
+    # compiler's default
     # (the kernel does not enable it for a process), no red zone needed.
-    arch_flags="-fPIE -mno-sse -mno-sse2 -mno-mmx -msoft-float"
+    arch_flags="-fPIE"
     ;;
   aarch64)
     target=aarch64-unknown-none-softfloat
     triple=aarch64-unknown-none-elf
-    arch_flags="-mgeneral-regs-only"
+    arch_flags=""
     ;;
   riscv64)
     target=riscv64imac-unknown-none-elf

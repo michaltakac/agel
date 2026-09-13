@@ -13,6 +13,99 @@ pub fn current_exception_level() -> u64 {
     (value >> 2) & 3
 }
 
+/// Let EL0 and EL1 use the floating-point and SIMD registers: `FPEN` in
+/// `CPACR_EL1`. The supervisor is built without them and never touches
+/// them; a process may.
+///
+/// # Safety
+/// Once, at bring-up.
+#[cfg(feature = "process")]
+pub unsafe fn enable_fpu() {
+    unsafe {
+        asm!(
+            "mrs {scratch}, cpacr_el1",
+            "orr {scratch}, {scratch}, #(3 << 20)",
+            "msr cpacr_el1, {scratch}",
+            "isb",
+            scratch = out(reg) _,
+            options(nomem, nostack)
+        )
+    };
+}
+
+/// Save the thirty-two SIMD registers and the two control words to a
+/// 528-byte, 16-byte-aligned area.
+///
+/// # Safety
+/// `area` must be that, and the FPU enabled.
+#[cfg(feature = "process")]
+pub unsafe fn fp_save(area: *mut u8) {
+    unsafe {
+        asm!(
+            ".arch armv8-a+fp+simd",
+            "stp q0, q1, [{p}, #0]",
+            "stp q2, q3, [{p}, #32]",
+            "stp q4, q5, [{p}, #64]",
+            "stp q6, q7, [{p}, #96]",
+            "stp q8, q9, [{p}, #128]",
+            "stp q10, q11, [{p}, #160]",
+            "stp q12, q13, [{p}, #192]",
+            "stp q14, q15, [{p}, #224]",
+            "stp q16, q17, [{p}, #256]",
+            "stp q18, q19, [{p}, #288]",
+            "stp q20, q21, [{p}, #320]",
+            "stp q22, q23, [{p}, #352]",
+            "stp q24, q25, [{p}, #384]",
+            "stp q26, q27, [{p}, #416]",
+            "stp q28, q29, [{p}, #448]",
+            "stp q30, q31, [{p}, #480]",
+            "mrs {t}, fpcr",
+            "str {t}, [{p}, #512]",
+            "mrs {t}, fpsr",
+            "str {t}, [{p}, #520]",
+            p = in(reg) area,
+            t = out(reg) _,
+            options(nostack)
+        )
+    };
+}
+
+/// Restore what [`fp_save`] saved, or the zero state a process starts with.
+///
+/// # Safety
+/// As [`fp_save`].
+#[cfg(feature = "process")]
+pub unsafe fn fp_restore(area: *const u8) {
+    unsafe {
+        asm!(
+            ".arch armv8-a+fp+simd",
+            "ldp q0, q1, [{p}, #0]",
+            "ldp q2, q3, [{p}, #32]",
+            "ldp q4, q5, [{p}, #64]",
+            "ldp q6, q7, [{p}, #96]",
+            "ldp q8, q9, [{p}, #128]",
+            "ldp q10, q11, [{p}, #160]",
+            "ldp q12, q13, [{p}, #192]",
+            "ldp q14, q15, [{p}, #224]",
+            "ldp q16, q17, [{p}, #256]",
+            "ldp q18, q19, [{p}, #288]",
+            "ldp q20, q21, [{p}, #320]",
+            "ldp q22, q23, [{p}, #352]",
+            "ldp q24, q25, [{p}, #384]",
+            "ldp q26, q27, [{p}, #416]",
+            "ldp q28, q29, [{p}, #448]",
+            "ldp q30, q31, [{p}, #480]",
+            "ldr {t}, [{p}, #512]",
+            "msr fpcr, {t}",
+            "ldr {t}, [{p}, #520]",
+            "msr fpsr, {t}",
+            p = in(reg) area,
+            t = out(reg) _,
+            options(nostack)
+        )
+    };
+}
+
 /// Install the exception vector base.
 ///
 /// # Safety

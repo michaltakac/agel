@@ -213,6 +213,11 @@ impl Machine {
     /// Build translation tables the kernel owns, install exception vectors, and
     /// start the preemption timer.
     pub fn bring_up() -> Result<Self, &'static str> {
+        // Safety: once, before any domain runs.
+        #[cfg(feature = "process")]
+        unsafe {
+            hal::enable_fpu()
+        };
         hal::mask_interrupts();
         if hal::current_exception_level() != 1 {
             // QEMU's `virt` machine enters an ELF kernel at EL1; a board

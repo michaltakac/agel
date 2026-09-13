@@ -18,6 +18,11 @@ heap=$(./scripts/build-c-program.sh heap "$architecture" | tail -n 1)
 big=$(./scripts/build-c-program.sh big "$architecture" | tail -n 1)
 canvas=$(./scripts/build-c-program.sh canvas "$architecture" | tail -n 1)
 digest=$(./scripts/build-c-program.sh digest "$architecture" | tail -n 1)
+# Floating point needs a unit: the RISC-V machine here has none.
+case "$architecture" in
+  riscv64) float_program= ;;
+  *) float_program=$(./scripts/build-c-program.sh float "$architecture" | tail -n 1) ;;
+esac
 . ./scripts/lib.sh
 prepare_machine "$architecture" libc 1024
 python3 ./scripts/install-program.py "$disk" writer "$writer" >/dev/null
@@ -31,6 +36,7 @@ python3 ./scripts/install-program.py "$disk" c-heap "$heap" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-big "$big" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-canvas "$canvas" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-digest "$digest" >/dev/null
+test -z "$float_program" || python3 ./scripts/install-program.py "$disk" c-float "$float_program" >/dev/null
 # A data file larger than any file the filesystem region holds.
 pattern=$(mktemp "${TMPDIR:-/tmp}/agel-pattern.XXXXXX")
 python3 -c 'import sys; sys.stdout.buffer.write(bytes((i * 7) & 0xff for i in range(100000)))' > "$pattern"

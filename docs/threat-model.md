@@ -1593,6 +1593,24 @@ process can take most of the pool and the next `:exec` fails to load.
 Not claimed: the data region's table is trusted as installed, checked
 for bounds but not for a digest, like the program region's.
 
+## v0.2.70
+
+- **One process's floating point is never another's:** the state is
+  saved when a domain leaves and restored when it enters, from a record
+  the domain owns; a fresh domain starts from the unit's defaults, never
+  from what the last process left in the registers.
+- **The supervisor holds no floating-point state** and executes no
+  floating-point instruction, so nothing a process leaves in the unit can
+  reach it, and enabling the unit widens no supervisor surface beyond
+  the two save and restore instructions.
+- **A misaligned stack is a fault, not a foothold:** vector stores that
+  assume alignment fault when it is absent; the entry stub makes the
+  promise the compiler relies on.
+
+Not claimed: the x87 and SSE state is saved with `fxsave`, not
+`xsave`, so AVX state, if a process used it, is neither saved nor
+restored; no process here uses it.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

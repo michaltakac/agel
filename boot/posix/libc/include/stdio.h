@@ -17,6 +17,15 @@ extern FILE *stderr;
 
 FILE *fopen(const char *path, const char *mode);
 int fclose(FILE *stream);
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+#endif
+int fseek(FILE *stream, long offset, int whence);
+long ftell(FILE *stream);
+void rewind(FILE *stream);
+int remove(const char *path);
 int fflush(FILE *stream);
 int fileno(FILE *stream);
 int feof(FILE *stream);
