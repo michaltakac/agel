@@ -1,0 +1,15 @@
+[package]
+name = "agel-play"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Agel plays DOOM: a hosted agent that drives the native desktop through the machine's screen and keys, through Agel's model-provider effect, and keeps a dataset of every step"
+
+[dependencies]
+agel-core = { path = "../agel-core" }
+agel-integrity = { path = "../agel-integrity" }
+agel-model = { path = "../agel-model" }
+
+[lints]
+workspace = true

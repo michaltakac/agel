@@ -619,6 +619,35 @@ impl Desk<'_, '_> {
         }
         let _ = render_region(self.compositor, self.inputs.as_deref_mut(), &frame, region);
     }
+
+    /// Repaint only a window's canvas, inside its content: what a game
+    /// asks for fifty times a second, without the surface under it.
+    fn paint_blit(&mut self, slot: usize) {
+        let Some(window) = self.windows[slot] else {
+            return;
+        };
+        let record = window.records[0];
+        if !window.permits(&record) {
+            return;
+        }
+        let mut frame = Frame::empty();
+        let mut moved = record;
+        put_u32(&mut moved, 1, record_u32(&record, 1) + window.x);
+        put_u32(&mut moved, 2, record_u32(&record, 2) + window.y);
+        put_u32(&mut moved, 4, u32::from(window.slot));
+        if frame.push(moved).is_err() {
+            return;
+        }
+        if let Some((px, py)) = self.pointer {
+            let _ = frame.push(sprite_record(px, py, SPRITE_CURSOR, 0));
+        }
+        let _ = render_region(
+            self.compositor,
+            self.inputs.as_deref_mut(),
+            &frame,
+            (window.x, window.y, window.width, window.height),
+        );
+    }
 }
 
 impl crate::process::Display for Desk<'_, '_> {
@@ -703,7 +732,19 @@ impl crate::process::Display for Desk<'_, '_> {
         }
         target.records[kept..kept + records.len()].copy_from_slice(records);
         target.count = (kept + records.len()) as u8;
-        self.paint(slot, false);
+        // A canvas frame alone, on the window in front: only the blit is
+        // painted, so no moment shows the window's surface without its
+        // picture between two of the frames a game draws.
+        let blit_only = target.canvas.is_some()
+            && !target.hidden
+            && target.count == 1
+            && record_u32(&target.records[0], 0) == 11
+            && self.order.last() == Some(&(slot as u8));
+        if blit_only {
+            self.paint_blit(slot);
+        } else {
+            self.paint(slot, false);
+        }
         i64::from(self.windows[slot].map_or(0, |window| window.count))
     }
 

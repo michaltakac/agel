@@ -320,6 +320,11 @@ promise.
   under `/data`; the shareware demo is timed at 49.4 frames per second
   under TCG, and the loader, `seek` and spanning reads are fixed on the
   way. A computing program is handed the prompt back after 256 passes.
+  `v0.2.72` adds `agel-play`, the hosted agent that plays DOOM on the
+  desktop through the screen and keys, deciding through the model
+  provider effect and leaving a dataset; the engine's console lines are
+  thinned (170 frames per second) and the desktop repaints only a
+  game's canvas.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

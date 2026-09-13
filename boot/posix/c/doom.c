@@ -15,6 +15,7 @@
 
 #include "doom/doomgeneric.h"
 #include "doom/doomkeys.h"
+#include "doom/doomstat.h"
 
 #define WIDTH 320u
 #define HEIGHT 200u
@@ -34,8 +35,9 @@ static void push(int pressed, unsigned char key) {
 }
 
 /* A key of the desktop's, as the engine names it; zero for one it has no
-   name for. The engine's fire and strafe are the control and alt keys,
-   its use key the space bar, its run key shift. */
+   name for. This engine names its fire, use and strafe keys apart from
+   the keys that carry them: control fires, space uses, comma and period
+   strafe, alt with an arrow strafes too, shift runs, and p pauses. */
 static unsigned char doom_key(int code) {
     unsigned scan = (unsigned)code & 0xffu;
     if (code & AGEL_KEY_EXTENDED) {
@@ -44,7 +46,7 @@ static unsigned char doom_key(int code) {
         case 0x50: return KEY_DOWNARROW;
         case 0x4b: return KEY_LEFTARROW;
         case 0x4d: return KEY_RIGHTARROW;
-        case 0x1d: return KEY_RCTRL;
+        case 0x1d: return KEY_FIRE;
         case 0x38: return KEY_RALT;
         case 0x1c: return KEY_ENTER;
         case 0x47: return KEY_HOME;
@@ -55,7 +57,10 @@ static unsigned char doom_key(int code) {
         default: return 0;
         }
     }
-    if (scan >= 0x10 && scan <= 0x19) return (unsigned char)"qwertyuiop"[scan - 0x10];
+    /* p pauses: the engine's pause key is the Pause key, which the
+       desktop's keyboard decoder has no code for. */
+    if (scan == 0x19) return KEY_PAUSE;
+    if (scan >= 0x10 && scan <= 0x18) return (unsigned char)"qwertyuio"[scan - 0x10];
     if (scan >= 0x1e && scan <= 0x26) return (unsigned char)"asdfghjkl"[scan - 0x1e];
     if (scan >= 0x2c && scan <= 0x32) return (unsigned char)"zxcvbnm"[scan - 0x2c];
     if (scan >= 0x02 && scan <= 0x0b) return (unsigned char)"1234567890"[scan - 0x02];
@@ -65,14 +70,14 @@ static unsigned char doom_key(int code) {
     case 0x1c: return KEY_ENTER;
     case 0x0f: return KEY_TAB;
     case 0x0e: return KEY_BACKSPACE;
-    case 0x39: return ' ';
-    case 0x1d: return KEY_RCTRL;
+    case 0x39: return KEY_USE;
+    case 0x1d: return KEY_FIRE;
     case 0x2a: case 0x36: return KEY_RSHIFT;
     case 0x38: return KEY_RALT;
     case 0x0c: return KEY_MINUS;
     case 0x0d: return KEY_EQUALS;
-    case 0x33: return ',';
-    case 0x34: return '.';
+    case 0x33: return KEY_STRAFE_L;
+    case 0x34: return KEY_STRAFE_R;
     case 0x3a: return KEY_CAPSLOCK;
     case 0x57: return KEY_F11;
     case 0x58: return KEY_F12;
@@ -119,11 +124,28 @@ void DG_DrawFrame(void) {
     if (agel_draw(window, &blit, 1, AGEL_DRAW_CLEAR) < 0) {
         printf("doom: blit refused (errno %d)\n", errno);
     }
-    /* A heartbeat on the console: the frame count once a second of game
-       time, so a run can be followed and timed from outside. */
-    if (frames++ % 35 == 0) {
+    /* A heartbeat on the console every ten seconds of game time, so a run
+       can be followed and timed from outside, and the engine's own account
+       of the player each time the game is paused: one line for whoever
+       plays from outside, and the dataset such a run leaves. The console
+       is a panel under the window, repainted for every line, so lines are
+       few. */
+    static int was_paused;
+    int heartbeat = frames++ % 350 == 0;
+    if (heartbeat) {
         printf("doom: frame %u at %u ms\n", frames - 1, DG_GetTicksMs());
     }
+    if (heartbeat || (paused && !was_paused)) {
+        player_t *player = &players[consoleplayer];
+        if (player->mo != NULL) {
+            printf("doom: state map %d x %d y %d angle %u health %d armor %d ammo %d kills %d%s\n",
+                   gamemap, player->mo->x >> FRACBITS, player->mo->y >> FRACBITS,
+                   (unsigned)(player->mo->angle >> 24), player->health, player->armorpoints,
+                   player->ammo[player->readyweapon == wp_pistol || player->readyweapon == wp_chaingun ? am_clip : am_shell],
+                   player->killcount, paused ? " paused" : "");
+        }
+    }
+    was_paused = paused;
     drain();
 }
 

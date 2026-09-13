@@ -394,6 +394,9 @@ Each rung must be runnable and differentially testable against the rung below:
 66. **It runs DOOM (v0.2.71):** an unmodified engine as a process in a
    domain, drawing a canvas, reading `/data`, taking the window's keys;
    the demo timed at 49 frames per second under emulation.
+67. **Agel plays (v0.2.72):** a hosted agent stepping the game through
+   the screen and keys, deciding through the model-provider effect,
+   leaving a dataset; 170 frames per second with the console quiet.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

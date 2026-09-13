@@ -1631,6 +1631,25 @@ Not claimed: the engine is trusted to render what the demo says; a
 malicious WAD could crash the engine (a contained fault) but not the
 system; the test fetches from a public mirror, which may go away.
 
+## v0.2.72
+
+- **The agent holds the machine's screen and keys, nothing inside it:**
+  it reads the framebuffer through QEMU's monitor and injects keys the
+  way a keyboard would; it has no handle on any domain, and the game
+  cannot tell it from a person.
+- **A model's answer is one of ten actions or nothing:** the answer is
+  parsed for an action's name; anything else is `forward` with the
+  answer recorded as the reason. No model output reaches the workshop's
+  line or any command.
+- **The provider is Agel's effect boundary:** the same sandboxed,
+  audited process invocation the hosted runtime uses, with its limits;
+  the dataset is the agent's, on the host, and holds the prompts' answers
+  as given.
+
+Not claimed: the model sees what the agent chose to show it; the agent
+is trusted by the operator who runs it; nothing here bounds what a
+provider costs beyond the provider's own limits.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

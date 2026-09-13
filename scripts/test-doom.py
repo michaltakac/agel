@@ -49,13 +49,13 @@ with tempfile.TemporaryDirectory(prefix="agel-doom-", dir="/tmp") as directory:
         assert "PROCESS RUNNING" in response, response
         # The engine's banner and a first frame: the window is drawn where
         # the plain content was, and the desktop still answers.
-        until_text(machine, b"doom: frame 35 ", 180)
-        time.sleep(5)
+        until_text(machine, b"doom: frame 350 ", 900)
+        time.sleep(3)
         Path("target/doom-demo.png").write_bytes(machine.frame())
         content = machine.region(560, 160, 640, 400)
         plain = content.count(b"\x1b\x1b\x1b") * 3
         assert plain < len(content) // 2, "the window's content is still plain"
-        report = until_text(machine, b"process c-doom exited", 900).decode(errors="replace")
+        report = until_text(machine, b"process c-doom exited", 1800).decode(errors="replace")
         timed = re.search(r"timed (\d+) gametics in (\d+) realtics", report)
         assert timed, report[-3000:]
         gametics, realtics = int(timed.group(1)), int(timed.group(2))

@@ -154,8 +154,8 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
    **v0.2.70**.
 5. DOOM runs, keyboard-playable on the desktop, `-timedemo` frame rate
    reported (design 5): **v0.2.71**, 49.4 frames per second under TCG.
-6. Agel plays it, stepping, with the dataset and the run window
-   (design 6).
+6. Agel plays it, stepping, with the dataset (design 6): **v0.2.72**,
+   the hosted agent; the run window on the desktop is open.
 7. A trained policy from the dataset (design 7); a world model after.
 8. Speech and steering (design 8).
 
@@ -191,6 +191,65 @@ file limit, a read spanning two sectors losing its first half to the
 second's delivery into the block area, the data directory needing the
 filesystem mounted before it could be named, and a wrapped exit status
 in the report; each fixed in v0.2.71 with a test.
+
+## Agel plays (v0.2.72)
+
+The sixth rung, in its first form: a hosted agent plays the game on the
+Agel desktop through the machine's screen and keys, deciding through
+Agel's model-provider effect, and leaves a dataset of every step.
+
+![DOOM paused in its window while Agel decides; the engine's state lines in the terminal, at v0.2.72](images/native-desktop-v0.2.72.png)
+
+`crates/agel-play` is the agent, a Rust program on the host (Tier 2 in
+[`deployment-targets.md`](deployment-targets.md)): it boots the desktop
+image in QEMU with the monitor and serial sockets the tests use, formats
+the region, starts the engine from the workshop (`-warp 1 -skill 2`), and
+then steps. Each step: `p` pauses the game, the engine prints its state
+line (`doom: state map 1 x 1055 y -3190 angle 64 health 100 armor 0 ammo
+50 kills 0 paused`) and the panel under the window is repainted for it;
+the agent captures the screen twice a quarter second apart and keeps a
+frame the two agree on (the compositor paints straight into the
+framebuffer, so a capture can catch a repaint half done); the window's
+content becomes eighty by twenty-five characters of luminance; a policy
+decides; `p` unpauses; the action's keys are held for the step's length
+(300 ms) and released. Every step is one line of `steps.jsonl`: the
+frame's path, the state, the action, the reason, the ASCII, and the
+frame itself is kept as a PPM.
+
+Two policies exist. **Scripted** is a fixed dance for tests, with no
+model: `scripts/test-play.sh` runs eight steps and requires the dataset,
+the engine's state in it, and a fire among the actions. **Claude** and
+**Codex** decide through `agel-model`'s providers, the same typed,
+audited `model/infer` effect the hosted runtime uses: the prompt is the
+rules, the action list, the state, the last six steps and the ASCII
+screen; the answer's `ACTION: <name> | REASON: ...` line is parsed into
+one of ten actions (forward, back, turn-left, turn-right, strafe-left,
+strafe-right, fire, forward-fire, use, wait), and anything else is
+`forward` with the answer as the reason. A five-step run with Claude
+Code on this machine walked north from the start of E1M1, each step
+with a reason ("Dark opening ahead, keep advancing"), the engine's
+coordinates confirming the walk; the run and its dataset are in the
+release notes.
+
+What the engine does for this: `p` is its pause key (the Pause key the
+engine names cannot be delivered by the desktop's decoder), its own
+fire, use and strafe keys are what control, space, comma and period
+carry, its heartbeat is one line every ten seconds of game time and one
+state line at each pause, because every console line repaints the panel
+under the window; that alone took the timed demo from 49 to 170 frames
+per second. The desktop repaints only the canvas for a window in front
+whose one record is its blit, so no moment shows the window's surface
+between two of a game's frames.
+
+What this is not: the loop is Rust on the host, not an Agel agent in
+the language, so the decision is an effect the host makes for the
+provider rather than a message an Agel world sends; that is the next
+form. The model reads shades, not pixels. One decision takes seconds
+and the game waits paused for it, so this is judgement, not reflexes;
+the trained policy of the next rung is for reflexes. There is no run
+window on the desktop yet: the agent's reasoning is on the host, and
+the engine's state lines in the terminal are all the desktop shows of
+it. No steering while it runs, no speech.
 
 ## What this is not
 

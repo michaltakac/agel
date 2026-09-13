@@ -113,7 +113,7 @@ trained on it.
 | Room: a bitmap frame ledger and pool, a 32 MiB disk, a 4 MiB program region, a data region of large read-only files under `/data` | done | `scripts/test-isolation.sh` counts the frames back; `scripts/test-libc.sh` reads a 100 KB data file by digest on three machines; `agelfs` files stay 64 KiB |
 | The C library's missing functions (`strcasecmp`, `fseek`/`ftell`, `remove`, `atof`, `math.h`) and floating point for processes | done | `scripts/test-libc.sh` runs `float.c` on x86-64 and AArch64; RISC-V has no unit here and stays soft-float |
 | DOOM runs on the desktop, keyboard-playable, `-timedemo` frame rate reported | done | `scripts/test-doom.sh`: the shareware demo timed at 49.4 frames per second under TCG; x86-64 and AArch64 only, no sound |
-| Agel plays it: a hosted agent stepping the game through the machine's screen and keys, a dataset of frames, state, actions and reasons, a run window on the desktop | open | the agent is hosted; the native kernel has no network or local inference |
+| Agel plays it: a hosted agent stepping the game through the machine's screen and keys, a dataset of frames, state, actions and reasons, a run window on the desktop | partial | `scripts/test-play.sh` runs eight scripted steps; the Claude and Codex policies decide through `agel-model` and were run by hand; the run window on the desktop is open, and the loop is Rust on the host, not an Agel agent |
 | A trained policy from the dataset; a world model for predictions | open | training is orchestrated through a provider, never performed by the OS |
 | Speech and steering of the run | open | |
 
