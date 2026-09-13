@@ -1,0 +1,12 @@
+; The same agent, but a model chooses. Each step model-request sends what the
+; language sees; the desktop carries it to a provider on the host and delivers
+; the answer, which model-result reads. The reply's first word is the action;
+; parse-key turns it into keys to hold. Until an answer arrives, hold nothing.
+(def play-pause (fn () 'p))
+(def play-reason "waiting for the model")
+(def ask (fn () (model-request (text-concat "DOOM E1M1. State: " (look-line)))))
+(def word (fn (s n) (if (= (text-byte s n) 32) n (if (< n (text-bytes s)) (word s (+ n 1)) n))))
+(def first-word (fn (s) (text-slice s 0 (word s 0))))
+(def keys-for (fn (a) (if (= a "forward") '(up) (if (= a "back") '(down) (if (= a "left") '(left) (if (= a "right") '(right) (if (= a "fire") '(ctrl) (if (= a "use") '(space) '(up ctrl)))))))))
+(def decide (fn (answer) (begin (def play-reason answer) (keys-for (first-word answer)))))
+(def play-step (fn () (begin (def answer (model-result)) (if (= answer nil) (begin (ask) '()) (decide answer)))))

@@ -1650,6 +1650,31 @@ Not claimed: the model sees what the agent chose to show it; the agent
 is trusted by the operator who runs it; nothing here bounds what a
 provider costs beyond the provider's own limits.
 
+## v0.2.74
+
+- **The language looks at a copy, never at memory or a device:** the
+  `look` words read a grid of shades and one console line the desktop
+  placed in the evaluator's shared page, in a fixed area past the
+  handshake, the payload and the block. The evaluator has no canvas
+  mapping and no device; it cannot reach the game's frames, only the
+  sample the supervisor took. A world that was handed nothing to look at
+  answers with an error, not with stale bytes.
+- **A model request is bounded text the operator's bridge answers:**
+  `model-request` records at most two hundred bytes and returns a number;
+  the desktop prints the request and the observation on the serial
+  console and reads back `:model-reply N TEXT`, at most two hundred bytes,
+  delivered only to the matching number. No model output becomes a
+  command: it is text the Agel program reads with `model-result` and
+  parses itself into keys.
+- **The keys go only to the window the operator plays:** `:play` injects
+  into the focused, listening window's own event queue, the same events a
+  keyboard would have produced; it holds no handle on the game's domain.
+
+Not claimed: the model call still leaves the machine through the host
+bridge, since the kernel has no network or local inference; the operator
+who runs `:play` is trusted; nothing bounds a provider's cost beyond its
+own limits.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

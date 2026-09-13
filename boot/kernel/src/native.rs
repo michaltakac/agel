@@ -30,6 +30,39 @@ pub const SCENE_WIDTH: u32 = 1920;
 pub const SCENE_DRAWABLE_HEIGHT: u32 = 1000;
 const NONE: u16 = u16::MAX;
 
+/// What a played program last showed: the desktop copies the program's
+/// last console line and a coarse grid of shades sampled from its window's
+/// canvas into the evaluator's shared page, and the `look` words read them.
+/// Byte 0 is the line's length, bytes 1.. the line, and from
+/// `LOOK_SHADES_OFFSET` one byte per cell, rows first, 0 dark to 255 light.
+pub const LOOK_COLUMNS: usize = 64;
+pub const LOOK_ROWS: usize = 25;
+pub const LOOK_LINE_BYTES: usize = 128;
+pub const LOOK_SHADES_OFFSET: usize = 256;
+pub const LOOK_BYTES: usize = LOOK_SHADES_OFFSET + LOOK_COLUMNS * LOOK_ROWS;
+/// The longest text a program may ask a model, and the longest answer.
+pub const REQUEST_BYTES: usize = 200;
+
+/// What the session holds for the language outside its transactional
+/// banks: the observation, and the last answer a model gave. A world reaches
+/// it through a pointer the session sets before every evaluation.
+#[derive(Clone, Copy)]
+struct Context {
+    look: [u8; LOOK_BYTES],
+    reply: [u8; REQUEST_BYTES],
+    reply_length: u8,
+    reply_number: u32,
+}
+
+impl Context {
+    const EMPTY: Self = Self {
+        look: [0; LOOK_BYTES],
+        reply: [0; REQUEST_BYTES],
+        reply_length: 0,
+        reply_number: 0,
+    };
+}
+
 /// Every fixed native resource bound, named and reported from the constants the
 /// evaluator actually enforces. `:limits` renders this table, so the console can
 /// never drift away from the implementation or the documentation.
@@ -50,6 +83,9 @@ pub const LIMITS: &[(&str, u64)] = &[
     ("scene-rects", MAX_SCENE_RECTS as u64),
     ("cells", MAX_CELLS as u64),
     ("text", MAX_TEXT as u64),
+    ("look-columns", LOOK_COLUMNS as u64),
+    ("look-rows", LOOK_ROWS as u64),
+    ("request", REQUEST_BYTES as u64),
 ];
 
 /// A result as the frontends see it. Data values (strings, symbols, lists,
@@ -315,6 +351,14 @@ struct World {
     scene_count: u8,
     scene_ids: [i64; MAX_SCENE_RECTS],
     scene_owners: [u16; MAX_SCENE_RECTS],
+    /// The text of the model request the language made last, and its
+    /// number; both roll back with the world.
+    request: [u8; REQUEST_BYTES],
+    request_length: u8,
+    request_number: u32,
+    /// The owning session's context, set before every evaluation; null in a
+    /// world that has none, where the `look` words answer with an error.
+    context: *const Context,
 }
 
 impl World {
@@ -328,7 +372,20 @@ impl World {
         scene_count: 0,
         scene_ids: [0; MAX_SCENE_RECTS],
         scene_owners: [0; MAX_SCENE_RECTS],
+        request: [0; REQUEST_BYTES],
+        request_length: 0,
+        request_number: 0,
+        context: core::ptr::null(),
     };
+
+    fn context(&self) -> Result<&Context, Error> {
+        if self.context.is_null() {
+            return Err(Error("nothing to look at in this world"));
+        }
+        // Safety: the pointer is set by the owning session immediately before
+        // each evaluation and points at its own context, which outlives it.
+        Ok(unsafe { &*self.context })
+    }
 
     fn find(&self, name: &[u8]) -> Option<usize> {
         self.bindings.iter().position(|binding| {
@@ -363,6 +420,7 @@ pub struct Session {
     candidate_revision: Option<u64>,
     result: [u8; RESULT_BYTES],
     result_length: u16,
+    context: Context,
 }
 
 impl Default for Session {
@@ -403,7 +461,42 @@ impl Session {
             candidate_revision: None,
             result: [0; RESULT_BYTES],
             result_length: 0,
+            context: Context::EMPTY,
         }
+    }
+
+    /// Give the language something to look at: the bytes the desktop
+    /// observed, in the layout `LOOK_*` describes.
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn observe(&mut self, bytes: &[u8]) {
+        let length = bytes.len().min(LOOK_BYTES);
+        self.context.look[..length].copy_from_slice(&bytes[..length]);
+        self.context.look[length..].fill(0);
+    }
+
+    /// The request the language made and has not been answered: its number
+    /// and text, or none.
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn request(&self) -> Option<(u32, &[u8])> {
+        let world = &self.active;
+        (world.request_length != 0 && world.request_number != self.context.reply_number).then(
+            || {
+                (
+                    world.request_number,
+                    &world.request[..usize::from(world.request_length)],
+                )
+            },
+        )
+    }
+
+    /// Deliver a model's answer to request `number`; `(model-result)` reads
+    /// it while that request is the latest.
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn deliver(&mut self, number: u32, text: &[u8]) {
+        let length = text.len().min(REQUEST_BYTES);
+        self.context.reply[..length].copy_from_slice(&text[..length]);
+        self.context.reply_length = length as u8;
+        self.context.reply_number = number;
     }
 
     /// The last successful evaluation's value, rendered in Agel syntax. Data
@@ -421,6 +514,7 @@ impl Session {
             .checked_add(1)
             .ok_or(Error("revision exhausted"))?;
         self.scratch = self.active;
+        self.scratch.context = &self.context;
         let result = evaluate_source(&mut self.scratch, source);
         match result {
             Ok((value, scalar)) => {
@@ -442,6 +536,7 @@ impl Session {
     pub fn preview(&mut self, source: &[u8]) -> Result<(), Error> {
         self.candidate_revision = None;
         self.scratch = self.active;
+        self.scratch.context = &self.context;
         evaluate_source(&mut self.scratch, source)?;
         collect(&mut self.scratch)?;
         if self
@@ -492,6 +587,7 @@ impl Session {
             return Err(Error("no current source candidate"));
         }
         self.candidate_revision = None;
+        self.scratch.context = &self.context;
         evaluate_source(&mut self.scratch, source)?;
         collect(&mut self.scratch)?;
         if self.scratch.agents.iter().any(|agent| agent.faulted) {
@@ -888,6 +984,12 @@ enum Builtin {
     DropMessage,
     ReapAgent,
     AgentCount,
+    Look,
+    LookMean,
+    LookLine,
+    LookField,
+    ModelRequest,
+    ModelResult,
 }
 
 #[derive(Clone, Copy)]
@@ -1173,6 +1275,9 @@ impl Collector<'_> {
     }
 
     fn forward_text(&mut self, start: u16, len: u16) -> Result<(u16, u16), Error> {
+        if len == 0 {
+            return Ok((0, 0));
+        }
         let bytes = self.source.bytes(start, len);
         let copied = self.target.text_len as usize;
         if let Some(existing) = self.target.text[..copied]
@@ -1828,6 +1933,9 @@ fn apply_builtin(
             0,
         )?)));
     }
+    if let Some(result) = look_builtin(builtin, arguments, world)? {
+        return Ok(RuntimeValue::Scalar(result));
+    }
     if let Some(result) = data_builtin(builtin, arguments, world, fuel)? {
         return Ok(RuntimeValue::Scalar(result));
     }
@@ -2188,6 +2296,12 @@ fn builtin_for_name(name: &[u8]) -> Option<Builtin> {
         b"drop-message" => Builtin::DropMessage,
         b"reap-agent" => Builtin::ReapAgent,
         b"agent-count" => Builtin::AgentCount,
+        b"look" => Builtin::Look,
+        b"look-mean" => Builtin::LookMean,
+        b"look-line" => Builtin::LookLine,
+        b"look-field" => Builtin::LookField,
+        b"model-request" => Builtin::ModelRequest,
+        b"model-result" => Builtin::ModelResult,
         _ => return None,
     })
 }
@@ -3263,4 +3377,131 @@ mod tests {
         assert_eq!(eval(&mut session, "(agent-faulted? a)"), Value::Bool(false));
         assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(1));
     }
+}
+
+/// The words that read what the desktop observed and speak to a model:
+/// `(look x y)` is one cell's shade, `(look-mean x y w h)` the mean over a
+/// block of cells, `(look-line)` the program's last console line,
+/// `(look-field n)` the n-th integer in that line or nil, `(model-request
+/// text)` records a request and answers its number, and `(model-result)` is
+/// the answer delivered to the latest request, or nil while there is none.
+fn look_builtin(
+    builtin: Builtin,
+    arguments: &[RuntimeValue],
+    world: &mut World,
+) -> Result<Option<Scalar>, Error> {
+    let cell = |value: &RuntimeValue, bound: usize| -> Result<usize, Error> {
+        match value {
+            RuntimeValue::Scalar(Scalar::Int(n)) if *n >= 0 && (*n as usize) < bound => {
+                Ok(*n as usize)
+            }
+            _ => Err(Error("look cell out of range")),
+        }
+    };
+    Ok(Some(match builtin {
+        Builtin::Look => {
+            let [x, y] = arguments else {
+                return Err(Error("look expects x y"));
+            };
+            let (x, y) = (cell(x, LOOK_COLUMNS)?, cell(y, LOOK_ROWS)?);
+            let look = &world.context()?.look;
+            Scalar::Int(i64::from(look[LOOK_SHADES_OFFSET + y * LOOK_COLUMNS + x]))
+        }
+        Builtin::LookMean => {
+            let [x, y, w, h] = arguments else {
+                return Err(Error("look-mean expects x y width height"));
+            };
+            let (x, y) = (cell(x, LOOK_COLUMNS)?, cell(y, LOOK_ROWS)?);
+            let (w, h) = (cell(w, LOOK_COLUMNS - x + 1)?, cell(h, LOOK_ROWS - y + 1)?);
+            if w == 0 || h == 0 {
+                return Err(Error("look-mean expects a non-empty block"));
+            }
+            let look = &world.context()?.look;
+            let mut total = 0_u64;
+            for row in y..y + h {
+                for column in x..x + w {
+                    total += u64::from(look[LOOK_SHADES_OFFSET + row * LOOK_COLUMNS + column]);
+                }
+            }
+            Scalar::Int((total / (w * h) as u64) as i64)
+        }
+        Builtin::LookLine | Builtin::LookField => {
+            let context = world.context()?;
+            let length = usize::from(context.look[0]).min(LOOK_LINE_BYTES);
+            let line = &context.look[1..1 + length];
+            if matches!(builtin, Builtin::LookLine) {
+                if !arguments.is_empty() {
+                    return Err(Error("look-line expects no arguments"));
+                }
+                let mut copy = [0_u8; LOOK_LINE_BYTES];
+                copy[..length].copy_from_slice(line);
+                let (start, len) = world.heap.alloc_text(&copy[..length])?;
+                Scalar::Text { start, len }
+            } else {
+                let [wanted] = arguments else {
+                    return Err(Error("look-field expects a field number"));
+                };
+                let wanted = cell(wanted, LOOK_LINE_BYTES)?;
+                let mut found = 0;
+                let mut index = 0;
+                let mut result = Scalar::Nil;
+                while index < length {
+                    let negative = line[index] == b'-'
+                        && index + 1 < length
+                        && line[index + 1].is_ascii_digit();
+                    if negative || line[index].is_ascii_digit() {
+                        let mut value: i64 = 0;
+                        let mut at = index + usize::from(negative);
+                        while at < length && line[at].is_ascii_digit() {
+                            value = value
+                                .saturating_mul(10)
+                                .saturating_add(i64::from(line[at] - b'0'));
+                            at += 1;
+                        }
+                        if found == wanted {
+                            result = Scalar::Int(if negative { -value } else { value });
+                            break;
+                        }
+                        found += 1;
+                        index = at;
+                    } else {
+                        index += 1;
+                    }
+                }
+                result
+            }
+        }
+        Builtin::ModelRequest => {
+            let [text] = arguments else {
+                return Err(Error("model-request expects one string"));
+            };
+            let (start, len) = text_of(text)?;
+            if usize::from(len) > REQUEST_BYTES {
+                return Err(Error("model request exceeds the request limit"));
+            }
+            let bytes = world.heap.bytes(start, len);
+            let mut copy = [0_u8; REQUEST_BYTES];
+            copy[..bytes.len()].copy_from_slice(bytes);
+            world.request = copy;
+            world.request_length = len as u8;
+            world.request_number = world.request_number.wrapping_add(1);
+            Scalar::Int(i64::from(world.request_number))
+        }
+        Builtin::ModelResult => {
+            if !arguments.is_empty() {
+                return Err(Error("model-result expects no arguments"));
+            }
+            let context = world.context()?;
+            if world.request_length == 0 || context.reply_number != world.request_number {
+                Scalar::Nil
+            } else {
+                let mut copy = [0_u8; REQUEST_BYTES];
+                let length = usize::from(context.reply_length);
+                copy[..length].copy_from_slice(&context.reply[..length]);
+                let (start, len) = world.heap.alloc_text(&copy[..length])?;
+                Scalar::Text { start, len }
+            }
+        }
+        _ => return Ok(None),
+    }))
 }

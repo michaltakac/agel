@@ -401,6 +401,11 @@ Each rung must be runnable and differentially testable against the rung below:
    and link `--no-relax`, so no linker turns a GOT entry into a 32-bit
    immediate that cannot hold an address at 512 GiB; `printf` formats
    floating point.
+69. **The loop in the OS (v0.2.74):** the DOOM-playing loop is an Agel
+   program in the desktop's native evaluator; new `look` and `model`
+   words let it read the window and the engine's state and ask a model,
+   and the desktop injects the keys it names. Rust observes and actuates;
+   Agel decides.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

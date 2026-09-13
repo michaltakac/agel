@@ -27,7 +27,16 @@ agent-state  agent-pending  agent-turns  agent-faulted?
 restart-agent  drop-message  agent-count
 scene-clear  scene-rect  scene-count  scene-bind  scene-hit  scene-owner
 agent-become
+look  look-mean  look-line  look-field  model-request  model-result
 ```
+
+Since v0.2.74 the `look` and `model` words let an Agel program play a game
+running in a window: `look` and `look-mean` read a sixty-four by
+twenty-five grid of shades the desktop sampled from the played window,
+`look-line` and `look-field` read the program's last console line and the
+integers in it, and `model-request`/`model-result` ask a model and read
+its answer. They answer only inside a played world (`:load doom-agent`,
+then `:play`); elsewhere there is nothing to look at.
 
 Since v0.2.23 atoms also include strings with the hosted escapes, and quoted
 symbols, lists and maps are ordinary values: `'(compile (core) "v1")` is data

@@ -329,6 +329,11 @@ promise.
   address to 32 bits (direct data access and `--no-relax` on x86-64),
   which is why DOOM faulted on CI at v0.2.71 and v0.2.72 while running
   here; `printf` formats `%f`, `%e` and `%g`.
+  `v0.2.74` moves the DOOM-playing loop into the OS: it is an Agel program
+  in the desktop's native evaluator (`doom-agent.agel`), run with `:play`,
+  deciding through six new native words (`look`, `look-mean`, `look-line`,
+  `look-field`, `model-request`, `model-result`); `crates/agel-play` is now
+  only the host bridge that answers a model request the Agel loop makes.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

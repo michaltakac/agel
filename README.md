@@ -5,11 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.73.** It runs DOOM, and Agel plays it: see [`docs/doom.md`](docs/doom.md). What is done, partial and open is in
+**Current release: v0.2.74.** It runs DOOM, and Agel plays it with the loop an Agel program in the OS: see [`docs/doom.md`](docs/doom.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
-![The native desktop at v0.2.72: DOOM paused in its window while Agel decides, the engine's state lines in the terminal](docs/images/native-desktop-v0.2.72.png)
+![The native desktop at v0.2.74: DOOM in its window while an Agel program in the OS plays it, the loop's steps and reasons in the terminal](docs/images/native-desktop-v0.2.74.png)
 
 ## What exists
 
@@ -209,7 +209,7 @@ Python 3.10 or newer drives the prompt-synchronized ones):
 ./scripts/test-raspi4.sh                 # the Pi 4 under QEMU, with and without a card
 ./scripts/test-raspi4-desktop.sh         # the desktop on the Pi 4 under QEMU
 ./scripts/test-doom.sh                   # DOOM's timed demo in a window, from the data region
-./scripts/test-play.sh                   # Agel plays DOOM: eight scripted steps and a dataset
+./scripts/test-play.sh                   # Agel plays DOOM: the loop an Agel program in the OS, eight steps
 ./scripts/test-sel4.sh                   # the same contract on seL4
 ```
 

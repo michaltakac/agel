@@ -1,15 +1,15 @@
-//! Agel plays DOOM.
+//! Agel plays DOOM, and the loop is Agel in the OS.
 //!
-//! The game runs on Agel's own kernel in QEMU; this program is the hosted
-//! agent of `docs/doom.md`: it boots the desktop image, starts the engine
-//! from the workshop, and then, step by step, pauses the game, reads the
-//! screen back, decides, unpauses and holds keys. Decisions come from a
-//! scripted policy (for tests, with no model) or from a model provider
-//! through Agel's typed, audited `model/infer` effect. Every step is
-//! appended to a dataset: the frame, its ASCII rendering, the engine's own
-//! state line, the action, the reason.
+//! Since v0.2.74 the perceive-decide-act loop is an Agel program in the
+//! desktop's own native evaluator (`boot/desktop/doom-agent.agel`, or
+//! `doom-agent-model.agel` when a model decides). The desktop pauses the
+//! game, shows the program the window and the engine's state line through
+//! its `look` words, asks it which keys to hold, and injects them. This
+//! host program is only the bridge the OS reaches through when the Agel
+//! loop asks a model: it boots the image, loads the program, runs `:play`,
+//! answers each `model-request` the OS prints by calling a provider through
+//! Agel's typed, audited `model/infer` effect, and records the run.
 
-use std::collections::VecDeque;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -38,7 +38,7 @@ struct Options {
     out: PathBuf,
     steps: usize,
     policy: String,
-    hold_ms: u64,
+    hold: usize,
     claude_bin: PathBuf,
     codex_bin: PathBuf,
     model: Option<String>,
@@ -50,9 +50,9 @@ fn options() -> Result<Options, String> {
         doom: PathBuf::from("boot/posix/target/c/x86_64/doom"),
         wad: PathBuf::from("target/doom1.wad"),
         out: PathBuf::from("target/doom-runs/latest"),
-        steps: 10,
+        steps: 8,
         policy: "scripted".to_owned(),
-        hold_ms: 300,
+        hold: 4000,
         claude_bin: PathBuf::from("claude"),
         codex_bin: PathBuf::from("codex"),
         model: None,
@@ -67,9 +67,7 @@ fn options() -> Result<Options, String> {
             "--out" => options.out = PathBuf::from(value()?),
             "--steps" => options.steps = value()?.parse().map_err(|_| "--steps wants a number")?,
             "--policy" => options.policy = value()?,
-            "--hold-ms" => {
-                options.hold_ms = value()?.parse().map_err(|_| "--hold-ms wants a number")?
-            }
+            "--hold" => options.hold = value()?.parse().map_err(|_| "--hold wants a number")?,
             "--claude-bin" => options.claude_bin = PathBuf::from(value()?),
             "--codex-bin" => options.codex_bin = PathBuf::from(value()?),
             "--model" => options.model = Some(value()?),
@@ -158,6 +156,32 @@ impl Serial {
         Ok(self.text_from(start)[..end - start].to_owned())
     }
 
+    /// Type a line at the workshop prompt, echo-waited, without waiting for
+    /// the next prompt: `:play` speaks for a long time before returning.
+    fn send_line(&mut self, line: &str) -> Result<(), String> {
+        for byte in line.bytes() {
+            self.stream
+                .write_all(&[byte])
+                .map_err(|error| error.to_string())?;
+            self.wait_for_byte(byte, Duration::from_secs(5))?;
+        }
+        self.stream
+            .write_all(b"\n")
+            .map_err(|error| error.to_string())
+    }
+
+    /// Write a line straight to the guest without waiting for an echo: while
+    /// `:play` runs, the kernel reads the console without echoing, so the
+    /// model reply cannot be echo-waited.
+    fn write_raw(&mut self, line: &str) -> Result<(), String> {
+        self.stream
+            .write_all(line.as_bytes())
+            .map_err(|error| error.to_string())?;
+        self.stream
+            .write_all(b"\n")
+            .map_err(|error| error.to_string())
+    }
+
     fn wait_for_byte(&self, byte: u8, timeout: Duration) -> Result<(), String> {
         let deadline = Instant::now() + timeout;
         let mut seen = self.len().saturating_sub(1);
@@ -238,19 +262,6 @@ impl Monitor {
         }
     }
 
-    fn key(&mut self, qcode: &str, down: bool) -> Result<(), String> {
-        self.command(&format!(
-            r#"{{"execute":"input-send-event","arguments":{{"events":[{{"type":"key","data":{{"down":{down},"key":{{"type":"qcode","data":"{qcode}"}}}}}}]}}}}"#
-        ))
-        .map(|_| ())
-    }
-
-    fn tap(&mut self, qcode: &str) -> Result<(), String> {
-        self.key(qcode, true)?;
-        thread::sleep(Duration::from_millis(60));
-        self.key(qcode, false)
-    }
-
     fn screendump(&mut self, path: &Path) -> Result<(), String> {
         self.command(&format!(
             r#"{{"execute":"screendump","arguments":{{"filename":"{}","format":"ppm"}}}}"#,
@@ -318,166 +329,77 @@ impl Frame {
         }
         text
     }
-
-    /// One flat colour over most of the content: the window's own surface
-    /// with nothing drawn, or a screendump that caught the compositor
-    /// between the surface and the frame.
-    fn is_plain(&self) -> bool {
-        let first = &self.rgb[..3];
-        self.rgb.chunks(3).filter(|pixel| *pixel == first).count() * 10 > self.rgb.len() / 3 * 9
-    }
-}
-
-/// What the agent may do: the keys held for one step.
-#[derive(Clone, Copy)]
-struct Action {
-    name: &'static str,
-    keys: &'static [&'static str],
-}
-
-const ACTIONS: &[Action] = &[
-    Action {
-        name: "forward",
-        keys: &["up"],
-    },
-    Action {
-        name: "back",
-        keys: &["down"],
-    },
-    Action {
-        name: "turn-left",
-        keys: &["left"],
-    },
-    Action {
-        name: "turn-right",
-        keys: &["right"],
-    },
-    Action {
-        name: "strafe-left",
-        keys: &["alt", "left"],
-    },
-    Action {
-        name: "strafe-right",
-        keys: &["alt", "right"],
-    },
-    Action {
-        name: "fire",
-        keys: &["ctrl"],
-    },
-    Action {
-        name: "forward-fire",
-        keys: &["up", "ctrl"],
-    },
-    Action {
-        name: "use",
-        keys: &["spc"],
-    },
-    Action {
-        name: "wait",
-        keys: &[],
-    },
-];
-
-fn action_named(name: &str) -> Option<Action> {
-    ACTIONS
-        .iter()
-        .copied()
-        .find(|action| action.name == name.trim())
-}
-
-/// The engine's own account of the player, from its heartbeat.
-#[derive(Clone, Default)]
-struct State {
-    line: String,
-}
-
-struct Step {
-    index: usize,
-    frame: PathBuf,
-    state: State,
-    action: Action,
-    reason: String,
 }
 
 trait Policy {
     fn name(&self) -> &str;
-    fn decide(&mut self, ascii: &str, state: &State, history: &VecDeque<Step>) -> (Action, String);
+
+    /// The Agel program the desktop loads to run the loop.
+    fn program(&self) -> &str;
+
+    /// Answer a model request the Agel loop made: the text the desktop
+    /// printed between `model-request N:` and `model-request end` (the
+    /// program's prompt, the engine's state line, and the window as shades).
+    /// The action word (`forward back left right fire use`) and a reason, or
+    /// `None` for a policy that never asks.
+    fn answer(&mut self, _block: &str) -> Option<(String, String)> {
+        None
+    }
 }
 
-/// A fixed dance for tests: it proves the loop without a model.
-struct Scripted {
-    at: usize,
-}
+/// The scripted policy asks nothing: it loads the plain `doom-agent`, whose
+/// forms alone choose every step. It proves the loop is in the OS.
+struct Scripted;
 
 impl Policy for Scripted {
     fn name(&self) -> &str {
         "scripted"
     }
 
-    fn decide(
-        &mut self,
-        _ascii: &str,
-        _state: &State,
-        _history: &VecDeque<Step>,
-    ) -> (Action, String) {
-        const DANCE: &[&str] = &[
-            "forward",
-            "forward",
-            "turn-left",
-            "forward",
-            "fire",
-            "turn-right",
-            "forward",
-            "use",
-        ];
-        let name = DANCE[self.at % DANCE.len()];
-        self.at += 1;
-        (
-            action_named(name).expect("a scripted action"),
-            format!("scripted step {}", self.at),
-        )
+    fn program(&self) -> &str {
+        "doom-agent"
     }
 }
 
-/// A model provider behind Agel's effect boundary decides from the ASCII
-/// frame, the engine's state and the last steps.
+/// A policy that answers instantly with a fixed action, for proving the
+/// request/reply round-trip without an external model.
+struct Echo {
+    action: String,
+}
+
+impl Policy for Echo {
+    fn name(&self) -> &str {
+        "echo"
+    }
+
+    fn program(&self) -> &str {
+        "doom-agent-model"
+    }
+
+    fn answer(&mut self, _block: &str) -> Option<(String, String)> {
+        Some((self.action.clone(), "echo policy".to_owned()))
+    }
+}
+
+/// The words the model program understands; the reply's action must be one.
+const WORDS: &[&str] = &["forward", "back", "left", "right", "fire", "use"];
+
+/// A model provider decides, reached through Agel's effect boundary. It loads
+/// `doom-agent-model`, whose forms call `model-request`; the bridge answers.
 struct Model {
     provider: Box<dyn Provider>,
     next_id: u64,
 }
 
 impl Model {
-    fn prompt(ascii: &str, state: &State, history: &VecDeque<Step>) -> String {
+    fn prompt(block: &str) -> String {
         let mut prompt = String::new();
         prompt.push_str("You are playing DOOM (shareware, E1M1) on the Agel operating system, one step at a time. ");
-        prompt.push_str("The game is paused while you decide. Below is the screen as 80x25 ASCII shades (space is dark, @ is bright), the engine's state line, and your recent steps. ");
+        prompt.push_str("The game is paused while you decide. Below is what the Agel agent in the OS asked, its engine state line, and the window as 64x25 ASCII shades (space dark, @ bright). ");
         prompt.push_str("Choose exactly one action from: ");
-        prompt.push_str(
-            &ACTIONS
-                .iter()
-                .map(|action| action.name)
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
-        prompt
-            .push_str(". Reply with one line: ACTION: <name> | REASON: <a few words>.\n\nSTATE: ");
-        prompt.push_str(&state.line);
-        prompt.push_str("\n\nRECENT:\n");
-        for step in history
-            .iter()
-            .rev()
-            .take(6)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-        {
-            prompt.push_str(&format!(
-                "- step {}: {} ({}); then {}\n",
-                step.index, step.action.name, step.reason, step.state.line
-            ));
-        }
-        prompt.push_str("\nSCREEN:\n");
-        prompt.push_str(ascii);
+        prompt.push_str(&WORDS.join(", "));
+        prompt.push_str(". Reply with one line: ACTION: <name> | REASON: <a few words>.\n\n");
+        prompt.push_str(block);
         prompt
     }
 }
@@ -487,8 +409,12 @@ impl Policy for Model {
         self.provider.name()
     }
 
-    fn decide(&mut self, ascii: &str, state: &State, history: &VecDeque<Step>) -> (Action, String) {
-        let prompt = Self::prompt(ascii, state, history);
+    fn program(&self) -> &str {
+        "doom-agent-model"
+    }
+
+    fn answer(&mut self, block: &str) -> Option<(String, String)> {
+        let prompt = Self::prompt(block);
         let prompt_digest = agel_integrity::sha256(prompt.as_bytes());
         let request = ModelRequest {
             id: self.next_id,
@@ -503,7 +429,7 @@ impl Policy for Model {
             ),
         };
         self.next_id += 1;
-        match self.provider.infer(&request) {
+        let (word, reason) = match self.provider.infer(&request) {
             Ok(answer) => {
                 let line = answer
                     .lines()
@@ -516,21 +442,33 @@ impl Policy for Model {
                     .and_then(|rest| rest.split('|').next())
                     .unwrap_or("")
                     .trim()
+                    .to_lowercase();
+                let reason = line
+                    .split("REASON:")
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim()
+                    .replace(['\n', '\r'], " ");
+                let word = WORDS
+                    .iter()
+                    .find(|word| name.starts_with(*word))
+                    .copied()
+                    .unwrap_or("forward")
                     .to_owned();
-                let reason = line.split("REASON:").nth(1).unwrap_or("").trim().to_owned();
-                match action_named(&name) {
-                    Some(action) => (action, reason),
-                    None => (
-                        action_named("forward").expect("forward"),
-                        format!("unparsed answer: {}", answer.trim()),
-                    ),
-                }
+                (
+                    word,
+                    if reason.is_empty() {
+                        format!("model said {name}")
+                    } else {
+                        reason
+                    },
+                )
             }
-            Err(error) => (
-                action_named("wait").expect("wait"),
-                format!("provider error: {error}"),
-            ),
-        }
+            Err(error) => ("forward".to_owned(), format!("provider error: {error}")),
+        };
+        // A reason on one line, bounded to what the request area holds.
+        let reason: String = reason.chars().take(120).collect();
+        Some((word, reason))
     }
 }
 
@@ -567,7 +505,10 @@ fn main() -> Result<(), String> {
     ])?;
 
     let mut policy: Box<dyn Policy> = match options.policy.as_str() {
-        "scripted" => Box::new(Scripted { at: 0 }),
+        "scripted" => Box::new(Scripted),
+        "echo" => Box::new(Echo {
+            action: "forward".to_owned(),
+        }),
         "claude" | "codex" => {
             let mut limits = CommandLimits::new(&options.out);
             limits.timeout = Duration::from_secs(120);
@@ -670,6 +611,10 @@ impl Machine {
     }
 }
 
+/// Boot the desktop, load the Agel program, start the engine, and run the
+/// in-OS `:play` loop, answering the model requests it makes and recording
+/// each step. The loop is the OS's; this only bridges the model and writes
+/// the dataset.
 fn play(
     _qemu: &mut Machine,
     qmp: &Path,
@@ -684,6 +629,13 @@ fn play(
     if !formatted.contains("formatted") {
         return Err(format!("the filesystem did not format: {formatted}"));
     }
+    let loaded = serial.submit(
+        &format!(":load {}", policy.program()),
+        Duration::from_secs(30),
+    )?;
+    if !loaded.contains("READY") {
+        return Err(format!("the agent did not load: {loaded}"));
+    }
     let started = serial.submit(
         ":exec c-doom -- -iwad /data/doom1.wad -mb 8 -warp 1 -skill 2",
         Duration::from_secs(120),
@@ -693,7 +645,7 @@ fn play(
     }
     serial.wait_for(0, b"doom: frame 0 ", Duration::from_secs(300))?;
     thread::sleep(Duration::from_secs(3));
-    let mut history: VecDeque<Step> = VecDeque::new();
+
     let dataset = options.out.join("steps.jsonl");
     let mut log = fs::OpenOptions::new()
         .create(true)
@@ -701,97 +653,118 @@ fn play(
         .open(&dataset)
         .map_err(|error| error.to_string())?;
     println!(
-        "agel-play: {} steps by the {} policy into {}",
+        "agel-play: {} steps by the {} Agel program ({}) into {}",
         options.steps,
         policy.name(),
+        policy.program(),
         options.out.display()
     );
-    for index in 0..options.steps {
-        // Pause, so the model's time is not the game's; the engine says
-        // where the player stands as it pauses, and the panel under the
-        // window is repainted for that line before anything is captured.
-        let before = serial.len();
-        monitor.tap("p")?;
-        serial.wait_for(before, b" paused\r\n", Duration::from_secs(20))?;
-        thread::sleep(Duration::from_millis(700));
-        // A frame the compositor was not in the middle of painting: two
-        // captures a quarter second apart that agree, neither one flat.
-        let frame_path = options.out.join(format!("step-{index:04}.ppm"));
-        let probe_path = options.out.join("probe.ppm");
-        let mut frame = None;
-        for _ in 0..8 {
-            monitor.screendump(&probe_path)?;
-            thread::sleep(Duration::from_millis(250));
-            monitor.screendump(&frame_path)?;
-            thread::sleep(Duration::from_millis(100));
-            let first = Frame::read(&probe_path)?;
-            let second = Frame::read(&frame_path)?;
-            if !second.is_plain() && first.rgb == second.rgb {
-                frame = Some(second);
-                break;
+
+    // Start the in-OS loop; it runs for the whole game, speaking as it goes.
+    let mut cursor = serial.len();
+    serial.send_line(&format!(":play {} {}", options.steps, options.hold))?;
+
+    let mut block = String::new();
+    let mut in_block = false;
+    let mut request_number = 0_u64;
+    let mut state_line = String::new();
+    let deadline = Instant::now() + Duration::from_secs(1800);
+    let mut leftover = String::new();
+    loop {
+        if Instant::now() > deadline {
+            return Err("the in-OS play loop did not finish in time".to_owned());
+        }
+        let fresh = serial.text_from(cursor);
+        cursor = serial.len();
+        if fresh.is_empty() {
+            thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        leftover.push_str(&fresh);
+        let mut done = false;
+        while let Some(at) = leftover.find('\n') {
+            let line = leftover[..at].trim_end_matches('\r').to_owned();
+            leftover = leftover[at + 1..].to_owned();
+            if line.starts_with("doom: state") {
+                state_line = line.trim_end_matches(" paused").to_owned();
+            }
+            if line == "model-request end" {
+                in_block = false;
+                if let Some((word, reason)) = policy.answer(&block) {
+                    serial.write_raw(&format!(":model-reply {request_number} {word} {reason}"))?;
+                    println!("agel-play: model reply {request_number}: {word} ({reason})");
+                } else {
+                    serial.write_raw(&format!(":model-reply {request_number} forward none"))?;
+                }
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("model-request ") {
+                request_number = rest
+                    .chars()
+                    .take_while(|character| character.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0);
+                block.clear();
+                block.push_str(&line);
+                block.push('\n');
+                in_block = true;
+                continue;
+            }
+            if in_block {
+                block.push_str(&line);
+                block.push('\n');
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("play: step ") {
+                let index: usize = rest
+                    .split(' ')
+                    .next()
+                    .and_then(|digits| digits.parse().ok())
+                    .unwrap_or(0);
+                let keys = rest
+                    .split("keys ")
+                    .nth(1)
+                    .and_then(|rest| rest.split(" reason ").next())
+                    .unwrap_or("")
+                    .trim()
+                    .to_owned();
+                let reason = rest
+                    .split(" reason ")
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim()
+                    .to_owned();
+                let frame_path = options.out.join(format!("step-{index:04}.ppm"));
+                let ascii = match monitor
+                    .screendump(&frame_path)
+                    .and_then(|_| Frame::read(&frame_path))
+                {
+                    Ok(frame) => frame.ascii(),
+                    Err(_) => String::new(),
+                };
+                let record = format!(
+                    "{{\"step\":{index},\"frame\":{:?},\"policy\":{:?},\"program\":{:?},\"state\":{:?},\"keys\":{:?},\"reason\":{:?},\"ascii\":{:?}}}\n",
+                    frame_path.display().to_string(),
+                    policy.name(),
+                    policy.program(),
+                    state_line,
+                    keys,
+                    reason.trim_matches('"'),
+                    ascii
+                );
+                log.write_all(record.as_bytes())
+                    .map_err(|error| error.to_string())?;
+                println!("agel-play: step {index}: {keys} [{state_line}]");
+            }
+            if line.contains("PLAYED") || line.contains("PROCESS ENDED") {
+                done = true;
             }
         }
-        let Some(frame) = frame else {
-            return Err(format!(
-                "the game's window never held still: nothing is being drawn, or every capture caught a repaint; the console ends: {}",
-                serial.text_from(serial.len().saturating_sub(1500))
-            ));
-        };
-        let text = serial.text_from(before);
-        let state = State {
-            line: text
-                .lines()
-                .rev()
-                .find(|line| line.starts_with("doom: state"))
-                .unwrap_or("")
-                .trim_end_matches(" paused")
-                .to_owned(),
-        };
-        let ascii = frame.ascii();
-        let (action, reason) = policy.decide(&ascii, &state, &history);
-        // Unpause and act: the keys held for the step's length.
-        monitor.tap("p")?;
-        for key in action.keys {
-            monitor.key(key, true)?;
-        }
-        thread::sleep(Duration::from_millis(options.hold_ms));
-        for key in action.keys.iter().rev() {
-            monitor.key(key, false)?;
-        }
-        thread::sleep(Duration::from_millis(150));
-        println!(
-            "agel-play: step {index}: {} ({}) [{}]",
-            action.name, reason, state.line
-        );
-        let record = format!(
-            "{{\"step\":{index},\"frame\":{:?},\"policy\":{:?},\"state\":{:?},\"action\":{:?},\"reason\":{:?},\"ascii\":{:?}}}\n",
-            frame_path.display().to_string(),
-            policy.name(),
-            state.line,
-            action.name,
-            reason,
-            ascii
-        );
-        log.write_all(record.as_bytes())
-            .map_err(|error| error.to_string())?;
-        history.push_back(Step {
-            index,
-            frame: frame_path,
-            state,
-            action,
-            reason,
-        });
-        if history.len() > 32 {
-            history.pop_front();
+        if done {
+            break;
         }
     }
-    let last = history
-        .back()
-        .map(|step| step.frame.display().to_string())
-        .unwrap_or_default();
-    println!(
-        "agel-play: done; the last frame is {last} and the dataset {}",
-        dataset.display()
-    );
+    println!("agel-play: done; the dataset is {}", dataset.display());
     Ok(())
 }

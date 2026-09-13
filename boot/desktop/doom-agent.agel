@@ -1,0 +1,17 @@
+; The agent that plays DOOM in its window. The desktop is the substrate: it
+; pauses the game with the key play-pause names, shows the window and the
+; engine's state line to the language, asks play-step which keys to hold,
+; holds them for the step, and unpauses. The policy is these forms.
+; The state line: doom: state map M x X y Y angle A health H armor R ammo N kills K
+(def play-pause (fn () 'p))
+(def steps 0)
+(def last-x 0)
+(def last-y 0)
+(def play-reason "")
+(def field (fn (n default) (if (= (look-field n) nil) default (look-field n))))
+(def stuck (fn () (if (= (field 1 0) last-x) (= (field 2 0) last-y) #f)))
+(def remember (fn () (begin (def last-x (field 1 0)) (def last-y (field 2 0)) (def steps (+ steps 1)))))
+(def turn (fn () (if (< (look-mean 0 6 20 10) (look-mean 44 6 20 10)) '(left) '(right))))
+(def choose (fn () (if (< (field 4 100) 30) '(down) (if (stuck) (turn) '(up ctrl)))))
+(def explain (fn () (if (< (field 4 100) 30) "hurt, backing off" (if (stuck) "stuck, turning to the darker side" "open ahead, forward and firing"))))
+(def play-step (fn () (begin (def play-reason (explain)) (def choice (choose)) (remember) choice)))

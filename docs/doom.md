@@ -154,7 +154,9 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
    **v0.2.70**.
 5. DOOM runs, keyboard-playable on the desktop, `-timedemo` frame rate
    reported (design 5): **v0.2.71**, 49.4 frames per second under TCG.
-6. Agel plays it, stepping, with the dataset (design 6): **v0.2.72**,
+6. Agel plays it, stepping, with the dataset (design 6): **v0.2.72**
+   with the loop on the host, then **v0.2.74** with the loop an Agel
+   program in the OS,
    the hosted agent; the run window on the desktop is open.
 7. A trained policy from the dataset (design 7); a world model after.
 8. Speech and steering (design 8).
@@ -250,6 +252,65 @@ the trained policy of the next rung is for reflexes. There is no run
 window on the desktop yet: the agent's reasoning is on the host, and
 the engine's state lines in the terminal are all the desktop shows of
 it. No steering while it runs, no speech.
+
+## The loop in the OS (v0.2.74)
+
+Now the loop is Agel, in the OS. The perceive-decide-act cycle is an Agel
+program, [`boot/desktop/doom-agent.agel`](../boot/desktop/doom-agent.agel),
+loaded into the desktop's own native evaluator with `:load doom-agent`
+and run with `:play STEPS [HOLD]`. The desktop is the substrate the
+language cannot be: each step it pauses the game with the key
+`(play-pause)` names, samples the played window's canvas into a grid of
+shades and copies the engine's last state line into the evaluator's
+shared page, calls `(play-step)`, and injects the keys the returned form
+names, holding them for the step. Rust observes and actuates; Agel
+decides.
+
+Six new native words give the language what it needs and nothing more:
+`(look x y)` is one cell's shade and `(look-mean x y w h)` a block's mean,
+over a sixty-four by twenty-five grid; `(look-line)` is the program's
+last console line and `(look-field n)` the n-th integer in it, so the
+agent reads `doom: state map 1 x 1055 y -3611 ...` as fields; and
+`(model-request text)` with `(model-result)` let a step ask a model and
+read its answer. They read a copy the desktop placed in the shared page,
+never process memory or a device; a world that was given nothing to look
+at answers with an error, and the request text is bounded to two hundred
+bytes. The scripted `doom-agent` asks no model: it goes forward and
+fires where the way is open, turns toward the darker (farther) half when
+its position has not changed, and backs off when health is low, all in
+its own forms.
+
+`scripts/test-play.sh` proves it: it loads the Agel program, starts the
+engine, and `:play 8` steps it, requiring eight `play: step` lines with
+the keys the language chose, a state line it read, and a forward or fire
+among them. No host policy and no model are in that path; the loop it
+tests is entirely the Agel program's, in the OS. A command line still
+reaches the workshop while the game holds the keyboard, because it opens
+with a colon, so `:play` can be typed at a game in focus.
+
+A model decides through the same words, in
+[`doom-agent-model.agel`](../boot/desktop/doom-agent-model.agel): each
+step it `model-request`s what it saw, and until an answer arrives it
+holds nothing. The desktop prints the request, the state line and the
+window as shades on the serial console between `model-request N:` and
+`model-request end`, and reads the answer back as `:model-reply N <action>
+<reason>`. `crates/agel-play` is now only that bridge: it boots the image,
+loads the program, runs `:play`, and answers each request by calling a
+provider through `agel-model`'s typed, audited `model/infer` effect,
+recording every step to `steps.jsonl`; a `--policy echo` answers
+instantly, for proving the round-trip without a model. The host makes the
+model call the OS cannot yet make itself; the loop that asks, decides
+what to do with the answer, and acts is the Agel program's. The request
+with its observation and the reply are proven; driving a whole model
+episode is by hand, not yet a tested path.
+
+What this still is not: the model call leaves the machine, because the
+native kernel has no network and no local inference; the shades are
+coarse and a decision takes seconds while the game waits paused, so this
+is judgement, not reflexes; there is no separate run window on the
+desktop drawing the agent's reasoning, and no steering or speech yet. The
+trained policy and the world model of the next rungs are for reflexes and
+for prediction.
 
 ### Built where CI builds (v0.2.73)
 

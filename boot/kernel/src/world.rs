@@ -142,6 +142,15 @@ pub mod shared {
     pub const COMMAND_EVALUATOR_SOURCE: u64 = 0x8900;
     pub const COMMAND_EVALUATOR_REBUILD: u64 = 0x8a00;
     pub const COMMAND_EVALUATOR_STAGE: u64 = 0x8b00;
+    /// Copy the observation area into the evaluator session, for the
+    /// `look` words.
+    pub const COMMAND_EVALUATOR_OBSERVE: u64 = 0x8c00;
+    /// Deliver a model's answer: the request number in `ARGUMENTS + 1`, the
+    /// text in the payload.
+    pub const COMMAND_EVALUATOR_MODEL_RESULT: u64 = 0x8d00;
+    /// Render the model request the language made and has not been
+    /// answered: its number, a space, its text; empty when there is none.
+    pub const COMMAND_EVALUATOR_REQUEST: u64 = 0x8e00;
     /// Rasterize one validated 64-byte native vector record.
     #[cfg(feature = "native-graphics")]
     pub const COMMAND_DISPLAY_DRAW: u64 = 0x9000;
@@ -715,6 +724,14 @@ pub const BLOCK_OFFSET: usize = 1024;
 
 /// Bytes in the block area: exactly one disk sector.
 pub const BLOCK_BYTES: usize = 512;
+/// Byte offset in the evaluator's shared page of the observation area: what
+/// the desktop last saw of a played program, in the layout
+/// [`crate::native`]'s `LOOK_*` constants describe. It is the second half of
+/// the page, past everything else.
+pub const OBSERVATION_OFFSET: usize = 2048;
+pub const OBSERVATION_BYTES: usize = 2048;
+const _: () = assert!(OBSERVATION_OFFSET + OBSERVATION_BYTES <= 4096);
+const _: () = assert!(crate::native::LOOK_BYTES <= OBSERVATION_BYTES);
 /// One compositor record: the unit the display driver reads and a window holds.
 #[cfg(feature = "process")]
 pub const RECORD_BYTES: usize = 64;
@@ -741,6 +758,18 @@ impl DomainCore {
                 .add(offset)
                 .read_volatile()
         }
+    }
+
+    /// Write one byte of the observation area.
+    #[cfg(feature = "native-graphics")]
+    pub fn write_observation(&mut self, offset: usize, byte: u8) {
+        let offset = OBSERVATION_OFFSET + (offset % OBSERVATION_BYTES);
+        // Safety: as in `write_payload`; the area is inside the page.
+        unsafe {
+            (self.shared_physical as *mut u8)
+                .add(offset)
+                .write_volatile(byte)
+        };
     }
 
     /// Write one byte of the block area.

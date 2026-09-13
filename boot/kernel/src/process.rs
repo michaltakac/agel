@@ -353,6 +353,12 @@ fn load(
 /// terminal on the desktop, or both.
 pub trait Console {
     fn write(&mut self, bytes: &[u8]);
+    /// How many whole lines have been written, where the console counts
+    /// them; the desktop's play loop waits for a program's line.
+    #[cfg(feature = "native-graphics")]
+    fn lines(&self) -> u32 {
+        0
+    }
 }
 
 impl Console for ServiceDomain {

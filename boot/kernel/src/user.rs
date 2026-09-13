@@ -422,6 +422,32 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
                 },
             }
             unsafe { evaluator_finish(page, response_length, result.is_err(), session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_OBSERVE {
+            let area = (shared_page as usize + crate::world::OBSERVATION_OFFSET) as *const u8;
+            // Safety: the area is inside the shared page, bounded below.
+            let bytes = unsafe { core::slice::from_raw_parts(area, crate::native::LOOK_BYTES) };
+            session.observe(bytes);
+            let mut response_length = 0;
+            unsafe { evaluator_text(page, &mut response_length, b"OBSERVED") };
+            unsafe { evaluator_finish(page, response_length, false, session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_REQUEST {
+            let mut response_length = 0;
+            if let Some((number, text)) = session.request() {
+                unsafe { evaluator_u64(page, &mut response_length, u64::from(number)) };
+                unsafe { evaluator_push(page, &mut response_length, b' ') };
+                unsafe { evaluator_text(page, &mut response_length, text) };
+            }
+            unsafe { evaluator_finish(page, response_length, false, session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_MODEL_RESULT {
+            let length = (unsafe { page.add(shared::ARGUMENTS).read_volatile() } as usize)
+                .min(crate::world::PAYLOAD_BYTES);
+            let number = unsafe { page.add(shared::ARGUMENTS + 1).read_volatile() } as u32;
+            let payload = (shared_page as usize + crate::world::PAYLOAD_OFFSET) as *const u8;
+            let text = unsafe { core::slice::from_raw_parts(payload, length) };
+            session.deliver(number, text);
+            let mut response_length = 0;
+            unsafe { evaluator_text(page, &mut response_length, b"DELIVERED") };
+            unsafe { evaluator_finish(page, response_length, false, session.revision()) };
         } else if command == shared::COMMAND_EVALUATOR_ROLLBACK {
             let result = session.rollback();
             let mut response_length = 0;

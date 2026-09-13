@@ -18,6 +18,7 @@ use crate::recovery::{BootPlan, LiveRecovery};
 #[allow(dead_code)]
 struct KernelRecovery;
 use crate::memory::PAGE;
+use crate::native::{LOOK_BYTES, LOOK_COLUMNS, LOOK_LINE_BYTES, LOOK_ROWS, LOOK_SHADES_OFFSET};
 use crate::process::{EBADF, EBUSY, EINVAL, ENOMEM, ENOSPC};
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
@@ -38,7 +39,7 @@ const MAX_SCENE_COMMANDS: usize = 224;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":workbench | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* | :cell :run :show :delete :cells :save :reload | :exec NAME [ROOT] :close :minimize :maximize N :fs-format :fs-ls | :rollback :shutdown";
+const HELP_POSTCARD: &[u8] = b":load NAME :play STEPS | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* look-* model-* | :cell :run :show :delete :cells :save :reload | :exec NAME :close :minimize/maximize N | :rollback :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 26;
 
@@ -800,6 +801,12 @@ impl crate::process::Display for Desk<'_, '_> {
             (u64::from(width) << 16) | u64::from(height),
         );
         target.canvas = Some((width, height));
+        // Safety: a single supervisor; the table is read only while the
+        // window keeps this canvas.
+        unsafe {
+            let table = &mut *core::ptr::addr_of_mut!(CANVAS_FRAMES);
+            table[slot][..frames.len()].copy_from_slice(frames);
+        }
         0
     }
 
@@ -811,6 +818,104 @@ impl crate::process::Display for Desk<'_, '_> {
             }
         }
     }
+}
+
+/// The frames of each window's canvas, by slot, for the observation the
+/// play loop takes: the process's pages, identity-mapped for the kernel like
+/// every pool frame, valid while the window's `canvas` is set.
+const CANVAS_PAGES: usize = (crate::world::process::CANVAS_BYTES / PAGE) as usize;
+static mut CANVAS_FRAMES: [[u64; CANVAS_PAGES]; crate::world::process::WINDOWS] =
+    [[0; CANVAS_PAGES]; crate::world::process::WINDOWS];
+
+/// What the language may look at: the played window's canvas as a grid of
+/// shades, one pixel sampled at each cell's centre, and the program's last
+/// console line, in the layout `native::LOOK_*` describes.
+fn observe(window: &Window, terminal: &Terminal, out: &mut [u8; LOOK_BYTES]) {
+    out.fill(0);
+    let length = usize::from(terminal.last_length);
+    out[0] = length as u8;
+    out[1..1 + length].copy_from_slice(&terminal.last[..length]);
+    let Some((width, height)) = window.canvas else {
+        return;
+    };
+    // Safety: the supervisor's table, read while the window keeps its canvas
+    // and the process its pages.
+    let frames = unsafe { &(*core::ptr::addr_of!(CANVAS_FRAMES))[usize::from(window.slot)] };
+    let (width, height) = (width as usize, height as usize);
+    for row in 0..LOOK_ROWS {
+        for column in 0..LOOK_COLUMNS {
+            let x = (2 * column * width + width) / (2 * LOOK_COLUMNS);
+            let y = (2 * row * height + height) / (2 * LOOK_ROWS);
+            let offset = (y * width + x) * 4;
+            let frame = frames[offset / PAGE as usize];
+            if frame == 0 {
+                continue;
+            }
+            // Safety: a pool frame the process owns, identity-mapped, and the
+            // offset is inside the canvas the process asked for.
+            let pixel = unsafe {
+                ((frame as usize + offset % PAGE as usize) as *const u32).read_volatile()
+            };
+            let (r, g, b) = ((pixel >> 16) & 0xff, (pixel >> 8) & 0xff, pixel & 0xff);
+            out[LOOK_SHADES_OFFSET + row * LOOK_COLUMNS + column] =
+                ((r * 77 + g * 150 + b * 29) >> 8) as u8;
+        }
+    }
+}
+
+/// The keys the play loop can hold, by the names the language uses: the
+/// set-1 scan code, whether it is extended, and the character it means when
+/// it means one. What the window sees is what a keyboard would have sent.
+const PLAY_KEYS: &[(&[u8], u8, bool, Option<u8>)] = &[
+    (b"up", 0x48, true, None),
+    (b"down", 0x50, true, None),
+    (b"left", 0x4b, true, None),
+    (b"right", 0x4d, true, None),
+    (b"ctrl", 0x1d, false, None),
+    (b"alt", 0x38, false, None),
+    (b"shift", 0x2a, false, None),
+    (b"space", 0x39, false, Some(b' ')),
+    (b"comma", 0x33, false, Some(b',')),
+    (b"period", 0x34, false, Some(b'.')),
+    (b"enter", 0x1c, false, Some(b'\n')),
+    (b"escape", 0x01, false, Some(27)),
+    (b"p", 0x19, false, Some(b'p')),
+    (b"y", 0x15, false, Some(b'y')),
+    (b"n", 0x31, false, Some(b'n')),
+];
+const PLAY_KEYS_HELD: usize = 4;
+
+fn play_key(name: &[u8]) -> Option<usize> {
+    PLAY_KEYS.iter().position(|(key, ..)| *key == name)
+}
+
+fn inject(window: &mut Window, key: usize, pressed: bool) {
+    use crate::world::process::{EVENT_KEY, EVENT_KEY_DOWN, EVENT_KEY_UP};
+    let (_, code, extended, byte) = PLAY_KEYS[key];
+    let kind = if pressed {
+        EVENT_KEY_DOWN
+    } else {
+        EVENT_KEY_UP
+    };
+    window.queue(kind | (u64::from(extended) << 8) | u64::from(code));
+    if let (true, Some(byte)) = (pressed, byte) {
+        window.queue(EVENT_KEY | u64::from(byte));
+    }
+}
+
+/// The keys an evaluated form names: symbols in a list, or one symbol;
+/// anything else names none.
+fn keys_named(form: &[u8], out: &mut [usize; PLAY_KEYS_HELD]) -> usize {
+    let mut count = 0;
+    for word in form.split(|byte| matches!(byte, b'(' | b')' | b' ' | b'\'')) {
+        if let Some(key) = play_key(word) {
+            if count < PLAY_KEYS_HELD {
+                out[count] = key;
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 /// Withdraw a window's canvas from the compositor: its pages unmapped and
@@ -1039,6 +1144,14 @@ struct Terminal {
     line_ended: bool,
     /// Written since the panel was last painted.
     dirty: bool,
+    /// The line being written and the last one finished, whole where the
+    /// panel would wrap them: what the language looks at.
+    line: [u8; LOOK_LINE_BYTES],
+    line_length: u8,
+    last: [u8; LOOK_LINE_BYTES],
+    last_length: u8,
+    /// Lines finished so far; the play loop waits for it to move.
+    lines: u32,
 }
 
 impl Terminal {
@@ -1051,6 +1164,11 @@ impl Terminal {
         used: 0,
         line_ended: false,
         dirty: false,
+        line: [0; LOOK_LINE_BYTES],
+        line_length: 0,
+        last: [0; LOOK_LINE_BYTES],
+        last_length: 0,
+        lines: 0,
     };
 
     fn is_empty(&self) -> bool {
@@ -1076,8 +1194,23 @@ impl Terminal {
         for byte in bytes {
             match *byte {
                 b'\r' => {}
-                b'\n' => self.line_ended = true,
+                b'\n' => {
+                    self.line_ended = true;
+                    self.last = self.line;
+                    self.last_length = self.line_length;
+                    self.line_length = 0;
+                    self.lines = self.lines.wrapping_add(1);
+                }
                 byte => {
+                    let shown = if byte.is_ascii_graphic() || byte == b' ' {
+                        byte
+                    } else {
+                        b'?'
+                    };
+                    if usize::from(self.line_length) < LOOK_LINE_BYTES {
+                        self.line[usize::from(self.line_length)] = shown;
+                        self.line_length += 1;
+                    }
                     if self.used == 0 || self.line_ended {
                         self.newline();
                         self.line_ended = false;
@@ -1112,6 +1245,10 @@ impl crate::process::Console for Tee<'_> {
     fn write(&mut self, bytes: &[u8]) {
         crate::process::Console::write(self.serial, bytes);
         self.terminal.push(bytes);
+    }
+
+    fn lines(&self) -> u32 {
+        self.terminal.lines
     }
 }
 
@@ -2278,6 +2415,327 @@ fn scene_command(line: &[u8]) -> bool {
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"(title \""))
 }
 
+/// An Agel program the desktop carries, by the name `:load` takes: the
+/// source, each form a cell named by the prefix, and the status shown when
+/// it is in.
+struct Program {
+    name: &'static [u8],
+    prefix: &'static [u8],
+    source: &'static [u8],
+    ready: &'static [u8],
+}
+
+const PROGRAMS: &[Program] = &[
+    Program {
+        name: b"workbench",
+        prefix: b"wb-",
+        source: include_bytes!("../../desktop/workbench.agel"),
+        ready: b"WORKBENCH READY - CLICK OR TAB",
+    },
+    Program {
+        name: b"doom-agent",
+        prefix: b"da-",
+        source: include_bytes!("../../desktop/doom-agent.agel"),
+        ready: b"DOOM AGENT READY - :PLAY STEPS",
+    },
+    Program {
+        name: b"doom-agent-model",
+        prefix: b"dm-",
+        source: include_bytes!("../../desktop/doom-agent-model.agel"),
+        ready: b"DOOM MODEL AGENT READY - :PLAY STEPS",
+    },
+];
+
+/// How long the play loop holds a step's keys, in passes of the run, unless
+/// `:play STEPS HOLD` says otherwise; how long it waits for the program to
+/// answer a pause with a line; and how many times it asks the serial console
+/// for a model's answer before giving up on one.
+const PLAY_HOLD_PASSES: usize = 24_000;
+const PLAY_PAUSE_PASSES: usize = 60_000;
+const PLAY_REPLY_POLLS: usize = 60_000_000;
+
+/// Run the desktop's programs for up to `passes` passes, or until one prints
+/// a whole line when `until_line` asks; whether every program ended.
+#[allow(clippy::too_many_arguments)]
+fn play_passes(
+    machine: &mut arch::Machine,
+    compositor: &mut arch::Domain,
+    inputs: Option<&mut Inputs<'_>>,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+    serial: &mut ServiceDomain,
+    current: &mut Scene,
+    run: &mut crate::process::Run,
+    passes: usize,
+    until_line: bool,
+) -> bool {
+    let lines = current.terminal.lines;
+    let mut tee = Tee {
+        serial,
+        terminal: &mut current.terminal,
+    };
+    let mut desk = Desk {
+        compositor,
+        inputs,
+        windows: &mut current.windows,
+        focus: &mut current.focus,
+        order: &mut current.order,
+        pointer: current.pointer,
+    };
+    let mut services = crate::process::Services {
+        storage,
+        console: &mut tee,
+        filesystem,
+        display: Some(&mut desk as &mut dyn crate::process::Display),
+    };
+    for _ in 0..passes {
+        if let crate::process::Progress::Ended =
+            crate::process::step_run(machine, &mut services, run)
+        {
+            crate::process::finish(machine, run, services.console);
+            return true;
+        }
+        if until_line && services.console.lines() != lines {
+            break;
+        }
+    }
+    crate::process::collect(run, services.console);
+    false
+}
+
+/// A line typed on the serial console while the play loop waits for a
+/// model's answer, bounded: none when nothing whole arrives in time.
+fn serial_line(serial: &mut ServiceDomain, out: &mut [u8; PAYLOAD_BYTES]) -> Option<usize> {
+    let handle = serial.handle();
+    let mut length = 0;
+    for _ in 0..PLAY_REPLY_POLLS {
+        match serial.read_console(handle) {
+            Ok(Some(b'\n')) | Ok(Some(b'\r')) => {
+                if length > 0 {
+                    return Some(length);
+                }
+            }
+            Ok(Some(byte)) => {
+                if length < out.len() {
+                    out[length] = byte;
+                    length += 1;
+                }
+            }
+            Ok(None) => core::hint::spin_loop(),
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// The language plays the focused window's program: each step pauses the
+/// game with the key `(play-pause)` names, waits for the program's line,
+/// shows the language what the window holds, asks `(play-step)` which keys
+/// to hold, answers a model request it made through the serial console,
+/// holds the keys for the step, and unpauses. The desktop is the substrate;
+/// the policy is Agel.
+#[allow(clippy::too_many_arguments)]
+fn play(
+    machine: &mut arch::Machine,
+    compositor: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
+    evaluator: &mut arch::Domain,
+    storage: &mut ServiceDomain,
+    mut filesystem: Option<&mut ServiceDomain>,
+    serial: &mut ServiceDomain,
+    current: &mut Scene,
+    evaluator_revision: &mut u64,
+    running: &mut Option<&'static mut crate::process::Run>,
+    line: &[u8],
+    steps: usize,
+    hold: usize,
+) -> StatusLine {
+    let Some(run) = running.as_deref_mut() else {
+        return StatusLine::new(b"NO PROGRAM TO PLAY - :EXEC ONE");
+    };
+    let Some(slot) = current
+        .focus
+        .filter(|slot| current.windows[usize::from(*slot)].is_some_and(|window| window.listens()))
+    else {
+        return StatusLine::new(b"NO WINDOW TO PLAY - CLICK ONE");
+    };
+    let slot = usize::from(slot);
+    let mut evaluate = |evaluator: &mut arch::Domain, form: &[u8]| -> Option<StatusLine> {
+        let reply = evaluator_request(evaluator, shared::COMMAND_EVALUATE, form).ok()?;
+        *evaluator_revision = reply.revision;
+        (!reply.error).then(|| StatusLine::new(&reply.bytes[..reply.length]))
+    };
+    let pause = evaluate(evaluator, b"(play-pause)").and_then(|key| play_key(key.get()));
+    let mut ended = false;
+    let mut played = 0;
+    for step in 1..=steps {
+        if let Some(key) = pause {
+            let window = current.windows[slot].as_mut().expect("the played window");
+            inject(window, key, true);
+            inject(window, key, false);
+            ended = play_passes(
+                machine,
+                compositor,
+                inputs.as_deref_mut(),
+                storage,
+                filesystem.as_deref_mut(),
+                serial,
+                current,
+                run,
+                PLAY_PAUSE_PASSES,
+                true,
+            );
+            if ended {
+                break;
+            }
+        }
+        let mut look = [0_u8; LOOK_BYTES];
+        observe(
+            current.windows[slot].as_ref().expect("the played window"),
+            &current.terminal,
+            &mut look,
+        );
+        for (offset, byte) in look.iter().enumerate() {
+            evaluator.core().write_observation(offset, *byte);
+        }
+        if evaluator_request(evaluator, shared::COMMAND_EVALUATOR_OBSERVE, b"").is_err() {
+            return StatusLine::new(b"THE EVALUATOR COULD NOT LOOK");
+        }
+        let Some(mut decision) = evaluate(evaluator, b"(play-step)") else {
+            return StatusLine::new(b"PLAY-STEP FAILED - :LOAD DOOM-AGENT");
+        };
+        // A request the step made goes out on the serial console with what
+        // the language saw; the answer comes back as `:model-reply N TEXT`
+        // and the step is asked again with it.
+        if let Ok(request) = evaluator_request(evaluator, shared::COMMAND_EVALUATOR_REQUEST, b"") {
+            if request.length > 0 {
+                let request = &request.bytes[..request.length];
+                let number = request
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_digit())
+                    .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
+                let mut text = StatusLine::new(b"model-request ");
+                text.push(request);
+                text.push(b"\n");
+                crate::process::Console::write(serial, text.get());
+                let mut shown = StatusLine::new(b"look-line: ");
+                shown.push(&look[1..1 + usize::from(look[0])]);
+                shown.push(b"\n");
+                crate::process::Console::write(serial, shown.get());
+                for row in 0..LOOK_ROWS {
+                    let mut shades = [b' '; LOOK_COLUMNS + 7];
+                    shades[..6].copy_from_slice(b"look: ");
+                    for (column, cell) in shades[6..6 + LOOK_COLUMNS].iter_mut().enumerate() {
+                        let shade = look[LOOK_SHADES_OFFSET + row * LOOK_COLUMNS + column];
+                        *cell = b" .:-=+*#%@"[usize::from(shade) * 10 / 256];
+                    }
+                    shades[LOOK_COLUMNS + 6] = b'\n';
+                    crate::process::Console::write(serial, &shades);
+                }
+                crate::process::Console::write(serial, b"model-request end\n");
+                let mut answer = [0_u8; PAYLOAD_BYTES];
+                let mut delivered = false;
+                while let Some(length) = serial_line(serial, &mut answer) {
+                    let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
+                        continue;
+                    };
+                    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+                    let given = rest[..digits]
+                        .iter()
+                        .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
+                    if digits == 0 || given != number {
+                        continue;
+                    }
+                    let text = trim(&rest[digits..]);
+                    let text = &text[..text.len().min(crate::native::REQUEST_BYTES)];
+                    evaluator.core().write_shared(shared::ARGUMENTS + 1, number);
+                    delivered =
+                        evaluator_request(evaluator, shared::COMMAND_EVALUATOR_MODEL_RESULT, text)
+                            .is_ok();
+                    break;
+                }
+                if delivered {
+                    if let Some(again) = evaluate(evaluator, b"(play-step)") {
+                        decision = again;
+                    }
+                } else {
+                    crate::process::Console::write(serial, b"model-reply: none\n");
+                }
+            }
+        }
+        let mut keys = [0; PLAY_KEYS_HELD];
+        let count = keys_named(decision.get(), &mut keys);
+        let mut report = StatusLine::new(b"play: step ");
+        report.number_u64(step as u64);
+        report.push(b" keys ");
+        report.push(decision.get());
+        if let Some(reason) = evaluate(evaluator, b"play-reason").filter(|r| r.get() != b"nil") {
+            report.push(b" reason ");
+            report.push(reason.get());
+        }
+        report.push(b"\n");
+        {
+            let mut tee = Tee {
+                serial,
+                terminal: &mut current.terminal,
+            };
+            crate::process::Console::write(&mut tee, report.get());
+        }
+        {
+            let window = current.windows[slot].as_mut().expect("the played window");
+            for key in &keys[..count] {
+                inject(window, *key, true);
+            }
+            if let Some(key) = pause {
+                inject(window, key, true);
+                inject(window, key, false);
+            }
+        }
+        ended = play_passes(
+            machine,
+            compositor,
+            inputs.as_deref_mut(),
+            storage,
+            filesystem.as_deref_mut(),
+            serial,
+            current,
+            run,
+            hold,
+            false,
+        );
+        if let Some(window) = current.windows[slot].as_mut() {
+            for key in &keys[..count] {
+                inject(window, *key, false);
+            }
+        }
+        played = step;
+        current.terminal.dirty = false;
+        let frame =
+            materialize(*current, Some(line), b"PLAYING").unwrap_or_else(|reason| failed(reason));
+        render_region(compositor, inputs.as_deref_mut(), &frame, TERMINAL_REGION)
+            .unwrap_or_else(|reason| failed(reason));
+        if ended || !run.alive(slot_owner(current, slot)) {
+            break;
+        }
+    }
+    if ended {
+        *running = None;
+        return StatusLine::new(b"PROCESS ENDED");
+    }
+    let mut status = StatusLine::new(b"PLAYED ");
+    status.number_u64(played as u64);
+    status.push(b" STEPS");
+    status
+}
+
+/// The process slot that owns window `slot`, or one no run has, so a window
+/// whose owner went away reads as ended.
+fn slot_owner(current: &Scene, slot: usize) -> usize {
+    current.windows[slot]
+        .and_then(|window| window.owner)
+        .map_or(usize::MAX, usize::from)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_workshop(
     machine: &mut arch::Machine,
@@ -2310,19 +2768,30 @@ fn execute_workshop(
     if line == b":shutdown" {
         arch::exit(true);
     }
-    if line == b":workbench" {
+    // The programs the desktop carries as Agel source, each form a cell:
+    // the workbench, and the agent that plays a game in a window.
+    let program = if line == b":workbench" {
+        Some(&b"workbench"[..])
+    } else {
+        command_argument(line, b":load ")
+    };
+    if let Some(name) = program {
+        let Some(program) = PROGRAMS.iter().find(|program| program.name == name) else {
+            return StatusLine::new(b"NO SUCH PROGRAM - :LOAD WORKBENCH OR DOOM-AGENT");
+        };
         if workspace.count() != 0 || *evaluator_revision != 0 {
-            return StatusLine::new(b"WORKBENCH NEEDS A FRESH EMPTY WORLD");
+            return StatusLine::new(b"A PROGRAM NEEDS A FRESH EMPTY WORLD");
         }
         let mut candidate = *workspace;
-        for (index, source) in include_bytes!("../../desktop/workbench.agel")
+        for (index, source) in program
+            .source
             .split(|byte| *byte == b'\n')
             .filter(|line| line.starts_with(b"("))
             .enumerate()
         {
-            let mut name = StatusLine::new(b"wb-");
-            name.number_u64(index as u64);
-            if let Err(reason) = candidate.upsert(name.get(), source) {
+            let mut cell = StatusLine::new(program.prefix);
+            cell.number_u64(index as u64);
+            if let Err(reason) = candidate.upsert(cell.get(), source) {
                 return StatusLine::new(reason.as_bytes());
             }
         }
@@ -2331,13 +2800,39 @@ fn execute_workshop(
                 *workspace = candidate;
                 *evaluator_revision = revision;
                 *dirty = true;
-                StatusLine::new(b"WORKBENCH READY - CLICK OR TAB")
+                StatusLine::new(program.ready)
             }
             Err(failure) => {
                 let _ = replay_workspace(evaluator, workspace);
                 StatusLine::new(failure.message().as_bytes())
             }
         };
+    }
+    if let Some(rest) = command_argument(line, b":play ") {
+        let mut words = rest
+            .split(|byte| *byte == b' ')
+            .filter(|word| !word.is_empty());
+        let number = |word: Option<&[u8]>, default: usize| {
+            word.and_then(|word| core::str::from_utf8(word).ok()?.parse::<usize>().ok())
+                .unwrap_or(default)
+        };
+        let steps = number(words.next(), 1).clamp(1, 999);
+        let hold = number(words.next(), PLAY_HOLD_PASSES).clamp(1, 100_000);
+        return play(
+            machine,
+            compositor,
+            inputs,
+            evaluator,
+            storage,
+            filesystem,
+            serial,
+            current,
+            evaluator_revision,
+            running,
+            line,
+            steps,
+            hold,
+        );
     }
     // Programs and files, answered on the serial console and in the
     // terminal panel; the frame is repainted after, as after any command.
@@ -3280,11 +3775,16 @@ fn interactive(
         };
         let byte = match input {
             Input::Byte(byte) => {
-                // A window with the keyboard and a live owner takes the key.
+                // A window with the keyboard and a live owner takes the key,
+                // except a line that opens with `:`, which is the workshop's
+                // however the window is focused: the operator can still
+                // command the desktop from the serial console while a game
+                // holds the keyboard.
                 if let Some(window) = current
                     .focus
                     .and_then(|slot| current.windows[usize::from(slot)].as_mut())
                     .filter(|window| window.listens() && running.is_some())
+                    .filter(|_| length == 0 && byte != b':' || length > 0 && line[0] != b':')
                 {
                     window.queue(crate::world::process::EVENT_KEY | u64::from(byte));
                     continue;
