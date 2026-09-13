@@ -292,6 +292,10 @@ promise.
   rendering at the empty cell, resize events past the window maximum);
   makes the AArch64 and RISC-V domain layers one `paged` module; and
   shares what the test scripts repeated. The tree is 850 lines smaller.
+  `v0.2.65` runs several programs at once on the desktop: every `:exec`
+  is a root in one process table, each tree is reported as it ends and
+  its slots freed, windows and the keyboard stay per process; two
+  sketches and a chart prove it in `scripts/test-desktop-process.sh`.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

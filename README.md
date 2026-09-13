@@ -5,11 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.64.** What is done, partial and open is in
+**Current release: v0.2.65.** What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
-![The native desktop at v0.2.63: two windows a C program asked for, over the workshop](docs/images/native-desktop-v0.2.63.png)
+![The native desktop at v0.2.65: two sketch programs running at once, over the workshop](docs/images/native-desktop-v0.2.65.png)
 
 ## What exists
 
@@ -54,7 +54,8 @@ dock, hover and press states, a terminal panel, and windows that processes
 ask for and draw into through records the supervisor checks before it
 paints them. Windows move by their header, stack, minimize to panel pills,
 maximize, resize by their corner, and hand a process its presses, keys,
-motion, releases and resizes while the desktop keeps running. The
+motion, releases and resizes while the desktop keeps running, with
+several programs running at once, each reported as it ends. The
 compositor holds the framebuffer as its only device mapping; every click is
 a typed command underneath. See [`docs/native-graphics.md`](docs/native-graphics.md).
 

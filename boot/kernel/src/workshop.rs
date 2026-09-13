@@ -177,7 +177,7 @@ pub fn exec_program(
         filesystem,
         display: display.map(|display| &mut *display as &mut dyn Display),
     };
-    let exit = loop {
+    loop {
         match process::step_run(machine, &mut services, run) {
             process::Progress::Running => {}
             // Time passes on its own: the pass is repeated until it has.
@@ -185,17 +185,18 @@ pub fn exec_program(
             process::Progress::Listening => {
                 // Nothing here delivers events between passes: a process
                 // that waits for one on this path waits for nothing.
-                break process::abandon(machine, &mut services, run);
+                process::abandon(machine, &mut services, run);
+                break;
             }
-            process::Progress::Ended(exit) => break exit,
+            process::Progress::Ended => break,
         }
-    };
-    finish_program(machine, services.console, run, exit);
+    }
+    process::finish(machine, run, services.console);
 }
 
 /// Parse an `:exec` line, resolve the root, find the program and start
-/// it in the prepared `run`: `Some` when it runs, or nothing, with the
-/// reason already on the console.
+/// it in `run`: its slot when it runs, or nothing, with the reason
+/// already on the console.
 #[inline(never)]
 pub fn start_program(
     machine: &mut arch::Machine,
@@ -205,7 +206,7 @@ pub fn start_program(
     display: Option<&mut dyn Display>,
     rest: &[u8],
     run: &mut process::Run,
-) -> Option<()> {
+) -> Option<usize> {
     let (options, arguments) = match rest.windows(2).position(|pair| pair == b"--") {
         Some(at)
             if (at == 0 || rest[at - 1] == b' ')
@@ -295,7 +296,7 @@ pub fn start_program(
         namespace,
         run,
     ) {
-        Ok(()) => Some(()),
+        Ok(slot) => Some(slot),
         Err(reason) => {
             text(
                 services.console,
@@ -305,21 +306,4 @@ pub fn start_program(
             None
         }
     }
-}
-
-/// The one line for how a run's first process ended, and its frames back.
-pub fn finish_program(
-    machine: &mut arch::Machine,
-    console: &mut dyn Console,
-    run: &mut process::Run,
-    exit: process::Exit,
-) {
-    let mut out = Line::new();
-    let _ = out.write_str("process ");
-    for byte in run.name() {
-        let _ = out.write_char(char::from(*byte));
-    }
-    process::report(&mut out, exit);
-    console.write(out.get());
-    process::finish(machine, run);
 }

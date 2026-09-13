@@ -235,8 +235,8 @@ returns, and the desktop runs sixteen passes between inputs while the
 program lives, repainting the terminal panel when the program wrote and
 the whole frame, with the report and a fresh prompt, when it ends. The
 process serves `write`, `draw` and its children the same way in either
-mode; a second `:exec` while one runs is refused with
-`A PROCESS IS RUNNING`.
+mode; a second `:exec` while one ran was refused with
+`A PROCESS IS RUNNING` until v0.2.65.
 
 `boot/posix/c/sketch.c` opens a window, waits for events, puts a dot
 where each press lands and writes the press to the console; a key clears
@@ -445,6 +445,45 @@ See [`examples/graphical-workshop.txt`](../examples/graphical-workshop.txt) for 
 complete session. `:help` prints the self-documenting command postcard; since
 v0.2.22 its length is checked at build time against the status line, so it can
 no longer be silently truncated.
+
+## Several programs (v0.2.65)
+
+The desktop runs more than one program at a time:
+
+![Two sketches side by side, a chart run between them, at v0.2.65](images/native-desktop-v0.2.65.png)
+
+- **Every `:exec` joins the run.** The process table is no longer one
+  program's: each `:exec` takes a free slot as a root process with no
+  parent, beside whatever already listens or sleeps there, up to the
+  table's four. A program that ends at once is reported at once; one
+  that listens gets the prompt back with `PROCESS LISTENING` as before,
+  and the desktop's passes between inputs serve all of them.
+- **Each is reported when its tree has ended.** `process::collect`
+  finds every root whose descendants have all ended, writes its one
+  line (`process NAME exited with status N`, or how it faulted, was
+  killed or blocked), and takes the tree out of the table so the slots
+  are free again; the desktop prints `PROCESS ENDED` and a fresh prompt
+  under the report whether or not others live on. The serial workshop
+  runs one program to its end as it always did and reports it the same
+  way; a child that ends badly is still reported the moment it does.
+- **Windows and the keyboard are per process.** A window belongs to the
+  process that asked for it, events go to the owner of the window under
+  the pointer, keys to the owner of the focused window, so two sketches
+  each collect their own dots and `q` ends only the one with the
+  keyboard. A click on the wallpaper gives the keyboard back to the
+  workshop, which is how a command is typed while a window listens.
+
+`scripts/test-desktop-process.sh` starts a chart while a sketch listens
+and reads the chart's bars, its exit report and `PROCESS ENDED` with the
+sketch's dot still in place once the chart's window is closed; starts a
+second sketch beside the first, presses in it and finds a dot in each
+window, sends `q` and reads one quit and one exit while the first still
+answers a press; then ends the first.
+
+What this is not: four processes is the table; a root that ends leaves
+its windows until they are closed, as before; there is still no
+scheduler beyond the round-robin pass, and no way to choose which
+listening program a key reaches except by clicking its window.
 
 ## Device handoff
 

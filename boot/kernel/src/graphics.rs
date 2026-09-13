@@ -706,9 +706,10 @@ impl crate::process::Display for Desk<'_, '_> {
 /// The terminal panel's box on the screen, for repainting it alone.
 const TERMINAL_REGION: (u32, u32, u32, u32) = (452, 292, 1360, 508);
 
-/// Where the desktop's one run lives: a run is four domains and four
-/// pipes, too large for the supervisor's stack beside the frames, and it
-/// outlasts the command that started it when the program listens.
+/// Where the desktop's run lives: a run is four domains and four pipes,
+/// too large for the supervisor's stack beside the frames, and it
+/// outlasts the command that started it when a program listens; every
+/// later `:exec` joins it while it lives.
 static mut RUN_SLOT: crate::process::RunSlot = crate::process::RunSlot::UNINIT;
 
 /// A fresh, empty run in the desktop's slot. Called only while no run is
@@ -2182,11 +2183,9 @@ fn execute_workshop(
     // terminal panel; the frame is repainted after, as after any command.
     // A program runs to its end here, as in the serial workshop, unless it
     // waits for an event in a window: then the desktop takes the input
-    // back and runs it between inputs, until it ends.
+    // back and runs it between inputs, until it ends. A program started
+    // while others live joins their run.
     if let Some(rest) = line.strip_prefix(b":exec ") {
-        if running.is_some() {
-            return StatusLine::new(b"A PROCESS IS RUNNING");
-        }
         let mut filesystem = filesystem;
         let mut tee = Tee {
             serial,
@@ -2200,8 +2199,11 @@ fn execute_workshop(
             order: &mut current.order,
             pointer: current.pointer,
         };
-        let run = prepare_run();
-        if crate::workshop::start_program(
+        let run = match running.take() {
+            Some(run) => run,
+            None => prepare_run(),
+        };
+        let Some(slot) = crate::workshop::start_program(
             machine,
             storage,
             filesystem.as_deref_mut(),
@@ -2209,11 +2211,12 @@ fn execute_workshop(
             Some(&mut desk),
             rest,
             run,
-        )
-        .is_none()
-        {
+        ) else {
+            if run.live() {
+                *running = Some(run);
+            }
             return StatusLine::new(b"PROCESS NOT STARTED");
-        }
+        };
         let mut services = crate::process::Services {
             storage,
             console: &mut tee,
@@ -2221,21 +2224,24 @@ fn execute_workshop(
             display: Some(&mut desk as &mut dyn crate::process::Display),
         };
         loop {
-            match crate::process::step_run(machine, &mut services, run) {
-                crate::process::Progress::Running => {}
-                crate::process::Progress::Listening => {
-                    *running = Some(run);
-                    return StatusLine::new(b"PROCESS LISTENING");
-                }
-                crate::process::Progress::Sleeping => {
-                    *running = Some(run);
-                    return StatusLine::new(b"PROCESS SLEEPING");
-                }
-                crate::process::Progress::Ended(exit) => {
-                    crate::workshop::finish_program(machine, services.console, run, exit);
+            let waiting = match crate::process::step_run(machine, &mut services, run) {
+                crate::process::Progress::Running => continue,
+                crate::process::Progress::Listening => &b"PROCESS LISTENING"[..],
+                crate::process::Progress::Sleeping => &b"PROCESS SLEEPING"[..],
+                crate::process::Progress::Ended => {
+                    crate::process::finish(machine, run, services.console);
                     return StatusLine::new(b"PROCESS ENDED");
                 }
-            }
+            };
+            // Others wait; the one just started may already be done.
+            crate::process::collect(run, services.console);
+            let status = if run.alive(slot) {
+                waiting
+            } else {
+                &b"PROCESS ENDED"[..]
+            };
+            *running = Some(run);
+            return StatusLine::new(status);
         }
     }
     // The header's other controls, and the pills, as typed commands.
@@ -3033,28 +3039,34 @@ fn interactive(
                         filesystem: filesystem.as_mut(),
                         display: Some(&mut desk as &mut dyn crate::process::Display),
                     };
-                    let mut ended = None;
+                    // Whether everything ended, and whether some program
+                    // did: each is reported, and either gets the operator
+                    // a fresh prompt under the report.
+                    let mut ended = false;
                     for _ in 0..PASSES_PER_IDLE {
                         match crate::process::step_run(machine, &mut services, run) {
                             crate::process::Progress::Running => {}
                             crate::process::Progress::Listening
                             | crate::process::Progress::Sleeping => break,
-                            crate::process::Progress::Ended(exit) => {
-                                crate::workshop::finish_program(
-                                    machine,
-                                    services.console,
-                                    run,
-                                    exit,
-                                );
-                                ended = Some(exit);
+                            crate::process::Progress::Ended => {
+                                ended = true;
                                 break;
                             }
                         }
                     }
-                    ended
+                    if ended {
+                        crate::process::finish(machine, run, services.console);
+                        Some(true)
+                    } else if crate::process::collect(run, services.console) > 0 {
+                        Some(false)
+                    } else {
+                        None
+                    }
                 };
-                if ended.is_some() {
-                    running = None;
+                if let Some(all) = ended {
+                    if all {
+                        running = None;
+                    }
                     status = StatusLine::new(b"PROCESS ENDED");
                     current.terminal.dirty = false;
                     let frame = materialize(current, Some(&line[..length]), status.get())

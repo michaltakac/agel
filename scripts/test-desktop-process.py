@@ -199,11 +199,47 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         assert dot_pixels(1000, 420, 40, 40) > 300, "the window did not move with its header"
         assert dot_pixels(800, 320, 40, 40) == 0, "the window's old place was not repainted"
         Path("target/desktop-moved.png").write_bytes(machine.frame())
+        # Other programs run while the sketch listens: a chart opens its
+        # window, draws, exits and is reported at once; the sketch keeps
+        # its window, its dot and its events. A click on the wallpaper
+        # gives the keyboard back to the workshop first.
+        move_to(300, 700)
+        click()
+        machine.until_prompt()
+        response = machine.submit(":exec c-chart -- 1 2")
+        assert "chart: window 1 shows 2 bars" in response, response
+        assert "process c-chart exited with status 0" in response, response
+        assert "PROCESS ENDED" in response, response
+        assert "WINDOW CLOSED 1" in machine.submit(":close 1")
+        assert dot_pixels(1000, 420, 40, 40) > 300, "the dot did not outlast the chart"
+        # A second sketch beside the first, each with its own window and
+        # dot; the one with the keyboard quits alone and is reported.
+        response = machine.submit(":exec c-sketch")
+        assert "PROCESS LISTENING" in response, response
+        assert dot_pixels(680, 280, 40, 40) == 0, "a dot in the second window before any press"
+        move_to(700, 300)
+        click()
+        time.sleep(1.5)
+        assert dot_pixels(680, 280, 40, 40) > 300, "no dot in the second window"
+        Path("target/desktop-two-programs.png").write_bytes(machine.frame())
+        machine.serial.sendall(b"q")
+        response = until_text(b"live-desktop> ")
+        assert "sketch: quit after 1 dots" in response.decode(), response
+        assert "process c-sketch exited with status 0" in response.decode(), response
+        assert "PROCESS ENDED" in response.decode(), response
+        assert "WINDOW CLOSED 1" in machine.submit(":close 1")
+        assert dot_pixels(1000, 420, 40, 40) > 300, "the first window's dot is gone"
+        # The first sketch still answers: a press in its window is a line.
+        move_to(1000, 420)
+        press()
+        until_text(b"sketch: press at ")
+        release()
+        until_text(b"sketch: release at ")
         # The window has the keyboard: a serial byte reaches the process,
         # not the workshop's line.
         machine.serial.sendall(b"q")
         response = until_text(b"live-desktop> ")
-        assert "sketch: quit after 1 dots" in response.decode(), response
+        assert "sketch: quit after 2 dots" in response.decode(), response
         assert "process c-sketch exited with status 0" in response.decode(), response
         assert "PROCESS ENDED" in response.decode(), response
         # Its window stays, with the dot, until closed; a window opened

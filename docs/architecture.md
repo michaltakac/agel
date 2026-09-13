@@ -376,6 +376,9 @@ Each rung must be runnable and differentially testable against the rung below:
 59. **A roadmap and a smaller tree (v0.2.64):** the state of every line
    written down with its proof, five bugs fixed, one paged domain for
    the two MMU kernels, the scripts sharing their preludes.
+60. **Several programs (v0.2.65):** every `:exec` a root in the desktop's
+   one process table, each reported as its tree ends, windows and keys
+   per process.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

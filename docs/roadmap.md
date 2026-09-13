@@ -65,7 +65,7 @@ code. Each release moves lines here; the release-by-release history is in
 | Panel with launcher and clock, dock, hover and press states, terminal panel | done | `scripts/test-native-dock.py`, `scripts/test-native-workbench.py` |
 | Windows a process asks for and draws into through checked records; move, stack, minimize, maximize, corner resize; press, key, motion, release and resize events | done | `scripts/test-desktop-process.sh` |
 | Keyboard shortcuts and window snapping | open | |
-| More than one running program at a time on the desktop | open | one program steps between inputs; the process table holds four |
+| More than one running program at a time on the desktop | done | `scripts/test-desktop-process.sh`: two sketches and a chart; the table holds four processes in all |
 | A Gaussian blur and translucent panels | open | needs the compositor to read back what is beneath |
 | SIMD or accelerated rendering | open | every pixel is written by safe Rust in a domain |
 

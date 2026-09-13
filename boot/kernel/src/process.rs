@@ -501,25 +501,35 @@ impl Pipe {
     };
 }
 
-/// The process table for one `:exec`: the process the operator started and
-/// every descendant it makes, all served here until the last has ended.
+/// The process table: every process the operator started with `:exec` and
+/// every descendant those make, all served here until the last has ended.
 struct Table {
     processes: [Option<Process>; process::PROCESSES],
     pipes: [Pipe; process::PIPES],
 }
 
-/// One `:exec` in flight: its table, and the name for the report. Large
-/// (four domains and four pipes), so it is never a value: it lives in a
-/// `RunSlot` and is built there.
+/// The programs in flight: one table, in which each `:exec` is a root
+/// process with no parent. Large (four domains and four pipes), so it is
+/// never a value: it lives in a `RunSlot` and is built there.
 pub struct Run {
     table: Table,
-    name: [u8; NAME_BYTES],
-    name_length: usize,
 }
 
+/// What the desktop asks of a run between commands; the serial workshop
+/// runs one program to its end and needs neither.
+#[cfg(feature = "native-graphics")]
 impl Run {
-    pub fn name(&self) -> &[u8] {
-        &self.name[..self.name_length]
+    /// Whether the process in `slot` is still to be served.
+    pub fn alive(&self, slot: usize) -> bool {
+        matches!(
+            self.table.processes.get(slot),
+            Some(Some(process)) if !matches!(process.state, State::Ended(_))
+        )
+    }
+
+    /// Whether any process is still to be served.
+    pub fn live(&self) -> bool {
+        (0..process::PROCESSES).any(|slot| self.alive(slot))
     }
 }
 
@@ -543,8 +553,6 @@ impl RunSlot {
             for index in 0..process::PIPES {
                 core::ptr::addr_of_mut!((*run).table.pipes[index]).write(Pipe::EMPTY);
             }
-            core::ptr::addr_of_mut!((*run).name).write([0; NAME_BYTES]);
-            core::ptr::addr_of_mut!((*run).name_length).write(0);
             &mut *run
         }
     }
@@ -559,13 +567,13 @@ pub enum Progress {
     Listening,
     /// Nothing moved, and a live process is asleep: time will wake it.
     Sleeping,
-    /// Every process has ended; how the first did.
-    Ended(Exit),
+    /// Every process has ended.
+    Ended,
 }
 
-/// Load the named program and place its arguments into a prepared,
-/// empty run: its first process, runnable, with the console as
-/// descriptors 1 and 2.
+/// Load the named program and place its arguments into a free slot of the
+/// run as a root process: runnable, with the console as descriptors 1 and
+/// 2, and no parent. Answers the slot.
 #[inline(never)]
 pub fn start(
     machine: &mut arch::Machine,
@@ -575,7 +583,10 @@ pub fn start(
     arguments: &[u8],
     namespace: Namespace,
     run: &mut Run,
-) -> Result<(), &'static str> {
+) -> Result<usize, &'static str> {
+    let Some(slot) = run.table.processes.iter().position(Option::is_none) else {
+        return Err("every process slot is taken");
+    };
     let (mut domain, brk) = load(machine, services.storage, program)?;
     // The argument block: the name, then each argument, each NUL-terminated,
     // in the payload area, with the count in its word.
@@ -591,7 +602,7 @@ pub fn start(
     let mut descriptors = [Descriptor::FREE; process::DESCRIPTORS];
     descriptors[1] = Descriptor::CONSOLE;
     descriptors[2] = Descriptor::CONSOLE;
-    run.table.processes[0] = Some(Process {
+    run.table.processes[slot] = Some(Process {
         domain,
         descriptors,
         namespace,
@@ -601,14 +612,64 @@ pub fn start(
         name_length: name.len().min(NAME_BYTES),
         brk,
     });
-    run.name = padded_name(name);
-    run.name_length = name.len().min(NAME_BYTES);
-    Ok(())
+    Ok(slot)
 }
 
-/// Whatever is left, waited for or not, gives its frames back now. Ended
-/// processes already did.
-pub fn finish(machine: &mut arch::Machine, run: &mut Run) {
+/// The root of the tree `slot` belongs to: its parent's parent's parent.
+/// A process whose parent was reaped stands as its own root.
+fn root_of(table: &Table, mut slot: usize) -> usize {
+    while let Some(Some(process)) = table.processes.get(slot) {
+        match process.parent {
+            Some(parent) if table.processes[parent].is_some() => slot = parent,
+            _ => break,
+        }
+    }
+    slot
+}
+
+/// Report every root whose whole tree has ended, one line each, and take
+/// the tree out of the table so its slots are free. Answers how many.
+pub fn collect(run: &mut Run, console: &mut dyn Console) -> usize {
+    let table = &mut run.table;
+    let mut collected = 0;
+    for root in 0..process::PROCESSES {
+        let exit = match table.processes[root].as_ref() {
+            Some(process) if process.parent.is_none() => match process.state {
+                State::Ended(exit) => exit,
+                _ => continue,
+            },
+            _ => continue,
+        };
+        let tree_live = (0..process::PROCESSES).any(|slot| {
+            root_of(table, slot) == root
+                && matches!(table.processes[slot].as_ref(), Some(process) if !matches!(process.state, State::Ended(_)))
+        });
+        if tree_live {
+            continue;
+        }
+        if let Some(process) = table.processes[root].as_ref() {
+            let mut line = Line::new();
+            let _ = line.write_str("process ");
+            for byte in &process.name[..process.name_length] {
+                let _ = line.write_char(char::from(*byte));
+            }
+            report(&mut line, exit);
+            console.write(line.get());
+        }
+        for slot in 0..process::PROCESSES {
+            if root_of(table, slot) == root {
+                table.processes[slot] = None;
+            }
+        }
+        collected += 1;
+    }
+    collected
+}
+
+/// Report what has ended and give back the frames of whatever is left,
+/// waited for or not. Ended processes already gave theirs.
+pub fn finish(machine: &mut arch::Machine, run: &mut Run, console: &mut dyn Console) {
+    collect(run, console);
     for slot in run.table.processes.iter_mut() {
         if let Some(process) = slot.take() {
             if !matches!(process.state, State::Ended(_)) {
@@ -647,14 +708,6 @@ fn padded_name(name: &[u8]) -> [u8; NAME_BYTES] {
     padded
 }
 
-/// How the run's first process ended, once nothing is live.
-fn outcome_of(table: &Table) -> Exit {
-    match table.processes[0].as_ref().map(|process| process.state) {
-        Some(State::Ended(exit)) => exit,
-        _ => Exit::Blocked,
-    }
-}
-
 /// Every live process is blocked on something no live process will do:
 /// a wait for a child that waits for it, a read of a pipe whose writers
 /// all wait, an event nothing can deliver. Nothing else could resolve it.
@@ -669,11 +722,10 @@ fn stop_all(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mu
 }
 
 /// Stop every live process of a run as blocked: what it waits for will
-/// not come. How the first process ended.
+/// not come.
 #[cfg(feature = "isolated-repl")]
-pub fn abandon(machine: &mut arch::Machine, services: &mut Services<'_>, run: &mut Run) -> Exit {
+pub fn abandon(machine: &mut arch::Machine, services: &mut Services<'_>, run: &mut Run) {
     stop_all(machine, services, &mut run.table);
-    outcome_of(&run.table)
 }
 
 /// One pass over the table: every runnable process gets one entry, every
@@ -756,7 +808,7 @@ pub fn step_run(
         }
     }
     if !alive {
-        return Progress::Ended(outcome_of(table));
+        return Progress::Ended;
     }
     if progressed {
         return Progress::Running;
@@ -768,7 +820,7 @@ pub fn step_run(
         return Progress::Listening;
     }
     stop_all(machine, services, table);
-    Progress::Ended(outcome_of(table))
+    Progress::Ended
 }
 /// Write a request's answer and make the process runnable again.
 fn answer(table: &mut Table, index: usize, result: u64) {
@@ -1115,7 +1167,9 @@ fn end(
     if let Some(display) = services.display.as_deref_mut() {
         display.release(index);
     }
-    if index != 0 && !matches!(exit, Exit::Status(_)) {
+    // A child that ends badly is reported now; a root is reported, however
+    // it ended, when its whole tree has, by `collect`.
+    if process.parent.is_some() && !matches!(exit, Exit::Status(_)) {
         let mut line = Line::new();
         let _ = line.write_str("process ");
         for byte in &process.name[..process.name_length] {

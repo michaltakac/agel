@@ -1508,6 +1508,23 @@ rendering would invalidate stored proposals; a canonical encoding is
 open. No new protection is added; the changes remove ways the existing
 ones could be sidestepped.
 
+## v0.2.65
+
+- **Programs share a table, not authority:** a second `:exec` takes its
+  own domain, namespace and descriptors; it cannot name another root's
+  windows, pipes or children, since every request is answered by the
+  slot it came from and a window's owner is the slot that opened it.
+- **A tree is freed only when whole:** a root's slots are taken back
+  when every descendant has ended, so a child that outlives its parent
+  keeps its domain until it ends; a child whose parent was reaped stands
+  as its own root and is reported and freed on its own.
+- **A key goes to one process:** the focused window's owner, or the
+  workshop; no program receives another's keys.
+
+Not claimed: the table is four slots, so four `:exec`s fill it and the
+fifth is refused, which a program cannot cause but an operator can; no
+priority or fairness beyond the round-robin pass.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a
