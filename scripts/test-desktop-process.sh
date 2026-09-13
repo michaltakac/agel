@@ -8,6 +8,7 @@ hello=$(./scripts/build-c-program.sh hello x86_64 | tail -n 1)
 cat_program=$(./scripts/build-c-program.sh cat x86_64 | tail -n 1)
 chart=$(./scripts/build-c-program.sh chart x86_64 | tail -n 1)
 canvas=$(./scripts/build-c-program.sh canvas x86_64 | tail -n 1)
+keys=$(./scripts/build-c-program.sh keys x86_64 | tail -n 1)
 sketch=$(./scripts/build-c-program.sh sketch x86_64 | tail -n 1)
 image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
 disk=$(mktemp "${TMPDIR:-/tmp}/agel-desktop.XXXXXX")
@@ -18,5 +19,6 @@ python3 ./scripts/install-program.py "$disk" c-hello "$hello" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-cat "$cat_program" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-chart "$chart" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-canvas "$canvas" >/dev/null
+python3 ./scripts/install-program.py "$disk" c-keys "$keys" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-sketch "$sketch" >/dev/null
 python3 ./scripts/test-desktop-process.py "$disk"

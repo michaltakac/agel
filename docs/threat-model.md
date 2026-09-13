@@ -1546,6 +1546,19 @@ only what it is asked; a canvas of one process is readable by the
 compositor, which is what showing it means. No partial damage means a
 canvas frame always repaints its whole window.
 
+## v0.2.67
+
+- **Keys reach one window:** the focused, listening window's owner, or
+  the workshop's line; a process never sees a key typed to another, and
+  a modifier held for the workshop is not reported to a window that
+  gains focus afterwards until it goes down again.
+- **The decoder stays in the supervisor:** the input driver domain
+  still reports raw bytes and nothing else; what a code means is decided
+  where the routing is.
+
+Not claimed: a process cannot tell a key typed on the serial console
+from one on the keyboard except by the events it gets; no key repeat.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

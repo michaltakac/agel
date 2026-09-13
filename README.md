@@ -5,7 +5,7 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.66.** What is done, partial and open is in
+**Current release: v0.2.67.** What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 

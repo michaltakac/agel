@@ -571,7 +571,7 @@ pub unsafe extern "C" fn agel_event(
         (*event).kind = (packed >> 56) as c_int;
         (*event).x = ((packed >> 32) & 0xffff) as c_int;
         (*event).y = ((packed >> 16) & 0xffff) as c_int;
-        (*event).key = (packed & 0xff) as c_int;
+        (*event).key = (packed & 0xffff) as c_int;
     }
     1
 }

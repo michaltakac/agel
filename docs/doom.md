@@ -139,7 +139,7 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
 
 1. A canvas (design 1), proved by a C program that draws a moving
    pattern into it and a test that reads the pixels back: **v0.2.66**.
-2. Key press and release events (design 2).
+2. Key press and release events (design 2): **v0.2.67**.
 3. Room: the larger disk, the data region, the bitmap ledger (design 3).
 4. The C library's missing functions and floating point (design 4).
 5. DOOM runs, keyboard-playable on the desktop, `-timedemo` frame rate

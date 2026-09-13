@@ -254,6 +254,32 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         assert dot_pixels(1000, 420, 40, 40) > 300, "the clicked window was not raised"
         assert "WINDOW CLOSED 0" in machine.submit(":close 0")
         assert "WINDOW CLOSED 1" in machine.submit(":close 1")
+        # Keys go down and up: the machine's keyboard reaches the focused
+        # window as scan codes both ways, with the character on a press.
+        def key(name, down):
+            machine.command("input-send-event", {"events": [
+                {"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": name}}}]})
+            time.sleep(0.3)
+        response = machine.submit(":exec c-keys")
+        assert "PROCESS LISTENING" in response, response
+        key("a", True)
+        until_text(b"keys: down 30\r\n")
+        until_text(b"keys: key a\r\n")
+        key("a", False)
+        until_text(b"keys: up 30\r\n")
+        key("up", True)
+        until_text(b"keys: down 72 extended\r\n")
+        key("up", False)
+        until_text(b"keys: up 72 extended\r\n")
+        key("shift", True)
+        until_text(b"keys: down 42\r\n")
+        key("shift", False)
+        until_text(b"keys: up 42\r\n")
+        machine.serial.sendall(b"q")
+        response = until_text(b"live-desktop> ").decode()
+        assert "keys: key q" in response and "keys: quit after 3 downs" in response, response
+        assert "process c-keys exited with status 0" in response, response
+        assert "WINDOW CLOSED 0" in machine.submit(":close 0")
         # A canvas: pixels a process draws into pages of its own, blitted
         # at twice their size; the gradient and the last frame's bar are
         # read back from the screen at the window's content (560, 160).

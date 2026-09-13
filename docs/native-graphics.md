@@ -532,6 +532,40 @@ the process asks for each frame to be drawn with a request, there is no
 vertical sync or double buffer, so a frame written while the compositor
 copies may tear.
 
+## Keys down and up (v0.2.67)
+
+The second rung of [`doom.md`](doom.md): a process can hold a key.
+
+- **Every scan code is an event.** The desktop's keyboard decoder, which
+  turned scan codes into the workshop's characters and swallowed the
+  rest, now reports each key as it goes down and up: `EVENT_KEY_DOWN`
+  (6) and `EVENT_KEY_UP` (7) carry the set-1 code in the low byte and
+  bit 8 for an `e0`-prefixed key, so the arrows and the right control
+  are told apart from the keypad and the left. Shifts, controls and
+  caps lock arrive like any key, and still shape the characters.
+- **A press that means a character is also `EVENT_KEY`,** as before, so
+  a program that reads characters (`sketch.c`) sees nothing new, and one
+  that reads keys (`keys.c`, then DOOM) sees down, the character, up.
+  The workshop's line sees only the character, as before; a key that
+  means nothing to the line and is not a window's goes nowhere.
+- **The serial console is characters only:** there is no down or up on a
+  wire that carries bytes, so a program driven from the console (the Pi
+  4 today) gets `EVENT_KEY` and nothing else, and a game there would
+  have to treat a character as a tap.
+- `<agel/window.h>` names the kinds, `AGEL_KEY_EXTENDED`, and the keys
+  a game needs (`AGEL_KEY_UP`, `AGEL_KEY_LEFT_CONTROL`, ...);
+  `agel_window_event.key` now holds sixteen bits.
+
+`scripts/test-desktop-process.sh` runs `keys.c`, sends `a`, the up
+arrow and a shift through QEMU's keyboard, and reads `down 30`, `key a`,
+`up 30`, `down 72 extended`, `up 72 extended`, `down 42`, `up 42` on the
+console; then `q` from the serial console ends it.
+
+What this is not: no key repeat, no layout beyond the US one the
+decoder knows, no way for a process to read a key the workshop has
+(focus is the window's or the line's), and no keys from the serial
+console.
+
 ## Device handoff
 
 The 512-byte BIOS seed asks SeaBIOS for QEMU's 1024×768×32 linear VBE mode while

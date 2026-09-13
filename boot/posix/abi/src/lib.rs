@@ -33,6 +33,10 @@ pub const EVENT_KEY: u64 = 2 << 56;
 pub const EVENT_RELEASE: u64 = 3 << 56;
 pub const EVENT_MOTION: u64 = 4 << 56;
 pub const EVENT_RESIZE: u64 = 5 << 56;
+/// A key went down or up: its scan code in the low byte, bit 8 for an
+/// extended key.
+pub const EVENT_KEY_DOWN: u64 = 6 << 56;
+pub const EVENT_KEY_UP: u64 = 7 << 56;
 /// Names in the namespace: remove, move, ask; and the next child of an
 /// open directory.
 pub const UNLINK: u64 = 13;

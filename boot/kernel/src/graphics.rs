@@ -1154,6 +1154,19 @@ enum Intent {
     Help,
 }
 
+/// A key event from the machine's keyboard, as the desktop routes it.
+#[derive(Clone, Copy)]
+struct Scan {
+    /// The set-1 code, without its release bit.
+    code: u8,
+    /// Prefixed by `e0`: the arrows, the right control, the keypad's enter.
+    extended: bool,
+    pressed: bool,
+    /// What the key means on the workshop's line, when pressed and it
+    /// means something.
+    byte: Option<u8>,
+}
+
 struct Keyboard {
     shifts: u8,
     controls: u8,
@@ -1171,11 +1184,26 @@ impl Keyboard {
         }
     }
 
-    fn decode(&mut self, scan: u8) -> Option<u8> {
+    /// One scan code: which key went which way, and the byte it means to
+    /// the workshop's line, if any. The `e0` prefix alone is nothing yet.
+    fn decode(&mut self, scan: u8) -> Option<Scan> {
         if scan == 0xe0 {
             self.extended = true;
             return None;
         }
+        let extended = self.extended;
+        let pressed = scan & 0x80 == 0;
+        let code = scan & 0x7f;
+        let byte = self.decode_byte(scan);
+        Some(Scan {
+            code,
+            extended,
+            pressed,
+            byte,
+        })
+    }
+
+    fn decode_byte(&mut self, scan: u8) -> Option<u8> {
         let extended = self.extended;
         self.extended = false;
         let released = scan & 0x80 != 0;
@@ -2785,7 +2813,10 @@ fn execute(
 }
 
 enum Input {
+    /// A byte from the serial console.
     Byte(u8),
+    /// A key from the machine's keyboard.
+    Key(Scan),
     Pointer(bool),
 }
 
@@ -2873,7 +2904,7 @@ fn next_input(
     if auxiliary {
         pointer.feed(byte).map(Input::Pointer)
     } else {
-        keyboard.decode(byte).map(Input::Byte)
+        keyboard.decode(byte).map(Input::Key)
     }
 }
 
@@ -3207,6 +3238,32 @@ fn interactive(
                     continue;
                 }
                 byte
+            }
+            Input::Key(scan) => {
+                // The window with the keyboard learns which key went which
+                // way, and the character it means when it means one; the
+                // workshop's line sees only the character.
+                if let Some(window) = current
+                    .focus
+                    .and_then(|slot| current.windows[usize::from(slot)].as_mut())
+                    .filter(|window| window.listens() && running.is_some())
+                {
+                    use crate::world::process::{EVENT_KEY, EVENT_KEY_DOWN, EVENT_KEY_UP};
+                    let kind = if scan.pressed {
+                        EVENT_KEY_DOWN
+                    } else {
+                        EVENT_KEY_UP
+                    };
+                    window.queue(kind | (u64::from(scan.extended) << 8) | u64::from(scan.code));
+                    if let (true, Some(byte)) = (scan.pressed, scan.byte) {
+                        window.queue(EVENT_KEY | u64::from(byte));
+                    }
+                    continue;
+                }
+                match scan.byte {
+                    Some(byte) => byte,
+                    None => continue,
+                }
             }
             Input::Pointer(pressed) => {
                 let before = current.pointer;

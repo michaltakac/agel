@@ -301,6 +301,9 @@ promise.
   compositor read-only, and a blit record shows them scaled in the
   window; the canvas goes with its process. `canvas.c` proves it on the
   desktop and answers `ENODEV` on the serial machines.
+  `v0.2.67` gives windows key down and key up events with scan codes,
+  extended keys flagged, beside the character a press means, so a
+  process can hold a key; `keys.c` proves it through QEMU's keyboard.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

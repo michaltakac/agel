@@ -109,7 +109,7 @@ trained on it.
 | Line | Status | Proof and limits |
 |---|---|---|
 | A canvas: a window record backed by pages a process draws and the compositor blits, scaled | done | `scripts/test-desktop-process.sh` reads the program's pixels back; one canvas per window, 640×400 at most, no partial damage |
-| Key press and release events with key codes | open | only `EVENT_KEY` on press |
+| Key press and release events with key codes | done | `scripts/test-desktop-process.sh` reads `keys.c`; the serial console remains characters only |
 | Room: a 32 MiB disk, a 4 MiB program region, a data region of large read-only files, a bitmap frame ledger | open | 3 MiB disk, 512 KiB of programs, 64 KiB files, 512 frames a domain |
 | The C library's missing functions (`strcasecmp`, `fseek`/`ftell`, `remove`, `atof`) and floating point for processes | open | all 80 `doomgeneric` sources compile against the headers with two shims |
 | DOOM runs on the desktop, keyboard-playable, `-timedemo` frame rate reported | open | |

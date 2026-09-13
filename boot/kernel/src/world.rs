@@ -544,6 +544,14 @@ pub mod process {
     /// in bits 16..32: after a maximize, a restore or a corner drag.
     #[cfg(feature = "native-graphics")]
     pub const EVENT_RESIZE: u64 = 5 << 56;
+    /// A key on the machine's keyboard went down or up: its set-1 scan
+    /// code in the low byte, bit 8 set for an extended (`e0`) key, so a
+    /// process can hold keys; a press that means a character is also an
+    /// `EVENT_KEY`. Keys typed on the serial console are bytes only.
+    #[cfg(feature = "native-graphics")]
+    pub const EVENT_KEY_DOWN: u64 = 6 << 56;
+    #[cfg(feature = "native-graphics")]
+    pub const EVENT_KEY_UP: u64 = 7 << 56;
     /// Events a window queues before the oldest is dropped.
     #[cfg(feature = "native-graphics")]
     pub const WINDOW_EVENTS: usize = 8;

@@ -53,6 +53,28 @@ int agel_draw(int window, const agel_record *records, unsigned count, unsigned f
 /* The content is now x by y wide and high: the operator maximized,
    restored or dragged the window's corner. */
 #define AGEL_EVENT_RESIZE 5
+/* A key on the machine's keyboard went down or up: key is its set-1 scan
+   code, with AGEL_KEY_EXTENDED set for an e0-prefixed key (the arrows,
+   the right control). A press that means a character is also an
+   AGEL_EVENT_KEY with the character. Keys typed on the serial console
+   are characters only. */
+#define AGEL_EVENT_KEY_DOWN 6
+#define AGEL_EVENT_KEY_UP 7
+#define AGEL_KEY_EXTENDED 0x100
+#define AGEL_KEY_ESCAPE 0x01
+#define AGEL_KEY_ENTER 0x1c
+#define AGEL_KEY_LEFT_CONTROL 0x1d
+#define AGEL_KEY_LEFT_SHIFT 0x2a
+#define AGEL_KEY_RIGHT_SHIFT 0x36
+#define AGEL_KEY_LEFT_ALT 0x38
+#define AGEL_KEY_SPACE 0x39
+#define AGEL_KEY_TAB 0x0f
+#define AGEL_KEY_BACKSPACE 0x0e
+#define AGEL_KEY_UP (AGEL_KEY_EXTENDED | 0x48)
+#define AGEL_KEY_LEFT (AGEL_KEY_EXTENDED | 0x4b)
+#define AGEL_KEY_RIGHT (AGEL_KEY_EXTENDED | 0x4d)
+#define AGEL_KEY_DOWN (AGEL_KEY_EXTENDED | 0x50)
+#define AGEL_KEY_RIGHT_CONTROL (AGEL_KEY_EXTENDED | 0x1d)
 
 typedef struct {
     int kind;
