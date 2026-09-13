@@ -29,6 +29,13 @@ typedef struct {
    with a title of at most 28 bytes: its number from 0, or -1 with errno. */
 int agel_window(unsigned width, unsigned height, const char *title);
 
+/* A canvas for the window: width by height pixels (at most 640 by 400,
+   each a 0x00RRGGBB unsigned, row by row) the process draws into as it
+   likes; an agel_blit record shows it, scaled, inside the content, as it
+   is when the window is drawn. One per window. Null with errno: ENODEV
+   without a display, EBUSY for a second one, EINVAL for the size. */
+unsigned *agel_canvas(int window, unsigned width, unsigned height);
+
 /* Draw count records into the window, clearing it first with
    AGEL_DRAW_CLEAR in flags: the records the window now holds, or -1 with
    errno and nothing of this request drawn. */
@@ -86,6 +93,13 @@ static inline agel_record agel_surface(unsigned x, unsigned y, unsigned width, u
 
 static inline agel_record agel_sprite(unsigned x, unsigned y, unsigned index, unsigned tint) {
     agel_record record = {{9, x, y, index, tint, 255}};
+    return record;
+}
+
+/* The window's canvas at x, y, each pixel scale (1 to 4) wide and high;
+   the whole of it must lie inside the content. */
+static inline agel_record agel_blit(unsigned x, unsigned y, unsigned scale) {
+    agel_record record = {{11, x, y, scale}};
     return record;
 }
 

@@ -5,11 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.65.** What is done, partial and open is in
+**Current release: v0.2.66.** What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
-![The native desktop at v0.2.65: two sketch programs running at once, over the workshop](docs/images/native-desktop-v0.2.65.png)
+![The native desktop at v0.2.66: a canvas a C program draws pixel by pixel, over the workshop](docs/images/native-desktop-v0.2.66.png)
 
 ## What exists
 
@@ -55,7 +55,8 @@ ask for and draw into through records the supervisor checks before it
 paints them. Windows move by their header, stack, minimize to panel pills,
 maximize, resize by their corner, and hand a process its presses, keys,
 motion, releases and resizes while the desktop keeps running, with
-several programs running at once, each reported as it ends. The
+several programs running at once, each reported as it ends, and a
+canvas of pixels a process draws itself, blitted into its window. The
 compositor holds the framebuffer as its only device mapping; every click is
 a typed command underneath. See [`docs/native-graphics.md`](docs/native-graphics.md).
 
@@ -226,6 +227,7 @@ the compiler bootstrap and the opt-in integer JIT (`cargo run --release -q
 - [`docs/native-graphics.md`](docs/native-graphics.md), [`docs/native-workshop.md`](docs/native-workshop.md), [`docs/native-boot.md`](docs/native-boot.md): the desktop, the workshop, the disk.
 - [`docs/posix-personality.md`](docs/posix-personality.md): the process protocol and the C library, stratum by stratum.
 - [`docs/raspberry-pi.md`](docs/raspberry-pi.md): the board.
+- [`docs/doom.md`](docs/doom.md): the programme for running DOOM and having Agel play it, and what is missing.
 - [`docs/kernel-contract.md`](docs/kernel-contract.md), [`docs/sel4-manifest.md`](docs/sel4-manifest.md), [`docs/microkernel-research.md`](docs/microkernel-research.md): the contract, the seL4 build, the research behind them.
 - [`docs/deployment-targets.md`](docs/deployment-targets.md): scope, tiers, what does not exist.
 - [`docs/language-core.md`](docs/language-core.md), [`docs/language-postcard.md`](docs/language-postcard.md), [`docs/agent-runtime.md`](docs/agent-runtime.md), [`docs/standard-library.md`](docs/standard-library.md), [`docs/agel-in-agel.md`](docs/agel-in-agel.md): the language.

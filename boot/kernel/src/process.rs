@@ -108,7 +108,6 @@ pub const ECHILD: i64 = 10;
 pub const EAGAIN: i64 = 11;
 pub const ENOMEM: i64 = 12;
 pub const EACCES: i64 = 13;
-#[cfg(feature = "native-graphics")]
 pub const EBUSY: i64 = 16;
 pub const ENODEV: i64 = 19;
 pub const EINVAL: i64 = 22;
@@ -434,8 +433,14 @@ pub trait Display {
     /// The next event queued for a window `owner` owns: `Ok(None)` when
     /// there is none yet, `Err` for a window it does not own.
     fn event(&mut self, owner: usize, window: u64) -> Result<Option<u64>, i64>;
+    /// A canvas of `width` by `height` pixels for a window `owner` owns,
+    /// backed by `frames` the process maps read-write: zero, or a
+    /// negated error and nothing mapped.
+    fn canvas(&mut self, owner: usize, window: u64, width: u32, height: u32, frames: &[u64])
+        -> i64;
     /// Process `owner` has ended: what it owned stays on the desktop, but
-    /// no later process in that slot may draw into it.
+    /// no later process in that slot may draw into it, and its canvases
+    /// are unmapped before its frames go back.
     fn release(&mut self, owner: usize);
 }
 
@@ -475,6 +480,8 @@ struct Process {
     name_length: usize,
     /// Where the next `brk` page goes: past the image and a guard page.
     brk: u64,
+    /// Whether the top of the window holds a canvas.
+    canvas: bool,
 }
 
 /// A pipe: a bounded queue in the supervisor with a count of the read and
@@ -611,6 +618,7 @@ pub fn start(
         name: padded_name(name),
         name_length: name.len().min(NAME_BYTES),
         brk,
+        canvas: false,
     });
     Ok(slot)
 }
@@ -924,6 +932,7 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
         process::SPAWN => spawn(machine, services, table, index, arguments),
         process::WINDOW => window(table, index, services, arguments),
+        process::CANVAS => canvas(machine, table, index, services, arguments),
         process::DRAW => draw(table, index, services, arguments),
         process::EVENT => match event(table, index, services, arguments) {
             Some(result) => result,
@@ -981,6 +990,56 @@ fn window(
     display.open(index, width, height, &title[..length]) as u64
 }
 
+/// `CANVAS`: pages at the top of the process's window, mapped for it
+/// read-write and, by the display, for the compositor read-only; the
+/// address, or a negated error. A canvas the display refuses leaves its
+/// pages with the process, to be reclaimed with the rest.
+#[inline(never)]
+fn canvas(
+    machine: &mut arch::Machine,
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    arguments: [u64; 4],
+) -> u64 {
+    const PAGES: usize = (process::CANVAS_BYTES / PAGE) as usize;
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let Some(display) = services.display.as_deref_mut() else {
+        return error(ENODEV);
+    };
+    let (Ok(width), Ok(height)) = (u32::try_from(arguments[1]), u32::try_from(arguments[2])) else {
+        return error(EINVAL);
+    };
+    let bytes = u64::from(width) * u64::from(height) * 4;
+    if width == 0 || height == 0 || bytes > process::CANVAS_BYTES {
+        return error(EINVAL);
+    }
+    if process.canvas {
+        return error(EBUSY);
+    }
+    let base = arch::PROCESS_BASE + arch::PROCESS_BYTES - process::CANVAS_BYTES;
+    let pages = bytes.div_ceil(PAGE) as usize;
+    let mut frames = [0_u64; PAGES];
+    for (page, frame) in frames.iter_mut().enumerate().take(pages) {
+        match machine.map_process_page(
+            &mut process.domain,
+            base + page as u64 * PAGE,
+            Access::UserData,
+        ) {
+            Ok(mapped) => *frame = mapped,
+            Err(_) => return error(ENOMEM),
+        }
+    }
+    let result = display.canvas(index, arguments[0], width, height, &frames[..pages]);
+    if result < 0 {
+        return result as u64;
+    }
+    process.canvas = true;
+    base
+}
+
 /// `DRAW`: the block area's first `arguments[1]` records go to the display
 /// as they are; the display decides whether they are permitted.
 fn draw(table: &mut Table, index: usize, services: &mut Services<'_>, arguments: [u64; 4]) -> u64 {
@@ -1015,7 +1074,8 @@ fn brk(machine: &mut arch::Machine, table: &mut Table, index: usize, pages: u64)
         return error(EINVAL);
     }
     let start = process.brk;
-    let end = arch::PROCESS_BASE + arch::PROCESS_BYTES;
+    // The window's top is the canvas's, whether or not one is mapped.
+    let end = arch::PROCESS_BASE + arch::PROCESS_BYTES - process::CANVAS_BYTES;
     if start.saturating_add(pages * PAGE) > end {
         return error(ENOMEM);
     }
@@ -1163,10 +1223,12 @@ fn end(
         return;
     };
     process.state = State::Ended(exit);
-    machine.reclaim(process.domain.frames());
+    // The display lets go of the process's pages before they are given
+    // back, so nothing it maps can become another domain's memory.
     if let Some(display) = services.display.as_deref_mut() {
         display.release(index);
     }
+    machine.reclaim(process.domain.frames());
     // A child that ends badly is reported now; a root is reported, however
     // it ended, when its whole tree has, by `collect`.
     if process.parent.is_some() && !matches!(exit, Exit::Status(_)) {
@@ -1670,6 +1732,7 @@ fn spawn(
         name,
         name_length,
         brk,
+        canvas: false,
     });
     free as u64
 }

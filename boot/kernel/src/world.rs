@@ -170,6 +170,11 @@ pub mod shared {
     /// sheet. Words 54 to 61.
     #[cfg(feature = "native-graphics")]
     pub const ASSET_WORDS: usize = 54;
+    /// Where each window's canvas is mapped in the compositor and its
+    /// width and height (`width << 16 | height`), two words per window
+    /// from 66; an address of zero is no canvas.
+    #[cfg(feature = "native-graphics")]
+    pub const CANVAS_WORDS: usize = 66;
     #[cfg(feature = "native-graphics")]
     pub const ASSET_SLOTS: usize = 4;
     #[cfg(feature = "native-graphics")]
@@ -509,6 +514,18 @@ pub mod process {
     /// `arguments[1]`, zero-filling what grows; the descriptor must be
     /// writable. Answers 0.
     pub const FTRUNCATE: u64 = 21;
+    /// `CANVAS`: pixels for a window. Arguments: the window, then the
+    /// width and height of a canvas the process draws into as
+    /// `0x00RRGGBB` words, row by row, at most `CANVAS_MAX` and
+    /// `CANVAS_BYTES`. The answer is the canvas's address in the process's
+    /// space: the top `CANVAS_BYTES` of its window, mapped for it
+    /// read-write and for the compositor read-only. One canvas per window
+    /// and per process; a blit record (operation 11: x, y, scale 1 to 4)
+    /// shows it inside the content. Graphics only; `-ENODEV` elsewhere.
+    pub const CANVAS: u64 = 22;
+    #[cfg(feature = "native-graphics")]
+    pub const CANVAS_MAX: (u32, u32) = (640, 400);
+    pub const CANVAS_BYTES: u64 = 0x0010_0000;
     /// An event's kind is its top byte; a press carries the content
     /// coordinates in bits 32..48 and 16..32, a key its byte in the low
     /// eight bits.

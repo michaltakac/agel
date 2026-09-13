@@ -379,6 +379,9 @@ Each rung must be runnable and differentially testable against the rung below:
 60. **Several programs (v0.2.65):** every `:exec` a root in the desktop's
    one process table, each reported as its tree ends, windows and keys
    per process.
+61. **A canvas (v0.2.66):** pixels a process draws into its own pages,
+   aliased read-only into the compositor and blitted into its window;
+   the first rung of running DOOM.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

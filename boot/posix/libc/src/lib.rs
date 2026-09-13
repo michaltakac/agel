@@ -488,6 +488,20 @@ pub unsafe extern "C" fn agel_window(width: c_uint, height: c_uint, title: *cons
     outcome(process().window(width, height, bytes)) as c_int
 }
 
+/// A canvas of `width` by `height` pixels for `window`, each a
+/// `0x00RRGGBB` word, row by row: the pixels, or null with `errno`
+/// (`ENODEV` without a display, `EBUSY` for a second canvas, `EINVAL`
+/// past 640 by 400).
+#[no_mangle]
+pub extern "C" fn agel_canvas(window: c_int, width: c_uint, height: c_uint) -> *mut c_uint {
+    let result = process().canvas(window as u64, width, height);
+    if result < 0 {
+        outcome(result);
+        return core::ptr::null_mut();
+    }
+    result as usize as *mut c_uint
+}
+
 /// Draw `count` records into `window`, eight per request, clearing it
 /// first with `AGEL_DRAW_CLEAR`: the records the window holds, or -1 with
 /// `errno` and the request's records undrawn (`EINVAL` for one the window

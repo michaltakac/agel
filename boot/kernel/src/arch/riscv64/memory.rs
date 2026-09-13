@@ -154,7 +154,7 @@ impl AddressSpace {
     /// Replace the leaf entry for `virtual_address`, or clear it, without
     /// allocating: the tables above it must already exist, which `map` at
     /// build time guarantees for the frame window.
-    #[cfg(feature = "contract-memory")]
+    #[cfg(any(feature = "contract-memory", feature = "native-graphics"))]
     pub fn set_leaf(
         &mut self,
         virtual_address: u64,

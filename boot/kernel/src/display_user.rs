@@ -926,6 +926,39 @@ unsafe fn draw(surface: Surface, page: *mut u64, record: *const u8, bytes: usize
                 alpha,
             )
         }
+    } else if operation == 11 {
+        // A window's canvas: the slot names the words that say where the
+        // supervisor aliased its pages and how large it is; nothing else
+        // in the record is believed.
+        let scale = unsafe { record_word(record, 3) };
+        let slot = unsafe { record_word(record, 4) } as usize;
+        if scale == 0 || scale > 4 || slot >= crate::world::process::WINDOWS {
+            return false;
+        }
+        let words = shared::CANVAS_WORDS + 2 * slot;
+        let address = unsafe { page.add(words).read_volatile() } as usize;
+        let dims = unsafe { page.add(words + 1).read_volatile() };
+        let (width, height) = ((dims >> 16) as u32, (dims & 0xffff) as u32);
+        let bytes = crate::world::process::CANVAS_BYTES as usize;
+        if address != crate::arch::CANVAS_BASE as usize + slot * bytes
+            || width == 0
+            || height == 0
+            || width as usize * height as usize * 4 > bytes
+        {
+            return false;
+        }
+        unsafe {
+            blit(
+                surface,
+                address,
+                width,
+                height,
+                surface.x(lx),
+                surface.y(ly),
+                scale,
+            )
+        };
+        true
     } else if operation == 5 {
         let scale = unsafe { record_word(record, 3) };
         let color = unsafe { record_word(record, 4) };
@@ -948,6 +981,35 @@ unsafe fn draw(surface: Surface, page: *mut u64, record: *const u8, bytes: usize
         true
     } else {
         false
+    }
+}
+
+/// Copy a canvas of `width` by `height` pixels to `x`, `y`, each pixel
+/// `scale` wide and high, inside the clip: the one record whose pixels
+/// a process chose, read from pages it wrote.
+unsafe fn blit(
+    surface: Surface,
+    address: usize,
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+    scale: u32,
+) {
+    let (top, bottom) = surface.rows(y, y.saturating_add(height * scale).min(surface.height));
+    let (left, right) = surface.columns(x, x.saturating_add(width * scale).min(surface.width));
+    let mut py = top;
+    while py < bottom {
+        let row = address + ((py - y) / scale * width) as usize * 4;
+        let out = surface.address + py as usize * surface.pitch as usize;
+        let mut px = left;
+        while px < right {
+            let source = (row + ((px - x) / scale) as usize * 4) as *const u32;
+            let color = unsafe { source.read_volatile() } & 0x00ff_ffff;
+            unsafe { ((out + px as usize * 4) as *mut u32).write_volatile(color) };
+            px += 1;
+        }
+        py += 1;
     }
 }
 

@@ -17,7 +17,8 @@ use crate::recovery::{BootPlan, LiveRecovery};
 #[cfg(not(target_arch = "x86_64"))]
 #[allow(dead_code)]
 struct KernelRecovery;
-use crate::process::{EBADF, EBUSY, EINVAL, ENOSPC};
+use crate::memory::PAGE;
+use crate::process::{EBADF, EBUSY, EINVAL, ENOMEM, ENOSPC};
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
 use crate::world::{shared, Stop, PAYLOAD_BYTES, RECORD_BYTES};
@@ -92,6 +93,10 @@ fn load_assets(
                 failed("a font atlas the desktop needs is missing from the asset region");
             }
         }
+    }
+    if let Err(reason) = machine.prepare_canvases(compositor) {
+        kprint!("canvases unavailable: {reason}\n");
+        failed("the compositor's canvas slots could not be built");
     }
     match crate::assets::load_sprites(machine, storage, compositor, SPRITE_SHEET) {
         Ok(count) => kprint!("assets: sprites {count} sprites\n"),
@@ -276,6 +281,9 @@ struct Window {
     hidden: bool,
     /// The box a maximized window returns to.
     restore: Option<(u32, u32, u32, u32)>,
+    /// The canvas's width and height, while its owner's pages are aliased
+    /// into the compositor.
+    canvas: Option<(u32, u32)>,
 }
 
 /// Where the panel's pills for minimized windows start, and their height.
@@ -445,6 +453,14 @@ impl Window {
                     && word(5) <= 255
                     && inside(x, y, SPRITE_SIZE, SPRITE_SIZE)
             }
+            // A blit of the canvas, scaled, wholly inside the content; the
+            // window's slot is written into the record when it is drawn.
+            11 => {
+                let scale = word(3);
+                self.canvas.is_some_and(|(width, height)| {
+                    (1..=4).contains(&scale) && inside(x, y, width * scale, height * scale)
+                })
+            }
             _ => false,
         }
     }
@@ -556,6 +572,9 @@ fn window_records(
         let mut moved = *record;
         put_u32(&mut moved, 1, record_u32(record, 1) + window.x);
         put_u32(&mut moved, 2, record_u32(record, 2) + window.y);
+        if record_u32(record, 0) == 11 {
+            put_u32(&mut moved, 4, u32::from(window.slot));
+        }
         frame.push(moved)?;
     }
     Ok(())
@@ -645,6 +664,7 @@ impl crate::process::Display for Desk<'_, '_> {
             event_count: 0,
             hidden: false,
             restore: None,
+            canvas: None,
         };
         window.title[..usize::from(window.title_len)]
             .copy_from_slice(&title[..usize::from(window.title_len)]);
@@ -694,13 +714,80 @@ impl crate::process::Display for Desk<'_, '_> {
         }
     }
 
+    fn canvas(
+        &mut self,
+        owner: usize,
+        window: u64,
+        width: u32,
+        height: u32,
+        frames: &[u64],
+    ) -> i64 {
+        use crate::world::process::{CANVAS_BYTES, CANVAS_MAX};
+        let slot = window as usize;
+        let Some(Some(target)) = self.windows.get_mut(slot) else {
+            return -EBADF;
+        };
+        if target.owner != Some(owner as u8) {
+            return -EBADF;
+        }
+        if target.canvas.is_some() {
+            return -EBUSY;
+        }
+        if width > CANVAS_MAX.0
+            || height > CANVAS_MAX.1
+            || frames.len() as u64 != (u64::from(width) * u64::from(height) * 4).div_ceil(PAGE)
+        {
+            return -EINVAL;
+        }
+        let base = arch::CANVAS_BASE + slot as u64 * CANVAS_BYTES;
+        for (page, frame) in frames.iter().enumerate() {
+            if self
+                .compositor
+                .alias(base + page as u64 * PAGE, *frame)
+                .is_err()
+            {
+                for undo in 0..page {
+                    self.compositor.unmap(base + undo as u64 * PAGE);
+                }
+                return -ENOMEM;
+            }
+        }
+        let core = self.compositor.core();
+        core.write_shared(shared::CANVAS_WORDS + 2 * slot, base);
+        core.write_shared(
+            shared::CANVAS_WORDS + 2 * slot + 1,
+            (u64::from(width) << 16) | u64::from(height),
+        );
+        target.canvas = Some((width, height));
+        0
+    }
+
     fn release(&mut self, owner: usize) {
         for window in self.windows.iter_mut().flatten() {
             if window.owner == Some(owner as u8) {
                 window.owner = None;
+                drop_canvas(self.compositor, window);
             }
         }
     }
+}
+
+/// Withdraw a window's canvas from the compositor: its pages unmapped and
+/// its words cleared, so no record can reach them; the blit records the
+/// window keeps are no longer permitted and are skipped.
+fn drop_canvas(compositor: &mut arch::Domain, window: &mut Window) {
+    let Some((width, height)) = window.canvas.take() else {
+        return;
+    };
+    let slot = usize::from(window.slot);
+    let base = arch::CANVAS_BASE + slot as u64 * crate::world::process::CANVAS_BYTES;
+    let pages = (u64::from(width) * u64::from(height) * 4).div_ceil(PAGE);
+    for page in 0..pages {
+        compositor.unmap(base + page * PAGE);
+    }
+    let core = compositor.core();
+    core.write_shared(shared::CANVAS_WORDS + 2 * slot, 0);
+    core.write_shared(shared::CANVAS_WORDS + 2 * slot + 1, 0);
 }
 
 /// The terminal panel's box on the screen, for repainting it alone.
@@ -2307,6 +2394,9 @@ fn execute_workshop(
         };
         return match current.windows.get_mut(slot) {
             Some(window) if window.is_some() => {
+                if let Some(closing) = window.as_mut() {
+                    drop_canvas(compositor, closing);
+                }
                 *window = None;
                 if current.focus == Some(slot as u8) {
                     current.focus = None;

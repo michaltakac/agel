@@ -49,6 +49,8 @@ pub const BRK: u64 = 20;
 /// The most pages one `brk` request maps.
 pub const BRK_PAGES: u64 = 64;
 pub const FTRUNCATE: u64 = 21;
+/// A canvas for a window: pixels the process draws, blitted by record 11.
+pub const CANVAS: u64 = 22;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;
@@ -332,6 +334,12 @@ impl Process {
     /// Set the length of the file at `descriptor`. 0, or a negated error.
     pub fn ftruncate(&self, descriptor: u64, length: u64) -> i64 {
         self.request(FTRUNCATE, [descriptor, length, 0, 0]) as i64
+    }
+
+    /// A canvas of `width` by `height` pixels for `window`: its address in
+    /// this process, or a negated error.
+    pub fn canvas(&self, window: u64, width: u32, height: u32) -> i64 {
+        self.request(CANVAS, [window, u64::from(width), u64::from(height), 0]) as i64
     }
 
     /// Wait for child `id` to end: its exit status, `WAIT_SIGNALED` with a

@@ -60,6 +60,12 @@ pub const DISPLAY_BASE: u64 = DOMAIN_BASE + 0x0400_0000;
 pub const ASSET_BASE: u64 = DOMAIN_BASE + 0x2000_0000;
 #[cfg(feature = "native-graphics")]
 pub const ASSET_SLOT_BYTES: u64 = 0x0020_0000;
+/// Where the compositor sees the windows' canvases: after the asset
+/// slots, `CANVAS_BYTES` per window, read-only aliases of pages the
+/// owning process maps read-write.
+#[cfg(feature = "native-graphics")]
+pub const CANVAS_BASE: u64 =
+    ASSET_BASE + crate::world::shared::ASSET_SLOTS as u64 * ASSET_SLOT_BYTES;
 
 /// Where a loaded process's segments live: a 16 MiB window well above the
 /// stack, shared page and frame window, inside the domain's private region.
@@ -296,6 +302,39 @@ impl Domain {
         self.frames.push(frame)?;
         self.space.map(pool, virtual_address, frame, access)?;
         Ok(frame)
+    }
+
+    /// Build the tables under `pages` pages from `base`, every one mapped
+    /// read-only to one blank frame, so that `alias` and `unmap` never
+    /// allocate: the compositor's canvas slots, made once with the domain.
+    #[cfg(feature = "native-graphics")]
+    pub fn prepare_aliases(
+        &mut self,
+        pool: &mut FramePool,
+        base: u64,
+        pages: u64,
+    ) -> Result<(), MemoryError> {
+        let blank = pool.allocate()?;
+        self.frames.push(blank)?;
+        for page in 0..pages {
+            self.space
+                .map(pool, base + page * PAGE, blank, Access::UserReadOnly)?;
+        }
+        Ok(())
+    }
+
+    /// Point a prepared page at a frame another domain owns, read-only.
+    /// The frame stays the other's to reclaim; `unmap` must come first.
+    #[cfg(feature = "native-graphics")]
+    pub fn alias(&mut self, virtual_address: u64, frame: u64) -> Result<(), MemoryError> {
+        self.space
+            .set_leaf(virtual_address, Some((frame, Access::UserReadOnly)))
+    }
+
+    /// Withdraw a prepared page's mapping; a read there faults after.
+    #[cfg(feature = "native-graphics")]
+    pub fn unmap(&mut self, virtual_address: u64) {
+        let _ = self.space.set_leaf(virtual_address, None);
     }
 
     /// Ask the world to do something it is not allowed to do, and report how it

@@ -1525,6 +1525,27 @@ Not claimed: the table is four slots, so four `:exec`s fill it and the
 fifth is refused, which a program cannot cause but an operator can; no
 priority or fairness beyond the round-robin pass.
 
+## v0.2.66
+
+- **A canvas is the process's memory, seen once more:** the frames are
+  the process's, in its ledger, mapped for it read-write; the compositor
+  holds read-only aliases in slots whose tables exist from its build, so
+  a canvas can never make the compositor allocate or write.
+- **A blit believes the supervisor, not the record:** the record names
+  nothing but a position and a scale; the window's slot is written in by
+  the supervisor, and the compositor reads the alias's address and size
+  from words only the supervisor sets, and refuses any other address.
+- **Aliases die before frames are given back:** `release` runs before
+  `reclaim`, so a frame that becomes another domain's is never still
+  readable through the compositor.
+- **A process cannot read the screen or another canvas:** the alias is
+  one-way; the process sees only its own pages.
+
+Not claimed: the compositor is a domain the supervisor trusts to paint
+only what it is asked; a canvas of one process is readable by the
+compositor, which is what showing it means. No partial damage means a
+canvas frame always repaints its whole window.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

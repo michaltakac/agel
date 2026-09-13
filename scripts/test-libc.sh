@@ -16,6 +16,7 @@ clock_program=$(./scripts/build-c-program.sh clock "$architecture" | tail -n 1)
 nap=$(./scripts/build-c-program.sh nap "$architecture" | tail -n 1)
 heap=$(./scripts/build-c-program.sh heap "$architecture" | tail -n 1)
 big=$(./scripts/build-c-program.sh big "$architecture" | tail -n 1)
+canvas=$(./scripts/build-c-program.sh canvas "$architecture" | tail -n 1)
 . ./scripts/lib.sh
 prepare_machine "$architecture" libc 1024
 python3 ./scripts/install-program.py "$disk" writer "$writer" >/dev/null
@@ -27,4 +28,5 @@ python3 ./scripts/install-program.py "$disk" c-clock "$clock_program" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-nap "$nap" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-heap "$heap" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-big "$big" >/dev/null
+python3 ./scripts/install-program.py "$disk" c-canvas "$canvas" >/dev/null
 python3 ./scripts/test-native-repl.py "$kernel" --c --arch "$architecture" --disk "$disk"

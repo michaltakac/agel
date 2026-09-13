@@ -20,7 +20,7 @@ mod paged;
 
 pub use paged::Domain;
 #[cfg(feature = "native-graphics")]
-pub use paged::{ASSET_BASE, ASSET_SLOT_BYTES};
+pub use paged::{ASSET_BASE, ASSET_SLOT_BYTES, CANVAS_BASE};
 #[cfg(feature = "process")]
 pub use paged::{PROCESS_BASE, PROCESS_BYTES};
 /// The ELF `e_machine` of programs built for this machine.
@@ -179,6 +179,17 @@ pub struct Machine {
 }
 
 impl Machine {
+    /// Build the compositor's canvas slots: the tables for every window's
+    /// canvas, ready for aliases that never allocate.
+    #[cfg(feature = "native-graphics")]
+    pub fn prepare_canvases(&mut self, domain: &mut Domain) -> Result<(), &'static str> {
+        let pages = crate::world::process::WINDOWS as u64 * crate::world::process::CANVAS_BYTES
+            / crate::memory::PAGE;
+        domain
+            .prepare_aliases(&mut self.pool, CANVAS_BASE, pages)
+            .map_err(|error| error.name())
+    }
+
     /// A protection domain entered unprivileged at `entry` with the given
     /// budget, grant and stack; what every `create_*_world` is.
     fn world(

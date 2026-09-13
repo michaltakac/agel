@@ -485,6 +485,53 @@ its windows until they are closed, as before; there is still no
 scheduler beyond the round-robin pass, and no way to choose which
 listening program a key reaches except by clicking its window.
 
+## A canvas (v0.2.66)
+
+The first rung of [`doom.md`](doom.md): pixels a process chose, on the
+screen.
+
+![A canvas a C program drew, blitted at twice its size, at v0.2.66](images/native-desktop-v0.2.66.png)
+
+- **A canvas is pages.** `CANVAS` (protocol word 22: the window, a width
+  and a height up to 640 by 400, at most 1 MiB) maps the top 1 MiB of the
+  process's window for it read-write and answers the address; the
+  process writes `0x00RRGGBB` words there, row by row, whenever it
+  likes. The supervisor aliases the same frames into the compositor
+  read-only, in a canvas slot per window after the asset slots, whose
+  page tables were built with the compositor so that no alias ever
+  allocates. `brk` stops below the canvas whether or not one exists.
+- **A blit is a record.** Operation 11 (x, y, a scale of 1 to 4) is
+  permitted like any other record: the scaled canvas must lie inside the
+  content, and the window's slot is written into the record when the
+  frame is made, so the compositor reads only the words the supervisor
+  set for that slot: where the alias is and how large. It copies the
+  pixels inside the clip, one read and one write each; a canvas of
+  320 by 200 at twice its size is 256 K writes, about 10 ms under QEMU's
+  TCG from the process's paint to the painted window.
+- **A canvas goes with its process.** When the process ends, or the
+  window is closed, the compositor's aliases are withdrawn and the words
+  cleared before the frames go back to the pool, so no other domain's
+  memory can ever be read through them; the blit records the window
+  keeps are no longer permitted and are skipped, and the content is the
+  window's plain surface again. `release` now runs before `reclaim` for
+  every process, canvas or not.
+- **`agel_canvas`** in `<agel/window.h>` answers the pixels, and
+  `agel_blit` builds the record; `boot/posix/c/canvas.c` draws a
+  gradient with a moving bar each frame and prints the frame's time.
+
+`scripts/test-desktop-process.sh` starts it, reads `PROCESS LISTENING`
+and the first frame's time, and requires three pixels of the screen to be
+what the program wrote: the gradient in the middle, the bar at the left,
+the far corner; then `q`, the exit, and the content plain again.
+`scripts/test-libc.sh` runs it on the three serial machines, where it
+answers `ENODEV` and exits 3.
+
+What this is not: one canvas per window, at most 640 by 400, blitted
+whole (no partial damage), with no alpha and no colour conversion; and
+the process asks for each frame to be drawn with a request, there is no
+vertical sync or double buffer, so a frame written while the compositor
+copies may tear.
+
 ## Device handoff
 
 The 512-byte BIOS seed asks SeaBIOS for QEMU's 1024×768×32 linear VBE mode while

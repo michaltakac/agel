@@ -100,6 +100,23 @@ tests run on all three research machines unless a line says otherwise.
 | USB keyboard and mouse on the Pi | open | no host controller driver; input on the board is the serial console |
 | One image serving both boards from the device tree | open | addresses are compiled in per board |
 
+## Does it run DOOM?
+
+The programme in [`doom.md`](doom.md): the game as a POSIX process on
+Agel's kernel, an agent that plays it, the data it leaves and a model
+trained on it.
+
+| Line | Status | Proof and limits |
+|---|---|---|
+| A canvas: a window record backed by pages a process draws and the compositor blits, scaled | done | `scripts/test-desktop-process.sh` reads the program's pixels back; one canvas per window, 640×400 at most, no partial damage |
+| Key press and release events with key codes | open | only `EVENT_KEY` on press |
+| Room: a 32 MiB disk, a 4 MiB program region, a data region of large read-only files, a bitmap frame ledger | open | 3 MiB disk, 512 KiB of programs, 64 KiB files, 512 frames a domain |
+| The C library's missing functions (`strcasecmp`, `fseek`/`ftell`, `remove`, `atof`) and floating point for processes | open | all 80 `doomgeneric` sources compile against the headers with two shims |
+| DOOM runs on the desktop, keyboard-playable, `-timedemo` frame rate reported | open | |
+| Agel plays it: a hosted agent stepping the game through the machine's screen and keys, a dataset of frames, state, actions and reasons, a run window on the desktop | open | the agent is hosted; the native kernel has no network or local inference |
+| A trained policy from the dataset; a world model for predictions | open | training is orchestrated through a provider, never performed by the OS |
+| Speech and steering of the run | open | |
+
 ## Not started
 
 - **Local inference.** CPU inference over quantized weights in a domain, in

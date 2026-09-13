@@ -1007,6 +1007,11 @@ def c_test(image: str, architecture: str, disk: str) -> None:
             ":exec c-chart",
             [b"chart: no display (errno 19)", b"process c-chart exited with status 3"],
         )
+        run_program(
+            boot,
+            ":exec c-canvas",
+            [b"canvas: no display (errno 19)", b"process c-canvas exited with status 3"],
+        )
         boot.send("(+ 20 22)", "42", 1)
         shutdown(boot)
     finally:

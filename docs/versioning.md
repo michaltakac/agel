@@ -296,6 +296,11 @@ promise.
   is a root in one process table, each tree is reported as it ends and
   its slots freed, windows and the keyboard stay per process; two
   sketches and a chart prove it in `scripts/test-desktop-process.sh`.
+  `v0.2.66` begins *Does it run DOOM?* (`docs/doom.md`) with a canvas:
+  `CANVAS` maps up to 640×400 pixels of a process's own pages into the
+  compositor read-only, and a blit record shows them scaled in the
+  window; the canvas goes with its process. `canvas.c` proves it on the
+  desktop and answers `ENODEV` on the serial machines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

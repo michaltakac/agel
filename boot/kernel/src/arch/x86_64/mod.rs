@@ -17,7 +17,7 @@ mod memory;
 #[cfg(feature = "isolation-selftest")]
 pub use domain::Domain;
 #[cfg(feature = "native-graphics")]
-pub use domain::{ASSET_BASE, ASSET_SLOT_BYTES};
+pub use domain::{ASSET_BASE, ASSET_SLOT_BYTES, CANVAS_BASE};
 #[cfg(feature = "process")]
 pub use domain::{PROCESS_BASE, PROCESS_BYTES};
 /// The ELF `e_machine` of programs built for this machine.
@@ -299,6 +299,17 @@ impl Machine {
     /// Give a domain one more page at `virtual_address`, and return the
     /// frame behind it for the loader to fill: a process's image, or the
     /// compositor's assets.
+    /// Build the compositor's canvas slots: the tables for every window's
+    /// canvas, ready for aliases that never allocate.
+    #[cfg(feature = "native-graphics")]
+    pub fn prepare_canvases(&mut self, domain: &mut Domain) -> Result<(), &'static str> {
+        let pages = crate::world::process::WINDOWS as u64 * crate::world::process::CANVAS_BYTES
+            / crate::memory::PAGE;
+        domain
+            .prepare_aliases(&mut self.pool, CANVAS_BASE, pages)
+            .map_err(|error| error.name())
+    }
+
     #[cfg(feature = "pages")]
     pub fn map_process_page(
         &mut self,

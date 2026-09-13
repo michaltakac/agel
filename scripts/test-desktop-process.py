@@ -254,6 +254,23 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         assert dot_pixels(1000, 420, 40, 40) > 300, "the clicked window was not raised"
         assert "WINDOW CLOSED 0" in machine.submit(":close 0")
         assert "WINDOW CLOSED 1" in machine.submit(":close 1")
+        # A canvas: pixels a process draws into pages of its own, blitted
+        # at twice their size; the gradient and the last frame's bar are
+        # read back from the screen at the window's content (560, 160).
+        response = machine.submit(":exec c-canvas")
+        assert "PROCESS LISTENING" in response, response
+        assert "canvas: frame 0 in" in response, response
+        assert machine.region(760, 260, 1, 1)[:3] == bytes([79, 64, 0x40]), "the gradient is wrong"
+        assert machine.region(565, 260, 1, 1)[:3] == b"\xff\xff\xff", "the bar is missing"
+        assert machine.region(1198, 558, 1, 1)[:3] == bytes([255, 255, 0x40]), "the far corner is wrong"
+        Path("target/desktop-canvas.png").write_bytes(machine.frame())
+        # The canvas goes with its process: the content is plain again.
+        machine.serial.sendall(b"q")
+        response = until_text(b"live-desktop> ").decode()
+        assert "canvas: 1 frames" in response, response
+        assert "process c-canvas exited with status 0" in response, response
+        assert machine.region(760, 260, 1, 1)[:3] == b"\x1b\x1b\x1b", "the canvas outlived its process"
+        assert "WINDOW CLOSED 0" in machine.submit(":close 0")
         # The workshop is still whole, and the frame is a real image.
         assert "42" in machine.submit("(+ 20 22)")
         assert machine.frame().startswith(b"\x89PNG\r\n\x1a\n")
