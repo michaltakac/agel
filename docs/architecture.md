@@ -384,6 +384,8 @@ Each rung must be runnable and differentially testable against the rung below:
    the first rung of running DOOM.
 62. **Keys down and up (v0.2.67):** every scan code an event to the
    focused window, the character beside it; the second rung.
+63. **Room in memory (v0.2.68):** the frame ledger and the pool's free
+   list as bitmaps over the pool, the x86-64 pool at 46 MiB.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

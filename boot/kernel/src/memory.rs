@@ -78,8 +78,6 @@ pub enum MemoryError {
     OutsideDomainWindow,
     /// The address is not page aligned.
     Misaligned,
-    /// A domain would need more frames than a ledger can name.
-    LedgerFull,
 }
 
 impl MemoryError {
@@ -89,43 +87,45 @@ impl MemoryError {
             Self::OutOfFrames => "frame pool exhausted",
             Self::OutsideDomainWindow => "address outside the domain window",
             Self::Misaligned => "address is not page aligned",
-            Self::LedgerFull => "domain needs more frames than a ledger names",
         }
     }
 }
 
+/// Frames in the pool, and the words of a bitmap over them: one bit a
+/// frame, so a set of frames costs the same however many it names.
+const POOL_FRAMES: u64 = (arch::POOL_END - arch::POOL_START) / PAGE;
+const POOL_WORDS: usize = POOL_FRAMES.div_ceil(64) as usize;
+
+/// The bit for a frame of the pool.
+#[inline(always)]
+fn frame_bit(frame: u64) -> (usize, u64) {
+    let index = (frame - arch::POOL_START) / PAGE;
+    ((index / 64) as usize, 1 << (index % 64))
+}
+
 /// Frames a domain was built from, so that a replaced domain gives them back.
 ///
-/// A domain is built in one go and never grows, so its frames are known when
-/// it is: the pool records every frame it hands out while a ledger is open.
-/// The bound is a fixed resource policy like every other native bound: the
-/// evaluator's 128 stack pages, its tables and its shared page fit with room
-/// to spare, and a domain that would need more is refused rather than
-/// tracked partially. It is sized tightly because every domain carries one
-/// and the x86-64 image has a fixed slot budget.
+/// A bitmap over the pool: a domain may hold any number of its frames, a
+/// loaded process with a canvas and a large heap as much as a driver with
+/// a page, and every domain carries the same fixed-size record of them.
+/// The pool records every frame it hands out while a ledger is open, and
+/// a frame mapped later is pushed.
 #[derive(Clone, Copy)]
 pub struct FrameLedger {
-    frames: [u64; FrameLedger::CAPACITY],
-    count: usize,
+    bits: [u64; POOL_WORDS],
+    count: u32,
 }
 
 impl FrameLedger {
-    /// Reclamation exists where restart exists: the self-test builds and the
-    /// serial workshop replace domains and account for their frames. The
-    /// compositor holds the font atlases as extra pages and a process holds
-    /// its image and its heap, so the ledger is sized for those: 512 frames,
-    /// two mebibytes.
-    pub const CAPACITY: usize = 512;
-
     pub const EMPTY: Self = Self {
-        frames: [0; Self::CAPACITY],
+        bits: [0; POOL_WORDS],
         count: 0,
     };
 
     /// How many frames the ledger names.
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn count(&self) -> usize {
-        self.count
+        self.count as usize
     }
 
     /// Add a frame allocated after the domain was built, so it is reclaimed
@@ -136,39 +136,37 @@ impl FrameLedger {
     }
 
     fn record(&mut self, frame: u64) -> Result<(), MemoryError> {
-        if self.count >= Self::CAPACITY {
-            return Err(MemoryError::LedgerFull);
+        if !(arch::POOL_START..arch::POOL_END).contains(&frame) {
+            return Err(MemoryError::OutsideDomainWindow);
         }
-        self.frames[self.count] = frame;
-        self.count += 1;
+        let (word, bit) = frame_bit(frame);
+        if self.bits[word] & bit == 0 {
+            self.bits[word] |= bit;
+            self.count += 1;
+        }
         Ok(())
     }
 }
 
 /// The architecture's fixed physical frame range: a bump allocator for
-/// frames never handed out yet, and a bounded list of frames given back by
+/// frames never handed out yet, and a bitmap of frames given back by
 /// replaced domains, which are handed out again first.
 ///
-/// Every frame is zeroed when it is handed out, whichever list it came from,
+/// Every frame is zeroed when it is handed out, whichever way it came,
 /// so nothing a dead domain wrote reaches its successor.
 pub struct FramePool {
     next: u64,
-    free: [u64; FramePool::FREE_CAPACITY],
-    free_count: usize,
+    freed: [u64; POOL_WORDS],
+    free_count: u64,
     ledger: Option<FrameLedger>,
 }
 
 impl FramePool {
-    /// Frames the free list can hold: a replaced driver gives back about ten,
-    /// so this is dozens of restarts, and the list is sized for the image
-    /// budget rather than for replacing evaluators, which nothing does yet.
-    const FREE_CAPACITY: usize = 192;
-
     /// A pool covering the whole fixed range this architecture reserves.
     pub const fn new() -> Self {
         Self {
             next: arch::POOL_START,
-            free: [0; Self::FREE_CAPACITY],
+            freed: [0; POOL_WORDS],
             free_count: 0,
             ledger: None,
         }
@@ -177,16 +175,14 @@ impl FramePool {
     /// Frames still available: never handed out, plus given back.
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn remaining(&self) -> u64 {
-        (arch::POOL_END - self.next) / PAGE + self.free_count as u64
+        (arch::POOL_END - self.next) / PAGE + self.free_count
     }
 
-    /// Take one zeroed frame, from the free list first.
+    /// Take one zeroed frame, a given-back one first.
     pub fn allocate(&mut self) -> Result<u64, MemoryError> {
-        let frame = if self.free_count > 0 {
-            self.free_count -= 1;
-            self.free[self.free_count]
-        } else {
-            self.bump()?
+        let frame = match self.take_freed() {
+            Some(frame) => frame,
+            None => self.bump()?,
         };
         if let Some(ledger) = self.ledger.as_mut() {
             if let Err(error) = ledger.record(frame) {
@@ -200,6 +196,22 @@ impl FramePool {
         // and which no live domain holds.
         unsafe { zero_frame(frame) };
         Ok(frame)
+    }
+
+    /// The lowest given-back frame, taken out of the bitmap.
+    fn take_freed(&mut self) -> Option<u64> {
+        if self.free_count == 0 {
+            return None;
+        }
+        let (word, bits) = self
+            .freed
+            .iter()
+            .enumerate()
+            .find(|(_, bits)| **bits != 0)?;
+        let bit = bits.trailing_zeros() as u64;
+        self.freed[word] &= !(1 << bit);
+        self.free_count -= 1;
+        Some(arch::POOL_START + (word as u64 * 64 + bit) * PAGE)
     }
 
     fn bump(&mut self) -> Result<u64, MemoryError> {
@@ -226,19 +238,22 @@ impl FramePool {
     /// allocates next, zeroed, and a domain that still mapped one would be
     /// sharing memory with its successor.
     pub fn reclaim(&mut self, ledger: &FrameLedger) {
-        for frame in ledger.frames[..ledger.count].iter().rev() {
-            self.give_back(*frame);
+        for (word, bits) in ledger.bits.iter().enumerate() {
+            let mut bits = *bits;
+            while bits != 0 {
+                let bit = bits.trailing_zeros() as u64;
+                bits &= !(1 << bit);
+                self.give_back(arch::POOL_START + (word as u64 * 64 + bit) * PAGE);
+            }
         }
     }
 
     fn give_back(&mut self, frame: u64) {
-        if self.free_count < Self::FREE_CAPACITY {
-            self.free[self.free_count] = frame;
+        let (word, bit) = frame_bit(frame);
+        if self.freed[word] & bit == 0 {
+            self.freed[word] |= bit;
             self.free_count += 1;
         }
-        // A full free list leaks the frame rather than corrupting the list;
-        // the list is sized so that this does not happen in practice, and a
-        // leaked frame is the failure this module had before reclamation.
     }
 
     /// Take `pages` contiguous frames and return the address just past the last

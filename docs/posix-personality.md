@@ -500,7 +500,7 @@ which starts a guard page past the image: the first `malloc` asks for
 64 pages, and a request nothing fits asks for more (at least 64, or what
 the request needs), which extend the last free block or follow it. A
 program can now hold as much as the process window and the domain's
-frame ledger allow, and the ledger is 512 frames on every build. `sbrk`
+frame ledger allow, and since v0.2.68 the ledger is a bitmap over the pool, so the pool is the only bound. `sbrk`
 is there for programs that manage their own break; `sbrk(0)` reads it.
 `chdir` and `getcwd` are the library's: the namespace has no working
 directory, so the library keeps one, folds `.` and `..`, checks it with

@@ -1559,6 +1559,23 @@ canvas frame always repaints its whole window.
 Not claimed: a process cannot tell a key typed on the serial console
 from one on the keyboard except by the events it gets; no key repeat.
 
+## v0.2.68
+
+- **Every frame comes back.** The pool's free list could hold 192
+  frames and leaked the rest of a large domain's reclaim, so repeated
+  `:exec`s drained the pool; a bitmap loses nothing, and the isolation
+  test's count of frames before and after a driver restart holds for
+  domains of any size.
+- **A ledger cannot fill.** A domain's frames are a bitmap over the
+  pool, so no process is refused for its size short of the pool itself,
+  and no frame can be recorded twice.
+- **The bound is still the pool:** 46 MiB on x86-64 as elsewhere, a fixed
+  policy, not a probe; a process that wants more is refused with
+  `ENOMEM` at `brk`, never given another's memory.
+
+Not claimed: no accounting per process beyond its window, so one
+process can take most of the pool and the next `:exec` fails to load.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

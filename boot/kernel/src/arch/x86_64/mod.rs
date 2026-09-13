@@ -39,10 +39,12 @@ pub const NAME: &str = "x86_64";
 /// sector, the kernel image, and the kernel stack.
 #[cfg(feature = "isolation-selftest")]
 pub const POOL_START: u64 = 0x0020_0000;
-/// End of the frame pool. QEMU is started with more memory than this; the bound
-/// is a deliberate fixed resource policy, not a probe result.
+/// End of the frame pool: 46 MiB, as much as the other machines' pools.
+/// QEMU is started with 64 MiB; the bound is a deliberate fixed resource
+/// policy, not a probe result, and the BIOS stage identity-maps the first
+/// gibibyte for the supervisor.
 #[cfg(feature = "isolation-selftest")]
-pub const POOL_END: u64 = 0x0100_0000;
+pub const POOL_END: u64 = 0x0300_0000;
 
 /// A supervisor-only address a world may try to write. It is the first page of
 /// the kernel image, which every domain maps without the user bit.

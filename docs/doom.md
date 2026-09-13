@@ -62,7 +62,7 @@ is listed here exactly.
 | Keys | `EVENT_KEY` carries a byte on press; nothing on release | DOOM holds keys; **press and release events with key codes**, and modifiers |
 | The program | ~1 MB of code and data | the program region is sectors 2048–3071, 512 KiB for every program together, in a 3 MiB disk image |
 | The WAD | `doom1.wad`, the shareware data, 4.2 MB, read by `fopen`/`fseek`/`fread` | files are 64 KiB at most in a 256 KiB filesystem region; a **data region** of large read-only files, or a larger `agelfs` |
-| Memory | a 6 MB zone plus the WAD's cached lumps | a domain is built from at most 512 frames (2 MiB, `FrameLedger::CAPACITY`) from a pool of 14 MiB on x86-64; the process window is 16 MiB |
+| Memory | a 6 MB zone plus the WAD's cached lumps | since v0.2.68 a domain may hold any number of the pool's frames (a bitmap ledger) and the x86-64 pool is 46 MiB like the others'; the process window is 16 MiB, of which the top 1 MiB is the canvas |
 | Floating point | `r_main.c` and `v_video.c` use `float` in a few places; `m_config.c` parses one with `atof` | processes run without an FPU (`-msoft-float`); one function returning `float` will not compile that way, and no soft-float runtime is linked |
 | C library | `printf` family, streams, heap, strings, `getopt`, directories, time | `strcasecmp`/`strncasecmp`, `fseek`/`ftell` declarations and `SEEK_*`, `remove`, `atof`, `system` (a stub), `strings.h`, `inttypes.h` |
 | Time | `clock_gettime`, `nanosleep` on a monotonic clock | enough: `DG_GetTicksMs`, `DG_SleepMs` |
@@ -140,7 +140,8 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
 1. A canvas (design 1), proved by a C program that draws a moving
    pattern into it and a test that reads the pixels back: **v0.2.66**.
 2. Key press and release events (design 2): **v0.2.67**.
-3. Room: the larger disk, the data region, the bitmap ledger (design 3).
+3. Room: the bitmap ledger and the larger pool (**v0.2.68**); the larger
+   disk and the data region (design 3).
 4. The C library's missing functions and floating point (design 4).
 5. DOOM runs, keyboard-playable on the desktop, `-timedemo` frame rate
    reported (design 5).

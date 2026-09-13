@@ -304,6 +304,9 @@ promise.
   `v0.2.67` gives windows key down and key up events with scan codes,
   extended keys flagged, beside the character a press means, so a
   process can hold a key; `keys.c` proves it through QEMU's keyboard.
+  `v0.2.68` makes the frame ledger and the pool's free list bitmaps over
+  the pool, so a domain may hold any number of frames and every
+  reclaimed frame comes back, and grows the x86-64 pool to 46 MiB.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

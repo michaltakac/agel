@@ -15,7 +15,9 @@ use crate::memory::{read_entry, table_index, write_entry, Access, FramePool, Mem
 
 /// Identity-mapped supervisor window, built from 2 MiB pages except for the
 /// first, which is split so that user-executable pages can be carved out of it.
-const IDENTITY_BYTES: u64 = 0x0100_0000;
+/// How far the supervisor's identity window reaches: the whole frame pool,
+/// which the supervisor zeroes and fills through it.
+const IDENTITY_BYTES: u64 = super::POOL_END;
 
 /// Virtual base of every domain's private region.
 ///
