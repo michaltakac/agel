@@ -65,7 +65,7 @@ code. Each release moves lines here; the release-by-release history is in
 | Panel with launcher and clock, dock, hover and press states, terminal panel | done | `scripts/test-native-dock.py`, `scripts/test-native-workbench.py` |
 | Windows a process asks for and draws into through checked records; move, stack, minimize, maximize, corner resize; press, key, motion, release and resize events | done | `scripts/test-desktop-process.sh` |
 | Keyboard shortcuts and window snapping | open | |
-| More than one running program at a time on the desktop | done | `scripts/test-desktop-process.sh`: two sketches and a chart; the table holds four processes in all |
+| More than one running program at a time on the desktop | done | `scripts/test-desktop-process.sh`: two sketches and a chart; the table holds four processes in all; a program that only computes is handed the prompt back after 256 passes and stepped between inputs (v0.2.71) |
 | A Gaussian blur and translucent panels | open | needs the compositor to read back what is beneath |
 | SIMD or accelerated rendering | open | every pixel is written by safe Rust in a domain |
 
@@ -112,7 +112,7 @@ trained on it.
 | Key press and release events with key codes | done | `scripts/test-desktop-process.sh` reads `keys.c`; the serial console remains characters only |
 | Room: a bitmap frame ledger and pool, a 32 MiB disk, a 4 MiB program region, a data region of large read-only files under `/data` | done | `scripts/test-isolation.sh` counts the frames back; `scripts/test-libc.sh` reads a 100 KB data file by digest on three machines; `agelfs` files stay 64 KiB |
 | The C library's missing functions (`strcasecmp`, `fseek`/`ftell`, `remove`, `atof`, `math.h`) and floating point for processes | done | `scripts/test-libc.sh` runs `float.c` on x86-64 and AArch64; RISC-V has no unit here and stays soft-float |
-| DOOM runs on the desktop, keyboard-playable, `-timedemo` frame rate reported | open | |
+| DOOM runs on the desktop, keyboard-playable, `-timedemo` frame rate reported | done | `scripts/test-doom.sh`: the shareware demo timed at 49.4 frames per second under TCG; x86-64 and AArch64 only, no sound |
 | Agel plays it: a hosted agent stepping the game through the machine's screen and keys, a dataset of frames, state, actions and reasons, a run window on the desktop | open | the agent is hosted; the native kernel has no network or local inference |
 | A trained policy from the dataset; a world model for predictions | open | training is orchestrated through a provider, never performed by the OS |
 | Speech and steering of the run | open | |

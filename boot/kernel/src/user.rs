@@ -2160,7 +2160,6 @@ impl Filesystem {
     #[link_section = ".user_text"]
     unsafe fn open(&mut self, root: u16, flags: u64, path: &[u8]) -> Result<(usize, u32, u8), u64> {
         use crate::world::fs;
-        unsafe { self.mount()? };
         let mut components = path
             .split(|byte| *byte == b'/')
             .filter(|component| !component.is_empty() && *component != b".")
@@ -2174,6 +2173,8 @@ impl Filesystem {
             }
             return unsafe { self.open_data(flags, components) };
         }
+        // The data region needs no filesystem; everything else does.
+        unsafe { self.mount()? };
         if self.entry(root as usize)?.kind != fs::KIND_DIRECTORY as u8 {
             return Err(fs::ENOTDIR);
         }
@@ -2349,17 +2350,22 @@ impl Filesystem {
             return Ok(0);
         }
         let length = length.min(512).min(size - offset);
-        let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+        // Assembled here first: every sector the supervisor delivers lands
+        // in the block area, which is also where the answer goes.
+        let mut assembled = [0_u8; 512];
         let mut done = 0_u64;
         while done < length {
             let at = offset + done;
             unsafe { self.read_sector(u64::from(file.start) + at / 512)? };
             let inside = (at % 512) as usize;
             let take = ((512 - inside) as u64).min(length - done) as usize;
-            for (position, byte) in self.sector.iter().skip(inside).take(take).enumerate() {
-                unsafe { block.add(done as usize + position).write_volatile(*byte) };
-            }
+            assembled[done as usize..done as usize + take]
+                .copy_from_slice(&self.sector[inside..inside + take]);
             done += take as u64;
+        }
+        let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+        for (position, byte) in assembled.iter().take(done as usize).enumerate() {
+            unsafe { block.add(position).write_volatile(*byte) };
         }
         Ok(done)
     }
@@ -2384,7 +2390,10 @@ impl Filesystem {
             return Ok(0);
         }
         let length = length.min(512).min(size - offset);
-        let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+        // Assembled here first, as `read_data` does: a read that spans two
+        // sectors must not have its first half overwritten by the second's
+        // delivery into the block area.
+        let mut assembled = [0_u8; 512];
         let mut done = 0_u64;
         while done < length {
             let at = offset + done;
@@ -2392,10 +2401,13 @@ impl Filesystem {
             unsafe { self.read_sector(sector)? };
             let inside = (at % 512) as usize;
             let take = ((512 - inside) as u64).min(length - done) as usize;
-            for (position, byte) in self.sector.iter().skip(inside).take(take).enumerate() {
-                unsafe { block.add(done as usize + position).write_volatile(*byte) };
-            }
+            assembled[done as usize..done as usize + take]
+                .copy_from_slice(&self.sector[inside..inside + take]);
             done += take as u64;
+        }
+        let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+        for (position, byte) in assembled.iter().take(done as usize).enumerate() {
+            unsafe { block.add(position).write_volatile(*byte) };
         }
         Ok(done)
     }

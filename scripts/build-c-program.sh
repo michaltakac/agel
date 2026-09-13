@@ -55,8 +55,14 @@ for source in "$posix_dir"/libc/c/*.c "$posix_dir"/libc/c/*.S; do
   "$clang" $cflags -c "$source" -o "$object"
   library_objects="$library_objects $object"
 done
+# A program may carry its own defines and flags in c/NAME.cflags, one line,
+# applied to it and to every source it lists.
+program_flags=""
+if test -f "$posix_dir/c/$name.cflags"; then
+  program_flags=$(cat "$posix_dir/c/$name.cflags")
+fi
 # shellcheck disable=SC2086
-"$clang" $cflags -c "$posix_dir/c/$name.c" -o "$out/$name.o"
+"$clang" $cflags $program_flags -c "$posix_dir/c/$name.c" -o "$out/$name.o"
 # A program may list further sources, one per line relative to c/, in
 # c/NAME.deps; third-party files are compiled as they are, without -Werror.
 objects="$out/$name.o"
@@ -65,7 +71,7 @@ if test -f "$posix_dir/c/$name.deps"; then
     test -n "$source" || continue
     object="$out/$(printf '%s' "$source" | tr '/' '_').o"
     # shellcheck disable=SC2086
-    "$clang" $cflags -Wno-error -Wno-unused-parameter -c "$posix_dir/c/$source" -o "$object"
+    "$clang" $cflags $program_flags -Wno-error -Wno-unused-parameter -c "$posix_dir/c/$source" -o "$object"
     objects="$objects $object"
   done < "$posix_dir/c/$name.deps"
 fi

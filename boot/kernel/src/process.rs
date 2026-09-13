@@ -132,8 +132,10 @@ const REGION: Region = Region {
 /// Program names are short and ASCII; the table pads them with zeros.
 pub const NAME_BYTES: usize = crate::region::NAME_BYTES;
 const MAX_SEGMENTS: usize = 8;
-/// Pages a process may be built from, code, data and zero fill together.
-const MAX_PAGES: usize = 128;
+/// Pages a process may be built from, code, data and zero fill together:
+/// 8 MiB of the 16 MiB window, the rest for the heap and the canvas. A
+/// game with its tables is about 730 KiB.
+const MAX_PAGES: usize = 2048;
 const PAGE: u64 = 4096;
 
 /// One row of the program table.
@@ -1247,7 +1249,8 @@ fn end(
 pub fn report(out: &mut dyn Write, exit: Exit) {
     match exit {
         Exit::Status(status) => {
-            let _ = write!(out, " exited with status {status}\r\n");
+            // Eight bits, as `wait` shows a parent: `exit(-1)` is 255.
+            let _ = write!(out, " exited with status {}\r\n", status & 0xff);
         }
         Exit::Faulted(fault) => {
             let _ = write!(
@@ -1506,7 +1509,9 @@ fn seek(table: &mut Table, index: usize, descriptor: u64, offset: u64, whence: u
     let Some(target) = base.checked_add(offset as i64) else {
         return error(EINVAL);
     };
-    if target < 0 || target > fs::FILE_BYTES as i64 {
+    // Any offset a 32-bit length can name: a data file is megabytes, and
+    // a write past a filesystem file's end fails there, not here.
+    if target < 0 || target > i64::from(u32::MAX) {
         return error(EINVAL);
     }
     slot.offset = target as u64;

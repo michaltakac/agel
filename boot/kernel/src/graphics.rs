@@ -809,6 +809,10 @@ fn prepare_run() -> &'static mut crate::process::Run {
 /// Passes over a running process's table between two inputs: enough to
 /// keep it moving, few enough that the next key is not kept waiting.
 const PASSES_PER_IDLE: usize = 16;
+/// Passes an `:exec` runs before handing the prompt back to a program
+/// that keeps computing: a game renders without ever listening or
+/// sleeping, and the desktop must still take keys for it.
+const PASSES_PER_COMMAND: usize = 256;
 
 /// Minutes and the date, as the panel shows them.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2338,9 +2342,16 @@ fn execute_workshop(
             filesystem,
             display: Some(&mut desk as &mut dyn crate::process::Display),
         };
+        let mut passes = 0;
         loop {
             let waiting = match crate::process::step_run(machine, &mut services, run) {
-                crate::process::Progress::Running => continue,
+                crate::process::Progress::Running => {
+                    passes += 1;
+                    if passes < PASSES_PER_COMMAND {
+                        continue;
+                    }
+                    &b"PROCESS RUNNING"[..]
+                }
                 crate::process::Progress::Listening => &b"PROCESS LISTENING"[..],
                 crate::process::Progress::Sleeping => &b"PROCESS SLEEPING"[..],
                 crate::process::Progress::Ended => {

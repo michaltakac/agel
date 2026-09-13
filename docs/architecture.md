@@ -391,6 +391,9 @@ Each rung must be runnable and differentially testable against the rung below:
 65. **Floating point (v0.2.70):** the unit the process's on x86-64 and
    AArch64, its state saved per domain; `math.h` and the rest of what
    the port asks of the library.
+66. **It runs DOOM (v0.2.71):** an unmodified engine as a process in a
+   domain, drawing a canvas, reading `/data`, taking the window's keys;
+   the demo timed at 49 frames per second under emulation.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

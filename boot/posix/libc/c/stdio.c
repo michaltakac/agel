@@ -137,7 +137,7 @@ int fseek(FILE *stream, long offset, int whence) {
         errno = EBADF;
         return -1;
     }
-    if (fflush(stream) != 0) {
+    if (stream->out_used != 0 && fflush(stream) != 0) {
         return -1;
     }
     if (whence == SEEK_CUR) {

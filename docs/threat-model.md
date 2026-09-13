@@ -1611,6 +1611,26 @@ Not claimed: the x87 and SSE state is saved with `fxsave`, not
 `xsave`, so AVX state, if a process used it, is neither saved nor
 restored; no process here uses it.
 
+## v0.2.71
+
+- **A 60,000-line program of someone else's is just a process:** DOOM
+  runs unprivileged in a domain with a namespace rooted at `/`, a
+  window, a canvas and sixteen descriptors; nothing it does reaches
+  another domain, and a fault in it would be one contained process,
+  reported and reclaimed. Its GPL v2 source stays a third-party program
+  beside Agel, built and linked by the same script as any C program.
+- **Its data is read-only by the supervisor's rule,** not the
+  engine's manners: the relay refuses every write to the data region.
+- **A game cannot hold the desktop:** a program that never listens or
+  sleeps is stepped between inputs after 256 passes, so the operator's
+  keys, clicks and commands keep working while it renders.
+- **The WAD comes from the network into the test disk only,** pinned
+  by digest; nothing in the repository carries it and no build needs it.
+
+Not claimed: the engine is trusted to render what the demo says; a
+malicious WAD could crash the engine (a contained fault) but not the
+system; the test fetches from a public mirror, which may go away.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

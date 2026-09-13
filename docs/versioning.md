@@ -315,6 +315,11 @@ promise.
   saved and restored per domain, and the C library `math.h`, `strtod`,
   `fseek`, `ftell`, `remove`, `strcasecmp` and the headers DOOM asks for;
   `float.c` proves them on both machines.
+  `v0.2.71` runs DOOM: `doomgeneric` unmodified as a C program on the
+  desktop, its frames a canvas, its keys the window's, its data a file
+  under `/data`; the shareware demo is timed at 49.4 frames per second
+  under TCG, and the loader, `seek` and spanning reads are fixed on the
+  way. A computing program is handed the prompt back after 256 passes.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

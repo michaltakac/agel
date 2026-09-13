@@ -1,5 +1,13 @@
 # Does it run DOOM?
 
+**Yes, since v0.2.71.** The shareware episode's demo plays in a window
+on the Agel desktop at 49 frames per second under QEMU's emulation, the
+engine an ordinary C program in a protection domain, the data a
+read-only file the filesystem service serves, every frame a canvas the
+process draws and the compositor blits.
+
+![DOOM's first level, played by its demo, in a window on the Agel desktop at v0.2.71](images/native-desktop-v0.2.71.png)
+
 The question every system gets asked, taken as a research programme
 rather than a stunt: DOOM runs as an ordinary POSIX process on Agel's own
 kernel, and Agel plays it, with the whole loop (the game, the agent that
@@ -145,17 +153,54 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
 4. The C library's missing functions and floating point (design 4):
    **v0.2.70**.
 5. DOOM runs, keyboard-playable on the desktop, `-timedemo` frame rate
-   reported (design 5).
+   reported (design 5): **v0.2.71**, 49.4 frames per second under TCG.
 6. Agel plays it, stepping, with the dataset and the run window
    (design 6).
 7. A trained policy from the dataset (design 7); a world model after.
 8. Speech and steering (design 8).
 
+## How it runs (v0.2.71)
+
+`boot/posix/c/doom/` is `doomgeneric` (the platform-free Chocolate Doom
+fork, GPL v2, its licence beside it) unmodified: eighty sources listed in
+`c/doom.deps`, compiled with the defines in `c/doom.cflags`.
+`c/doom.c` is the platform: `DG_Init` asks for a 640×400 window and a
+320×200 canvas, `DG_DrawFrame` copies the engine's frame into the canvas
+and blits it at twice its size, `DG_GetKey` turns the window's key
+events into the engine's keys (arrows, control to fire, alt to strafe,
+shift to run, space to use, escape and enter for the menus, a character
+from the serial console as a tap), `DG_GetTicksMs` and `DG_SleepMs` are
+the monotonic clock and `nanosleep`. `scripts/fetch-doom-wad.sh` fetches
+`doom1.wad` once, pinned by digest; `scripts/test-doom.sh` builds the
+image and the engine, installs both in a test disk and starts
+
+```
+:exec c-doom -- -iwad /data/doom1.wad -mb 8 -timedemo demo1
+```
+
+The desktop answers `PROCESS RUNNING`: a program that keeps computing
+without ever listening or sleeping now gets the prompt handed back after
+256 passes and is stepped between inputs like one that listens, so keys
+reach it. To play: the same line without `-timedemo`, then click the
+window and use the keys above; `-mb 8` gives the engine an 8 MiB zone
+of the process's 16 MiB window.
+
+What the port found on the way: the loader's cap of 128 pages (the
+engine is 730 KiB), `seek` refusing offsets past the 64 KiB filesystem
+file limit, a read spanning two sectors losing its first half to the
+second's delivery into the block area, the data directory needing the
+filesystem mounted before it could be named, and a wrapped exit status
+in the report; each fixed in v0.2.71 with a test.
+
 ## What this is not
 
-Nothing here is a claim that Agel runs DOOM today: it does not. The
-native kernel has no network and no local inference, so the agent that
-plays is hosted, as [`deployment-targets.md`](deployment-targets.md)
-calls Tier 2, until those lines close. Sound is out of scope. DOOM's
-source is GPL v2 and stays a third-party program beside Agel's code, not
-part of it.
+Sound is out of scope: the engine is built without it. RISC-V has no
+floating-point unit here, so the port is for x86-64 and AArch64; on the
+Pi it waits for USB input, since the serial console gives taps, not held
+keys. The frame rate is QEMU's TCG on one core of a laptop, not a
+measurement of the design. Saving the configuration on exit writes into
+the filesystem region, which fails harmlessly when it is not formatted.
+The native kernel has no network and no local inference, so the agent
+that plays is hosted, as [`deployment-targets.md`](deployment-targets.md)
+calls Tier 2, until those lines close. DOOM's source is GPL v2 and stays
+a third-party program beside Agel's code, not part of it.
