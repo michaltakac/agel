@@ -12,8 +12,8 @@ use crate::world::shared;
 
 /// The asset region: sectors 3072 through 6143.
 pub const REGION: Region = Region {
-    table: 3072,
-    last: 6143,
+    table: 10240,
+    last: 13311,
     magic: b"AGELAS1\0",
 };
 pub const MAX_SIZES: usize = 8;

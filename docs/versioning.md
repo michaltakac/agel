@@ -307,6 +307,10 @@ promise.
   `v0.2.68` makes the frame ledger and the pool's free list bitmaps over
   the pool, so a domain may hold any number of frames and every
   reclaimed frame comes back, and grows the x86-64 pool to 46 MiB.
+  `v0.2.69` grows the image to 32 MiB with a 4 MiB program region and
+  adds the data region, large read-only files installed from the host
+  and served by the filesystem service under `/data`; a 100 KB file is
+  read back by digest on three machines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

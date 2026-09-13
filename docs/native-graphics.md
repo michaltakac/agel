@@ -60,8 +60,9 @@ like the others:
 | `shadow` (8) | x, y, width, height, radius, blur, alpha | a linear falloff around a box, drawn as rings, the box itself left alone |
 | `sprite` (9) | x, y, sprite, tint, alpha | a sprite from the sheet, blended by its own alpha; in `tint` when that is not black, so one white glyph serves every colour |
 
-The faces are font atlases in the disk's **asset region** (sectors 3072
-through 6143, a table like the program region's). `scripts/build-font-atlas.py`
+The faces are font atlases in the disk's **asset region** (sectors 10240
+through 13311 since v0.2.69, 3072 through 6143 before; a table like the
+program region's). `scripts/build-font-atlas.py`
 rasterizes a TrueType font with Pillow into `AGF1`: for each pixel size,
 the 96 printable ASCII glyphs with their metrics and 8-bit coverage
 bitmaps. Fira Sans Regular and Medium (12 to 32 px) and Fira Mono (12 to

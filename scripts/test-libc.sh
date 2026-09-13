@@ -17,6 +17,7 @@ nap=$(./scripts/build-c-program.sh nap "$architecture" | tail -n 1)
 heap=$(./scripts/build-c-program.sh heap "$architecture" | tail -n 1)
 big=$(./scripts/build-c-program.sh big "$architecture" | tail -n 1)
 canvas=$(./scripts/build-c-program.sh canvas "$architecture" | tail -n 1)
+digest=$(./scripts/build-c-program.sh digest "$architecture" | tail -n 1)
 . ./scripts/lib.sh
 prepare_machine "$architecture" libc 1024
 python3 ./scripts/install-program.py "$disk" writer "$writer" >/dev/null
@@ -29,4 +30,10 @@ python3 ./scripts/install-program.py "$disk" c-nap "$nap" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-heap "$heap" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-big "$big" >/dev/null
 python3 ./scripts/install-program.py "$disk" c-canvas "$canvas" >/dev/null
+python3 ./scripts/install-program.py "$disk" c-digest "$digest" >/dev/null
+# A data file larger than any file the filesystem region holds.
+pattern=$(mktemp "${TMPDIR:-/tmp}/agel-pattern.XXXXXX")
+python3 -c 'import sys; sys.stdout.buffer.write(bytes((i * 7) & 0xff for i in range(100000)))' > "$pattern"
+python3 ./scripts/install-program.py --region data "$disk" pattern "$pattern" >/dev/null
+rm -f "$pattern"
 python3 ./scripts/test-native-repl.py "$kernel" --c --arch "$architecture" --disk "$disk"

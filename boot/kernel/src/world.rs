@@ -595,6 +595,9 @@ pub mod process {
     pub const O_DIRECTORY: u64 = 0o200000;
     /// Descriptors a process may hold at once, numbered from 3.
     pub const DESCRIPTORS: usize = 16;
+    /// The program region: a table sector and the images it names.
+    pub const PROGRAM_TABLE_SECTOR: u32 = 2048;
+    pub const PROGRAM_LAST_SECTOR: u32 = 10239;
     /// Stack pages a process is built with.
     pub const STACK_PAGES: u64 = 16;
     /// Tick budget per entry: a process that computes for longer yields
@@ -610,6 +613,19 @@ pub mod process {
 /// inside the region it was told it owns.
 #[cfg(feature = "process")]
 pub mod fs {
+    /// The data region: large read-only files installed from the host
+    /// (`scripts/install-program.py --region data`), a table sector like
+    /// the program region's and the bytes after it, which the service
+    /// serves under the root's `data` directory and never writes. The
+    /// supervisor relays reads of these sectors to the service and
+    /// nothing else.
+    pub const DATA_TABLE_SECTOR: u32 = 13312;
+    pub const DATA_LAST_SECTOR: u32 = 65535;
+    /// The entry number of the `data` directory, and the first data file's:
+    /// above every entry the filesystem region can hold, so a descriptor
+    /// names either without confusion.
+    pub const DATA_DIRECTORY: u16 = 0x8000;
+    pub const DATA_ROWS: usize = 15;
     /// Write an empty filesystem over the region.
     pub const COMMAND_FORMAT: u64 = 0xb000;
     /// Resolve the payload path from directory `arguments[0]` with `open`

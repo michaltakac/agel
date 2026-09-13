@@ -1576,6 +1576,23 @@ from one on the keyboard except by the events it gets; no key repeat.
 Not claimed: no accounting per process beyond its window, so one
 process can take most of the pool and the next `:exec` fails to load.
 
+## v0.2.69
+
+- **The data region is read-only by construction:** the supervisor's
+  relay serves the filesystem service reads of those sectors and refuses
+  every write, so a service that was wrong or replaced could not change
+  what the host installed.
+- **A path is still not authority:** `data` is a directory of the root,
+  reachable from a namespace rooted at `/` or at `data`, and unreachable
+  from one rooted below either however it is spelled; a read-only
+  namespace's refusal still comes first in the supervisor.
+- **Numbers do not collide:** data entries start at `0x8000`, above the
+  filesystem's, so no descriptor can name a data file while meaning a
+  filesystem one or the reverse.
+
+Not claimed: the data region's table is trusted as installed, checked
+for bounds but not for a digest, like the program region's.
+
 ## Surfaces the scope adds
 
 Recorded before the code exists, because it is easier to design against a

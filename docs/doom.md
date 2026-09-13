@@ -60,8 +60,8 @@ is listed here exactly.
 |---|---|---|
 | Pixels on the screen | a window holds 24 records: rectangles, gradients, ellipses, labels, surfaces, sprites | no way to show a 320×200 frame a process rendered; a **pixel surface** record backed by pages the process draws into and the compositor blits, scaled |
 | Keys | `EVENT_KEY` carries a byte on press; nothing on release | DOOM holds keys; **press and release events with key codes**, and modifiers |
-| The program | ~1 MB of code and data | the program region is sectors 2048–3071, 512 KiB for every program together, in a 3 MiB disk image |
-| The WAD | `doom1.wad`, the shareware data, 4.2 MB, read by `fopen`/`fseek`/`fread` | files are 64 KiB at most in a 256 KiB filesystem region; a **data region** of large read-only files, or a larger `agelfs` |
+| The program | ~1 MB of code and data | since v0.2.69 the program region is 4 MiB (sectors 2048–10239) in a 32 MiB image |
+| The WAD | `doom1.wad`, the shareware data, 4.2 MB, read by `fopen`/`fseek`/`fread` | since v0.2.69 the data region (25.5 MiB, sectors 13312–65535) holds large read-only files served under `/data`; `agelfs` files stay 64 KiB |
 | Memory | a 6 MB zone plus the WAD's cached lumps | since v0.2.68 a domain may hold any number of the pool's frames (a bitmap ledger) and the x86-64 pool is 46 MiB like the others'; the process window is 16 MiB, of which the top 1 MiB is the canvas |
 | Floating point | `r_main.c` and `v_video.c` use `float` in a few places; `m_config.c` parses one with `atof` | processes run without an FPU (`-msoft-float`); one function returning `float` will not compile that way, and no soft-float runtime is linked |
 | C library | `printf` family, streams, heap, strings, `getopt`, directories, time | `strcasecmp`/`strncasecmp`, `fseek`/`ftell` declarations and `SEEK_*`, `remove`, `atof`, `system` (a stub), `strings.h`, `inttypes.h` |
@@ -141,7 +141,7 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
    pattern into it and a test that reads the pixels back: **v0.2.66**.
 2. Key press and release events (design 2): **v0.2.67**.
 3. Room: the bitmap ledger and the larger pool (**v0.2.68**); the larger
-   disk and the data region (design 3).
+   disk and the data region (**v0.2.69**).
 4. The C library's missing functions and floating point (design 4).
 5. DOOM runs, keyboard-playable on the desktop, `-timedemo` frame rate
    reported (design 5).

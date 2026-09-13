@@ -386,6 +386,8 @@ Each rung must be runnable and differentially testable against the rung below:
    focused window, the character beside it; the second rung.
 63. **Room in memory (v0.2.68):** the frame ledger and the pool's free
    list as bitmaps over the pool, the x86-64 pool at 46 MiB.
+64. **Room on the disk (v0.2.69):** a 32 MiB image, a 4 MiB program
+   region, and a read-only data region served under `/data`.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

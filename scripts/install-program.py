@@ -4,7 +4,7 @@
     install-program.py IMAGE NAME ELF      add or replace NAME
     install-program.py IMAGE --list        print the table
 
-The program region is sectors 2048 through 3071: a table sector ("AGELPR1",
+The program region is sectors 2048 through 10239: a table sector ("AGELPR1",
 a count, then 32-byte rows of name, start sector, length and CRC-32) followed
 by the images. The supervisor's `:exec NAME` reads the table, checks the
 CRC, parses the ELF and loads it into a fresh protection domain.
@@ -19,8 +19,9 @@ SECTOR = 512
 # The program region and, since v0.2.47, the asset region the compositor's
 # fonts and icons live in: the same table shape, a different magic.
 REGIONS = {
-    "programs": (2048, 3071, b"AGELPR1\0"),
-    "assets": (3072, 6143, b"AGELAS1\0"),
+    "programs": (2048, 10239, b"AGELPR1\0"),
+    "assets": (10240, 13311, b"AGELAS1\0"),
+    "data": (13312, 65535, b"AGELDA1\0"),
 }
 TABLE, LAST, MAGIC = REGIONS["programs"]
 NAME_BYTES = 16

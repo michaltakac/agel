@@ -25,11 +25,13 @@ began, and because a reproducible 256 KiB boot seed is a useful thing to have.
    evaluator's world banks.
 
 The linker keeps `.text.entry` first so helper-function reordering cannot move
-the address called by the BIOS stage. The x86-64 image is 6,144 sectors
-(3 MiB), laid out as follows since v0.2.42 with the asset region added at
-v0.2.47; the virtio disks of the AArch64 and RISC-V machines are 3,072
-sectors, have no BIOS stage, kernel slots or assets, and keep everything from
-sector 1024 to 3071 in the same place.
+the address called by the BIOS stage. The x86-64 image is 65,536 sectors
+(32 MiB) since v0.2.69, laid out as follows since v0.2.42 with the asset
+region added at v0.2.47 and moved, with the program region grown and the
+data region added, at v0.2.69; the virtio disks of the AArch64 and RISC-V
+machines start at 3,072 sectors, have no BIOS stage, kernel slots or
+assets, keep everything from sector 1024 on in the same place, and grow
+when a program or data file is installed past their end.
 
 | Sectors | Contents |
 |---|---|
@@ -39,9 +41,10 @@ sector 1024 to 3071 in the same place.
 | 1024–1055 | the two v0.1.7 workspace slots, 16 sectors each |
 | 1056 | the v0.2.29 recovery record |
 | 1057 | the v0.2.30 kernel slot selector |
-| 1536–2047 | reserved for the filesystem the POSIX personality's next stratum adds |
-| 2048–3071 | the v0.2.41 program region: a table sector and static ELF images |
-| 3072–6143 | the v0.2.47 asset region: a table sector, the compositor's font atlases and, since v0.2.48, its sprite sheet; the x86-64 image is 6,144 sectors (3 MiB) to hold it |
+| 1536–2047 | the v0.2.43 filesystem region, `agelfs`, served by the filesystem service |
+| 2048–10239 | the v0.2.41 program region: a table sector and static ELF images, 4 MiB since v0.2.69 (512 KiB before) |
+| 10240–13311 | the v0.2.47 asset region: a table sector, the compositor's font atlases and, since v0.2.48, its sprite sheet (3072–6143 before v0.2.69) |
+| 13312–65535 | the v0.2.69 data region: a table sector and large read-only files installed from the host (`scripts/install-program.py --region data`), served by the filesystem service under `/data`; 25.5 MiB |
 
 Rebuilding installs the new kernel as slot A, clears the selector so that
 kernel is what boots, and preserves everything else. Before v0.2.42 a kernel

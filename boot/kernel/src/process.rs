@@ -121,9 +121,9 @@ pub const ENOSYS: i64 = 38;
 pub const ESTALE: i64 = 116;
 
 /// The program region: a table sector followed by the programs it names.
-pub const TABLE_SECTOR: u32 = 2048;
+pub const TABLE_SECTOR: u32 = process::PROGRAM_TABLE_SECTOR;
 /// Last sector of the program region, inclusive.
-pub const LAST_SECTOR: u32 = 3071;
+pub const LAST_SECTOR: u32 = process::PROGRAM_LAST_SECTOR;
 const REGION: Region = Region {
     table: TABLE_SECTOR,
     last: LAST_SECTOR,

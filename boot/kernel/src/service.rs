@@ -289,38 +289,42 @@ impl ServiceDomain {
                 break;
             }
             // A sector request: the service's block area is the buffer, and
-            // the sector must lie inside the region the service owns.
+            // the sector must lie inside the region the service owns, or,
+            // for a read, inside the data region it serves read-only.
             let sector = self.domain.core().read_shared(fs::DISK_SECTOR);
-            let status =
-                if sector < u64::from(fs::FIRST_SECTOR) || sector > u64::from(fs::LAST_SECTOR) {
-                    fs::EACCES
-                } else {
-                    let lba = sector as u32;
-                    let mut bytes = [0_u8; crate::world::BLOCK_BYTES];
-                    let outcome = if operation == fs::DISK_READ {
-                        storage
-                            .read_sector(storage.handle(), lba, &mut bytes)
-                            .map(|()| {
-                                for (offset, byte) in bytes.iter().enumerate() {
-                                    self.domain.core().write_block(offset, *byte);
-                                }
-                            })
-                    } else if operation == fs::DISK_WRITE {
-                        for (offset, byte) in bytes.iter_mut().enumerate() {
-                            *byte = self.domain.core().read_block(offset);
-                        }
-                        storage
-                            .write_sector(storage.handle(), lba, &bytes)
-                            .and_then(|()| storage.flush(storage.handle()))
-                    } else {
-                        Err(ServiceError::Faulted)
-                    };
-                    if outcome.is_ok() {
-                        0
-                    } else {
-                        fs::EIO
+            let owned =
+                (u64::from(fs::FIRST_SECTOR)..=u64::from(fs::LAST_SECTOR)).contains(&sector);
+            let data = (u64::from(fs::DATA_TABLE_SECTOR)..=u64::from(fs::DATA_LAST_SECTOR))
+                .contains(&sector);
+            let status = if !(owned || (data && operation == fs::DISK_READ)) {
+                fs::EACCES
+            } else {
+                let lba = sector as u32;
+                let mut bytes = [0_u8; crate::world::BLOCK_BYTES];
+                let outcome = if operation == fs::DISK_READ {
+                    storage
+                        .read_sector(storage.handle(), lba, &mut bytes)
+                        .map(|()| {
+                            for (offset, byte) in bytes.iter().enumerate() {
+                                self.domain.core().write_block(offset, *byte);
+                            }
+                        })
+                } else if operation == fs::DISK_WRITE {
+                    for (offset, byte) in bytes.iter_mut().enumerate() {
+                        *byte = self.domain.core().read_block(offset);
                     }
+                    storage
+                        .write_sector(storage.handle(), lba, &bytes)
+                        .and_then(|()| storage.flush(storage.handle()))
+                } else {
+                    Err(ServiceError::Faulted)
                 };
+                if outcome.is_ok() {
+                    0
+                } else {
+                    fs::EIO
+                }
+            };
             self.domain.core().write_shared(fs::DISK_STATUS, status);
             self.domain.core().write_shared(fs::DISK_OPERATION, 0);
         }

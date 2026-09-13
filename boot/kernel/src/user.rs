@@ -1884,7 +1884,18 @@ impl Entry {
     };
 }
 
-/// The service's whole state: the directory, and whether it has been read.
+/// One file of the data region: its name, where it starts, how long.
+#[cfg(feature = "process")]
+#[derive(Clone, Copy)]
+struct DataRow {
+    name: [u8; crate::region::NAME_BYTES],
+    name_len: u8,
+    start: u32,
+    length: u32,
+}
+
+/// The service's whole state: the directory, and whether it has been read;
+/// the data region's table, and whether it has.
 #[cfg(feature = "process")]
 struct Filesystem {
     page: *mut u64,
@@ -1893,6 +1904,9 @@ struct Filesystem {
     used: u64,
     mounted: bool,
     sector: [u8; 512],
+    data: [DataRow; crate::world::fs::DATA_ROWS],
+    data_count: u8,
+    data_loaded: bool,
 }
 
 #[cfg(feature = "process")]
@@ -2147,14 +2161,23 @@ impl Filesystem {
     unsafe fn open(&mut self, root: u16, flags: u64, path: &[u8]) -> Result<(usize, u32, u8), u64> {
         use crate::world::fs;
         unsafe { self.mount()? };
+        let mut components = path
+            .split(|byte| *byte == b'/')
+            .filter(|component| !component.is_empty() && *component != b".")
+            .peekable();
+        // The data region's files live under the root's `data`: reachable
+        // from the root, or from a namespace rooted at `data` itself, and
+        // never from below either.
+        if root == fs::DATA_DIRECTORY || (root == 0 && components.peek() == Some(&&b"data"[..])) {
+            if root == 0 {
+                components.next();
+            }
+            return unsafe { self.open_data(flags, components) };
+        }
         if self.entry(root as usize)?.kind != fs::KIND_DIRECTORY as u8 {
             return Err(fs::ENOTDIR);
         }
         let mut current = root;
-        let mut components = path
-            .split(|byte| *byte == b'/')
-            .filter(|component| !component.is_empty())
-            .peekable();
         while let Some(component) = components.next() {
             let last = components.peek().is_none();
             if component == b"." {
@@ -2220,11 +2243,137 @@ impl Filesystem {
         Ok((current as usize, entry.length, entry.kind))
     }
 
+    /// Read the data region's table once: its rows are the files under
+    /// `data`. A region without a table is an empty directory.
+    #[link_section = ".user_text"]
+    unsafe fn load_data(&mut self) -> Result<(), u64> {
+        use crate::world::fs;
+        if self.data_loaded {
+            return Ok(());
+        }
+        self.data_count = 0;
+        self.data_loaded = true;
+        if unsafe { self.read_sector(u64::from(fs::DATA_TABLE_SECTOR)) }.is_err()
+            || !self.sector.starts_with(b"AGELDA1\0")
+        {
+            return Ok(());
+        }
+        let count = (u32::from_le_bytes([
+            self.sector[8],
+            self.sector[9],
+            self.sector[10],
+            self.sector[11],
+        ]) as usize)
+            .min(fs::DATA_ROWS);
+        for row in 0..count {
+            let base = 16 + row * 32;
+            let Some(bytes) = self.sector.get(base..base + 32) else {
+                break;
+            };
+            let mut name = [0_u8; crate::region::NAME_BYTES];
+            name.copy_from_slice(&bytes[..crate::region::NAME_BYTES]);
+            let name_len = name
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(name.len());
+            let start = u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+            let length = u32::from_le_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+            let last = u64::from(start) + u64::from(length).div_ceil(512);
+            if start <= fs::DATA_TABLE_SECTOR || last > u64::from(fs::DATA_LAST_SECTOR) + 1 {
+                continue;
+            }
+            if let Some(slot) = self.data.get_mut(usize::from(self.data_count)) {
+                *slot = DataRow {
+                    name,
+                    name_len: name_len as u8,
+                    start,
+                    length,
+                };
+                self.data_count += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// Resolve a path inside `data`: the directory itself, or one of its
+    /// files by name; nothing there is written or made.
+    #[link_section = ".user_text"]
+    unsafe fn open_data<'a>(
+        &mut self,
+        flags: u64,
+        mut components: core::iter::Peekable<impl Iterator<Item = &'a [u8]>>,
+    ) -> Result<(usize, u32, u8), u64> {
+        use crate::world::fs;
+        if flags & (fs::O_WRONLY_BIT | fs::O_RDWR_BIT | fs::O_CREAT_BIT) != 0 {
+            return Err(fs::EACCES);
+        }
+        unsafe { self.load_data()? };
+        let Some(component) = components.next() else {
+            return Ok((usize::from(fs::DATA_DIRECTORY), 0, fs::KIND_DIRECTORY as u8));
+        };
+        if component == b".." {
+            return Err(fs::EACCES);
+        }
+        if components.peek().is_some() {
+            return Err(fs::ENOTDIR);
+        }
+        let found = self
+            .data
+            .iter()
+            .take(usize::from(self.data_count))
+            .position(|row| &row.name[..usize::from(row.name_len)] == component)
+            .ok_or(fs::ENOENT)?;
+        if flags & fs::O_DIRECTORY_BIT != 0 {
+            return Err(fs::ENOTDIR);
+        }
+        Ok((
+            usize::from(fs::DATA_DIRECTORY) + 1 + found,
+            self.data[found].length,
+            fs::KIND_FILE as u8,
+        ))
+    }
+
+    /// The bytes of a data file at `offset`, at most one block, into the
+    /// block area, sector by sector through the supervisor.
+    #[link_section = ".user_text"]
+    unsafe fn read_data(&mut self, row: usize, offset: u64, length: u64) -> Result<u64, u64> {
+        use crate::world::fs;
+        unsafe { self.load_data()? };
+        let file = *self
+            .data
+            .get(row)
+            .filter(|_| row < usize::from(self.data_count))
+            .ok_or(fs::EINVAL)?;
+        let size = u64::from(file.length);
+        if offset >= size {
+            return Ok(0);
+        }
+        let length = length.min(512).min(size - offset);
+        let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+        let mut done = 0_u64;
+        while done < length {
+            let at = offset + done;
+            unsafe { self.read_sector(u64::from(file.start) + at / 512)? };
+            let inside = (at % 512) as usize;
+            let take = ((512 - inside) as u64).min(length - done) as usize;
+            for (position, byte) in self.sector.iter().skip(inside).take(take).enumerate() {
+                unsafe { block.add(done as usize + position).write_volatile(*byte) };
+            }
+            done += take as u64;
+        }
+        Ok(done)
+    }
+
     /// The bytes of `entry` at `offset`, at most one block, into the block
     /// area.
     #[link_section = ".user_text"]
     unsafe fn read(&mut self, index: usize, offset: u64, length: u64) -> Result<u64, u64> {
         use crate::world::fs;
+        if index > usize::from(fs::DATA_DIRECTORY) {
+            return unsafe {
+                self.read_data(index - usize::from(fs::DATA_DIRECTORY) - 1, offset, length)
+            };
+        }
         unsafe { self.mount()? };
         let entry = self.entry(index)?;
         if entry.kind != fs::KIND_FILE as u8 {
@@ -2255,6 +2404,9 @@ impl Filesystem {
     #[link_section = ".user_text"]
     unsafe fn write(&mut self, index: usize, offset: u64, length: u64) -> Result<u64, u64> {
         use crate::world::fs;
+        if index >= usize::from(fs::DATA_DIRECTORY) {
+            return Err(fs::EACCES);
+        }
         unsafe { self.mount()? };
         let entry = self.entry(index)?;
         if entry.kind != fs::KIND_FILE as u8 {
@@ -2306,7 +2458,7 @@ impl Filesystem {
     unsafe fn unlink(&mut self, root: u16, path: &[u8]) -> Result<(), u64> {
         use crate::world::fs;
         let (index, _, kind) = unsafe { self.open(root, 0, path)? };
-        if index == 0 || index == usize::from(root) {
+        if index == 0 || index == usize::from(root) || index >= usize::from(fs::DATA_DIRECTORY) {
             return Err(fs::EACCES);
         }
         if kind == fs::KIND_DIRECTORY as u8
@@ -2331,7 +2483,7 @@ impl Filesystem {
     unsafe fn rename(&mut self, root: u16, old: &[u8], new: &[u8]) -> Result<(), u64> {
         use crate::world::fs;
         let (index, _, kind) = unsafe { self.open(root, 0, old)? };
-        if index == 0 || index == usize::from(root) {
+        if index == 0 || index == usize::from(root) || index >= usize::from(fs::DATA_DIRECTORY) {
             return Err(fs::EACCES);
         }
         let trimmed = new.strip_suffix(b"/").unwrap_or(new);
@@ -2378,6 +2530,9 @@ impl Filesystem {
     #[link_section = ".user_text"]
     unsafe fn truncate(&mut self, index: usize, length: u64) -> Result<(), u64> {
         use crate::world::fs;
+        if index >= usize::from(fs::DATA_DIRECTORY) {
+            return Err(fs::EACCES);
+        }
         unsafe { self.mount()? };
         let entry = self.entry(index)?;
         if entry.kind != fs::KIND_FILE as u8 {
@@ -2420,12 +2575,33 @@ impl Filesystem {
     #[link_section = ".user_text"]
     unsafe fn list(&mut self, directory: u16, position: u64) -> Result<(usize, u8, u32), u64> {
         use crate::world::fs;
+        let payload = (self.page as usize + crate::world::PAYLOAD_OFFSET) as *mut u8;
+        if directory == fs::DATA_DIRECTORY {
+            unsafe { self.load_data()? };
+            let row = *self
+                .data
+                .get(position as usize)
+                .filter(|_| position < u64::from(self.data_count))
+                .ok_or(fs::ENOENT)?;
+            for (offset, byte) in row.name.iter().take(usize::from(row.name_len)).enumerate() {
+                unsafe { payload.add(offset).write_volatile(*byte) };
+            }
+            unsafe {
+                self.page
+                    .add(shared::VALUES + 3)
+                    .write_volatile(u64::from(row.name_len))
+            };
+            return Ok((
+                usize::from(fs::DATA_DIRECTORY) + 1 + position as usize,
+                fs::KIND_FILE as u8,
+                row.length,
+            ));
+        }
         unsafe { self.mount()? };
         let mut seen = 0_u64;
         for (index, entry) in self.entries.iter().enumerate().skip(1) {
             if entry.kind != 0 && entry.parent == directory {
                 if seen == position {
-                    let payload = (self.page as usize + crate::world::PAYLOAD_OFFSET) as *mut u8;
                     let name_len = entry.name_len as usize;
                     for (offset, byte) in entry.name.iter().take(name_len).enumerate() {
                         unsafe { payload.add(offset).write_volatile(*byte) };
@@ -2439,6 +2615,14 @@ impl Filesystem {
                 }
                 seen += 1;
             }
+        }
+        // The root lists `data` last: the directory every root has.
+        if directory == 0 && seen == position {
+            for (offset, byte) in b"data".iter().enumerate() {
+                unsafe { payload.add(offset).write_volatile(*byte) };
+            }
+            unsafe { self.page.add(shared::VALUES + 3).write_volatile(4) };
+            return Ok((usize::from(fs::DATA_DIRECTORY), fs::KIND_DIRECTORY as u8, 0));
         }
         Err(fs::ENOENT)
     }
@@ -2461,6 +2645,14 @@ pub unsafe extern "C" fn agel_fs_main(shared_page: u64) -> ! {
         used: 0,
         mounted: false,
         sector: [0; 512],
+        data: [DataRow {
+            name: [0; crate::region::NAME_BYTES],
+            name_len: 0,
+            start: 0,
+            length: 0,
+        }; crate::world::fs::DATA_ROWS],
+        data_count: 0,
+        data_loaded: false,
     };
     loop {
         let command = unsafe { page.add(shared::COMMAND).read_volatile() };

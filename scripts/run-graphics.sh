@@ -41,7 +41,7 @@ if $workbench; then
   test -f "$workbench_image"
   dd if="$image" of="$workbench_image" bs=512 count=512 conv=notrunc 2>/dev/null
   # The asset region travels with the seed: the fonts the desktop is set in.
-  dd if="$image" of="$workbench_image" bs=512 skip=3072 seek=3072 count=3072 conv=notrunc 2>/dev/null
+  dd if="$image" of="$workbench_image" bs=512 skip=10240 seek=10240 count=3072 conv=notrunc 2>/dev/null
   image="$workbench_image"
 fi
 if $web; then

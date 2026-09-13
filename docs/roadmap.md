@@ -110,7 +110,7 @@ trained on it.
 |---|---|---|
 | A canvas: a window record backed by pages a process draws and the compositor blits, scaled | done | `scripts/test-desktop-process.sh` reads the program's pixels back; one canvas per window, 640×400 at most, no partial damage |
 | Key press and release events with key codes | done | `scripts/test-desktop-process.sh` reads `keys.c`; the serial console remains characters only |
-| Room: a bitmap frame ledger and pool, a 32 MiB disk, a 4 MiB program region, a data region of large read-only files | partial | the ledger and the pool are bitmaps and the x86-64 pool is 46 MiB (`scripts/test-isolation.sh` counts the frames back); the disk is still 3 MiB with 512 KiB of programs and 64 KiB files |
+| Room: a bitmap frame ledger and pool, a 32 MiB disk, a 4 MiB program region, a data region of large read-only files under `/data` | done | `scripts/test-isolation.sh` counts the frames back; `scripts/test-libc.sh` reads a 100 KB data file by digest on three machines; `agelfs` files stay 64 KiB |
 | The C library's missing functions (`strcasecmp`, `fseek`/`ftell`, `remove`, `atof`) and floating point for processes | open | all 80 `doomgeneric` sources compile against the headers with two shims |
 | DOOM runs on the desktop, keyboard-playable, `-timedemo` frame rate reported | open | |
 | Agel plays it: a hosted agent stepping the game through the machine's screen and keys, a dataset of frames, state, actions and reasons, a run window on the desktop | open | the agent is hosted; the native kernel has no network or local inference |

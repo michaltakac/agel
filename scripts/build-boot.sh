@@ -50,9 +50,9 @@ test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 260096
 # candidate staged with scripts/stage-kernel.py is dropped rather than
 # silently kept in front of the kernel just built. Slot B (sectors 512-1019)
 # is left as it was.
-disk_bytes=3145728
+disk_bytes=33554432
 if test ! -f "$disk_image"; then
-  dd if=/dev/zero of="$disk_image" bs=512 count=6144 2>/dev/null
+  dd if=/dev/zero of="$disk_image" bs=512 count=65536 2>/dev/null
 elif test "$(wc -c < "$disk_image" | tr -d ' ')" -lt "$disk_bytes"; then
   dd if=/dev/zero of="$disk_image" bs=1 count=1 seek=$((disk_bytes - 1)) conv=notrunc 2>/dev/null
 fi
@@ -61,7 +61,7 @@ dd if=/dev/zero of="$disk_image" bs=512 seek=1057 count=1 conv=notrunc 2>/dev/nu
 dd if="$boot_bin" of="$disk_image" conv=notrunc 2>/dev/null
 dd if="$kernel_bin" of="$disk_image" bs=512 seek=1 conv=notrunc 2>/dev/null
 
-# The asset region (sectors 3072-6143) holds the compositor's font atlases
+# The asset region (sectors 10240-13311) holds the compositor's font atlases
 # and sprite sheet, committed under boot/desktop/assets so that every build
 # installs the same bytes (scripts/build-assets.sh regenerates them from the
 # fonts and drawings). They are part of the seed: the graphics image refuses

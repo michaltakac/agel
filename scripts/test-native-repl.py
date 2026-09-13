@@ -835,7 +835,8 @@ def files_test(image: str, architecture: str, disk: str) -> None:
         # An unformatted region is refused, not invented.
         boot.send(":fs-ls", "filesystem: error 5", 0)
         boot.send(":fs-format", "formatted", 0)
-        boot.send(":fs-ls", "(empty)", 0)
+        # A fresh root holds nothing but the data region's directory.
+        boot.send(":fs-ls", "data/", 0)
         boot.send(":fs-mkdir app", "directory ready: app", 0)
         boot.send(":fs-mkdir etc", "directory ready: etc", 0)
         # The operator's root: the writer creates files in two directories.
@@ -864,7 +865,7 @@ def files_test(image: str, architecture: str, disk: str) -> None:
             [b"writer: open etc/secret: error 13", b"process writer exited with status 13"],
         )
         boot.send_line(":fs-ls /")
-        boot.expect_exact(b"\r\napp/\r\netc/\r\nagel-native[0]> ")
+        boot.expect_exact(b"\r\napp/\r\netc/\r\ndata/\r\nagel-native[0]> ")
         boot.send_line(":fs-ls /etc")
         boot.expect_exact(b"\r\nsecret  11 bytes\r\nagel-native[0]> ")
         boot.send(":exec reader /nowhere", "filesystem: error 2", 0)
@@ -1012,6 +1013,23 @@ def c_test(image: str, architecture: str, disk: str) -> None:
             ":exec c-canvas",
             [b"canvas: no display (errno 19)", b"process c-canvas exited with status 3"],
         )
+        # The data region: a large read-only file installed from the host,
+        # read through the namespace by its digest, listed, never written.
+        import hashlib
+        digest = hashlib.sha256(data_pattern()).hexdigest()
+        run_program(
+            boot,
+            ":exec c-digest -- /data/pattern",
+            [f"{digest}  /data/pattern".encode(), b"process c-digest exited with status 0"],
+        )
+        boot.send_line(":fs-ls /data")
+        boot.expect_exact(b"\r\npattern  100000 bytes\r\nagel-native[0]> ")
+        boot.send(":fs-mkdir data/new", "filesystem: error 13", 0)
+        run_program(
+            boot,
+            ":exec writer /data",
+            [b"writer: open etc/secret: error 13", b"process writer exited with status 13"],
+        )
         boot.send("(+ 20 22)", "42", 1)
         shutdown(boot)
     finally:
@@ -1100,6 +1118,11 @@ def breadth_test(image: str, architecture: str, disk: str) -> None:
         shutdown(boot)
     finally:
         boot.close()
+
+
+def data_pattern() -> bytes:
+    """The data file the C suite installs: 100,000 bytes no block holds."""
+    return bytes((index * 7) & 0xFF for index in range(100_000))
 
 
 def send_kernel_healthy(

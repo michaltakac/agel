@@ -28,7 +28,8 @@ Binary compatibility with Linux ELFs is not planned; see the requirements.
 
 A process is an ordinary protection domain whose code did not come from the
 kernel image. The supervisor reads a static ELF from the disk's **program
-region**, sectors 2048 through 3071 (1024 through 2047 before v0.2.42): a
+region**, sectors 2048 through 10239 (through 3071 before v0.2.69, 1024
+through 2047 before v0.2.42): a
 table sector (`AGELPR1`, a count, then
 32-byte rows of name, start sector, length and CRC-32) followed by the
 images. `scripts/install-program.py IMAGE NAME ELF` writes a row;
@@ -391,6 +392,23 @@ machines, requires the child's output, the byte count as its status, the
 fault report and the signal the parent sees, `ENOENT` for a missing
 program, `ECHILD` for a child that is not the caller's, and then runs the
 whole thing again to show every process's frames came back.
+
+### The data region (v0.2.69)
+
+Files too large for the filesystem region, read-only, installed from
+the host: the **data region** is sectors 13312 through 65535 of the
+32 MiB image, with a table sector like the program region's
+(`scripts/install-program.py --region data IMAGE NAME FILE`). The
+filesystem service serves it as the directory `data` of the root: `open`
+resolves `data/NAME` from a namespace rooted at `/` or at `data` itself
+and never from below either, `read` fetches the file's sectors through
+the supervisor's relay, which permits reads of the data region and no
+writes, `stat` and `readdir` see the table, and every write, create,
+truncate, unlink or rename there answers `EACCES`. The entries are
+numbered from `0x8000`, above anything the filesystem region holds, so a
+descriptor names either without confusion. A DOOM WAD is the file this
+exists for; `scripts/test-libc.sh` installs a 100,000-byte pattern and
+`c-digest` reads it back by its SHA-256 on all three machines.
 
 ### What stratum 3 does not claim
 
