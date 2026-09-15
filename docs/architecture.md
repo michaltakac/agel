@@ -406,6 +406,10 @@ Each rung must be runnable and differentially testable against the rung below:
    words let it read the window and the engine's state and ask a model,
    and the desktop injects the keys it names. Rust observes and actuates;
    Agel decides.
+70. **Effects for Agel in the OS (v0.2.75):** a synchronous port from the
+   evaluator to the desktop answers `file-*`, `clock`, `console-log` and `exec`
+   in the shared page; the agent keeps its own log in the filesystem
+   region and reads it back.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

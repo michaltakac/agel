@@ -151,6 +151,9 @@ pub mod shared {
     /// Render the model request the language made and has not been
     /// answered: its number, a space, its text; empty when there is none.
     pub const COMMAND_EVALUATOR_REQUEST: u64 = 0x8e00;
+    /// Take the program the language asked to start, rendered as the line
+    /// `:exec` would take; empty when there is none.
+    pub const COMMAND_EVALUATOR_EXEC: u64 = 0x8f00;
     /// Rasterize one validated 64-byte native vector record.
     #[cfg(feature = "native-graphics")]
     pub const COMMAND_DISPLAY_DRAW: u64 = 0x9000;
@@ -753,6 +756,19 @@ impl DomainCore {
     pub fn read_payload(&self, offset: usize) -> u8 {
         let offset = PAYLOAD_OFFSET + (offset % PAYLOAD_BYTES);
         // Safety: as in `write_payload`; the result remains untrusted data.
+        unsafe {
+            (self.shared_physical as *const u8)
+                .add(offset)
+                .read_volatile()
+        }
+    }
+
+    /// Read one untrusted byte of the observation area: an effect request's
+    /// text.
+    #[cfg(feature = "native-graphics")]
+    pub fn read_observation(&self, offset: usize) -> u8 {
+        let offset = OBSERVATION_OFFSET + (offset % OBSERVATION_BYTES);
+        // Safety: as in `read_payload`; the area is inside the page.
         unsafe {
             (self.shared_physical as *const u8)
                 .add(offset)

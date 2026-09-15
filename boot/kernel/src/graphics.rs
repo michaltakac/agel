@@ -18,7 +18,9 @@ use crate::recovery::{BootPlan, LiveRecovery};
 #[allow(dead_code)]
 struct KernelRecovery;
 use crate::memory::PAGE;
-use crate::native::{LOOK_BYTES, LOOK_COLUMNS, LOOK_LINE_BYTES, LOOK_ROWS, LOOK_SHADES_OFFSET};
+use crate::native::{
+    EFFECT_BYTES, LOOK_BYTES, LOOK_COLUMNS, LOOK_LINE_BYTES, LOOK_ROWS, LOOK_SHADES_OFFSET,
+};
 use crate::process::{EBADF, EBUSY, EINVAL, ENOMEM, ENOSPC};
 use crate::service::{ServiceDomain, ServiceKind};
 use crate::workspace::Workspace;
@@ -2543,6 +2545,7 @@ fn play(
     storage: &mut ServiceDomain,
     mut filesystem: Option<&mut ServiceDomain>,
     serial: &mut ServiceDomain,
+    mut clock: Option<&mut ServiceDomain>,
     current: &mut Scene,
     evaluator_revision: &mut u64,
     running: &mut Option<&'static mut crate::process::Run>,
@@ -2560,12 +2563,24 @@ fn play(
         return StatusLine::new(b"NO WINDOW TO PLAY - CLICK ONE");
     };
     let slot = usize::from(slot);
-    let mut evaluate = |evaluator: &mut arch::Domain, form: &[u8]| -> Option<StatusLine> {
-        let reply = evaluator_request(evaluator, shared::COMMAND_EVALUATE, form).ok()?;
-        *evaluator_revision = reply.revision;
-        (!reply.error).then(|| StatusLine::new(&reply.bytes[..reply.length]))
-    };
-    let pause = evaluate(evaluator, b"(play-pause)").and_then(|key| play_key(key.get()));
+    // Each form the loop asks is evaluated with the desktop answering the
+    // language's effects, so the program can log its own steps to a file.
+    macro_rules! evaluate {
+        ($form:expr) => {{
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            let mut host = EffectHost {
+                storage: &mut *storage,
+                filesystem: filesystem.as_deref_mut(),
+                console: &mut tee,
+                clock: clock.as_deref_mut(),
+            };
+            evaluate_form(evaluator, evaluator_revision, $form, &mut host)
+        }};
+    }
+    let pause = evaluate!(b"(play-pause)").and_then(|key| play_key(key.get()));
     let mut ended = false;
     let mut played = 0;
     for step in 1..=steps {
@@ -2601,7 +2616,7 @@ fn play(
         if evaluator_request(evaluator, shared::COMMAND_EVALUATOR_OBSERVE, b"").is_err() {
             return StatusLine::new(b"THE EVALUATOR COULD NOT LOOK");
         }
-        let Some(mut decision) = evaluate(evaluator, b"(play-step)") else {
+        let Some(mut decision) = evaluate!(b"(play-step)") else {
             return StatusLine::new(b"PLAY-STEP FAILED - :LOAD DOOM-AGENT");
         };
         // A request the step made goes out on the serial console with what
@@ -2655,7 +2670,7 @@ fn play(
                     break;
                 }
                 if delivered {
-                    if let Some(again) = evaluate(evaluator, b"(play-step)") {
+                    if let Some(again) = evaluate!(b"(play-step)") {
                         decision = again;
                     }
                 } else {
@@ -2669,7 +2684,7 @@ fn play(
         report.number_u64(step as u64);
         report.push(b" keys ");
         report.push(decision.get());
-        if let Some(reason) = evaluate(evaluator, b"play-reason").filter(|r| r.get() != b"nil") {
+        if let Some(reason) = evaluate!(b"play-reason").filter(|r| r.get() != b"nil") {
             report.push(b" reason ");
             report.push(reason.get());
         }
@@ -2743,8 +2758,9 @@ fn execute_workshop(
     inputs: Option<&mut Inputs<'_>>,
     evaluator: &mut arch::Domain,
     storage: &mut ServiceDomain,
-    filesystem: Option<&mut ServiceDomain>,
+    mut filesystem: Option<&mut ServiceDomain>,
     serial: &mut ServiceDomain,
+    mut clock: Option<&mut ServiceDomain>,
     recovery: &mut Option<LiveRecovery>,
     kernel: &mut Option<KernelRecovery>,
     current: &mut Scene,
@@ -2826,6 +2842,7 @@ fn execute_workshop(
             storage,
             filesystem,
             serial,
+            clock,
             current,
             evaluator_revision,
             running,
@@ -3190,16 +3207,16 @@ fn execute_workshop(
             Err(reason) => StatusLine::new(reason.as_bytes()),
         };
     }
+    // A cell run by name is evaluated as a typed form is, below.
+    let mut cell_source = [0_u8; PAYLOAD_BYTES];
+    let mut cell_length = None;
     if let Some(name) = command_argument(line, b":run ") {
-        return match workspace.find(name) {
-            Some(cell) => evaluator_status(
-                evaluator,
-                evaluator_revision,
-                shared::COMMAND_EVALUATE,
-                cell.source(),
-            ),
-            None => StatusLine::new(b"NO SUCH CELL"),
+        let Some(cell) = workspace.find(name) else {
+            return StatusLine::new(b"NO SUCH CELL");
         };
+        let source = cell.source();
+        cell_source[..source.len()].copy_from_slice(source);
+        cell_length = Some(source.len());
     }
     if let Some(name) = command_argument(line, b":show ") {
         return workspace
@@ -3217,6 +3234,7 @@ fn execute_workshop(
         };
     }
     let command = match line {
+        _ if cell_length.is_some() => shared::COMMAND_EVALUATE,
         b":promote" => shared::COMMAND_EVALUATOR_PROMOTE,
         b":discard" => shared::COMMAND_EVALUATOR_DISCARD,
         b":rollback" => shared::COMMAND_EVALUATOR_ROLLBACK,
@@ -3225,17 +3243,63 @@ fn execute_workshop(
         _ if line.starts_with(b":") => return StatusLine::new(b"UNKNOWN COMMAND - :HELP"),
         _ => shared::COMMAND_EVALUATE,
     };
+    let source: &[u8] = match cell_length {
+        Some(length) => &cell_source[..length],
+        None if command == shared::COMMAND_EVALUATE => line,
+        None => b"",
+    };
     let before = *evaluator_revision;
-    let status = evaluator_status(
-        evaluator,
-        evaluator_revision,
-        command,
-        if command == shared::COMMAND_EVALUATE {
-            line
-        } else {
-            b""
-        },
-    );
+    // The desktop answers the language's effects while the form runs:
+    // files in the filesystem region, the clock, the console.
+    let mut status = {
+        let mut tee = Tee {
+            serial: &mut *serial,
+            terminal: &mut current.terminal,
+        };
+        let mut host = EffectHost {
+            storage: &mut *storage,
+            filesystem: filesystem.as_deref_mut(),
+            console: &mut tee,
+            clock: clock.as_deref_mut(),
+        };
+        evaluate_status(evaluator, evaluator_revision, command, source, &mut host)
+    };
+    // A program the form asked for starts now that the form has committed,
+    // as `:exec` would start it, and both are reported.
+    if command == shared::COMMAND_EVALUATE {
+        if let Ok(reply) = evaluator_request(evaluator, shared::COMMAND_EVALUATOR_EXEC, b"") {
+            if reply.length > 0 {
+                let mut exec_line = StatusLine::new(b":exec ");
+                exec_line.push(&reply.bytes[..reply.length]);
+                let started = execute_workshop(
+                    machine,
+                    compositor,
+                    inputs,
+                    evaluator,
+                    storage,
+                    filesystem,
+                    serial,
+                    clock,
+                    recovery,
+                    kernel,
+                    current,
+                    previous,
+                    scene_revision,
+                    evaluator_revision,
+                    workspace,
+                    committed_workspace,
+                    generation,
+                    dirty,
+                    running,
+                    exec_line.get(),
+                );
+                let mut both = StatusLine::new(status.get());
+                both.push(b" | ");
+                both.push(started.get());
+                status = both;
+            }
+        }
+    }
     // A form evaluated after boot is the health oracle every generation gets
     // for free: the desktop reached an interactive, working state.
     if command == shared::COMMAND_EVALUATE && *evaluator_revision > before {
@@ -3260,6 +3324,259 @@ fn execute_workshop(
         let _ = &kernel;
     }
     status
+}
+
+/// What the desktop lends the language while a form runs: the filesystem
+/// region through its service, the console, and the clock where the
+/// machine has one. Each effect request the evaluator yields with is
+/// answered in its page, and the world goes on.
+struct EffectHost<'a> {
+    storage: &'a mut ServiceDomain,
+    filesystem: Option<&'a mut ServiceDomain>,
+    console: &'a mut dyn crate::process::Console,
+    clock: Option<&'a mut ServiceDomain>,
+}
+
+impl EffectHost<'_> {
+    /// Answer the effect request in the evaluator's page.
+    fn answer(&mut self, evaluator: &mut arch::Domain) {
+        use crate::native::{
+            EFFECT_BYTES, EFFECT_CLOCK, EFFECT_FILE_APPEND, EFFECT_FILE_LIST, EFFECT_FILE_READ,
+            EFFECT_FILE_WRITE, EFFECT_LOG,
+        };
+        let core = evaluator.core();
+        let kind = core.read_shared(shared::VALUES);
+        let words = [
+            core.read_shared(shared::ARGUMENTS),
+            core.read_shared(shared::ARGUMENTS + 1),
+            core.read_shared(shared::ARGUMENTS + 2),
+        ];
+        let length = (core.read_shared(shared::VALUES + 1) as usize).min(EFFECT_BYTES);
+        let mut text = [0_u8; EFFECT_BYTES];
+        for (offset, byte) in text.iter_mut().take(length).enumerate() {
+            *byte = core.read_observation(offset);
+        }
+        let mut reply = [0_u8; EFFECT_BYTES];
+        let outcome = match kind {
+            EFFECT_FILE_READ => self.file_read(&text[..length], &mut reply),
+            EFFECT_FILE_WRITE | EFFECT_FILE_APPEND => {
+                let path_length = (words[0] as usize).min(length);
+                let (path, content) = text[..length].split_at(path_length);
+                self.file_write(path, content, kind == EFFECT_FILE_APPEND)
+            }
+            EFFECT_FILE_LIST => self.file_list(&text[..length], &mut reply),
+            EFFECT_CLOCK => self.clock(),
+            EFFECT_LOG => {
+                self.console.write(&text[..length]);
+                self.console.write(b"\n");
+                Ok((0, 0))
+            }
+            _ => Err(38),
+        };
+        let core = evaluator.core();
+        match outcome {
+            Ok((value, reply_length)) => {
+                for (offset, byte) in reply.iter().take(reply_length).enumerate() {
+                    core.write_observation(offset, *byte);
+                }
+                core.write_shared(shared::STATUS, 0);
+                core.write_shared(shared::VALUES + 1, value);
+                core.write_shared(shared::VALUES + 2, reply_length as u64);
+            }
+            Err(number) => {
+                core.write_shared(shared::STATUS, number);
+                core.write_shared(shared::VALUES + 1, 0);
+                core.write_shared(shared::VALUES + 2, 0);
+            }
+        }
+    }
+
+    /// The filesystem's answer as the service gave it, or an error number:
+    /// the service's own, or `EIO` when the service itself failed.
+    fn filesystem(&mut self, command: u64, arguments: [u64; 3]) -> Result<[u64; 3], u64> {
+        let Some(filesystem) = self.filesystem.as_deref_mut() else {
+            return Err(38);
+        };
+        let handle = filesystem.handle();
+        match filesystem.filesystem_request(handle, self.storage, command, arguments) {
+            Ok((0, values)) => Ok(values),
+            Ok((status, _)) => Err(status),
+            Err(_) => Err(5),
+        }
+    }
+
+    fn open(&mut self, path: &[u8], flags: u64) -> Result<[u64; 3], u64> {
+        let Some(filesystem) = self.filesystem.as_deref_mut() else {
+            return Err(38);
+        };
+        filesystem.write_payload(path);
+        self.filesystem(
+            crate::world::fs::COMMAND_OPEN,
+            [0, flags, path.len() as u64],
+        )
+    }
+
+    fn file_read(
+        &mut self,
+        path: &[u8],
+        out: &mut [u8; EFFECT_BYTES],
+    ) -> Result<(u64, usize), u64> {
+        use crate::world::fs;
+        let [entry, length, kind] = self.open(path, 0)?;
+        if kind == fs::KIND_DIRECTORY {
+            return Err(21);
+        }
+        let wanted = (length as usize).min(EFFECT_BYTES);
+        let mut offset = 0;
+        while offset < wanted {
+            let chunk = (wanted - offset).min(crate::world::BLOCK_BYTES);
+            let [count, _, _] =
+                self.filesystem(fs::COMMAND_READ, [entry, offset as u64, chunk as u64])?;
+            let count = (count as usize).min(chunk);
+            if count == 0 {
+                break;
+            }
+            let filesystem = self.filesystem.as_deref_mut().ok_or(38_u64)?;
+            for index in 0..count {
+                out[offset + index] = filesystem.read_block(index);
+            }
+            offset += count;
+        }
+        Ok((offset as u64, offset))
+    }
+
+    fn file_write(
+        &mut self,
+        path: &[u8],
+        content: &[u8],
+        append: bool,
+    ) -> Result<(u64, usize), u64> {
+        use crate::world::fs;
+        let [entry, length, kind] = self.open(path, fs::O_CREAT_BIT | fs::O_WRONLY_BIT)?;
+        if kind == fs::KIND_DIRECTORY {
+            return Err(21);
+        }
+        let mut offset = if append {
+            length
+        } else {
+            self.filesystem(fs::COMMAND_TRUNCATE, [entry, 0, 0])?;
+            0
+        };
+        let mut written = 0;
+        while written < content.len() {
+            let chunk = (content.len() - written).min(crate::world::BLOCK_BYTES);
+            let filesystem = self.filesystem.as_deref_mut().ok_or(38_u64)?;
+            for (index, byte) in content[written..written + chunk].iter().enumerate() {
+                filesystem.write_block(index, *byte);
+            }
+            let [count, _, _] =
+                self.filesystem(fs::COMMAND_WRITE, [entry, offset, chunk as u64])?;
+            if count == 0 {
+                break;
+            }
+            written += count as usize;
+            offset += count;
+        }
+        Ok((written as u64, 0))
+    }
+
+    fn file_list(
+        &mut self,
+        path: &[u8],
+        out: &mut [u8; EFFECT_BYTES],
+    ) -> Result<(u64, usize), u64> {
+        use crate::world::fs;
+        let path = if path.is_empty() { &b"/"[..] } else { path };
+        let [directory, _, _] = self.open(path, fs::O_DIRECTORY_BIT)?;
+        let mut position = 0;
+        let mut length = 0;
+        while self
+            .filesystem(fs::COMMAND_LIST, [directory, position, 0])
+            .is_ok()
+        {
+            let filesystem = self.filesystem.as_deref_mut().ok_or(38_u64)?;
+            let name_length = (filesystem.name_length() as usize).min(32);
+            if length + name_length + 1 > EFFECT_BYTES {
+                break;
+            }
+            for offset in 0..name_length {
+                out[length + offset] = filesystem.read_payload(offset);
+            }
+            length += name_length;
+            out[length] = b'\n';
+            length += 1;
+            position += 1;
+        }
+        Ok((position, length))
+    }
+
+    /// Seconds into the day, from the clock driver where there is one:
+    /// x86-64 has it; a board has no clock driver and answers "no service".
+    fn clock(&mut self) -> Result<(u64, usize), u64> {
+        let Some(clock) = self.clock.as_deref_mut() else {
+            return Err(38);
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let _ = clock;
+            Err(38)
+        }
+        #[cfg(target_arch = "x86_64")]
+        {
+            let handle = clock.handle();
+            match clock.read_clock(handle) {
+                Ok(Some(packed)) => {
+                    let seconds = packed & 0xff;
+                    let minutes = (packed >> 8) & 0xff;
+                    let hours = (packed >> 16) & 0xff;
+                    Ok((hours * 3600 + minutes * 60 + seconds, 0))
+                }
+                _ => Err(5),
+            }
+        }
+    }
+}
+
+/// Evaluate one form with the desktop answering its effects: the rendered
+/// value, or none when the form failed or the evaluator could not run.
+fn evaluate_form(
+    evaluator: &mut arch::Domain,
+    revision: &mut u64,
+    form: &[u8],
+    host: &mut EffectHost<'_>,
+) -> Option<StatusLine> {
+    let reply = crate::native_session::request_with(
+        evaluator,
+        shared::COMMAND_EVALUATE,
+        form,
+        &mut |evaluator| host.answer(evaluator),
+    )
+    .ok()?;
+    *revision = reply.revision;
+    (!reply.error).then(|| StatusLine::new(&reply.bytes[..reply.length]))
+}
+
+/// `evaluator_status`, with the desktop answering effects.
+fn evaluate_status(
+    evaluator: &mut arch::Domain,
+    revision: &mut u64,
+    command: u64,
+    source: &[u8],
+    host: &mut EffectHost<'_>,
+) -> StatusLine {
+    match crate::native_session::request_with(evaluator, command, source, &mut |evaluator| {
+        host.answer(evaluator)
+    }) {
+        Ok(reply) => {
+            *revision = reply.revision;
+            let status = StatusLine::new(&reply.bytes[..reply.length]);
+            if reply.error {
+                console::write("evaluator transaction rolled back\n");
+            }
+            status
+        }
+        Err(reason) => StatusLine::new(reason.as_bytes()),
+    }
 }
 
 fn evaluator_status(
@@ -4150,6 +4467,10 @@ fn interactive(
                     console::write("INVALID UTF-8\nlive-desktop> ");
                     continue;
                 }
+                #[cfg(target_arch = "x86_64")]
+                let clock = clock_driver.as_mut();
+                #[cfg(not(target_arch = "x86_64"))]
+                let clock: Option<&mut ServiceDomain> = None;
                 status = execute_workshop(
                     machine,
                     compositor,
@@ -4158,6 +4479,7 @@ fn interactive(
                     &mut storage,
                     filesystem.as_mut(),
                     &mut console_driver,
+                    clock,
                     &mut recovery,
                     &mut kernel,
                     &mut current,

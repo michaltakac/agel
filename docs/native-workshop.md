@@ -28,7 +28,18 @@ restart-agent  drop-message  agent-count
 scene-clear  scene-rect  scene-count  scene-bind  scene-hit  scene-owner
 agent-become
 look  look-mean  look-line  look-field  model-request  model-result
+file-read  file-write  file-append  file-list  clock  console-log  exec
 ```
+
+Since v0.2.75 the effect words reach outside the world through the
+desktop: `file-read`, `file-write`, `file-append` and `file-list` are the
+filesystem region (a path from the root, text of at most 1,024 bytes per
+write and 2,048 per read), `clock` is seconds into the day where the
+machine has a clock driver, `console-log` prints a line on the console, and `exec`
+asks the desktop to start a program as `:exec` would, once the form that
+asked has committed. Each is one request the evaluator yields to the
+desktop with, answered in place; the serial workshop answers them "no
+service", and a world with no desktop answers an error.
 
 Since v0.2.74 the `look` and `model` words let an Agel program play a game
 running in a window: `look` and `look-mean` read a sixty-four by

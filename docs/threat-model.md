@@ -1675,6 +1675,26 @@ bridge, since the kernel has no network or local inference; the operator
 who runs `:play` is trusted; nothing bounds a provider's cost beyond its
 own limits.
 
+## v0.2.75
+
+- **An effect is a request in a page, answered by the supervisor:** the
+  evaluator never gains a mapping, a handle or a device; it writes a
+  bounded request (a kind, three words, at most 2,048 bytes of text) and
+  yields, and the desktop performs it with the filesystem service the
+  operator's `:fs-*` commands use, through the same relay and the same
+  region bounds. A path is a path from the root of that region; the data
+  region stays read-only as before.
+- **What a world may do is what the desktop lends it:** the serial
+  workshop lends nothing, so the same program there gets "no service";
+  a world outside the desktop (seL4, the tests) has no port at all.
+- **`exec` starts a program only after the form commits**, through the
+  desktop's own `:exec` path with its checks, never from inside the
+  evaluator.
+
+Not claimed: every form the desktop evaluates may use every effect word;
+there is no capability a world must hold to write a file yet. An effect
+performed by a form that then fails is not undone.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

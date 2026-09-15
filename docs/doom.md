@@ -312,6 +312,33 @@ desktop drawing the agent's reasoning, and no steering or speech yet. The
 trained policy and the world model of the next rungs are for reflexes and
 for prediction.
 
+## The agent keeps its own log (v0.2.75)
+
+The next rung toward self-hosting: what the loop needs beyond deciding is
+handled by the Agel program too. Seven effect words let a program in the
+OS reach outside its world through the desktop: `file-read`, `file-write`,
+`file-append` and `file-list` are the filesystem region, `clock` the
+machine's clock, `console-log` the console, and `exec` starts a program as `:exec`
+would. `doom-agent.agel` now appends one line per step to `play.log`, the
+engine's state line and its reason, with `file-append`, and
+`scripts/test-play.sh` reads the log back with `file-read`, lists it with
+`file-list`, and sees it in `:fs-ls`. The dataset of a scripted run is the
+program's own file, written and read by Agel.
+
+The mechanism is a synchronous port: the evaluator writes the request
+into its shared page (the kind, three words, the text in the observation
+area), yields to the supervisor, the desktop performs it against the
+filesystem service, the clock driver or the console and writes the answer
+in place, and the world resumes inside the word. No effect touches the
+world's transaction: a request made by a form that then fails is not
+undone (a file written stays written), which is what an effect is; the
+words say so in their names.
+
+What this is not: the words are available to every form the desktop
+evaluates, as `:fs-ls` is to every operator; a capability a world must
+hold to write is the next step, with the runtime that can hold more than
+sixteen cells.
+
 ### Built where CI builds (v0.2.73)
 
 v0.2.71 and v0.2.72 passed every suite here and failed the DOOM suite on

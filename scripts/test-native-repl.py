@@ -1333,7 +1333,7 @@ def main() -> int:
             ":limits",
             "source=256 nodes=128 globals=24 name=24 params=4 locals=8 "
             "args=8 body=192 depth=24 fuel=2000 agents=8 mailbox=8 run-turns=32 scene-rects=12 "
-            "cells=384 text=2048 look-columns=64 look-rows=25 request=200",
+            "cells=384 text=2048 look-columns=64 look-rows=25 request=200 effect-text=1024",
             10,
         )
         harness.send(

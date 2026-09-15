@@ -335,6 +335,7 @@ unsafe fn evaluator_finish(page: *mut u64, response_length: usize, error: bool, 
 pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
     let page = shared_page as *mut u64;
     let mut session = crate::native::Session::new();
+    session.attach(page, effect_port);
     loop {
         let command = unsafe { page.add(shared::COMMAND).read_volatile() };
         if command == shared::COMMAND_EVALUATE {
@@ -430,6 +431,13 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
             let mut response_length = 0;
             unsafe { evaluator_text(page, &mut response_length, b"OBSERVED") };
             unsafe { evaluator_finish(page, response_length, false, session.revision()) };
+        } else if command == shared::COMMAND_EVALUATOR_EXEC {
+            let mut response_length = 0;
+            if let Some(line) = session.take_exec() {
+                let length = crate::native::Session::exec_length(&line);
+                unsafe { evaluator_text(page, &mut response_length, &line[..length]) };
+            }
+            unsafe { evaluator_finish(page, response_length, false, session.revision()) };
         } else if command == shared::COMMAND_EVALUATOR_REQUEST {
             let mut response_length = 0;
             if let Some((number, text)) = session.request() {
@@ -522,6 +530,50 @@ pub unsafe extern "C" fn agel_evaluator_main(shared_page: u64) -> ! {
             unsafe { evaluator_finish(page, 0, false, session.revision()) };
         }
         unsafe { yield_to_supervisor() };
+    }
+}
+
+/// The evaluator's port to the desktop: the effect request goes into the
+/// page (its kind and words in the value and argument words, its text in
+/// the observation area) under the effect status, the world yields, and
+/// what the desktop wrote in place is the answer.
+///
+/// # Safety
+/// `page` is the evaluator's shared page; called only from the evaluator,
+/// through a pointer, so it must live in the evaluator's text.
+#[link_section = ".user_text"]
+unsafe fn effect_port(
+    page: *mut u64,
+    kind: u64,
+    arguments: [u64; 3],
+    text: &[u8],
+    out: &mut [u8; crate::native::EFFECT_BYTES],
+) -> Result<[u64; 2], u64> {
+    let area = (page as usize + crate::world::OBSERVATION_OFFSET) as *mut u8;
+    let length = text.len().min(crate::native::EFFECT_BYTES);
+    unsafe {
+        for (offset, byte) in text.iter().take(length).enumerate() {
+            area.add(offset).write_volatile(*byte);
+        }
+        page.add(shared::VALUES).write_volatile(kind);
+        page.add(shared::VALUES + 1).write_volatile(length as u64);
+        for (index, word) in arguments.iter().enumerate() {
+            page.add(shared::ARGUMENTS + index).write_volatile(*word);
+        }
+        page.add(shared::STATUS)
+            .write_volatile(crate::native::EFFECT_STATUS);
+        yield_to_supervisor();
+        let status = page.add(shared::STATUS).read_volatile();
+        if status != 0 {
+            return Err(status);
+        }
+        let value = page.add(shared::VALUES + 1).read_volatile();
+        let reply = (page.add(shared::VALUES + 2).read_volatile() as usize)
+            .min(crate::native::EFFECT_BYTES);
+        for (offset, byte) in out.iter_mut().take(reply).enumerate() {
+            *byte = area.add(offset).read_volatile();
+        }
+        Ok([value, reply as u64])
     }
 }
 

@@ -14,4 +14,5 @@
 (def turn (fn () (if (< (look-mean 0 6 20 10) (look-mean 44 6 20 10)) '(left) '(right))))
 (def choose (fn () (if (< (field 4 100) 30) '(down) (if (stuck) (turn) '(up ctrl)))))
 (def explain (fn () (if (< (field 4 100) 30) "hurt, backing off" (if (stuck) "stuck, turning to the darker side" "open ahead, forward and firing"))))
-(def play-step (fn () (begin (def play-reason (explain)) (def choice (choose)) (remember) choice)))
+(def note (fn () (file-append "play.log" (text-concat (look-line) (text-concat " | " (text-concat play-reason "\n"))))))
+(def play-step (fn () (begin (def play-reason (explain)) (def choice (choose)) (remember) (note) choice)))

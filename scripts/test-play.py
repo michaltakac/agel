@@ -67,6 +67,27 @@ with tempfile.TemporaryDirectory(prefix="agel-play-", dir="/tmp") as directory:
         assert len(steps) == STEPS, f"expected {STEPS} steps, saw {steps!r} in {report[-2000:]!r}"
         assert any("up" in keys or "ctrl" in keys for _, keys in steps), report[-2000:]
         assert "doom: state map 1 " in report, "the agent never saw the engine's state"
+        # A typed form goes to the game while its window holds the keyboard;
+        # a click on the workshop gives the keyboard back.
+        def pointer(events):
+            machine.command("input-send-event", {"events": events})
+            time.sleep(0.3)
+        pointer([{"type": "rel", "data": {"axis": "x", "value": -4000}},
+                 {"type": "rel", "data": {"axis": "y", "value": -4000}}])
+        pointer([{"type": "rel", "data": {"axis": "x", "value": 300}},
+                 {"type": "rel", "data": {"axis": "y", "value": 700}}])
+        pointer([{"type": "btn", "data": {"down": True, "button": "left"}}])
+        pointer([{"type": "btn", "data": {"down": False, "button": "left"}}])
+        machine.until_prompt()
+        # The program kept its own log in the filesystem region, through the
+        # file words, and reads it back itself: one line per step.
+        lines = machine.submit('(text-bytes (file-read "play.log"))')
+        assert re.search(r"\r\n(\d+)\r\n", lines), lines
+        head = machine.submit('(text-slice (file-read "play.log") 0 24)')
+        assert '"doom: state map 1 x ' in head, head
+        listing = machine.submit("(file-list)")
+        assert '"play.log"' in listing, listing
+        assert "play.log" in machine.submit(":fs-ls /"), "the log is not in the region"
         Path("target/play-in-os.png").write_bytes(machine.frame())
     finally:
         machine.close()

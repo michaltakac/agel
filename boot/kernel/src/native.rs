@@ -43,6 +43,36 @@ pub const LOOK_BYTES: usize = LOOK_SHADES_OFFSET + LOOK_COLUMNS * LOOK_ROWS;
 /// The longest text a program may ask a model, and the longest answer.
 pub const REQUEST_BYTES: usize = 200;
 
+/// The effects a program in the OS may ask of the desktop, through the
+/// session's port: the request is written to the shared page with this
+/// status word, the world yields, the desktop answers in place, the world
+/// resumes. The text of a request or an answer lives in the observation
+/// area and is bounded by it.
+#[cfg_attr(not(feature = "isolation-selftest"), allow(dead_code))]
+pub const EFFECT_STATUS: u64 = 2;
+pub const EFFECT_FILE_READ: u64 = 1;
+pub const EFFECT_FILE_WRITE: u64 = 2;
+pub const EFFECT_FILE_APPEND: u64 = 3;
+pub const EFFECT_FILE_LIST: u64 = 4;
+pub const EFFECT_CLOCK: u64 = 5;
+pub const EFFECT_LOG: u64 = 6;
+pub const EFFECT_BYTES: usize = 2048;
+/// What one write may carry, so that a read of it fits the text arena.
+pub const EFFECT_TEXT_BYTES: usize = 1024;
+/// A program the language asks the desktop to start, as `:exec` would.
+pub const EXEC_BYTES: usize = 200;
+
+/// The session's way out to the desktop: given the shared page, an effect
+/// kind, three words and the request's text, it answers two words and the
+/// reply's text, or the error number the desktop gave.
+pub type Port = unsafe fn(
+    page: *mut u64,
+    kind: u64,
+    arguments: [u64; 3],
+    text: &[u8],
+    out: &mut [u8; EFFECT_BYTES],
+) -> Result<[u64; 2], u64>;
+
 /// What the session holds for the language outside its transactional
 /// banks: the observation, and the last answer a model gave. A world reaches
 /// it through a pointer the session sets before every evaluation.
@@ -52,6 +82,10 @@ struct Context {
     reply: [u8; REQUEST_BYTES],
     reply_length: u8,
     reply_number: u32,
+    /// The shared page and the port out to the desktop; none where the
+    /// session has no desktop, and the effect words then answer an error.
+    page: *mut u64,
+    port: Option<Port>,
 }
 
 impl Context {
@@ -60,6 +94,8 @@ impl Context {
         reply: [0; REQUEST_BYTES],
         reply_length: 0,
         reply_number: 0,
+        page: core::ptr::null_mut(),
+        port: None,
     };
 }
 
@@ -86,6 +122,7 @@ pub const LIMITS: &[(&str, u64)] = &[
     ("look-columns", LOOK_COLUMNS as u64),
     ("look-rows", LOOK_ROWS as u64),
     ("request", REQUEST_BYTES as u64),
+    ("effect-text", EFFECT_TEXT_BYTES as u64),
 ];
 
 /// A result as the frontends see it. Data values (strings, symbols, lists,
@@ -356,6 +393,10 @@ struct World {
     request: [u8; REQUEST_BYTES],
     request_length: u8,
     request_number: u32,
+    /// A program the language asked the desktop to start, taken by the
+    /// desktop after the form commits; rolls back with the world.
+    exec: [u8; EXEC_BYTES],
+    exec_length: u8,
     /// The owning session's context, set before every evaluation; null in a
     /// world that has none, where the `look` words answer with an error.
     context: *const Context,
@@ -375,6 +416,8 @@ impl World {
         request: [0; REQUEST_BYTES],
         request_length: 0,
         request_number: 0,
+        exec: [0; EXEC_BYTES],
+        exec_length: 0,
         context: core::ptr::null(),
     };
 
@@ -463,6 +506,37 @@ impl Session {
             result_length: 0,
             context: Context::EMPTY,
         }
+    }
+
+    /// Connect the session to its desktop: the shared page the effect words
+    /// write to and the port that yields through it.
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn attach(&mut self, page: *mut u64, port: Port) {
+        self.context.page = page;
+        self.context.port = Some(port);
+    }
+
+    /// The program the language asked to start, if any, taken: the desktop
+    /// starts it as `:exec` would, once, after the form that asked commits.
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn take_exec(&mut self) -> Option<[u8; EXEC_BYTES]> {
+        if self.active.exec_length == 0 {
+            return None;
+        }
+        let mut line = [0; EXEC_BYTES];
+        let length = usize::from(self.active.exec_length);
+        line[..length].copy_from_slice(&self.active.exec[..length]);
+        self.active.exec_length = 0;
+        Some(line)
+    }
+
+    /// The length of the line `take_exec` answered, which the array does not
+    /// carry: the bytes after it are zero.
+    #[cfg(any(feature = "isolation-selftest", test))]
+    pub fn exec_length(line: &[u8; EXEC_BYTES]) -> usize {
+        line.iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(EXEC_BYTES)
     }
 
     /// Give the language something to look at: the bytes the desktop
@@ -990,6 +1064,13 @@ enum Builtin {
     LookField,
     ModelRequest,
     ModelResult,
+    FileRead,
+    FileWrite,
+    FileAppend,
+    FileList,
+    Clock,
+    Log,
+    Exec,
 }
 
 #[derive(Clone, Copy)]
@@ -1936,6 +2017,9 @@ fn apply_builtin(
     if let Some(result) = look_builtin(builtin, arguments, world)? {
         return Ok(RuntimeValue::Scalar(result));
     }
+    if let Some(result) = effect_builtin(builtin, arguments, world)? {
+        return Ok(RuntimeValue::Scalar(result));
+    }
     if let Some(result) = data_builtin(builtin, arguments, world, fuel)? {
         return Ok(RuntimeValue::Scalar(result));
     }
@@ -2302,6 +2386,13 @@ fn builtin_for_name(name: &[u8]) -> Option<Builtin> {
         b"look-field" => Builtin::LookField,
         b"model-request" => Builtin::ModelRequest,
         b"model-result" => Builtin::ModelResult,
+        b"file-read" => Builtin::FileRead,
+        b"file-write" => Builtin::FileWrite,
+        b"file-append" => Builtin::FileAppend,
+        b"file-list" => Builtin::FileList,
+        b"clock" => Builtin::Clock,
+        b"console-log" => Builtin::Log,
+        b"exec" => Builtin::Exec,
         _ => return None,
     })
 }
@@ -3505,3 +3596,126 @@ fn look_builtin(
         _ => return Ok(None),
     }))
 }
+
+/// The words that reach outside the world through the desktop: files in
+/// the filesystem region (`file-read`, `file-write`, `file-append`,
+/// `file-list`), the clock, the console (`console-log`), and a program to start
+/// (`exec`, taken by the desktop after the form commits). Each is one
+/// request through the session's port; a world with no desktop answers an
+/// error, and the desktop's refusals come back as errors too.
+fn effect_builtin(
+    builtin: Builtin,
+    arguments: &[RuntimeValue],
+    world: &mut World,
+) -> Result<Option<Scalar>, Error> {
+    let kind = match builtin {
+        Builtin::FileRead => EFFECT_FILE_READ,
+        Builtin::FileWrite => EFFECT_FILE_WRITE,
+        Builtin::FileAppend => EFFECT_FILE_APPEND,
+        Builtin::FileList => EFFECT_FILE_LIST,
+        Builtin::Clock => EFFECT_CLOCK,
+        Builtin::Log => EFFECT_LOG,
+        Builtin::Exec => {
+            let [line] = arguments else {
+                return Err(Error("exec expects one string"));
+            };
+            let (start, len) = text_of(line)?;
+            if len == 0 || usize::from(len) > EXEC_BYTES {
+                return Err(Error("exec line exceeds the exec limit"));
+            }
+            let bytes = world.heap.bytes(start, len);
+            let mut copy = [0_u8; EXEC_BYTES];
+            copy[..bytes.len()].copy_from_slice(bytes);
+            world.exec = copy;
+            world.exec_length = len as u8;
+            return Ok(Some(Scalar::Bool(true)));
+        }
+        _ => return Ok(None),
+    };
+    // The request's text: a path, a path then its content, or a line.
+    let mut text = [0_u8; EFFECT_BYTES];
+    let mut length = 0;
+    let mut words = [0_u64; 3];
+    let push = |text: &mut [u8; EFFECT_BYTES], length: &mut usize, value: &RuntimeValue| {
+        let (start, len) = text_of(value)?;
+        let bytes = world.heap.bytes(start, len);
+        if *length + bytes.len() > EFFECT_TEXT_BYTES + PAYLOAD_LIMIT {
+            return Err(Error("effect text exceeds the effect limit"));
+        }
+        text[*length..*length + bytes.len()].copy_from_slice(bytes);
+        *length += bytes.len();
+        Ok(bytes.len() as u64)
+    };
+    match (builtin, arguments) {
+        (Builtin::FileRead, [path]) | (Builtin::FileList, [path]) => {
+            words[0] = push(&mut text, &mut length, path)?;
+        }
+        (Builtin::FileList, []) | (Builtin::Clock, []) => {}
+        (Builtin::FileWrite, [path, content]) | (Builtin::FileAppend, [path, content]) => {
+            words[0] = push(&mut text, &mut length, path)?;
+            let (_, len) = text_of(content)?;
+            if usize::from(len) > EFFECT_TEXT_BYTES {
+                return Err(Error("file text exceeds the effect limit"));
+            }
+            words[1] = push(&mut text, &mut length, content)?;
+        }
+        (Builtin::Log, [line]) => {
+            words[0] = push(&mut text, &mut length, line)?;
+        }
+        _ => return Err(Error("effect word given the wrong arguments")),
+    }
+    let context = world.context()?;
+    let Some(port) = context.port else {
+        return Err(Error("no desktop to ask for effects here"));
+    };
+    let mut out = [0_u8; EFFECT_BYTES];
+    // Safety: the port is the desktop's, set with the page it writes to.
+    let answer = unsafe { port(context.page, kind, words, &text[..length], &mut out) };
+    let [value, reply_length] = answer.map_err(|number| match number {
+        2 => Error("no such file"),
+        13 => Error("the desktop refused the effect"),
+        28 => Error("the filesystem is full"),
+        38 => Error("the desktop has no service for that effect"),
+        _ => Error("the effect failed"),
+    })?;
+    let reply_length = (reply_length as usize).min(EFFECT_BYTES);
+    Ok(Some(match builtin {
+        Builtin::FileRead => {
+            let (start, len) = world.heap.alloc_text(&out[..reply_length])?;
+            Scalar::Text { start, len }
+        }
+        Builtin::FileList => {
+            // One name per line, answered as a list of strings, last first
+            // so the first name heads the list.
+            let mut head = Scalar::Nil;
+            let names = &out[..reply_length];
+            let mut end = names.len();
+            while end > 0 {
+                let start = names[..end]
+                    .iter()
+                    .rposition(|byte| *byte == b'\n')
+                    .map_or(0, |at| at + 1);
+                if start < end {
+                    let (text_start, len) = world.heap.alloc_text(&names[start..end])?;
+                    head = Scalar::List(world.heap.cons(
+                        Scalar::Text {
+                            start: text_start,
+                            len,
+                        },
+                        head,
+                    )?);
+                }
+                end = start.saturating_sub(1);
+                if start == 0 {
+                    break;
+                }
+            }
+            head
+        }
+        Builtin::Log => Scalar::Nil,
+        _ => Scalar::Int(value as i64),
+    }))
+}
+
+/// A path's share of the request text, over the content's.
+const PAYLOAD_LIMIT: usize = 256;

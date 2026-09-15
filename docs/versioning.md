@@ -334,6 +334,10 @@ promise.
   deciding through six new native words (`look`, `look-mean`, `look-line`,
   `look-field`, `model-request`, `model-result`); `crates/agel-play` is now
   only the host bridge that answers a model request the Agel loop makes.
+  `v0.2.75` gives Agel in the OS its effects: `file-read`, `file-write`,
+  `file-append`, `file-list`, `clock`, `console-log` and `exec`, answered by the
+  desktop through a synchronous port in the evaluator's shared page; the
+  DOOM agent keeps its own `play.log`.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

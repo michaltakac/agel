@@ -16,10 +16,34 @@ pub struct EvaluatorReply {
     pub error: bool,
 }
 
+/// A request with no one to answer the language's effects: an effect word
+/// evaluated here is refused with "no service" and evaluation goes on.
 pub fn request(
     evaluator: &mut arch::Domain,
     command: u64,
     source: &[u8],
+) -> Result<EvaluatorReply, &'static str> {
+    request_with(
+        evaluator,
+        command,
+        source,
+        &mut |evaluator: &mut arch::Domain| {
+            let core = evaluator.core();
+            core.write_shared(shared::STATUS, 38);
+            core.write_shared(shared::VALUES + 1, 0);
+            core.write_shared(shared::VALUES + 2, 0);
+        },
+    )
+}
+
+/// A request whose effects `answer` performs: whenever the world yields
+/// with the effect status in its page, `answer` reads the request from the
+/// page, writes the reply in place, and the world is entered again to go on.
+pub fn request_with(
+    evaluator: &mut arch::Domain,
+    command: u64,
+    source: &[u8],
+    answer: &mut dyn FnMut(&mut arch::Domain),
 ) -> Result<EvaluatorReply, &'static str> {
     if source.len() > PAYLOAD_BYTES {
         return Err("request exceeds shared evaluator payload");
@@ -31,20 +55,28 @@ pub fn request(
         .core()
         .write_shared(shared::ARGUMENTS, source.len() as u64);
     evaluator.core().stage_command(command);
-    match evaluator.run() {
-        Stop::Replied => {}
-        Stop::Faulted(fault) => {
-            crate::kprint!(
-                "native evaluator contained: {} at {:#x}; restart required\n",
-                fault.name(),
-                fault.pc
-            );
-            return Err("domain fault; restart required");
+    loop {
+        match evaluator.run() {
+            Stop::Replied => {}
+            Stop::Faulted(fault) => {
+                crate::kprint!(
+                    "native evaluator contained: {} at {:#x}; restart required\n",
+                    fault.name(),
+                    fault.pc
+                );
+                return Err("domain fault; restart required");
+            }
+            Stop::BudgetExhausted => {
+                crate::kprint!(
+                    "native evaluator contained: tick budget exhausted; restart required\n"
+                );
+                return Err("tick budget exhausted; restart required");
+            }
         }
-        Stop::BudgetExhausted => {
-            crate::kprint!("native evaluator contained: tick budget exhausted; restart required\n");
-            return Err("tick budget exhausted; restart required");
+        if evaluator.core().read_shared(shared::STATUS) != crate::native::EFFECT_STATUS {
+            break;
         }
+        answer(evaluator);
     }
 
     let error = evaluator.core().read_shared(shared::STATUS) != 0;
