@@ -1,5 +1,5 @@
 use crate::agent::Protocol;
-use crate::canon::{Canon, Encoder};
+use crate::canon::{Canon, CanonError, Decoder, Encoder};
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::{format, string::String, vec, vec::Vec};
@@ -258,6 +258,31 @@ fn escape_string(value: &str) -> String {
         .collect()
 }
 
+impl Builtin {
+    /// The name a builtin is bound to in a fresh world, or `host/N` for
+    /// the N-th host word: how an encoding names it.
+    fn canonical_name(self) -> String {
+        if let Self::Host(index) = self {
+            return format!("host/{index}");
+        }
+        crate::world::SEED_BUILTINS
+            .iter()
+            .find(|(_, builtin)| *builtin == self)
+            .map(|(name, _)| String::from(*name))
+            .unwrap_or_else(|| format!("{self:?}"))
+    }
+
+    fn from_canonical_name(name: &str) -> Option<Self> {
+        if let Some(index) = name.strip_prefix("host/") {
+            return index.parse().ok().map(Self::Host);
+        }
+        crate::world::SEED_BUILTINS
+            .iter()
+            .find(|(seed, _)| *seed == name)
+            .map(|(_, builtin)| *builtin)
+    }
+}
+
 impl Canon for Expr {
     fn canon(&self, out: &mut Encoder) {
         match self {
@@ -288,6 +313,22 @@ impl Canon for Expr {
                 out.option(module.as_ref());
             }
         }
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        Ok(match input.tag()? {
+            "nil" => Self::Nil,
+            "bool" => Self::Bool(input.bool()?),
+            "int" => Self::Int(input.i64()?),
+            "string" => Self::String(input.text()?),
+            "symbol" => Self::Symbol(input.text()?),
+            "list" => Self::List(input.items()?),
+            "scoped" => Self::ScopedSymbol {
+                name: input.text()?,
+                module: input.option()?,
+            },
+            other => return input.fail(format!("not a syntax tag: {other}")),
+        })
     }
 }
 
@@ -336,9 +377,45 @@ impl Canon for Value {
             Self::Closure(closure) => closure.canon(out),
             Self::Builtin(builtin) => {
                 out.tag("builtin");
-                out.text(&format!("{builtin:?}"));
+                out.text(&builtin.canonical_name());
             }
         }
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        Ok(match input.peek_tag()? {
+            "protocol" => Self::Protocol(Protocol::decode(input)?),
+            "capability" => Self::Capability(Capability::decode(input)?),
+            "fn" => Self::Closure(Arc::new(Closure::decode(input)?)),
+            _ => match input.tag()? {
+                "nil" => Self::Nil,
+                "bool" => Self::Bool(input.bool()?),
+                "int" => Self::Int(input.i64()?),
+                "string" => Self::String(input.text()?),
+                "symbol" => Self::Symbol(input.text()?),
+                "list" => Self::List(input.items()?),
+                "map" => {
+                    let count = input.seq()?;
+                    let mut entries = Vec::with_capacity(count.min(4096));
+                    for _ in 0..count {
+                        let key = Self::decode(input)?;
+                        let value = Self::decode(input)?;
+                        entries.push((key, value));
+                    }
+                    Self::Map(entries)
+                }
+                "agent" => Self::Agent(input.u64()?),
+                "module" => Self::Module(input.text()?),
+                "builtin" => {
+                    let name = input.text()?;
+                    match Builtin::from_canonical_name(&name) {
+                        Some(builtin) => Self::Builtin(builtin),
+                        None => return input.fail(format!("not a builtin: {name}")),
+                    }
+                }
+                other => return input.fail(format!("not a value tag: {other}")),
+            },
+        })
     }
 }
 
@@ -351,6 +428,16 @@ impl Canon for Capability {
         out.u64(self.issuer_world);
         out.u64(self.epoch);
     }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("capability")?;
+        let id = input.u64()?;
+        let kind = input.text()?;
+        let scope = input.text()?;
+        let issuer_world = input.u64()?;
+        let epoch = input.u64()?;
+        Ok(Self::new(id, kind, scope, issuer_world, epoch))
+    }
 }
 
 impl Canon for Closure {
@@ -360,6 +447,16 @@ impl Canon for Closure {
         out.items(self.body.iter());
         self.env.canon(out);
         out.option(self.module.as_ref());
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("fn")?;
+        Ok(Self {
+            params: input.items()?,
+            body: input.items()?,
+            env: Env::decode(input)?,
+            module: input.option()?,
+        })
     }
 }
 
@@ -380,6 +477,24 @@ impl Canon for Env {
             out.entries(current.bindings.iter());
             frame = current.parent.as_deref();
         }
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("env")?;
+        let count = input.seq()?;
+        let mut frames = Vec::with_capacity(count.min(4096));
+        for _ in 0..count {
+            frames.push(input.entries::<Value>()?);
+        }
+        // Innermost first in the bytes; the chain is built from the outside.
+        let mut env = None;
+        for bindings in frames.into_iter().rev() {
+            env = Some(Self {
+                bindings: Arc::new(bindings),
+                parent: env.map(Arc::new),
+            });
+        }
+        Ok(env.unwrap_or_default())
     }
 }
 

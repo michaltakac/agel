@@ -529,7 +529,7 @@ mod canonical_digest {
     /// The content digest of a fresh world, pinned: the canonical encoding
     /// changes only with its version prefix, and this vector catches an
     /// accidental change to either.
-    const FRESH_WORLD: &str = "44a2357b2daf253d400069de6ab46390b76871619e8ad9923fbee7d2b0fe9ebe";
+    const FRESH_WORLD: &str = "0865eb17787f00e85f79d05ba6fa95abdf46ce50e899cd0b2e7daec4b678f888";
 
     #[test]
     fn a_fresh_world_has_the_pinned_digest() {

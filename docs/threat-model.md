@@ -1851,6 +1851,28 @@ produced or run there.
   `agel` is a line and status 12. Before, both were a spin the supervisor
   stopped as an exhausted tick budget, which said nothing about the cause.
 
+## v0.2.83
+
+- **A world file is authority restored, not granted:** it carries the
+  world's identity and authority epoch, so the capabilities that world
+  issued permit in the restored one; that is what continuing a session
+  means, and it means the file is the world. It is the operator's file in
+  the operator's namespace, unsigned; whoever can write it can define what
+  the next run believes, as they could by typing.
+- **Decoding refuses, it never guesses:** a wrong marker, a length past
+  the end, a sequence claiming more than the bytes remaining, text that is
+  not UTF-8, an unknown builtin, kind, policy or status, bytes after the
+  state, or another version each end the read with the byte offset. A
+  claimed count reserves at most a bounded number of items before its
+  bytes are read.
+- **A delta is over a base the process built:** the same library, the
+  same host words, the same capability kinds. A different runtime applies
+  it to a different base; the file's version header is the only check,
+  and it names the encoding, not the library.
+- **Nothing runs on decode:** closures come back as data, agents as
+  records with their mailboxes; the first evaluation after a restore is
+  the operator's next line.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

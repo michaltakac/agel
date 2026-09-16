@@ -13,14 +13,14 @@ dependencies = [
 
 [[package]]
 name = "agel-core"
-version = "0.2.82"
+version = "0.2.83"
 dependencies = [
  "agel-integrity",
 ]
 
 [[package]]
 name = "agel-integrity"
-version = "0.2.82"
+version = "0.2.83"
 
 [[package]]
 name = "agel-libc"
@@ -35,7 +35,7 @@ version = "0.1.0"
 
 [[package]]
 name = "agel-stdlib"
-version = "0.2.82"
+version = "0.2.83"
 dependencies = [
  "agel-core",
 ]

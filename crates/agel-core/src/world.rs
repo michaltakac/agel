@@ -1,5 +1,5 @@
 use crate::agent::{Agent, Event};
-use crate::canon::{Canon, Encoder};
+use crate::canon::{Canon, CanonError, Decoder, Encoder};
 use crate::eval::{eval_all, EvalError};
 use crate::macro_expander::MacroDef;
 use crate::model::{
@@ -127,50 +127,54 @@ pub(crate) struct State {
     pub next_model_request_id: u64,
 }
 
+/// The seed builtins by the names a fresh world binds them to: the
+/// evaluator's own words, which an encoding names by these.
+pub(crate) const SEED_BUILTINS: &[(&str, Builtin)] = &[
+    ("+", Builtin::Add),
+    ("-", Builtin::Subtract),
+    ("*", Builtin::Multiply),
+    ("/", Builtin::Divide),
+    ("=", Builtin::Equal),
+    ("<", Builtin::LessThan),
+    ("list", Builtin::List),
+    ("cons", Builtin::Cons),
+    ("car", Builtin::Car),
+    ("cdr", Builtin::Cdr),
+    ("dict", Builtin::Dict),
+    ("get", Builtin::Get),
+    ("has-key?", Builtin::HasKey),
+    ("assoc", Builtin::Assoc),
+    ("dissoc", Builtin::Dissoc),
+    ("keys", Builtin::Keys),
+    ("count", Builtin::Count),
+    ("type-of", Builtin::TypeOf),
+    ("text-bytes", Builtin::TextBytes),
+    ("text-byte", Builtin::TextByte),
+    ("text-slice", Builtin::TextSlice),
+    ("text-concat", Builtin::TextConcat),
+    ("text-symbol", Builtin::TextSymbol),
+    ("apply", Builtin::Apply),
+    ("spawn", Builtin::Spawn),
+    ("send", Builtin::Send),
+    ("recv", Builtin::Receive),
+    ("run", Builtin::Run),
+    ("step", Builtin::Step),
+    ("agent-info", Builtin::AgentInfo),
+    ("event-log", Builtin::EventLog),
+    ("pending-turns", Builtin::PendingTurns),
+    ("model-request", Builtin::ModelRequest),
+    ("pending-model-requests", Builtin::PendingModelRequests),
+    ("signal", Builtin::Signal),
+    ("request-capability", Builtin::RequestCapability),
+    ("capability-kind", Builtin::CapabilityKind),
+    ("capability-scope", Builtin::CapabilityScope),
+];
+
 impl Default for State {
     fn default() -> Self {
         let mut bindings = BTreeMap::new();
-        for (name, builtin) in [
-            ("+", Builtin::Add),
-            ("-", Builtin::Subtract),
-            ("*", Builtin::Multiply),
-            ("/", Builtin::Divide),
-            ("=", Builtin::Equal),
-            ("<", Builtin::LessThan),
-            ("list", Builtin::List),
-            ("cons", Builtin::Cons),
-            ("car", Builtin::Car),
-            ("cdr", Builtin::Cdr),
-            ("dict", Builtin::Dict),
-            ("get", Builtin::Get),
-            ("has-key?", Builtin::HasKey),
-            ("assoc", Builtin::Assoc),
-            ("dissoc", Builtin::Dissoc),
-            ("keys", Builtin::Keys),
-            ("count", Builtin::Count),
-            ("type-of", Builtin::TypeOf),
-            ("text-bytes", Builtin::TextBytes),
-            ("text-byte", Builtin::TextByte),
-            ("text-slice", Builtin::TextSlice),
-            ("text-concat", Builtin::TextConcat),
-            ("text-symbol", Builtin::TextSymbol),
-            ("apply", Builtin::Apply),
-            ("spawn", Builtin::Spawn),
-            ("send", Builtin::Send),
-            ("recv", Builtin::Receive),
-            ("run", Builtin::Run),
-            ("step", Builtin::Step),
-            ("agent-info", Builtin::AgentInfo),
-            ("event-log", Builtin::EventLog),
-            ("pending-turns", Builtin::PendingTurns),
-            ("model-request", Builtin::ModelRequest),
-            ("pending-model-requests", Builtin::PendingModelRequests),
-            ("signal", Builtin::Signal),
-            ("request-capability", Builtin::RequestCapability),
-            ("capability-kind", Builtin::CapabilityKind),
-            ("capability-scope", Builtin::CapabilityScope),
-        ] {
-            bindings.insert(name.into(), Value::Builtin(builtin));
+        for (name, builtin) in SEED_BUILTINS {
+            bindings.insert((*name).into(), Value::Builtin(*builtin));
         }
         Self {
             bindings,
@@ -804,6 +808,22 @@ impl Canon for Module {
             out.text(name);
         }
     }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("module")?;
+        let bindings = input.entries()?;
+        let macros = input.entries()?;
+        let count = input.seq()?;
+        let mut exports = BTreeSet::new();
+        for _ in 0..count {
+            exports.insert(input.text()?);
+        }
+        Ok(Self {
+            bindings,
+            macros,
+            exports,
+        })
+    }
 }
 
 impl Canon for State {
@@ -812,6 +832,25 @@ impl Canon for State {
         out.entries(self.bindings.iter());
         out.entries(self.macros.iter());
         out.entries(self.modules.iter());
+        self.canon_tail(out);
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("state")?;
+        let mut state = Self {
+            bindings: input.entries()?,
+            macros: input.entries()?,
+            modules: input.entries()?,
+            ..Self::default()
+        };
+        state.decode_tail(input)?;
+        Ok(state)
+    }
+}
+
+impl State {
+    /// Everything after the three tables, whole in either form.
+    fn canon_tail(&self, out: &mut Encoder) {
         out.seq(self.agents.len());
         for (id, agent) in &self.agents {
             out.u64(*id);
@@ -828,6 +867,157 @@ impl Canon for State {
             record.canon(out);
         }
         out.u64(self.next_model_request_id);
+    }
+
+    fn decode_tail(&mut self, input: &mut Decoder<'_>) -> Result<(), CanonError> {
+        let count = input.seq()?;
+        self.agents = BTreeMap::new();
+        for _ in 0..count {
+            let id = input.u64()?;
+            self.agents.insert(id, Agent::decode(input)?);
+        }
+        self.ready_queue = VecDeque::from(input.items::<u64>()?);
+        self.events = input.items()?;
+        self.next_event_sequence = input.u64()?;
+        self.next_agent_id = input.u64()?;
+        self.next_syntax_id = input.u64()?;
+        let count = input.seq()?;
+        self.model_requests = BTreeMap::new();
+        for _ in 0..count {
+            let id = input.u64()?;
+            self.model_requests.insert(id, ModelRecord::decode(input)?);
+        }
+        self.next_model_request_id = input.u64()?;
+        Ok(())
+    }
+
+    /// The state as a delta over `base`: of the three tables only the
+    /// entries `base` lacks or holds differently, the rest whole. What a
+    /// session added to a freshly built world, small where the whole is
+    /// not; an entry removed from `base` is not expressible and stays.
+    fn canon_over(&self, base: &Self, out: &mut Encoder) {
+        out.tag("delta");
+        let bindings: Vec<_> = self
+            .bindings
+            .iter()
+            .filter(|(name, value)| base.bindings.get(*name) != Some(value))
+            .collect();
+        out.entries(bindings.into_iter());
+        let macros: Vec<_> = self
+            .macros
+            .iter()
+            .filter(|(name, value)| base.macros.get(*name) != Some(value))
+            .collect();
+        out.entries(macros.into_iter());
+        let modules: Vec<_> = self
+            .modules
+            .iter()
+            .filter(|(name, value)| base.modules.get(*name) != Some(value))
+            .collect();
+        out.entries(modules.into_iter());
+        self.canon_tail(out);
+    }
+
+    /// `base` with a delta applied.
+    fn decode_over(mut base: Self, input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("delta")?;
+        base.bindings.extend(input.entries::<Value>()?);
+        base.macros.extend(input.entries::<MacroDef>()?);
+        base.modules.extend(input.entries::<Module>()?);
+        base.decode_tail(input)?;
+        Ok(base)
+    }
+}
+
+/// The version a world file's header names: bumped with the encoding.
+const WORLD_FILE_VERSION: u64 = 2;
+
+impl World {
+    fn canonical_header(&self, out: &mut Encoder) {
+        out.tag("agel-world");
+        out.u64(WORLD_FILE_VERSION);
+        out.u64(self.revision);
+        out.u64(self.next_revision);
+        out.u64(self.next_capability_id);
+        out.u64(self.world_id);
+        out.u64(self.authority_epoch);
+    }
+
+    fn decode_header(input: &mut Decoder<'_>) -> Result<[u64; 5], CanonError> {
+        input.expect("agel-world")?;
+        let version = input.u64()?;
+        if version != WORLD_FILE_VERSION {
+            return input.fail(format!(
+                "world file version {version}; this runtime reads {WORLD_FILE_VERSION}"
+            ));
+        }
+        Ok([
+            input.u64()?,
+            input.u64()?,
+            input.u64()?,
+            input.u64()?,
+            input.u64()?,
+        ])
+    }
+
+    fn with_header(mut self, header: [u64; 5], state: State) -> Self {
+        let [revision, next_revision, next_capability_id, world_id, authority_epoch] = header;
+        self.state = state;
+        self.revision = revision;
+        self.next_revision = next_revision;
+        self.next_capability_id = next_capability_id;
+        self.world_id = world_id;
+        self.authority_epoch = authority_epoch;
+        self.history.clear();
+        self
+    }
+
+    /// The world as a file: a versioned header (revision, capability and
+    /// authority counters, identity) and the canonical encoding of the
+    /// whole state, which `from_canonical` reads back. The identity is
+    /// kept so the capabilities it issued still permit.
+    pub fn to_canonical(&self) -> Vec<u8> {
+        let mut out = Encoder::new();
+        self.canonical_header(&mut out);
+        self.state.canon(&mut out);
+        out.finish()
+    }
+
+    /// A world from `to_canonical`'s bytes: no history, a fresh effect
+    /// journal, and a refusal, not a guess, at anything the encoder never
+    /// wrote or a version this runtime does not read.
+    pub fn from_canonical(bytes: &[u8]) -> Result<Self, CanonError> {
+        let mut input = Decoder::new(bytes);
+        let header = Self::decode_header(&mut input)?;
+        let state = State::decode(&mut input)?;
+        if !input.finished() {
+            return input.fail("bytes after the state");
+        }
+        Ok(Self::new(0).with_header(header, state))
+    }
+
+    /// The world as a delta over `base`, a world built the same way (the
+    /// same host words, the same library): of the bindings, macros and
+    /// modules only what differs, the rest whole. Small where the whole
+    /// world is not; `from_canonical_over` applies it to such a base.
+    pub fn to_canonical_over(&self, base: &Self) -> Vec<u8> {
+        let mut out = Encoder::new();
+        self.canonical_header(&mut out);
+        self.state.canon_over(&base.state, &mut out);
+        out.finish()
+    }
+
+    /// `base` with a delta from `to_canonical_over` applied, and the
+    /// delta's header: the world that was saved, over the library the base
+    /// carries.
+    pub fn from_canonical_over(base: Self, bytes: &[u8]) -> Result<Self, CanonError> {
+        let mut input = Decoder::new(bytes);
+        let header = Self::decode_header(&mut input)?;
+        let state = State::decode_over(base.state.clone(), &mut input)?;
+        if !input.finished() {
+            return input.fail("bytes after the state");
+        }
+        Ok(base.with_header(header, state))
     }
 }
 
@@ -852,7 +1042,7 @@ fn state_digest(state: &State) -> u64 {
 /// The digest that binds evidence to a world state: SHA-256 over the
 /// canonical encoding, versioned by its prefix.
 fn state_content_digest(state: &State) -> agel_integrity::Digest {
-    let mut bytes = b"agel-world-canonical-v1\0".to_vec();
+    let mut bytes = b"agel-world-canonical-v2\0".to_vec();
     bytes.extend_from_slice(&canonical_bytes(state));
     agel_integrity::sha256(&bytes)
 }

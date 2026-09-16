@@ -21,6 +21,7 @@ mod world;
 
 pub use agel_integrity::Digest;
 pub use agent::{AgentStatus, Event, EventKind, FailureAction, Protocol, TypeSpec};
+pub use canon::CanonError;
 pub use eval::{Condition, EvalError};
 pub use model::{
     EffectJournal, EffectJournalEntry, EffectJournalStatus, EffectKey, ModelCompletion,

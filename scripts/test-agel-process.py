@@ -158,6 +158,26 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         reply += until_text(machine, b"PROCESS ENDED", 30) + quiet(machine)
         assert "agel: end of input at revision 3" in reply, reply
         assert "process agel exited with status 0" in reply, reply
+        # A kept world: with --world NAME the world is read from the file at
+        # the start, as a delta over the freshly installed library, and
+        # written back after every transaction; a second run has what the
+        # first defined, an agent and its mailbox included.
+        reply = check(machine, ":exec agel -- --world kept.agel", "agel: new world, kept in kept.agel")
+        assert "PROCESS READING" in reply, reply
+        converse("(def x 40)", "=> 40")
+        converse('(def w (spawn "w"))', "=> #<agent:1>")
+        converse("(send w (quote hi))", "=>")
+        reply = check(machine, ":eof", "END OF INPUT")
+        reply += until_text(machine, b"PROCESS ENDED", 30) + quiet(machine)
+        assert "process agel exited with status 0" in reply, reply
+        check(machine, ":fs-ls /", "kept.agel")
+        reply = check(machine, ":exec agel -- --world kept.agel", "agel: world read from kept.agel at revision 4")
+        assert "PROCESS READING" in reply, reply
+        converse("(+ x 2)", "=> 42")
+        converse("(recv w)", "=> hi")
+        reply = check(machine, ":eof", "END OF INPUT")
+        reply += until_text(machine, b"PROCESS ENDED", 30) + quiet(machine)
+        assert "agel: end of input at revision 6" in reply, reply
         # A failing form: the transaction rolls back, the error is reported,
         # the status is 1.
         check(machine, '(file-write "bad.agel" "(def ok 1)\\n(/ 1 0)\\n")', "\r\n")

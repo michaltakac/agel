@@ -98,6 +98,18 @@ is never called during replay. See [`model-agents.md`](model-agents.md).
 The REPL offers `:snapshot NAME`, `:restore NAME`, and `:snapshots` for live
 branching. Restoring creates a fresh monotonic world revision.
 
+## World files (v0.2.83)
+
+`World::to_canonical` writes a world as its versioned canonical encoding
+and `World::from_canonical` reads it back with the same content digest,
+revision, identity and answers; `to_canonical_over(&base)` and
+`from_canonical_over(base, bytes)` do the same as a delta over a world
+built the same way — only the bindings, macros and modules the base lacks
+or holds differently, the rest whole — which is how the runtime loaded in
+the OS keeps a session within a file's size. Decoding refuses anything the
+encoder never wrote, naming the byte offset. A restored world has no
+history and a fresh effect journal.
+
 ## Demonstrations
 
 ```sh

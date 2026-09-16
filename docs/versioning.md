@@ -367,6 +367,11 @@ promise.
   `v0.2.82` gives processes the console as input — descriptor 0 reads what
   the operator types, `:eof` ends it — and makes `agel` without a file a
   session: each line a transaction in one world kept between lines.
+  `v0.2.83` keeps that world in a file: the canonical encoding decodes,
+  `World::to_canonical`/`from_canonical` and their delta forms are the
+  world-file API, and `agel --world NAME` reads the world at the start and
+  writes it back after every transaction; the digest prefix is
+  `agel-world-canonical-v2`.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

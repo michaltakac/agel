@@ -6,7 +6,10 @@
 //! the standard library, evaluates the file as one transaction and prints
 //! each form's value on its console descriptor. Without a file it is a
 //! session: it reads the console line by line, each line a transaction in
-//! the same world, until the end of input. It holds no authority the
+//! the same world, until the end of input. With `--world NAME` the world
+//! outlives the process: it is read from that file at the start, as a
+//! delta over the freshly installed library, and written back after every
+//! transaction. It holds no authority the
 //! supervisor did not hand it: a namespace, descriptors 1 and 2, pages at
 //! its break. Its effect words reach the namespace, the console, the clock
 //! and the program table through the process protocol, each behind a
@@ -524,10 +527,19 @@ extern "C" fn main() -> ! {
     let arguments = arguments();
     let mut stdlib = true;
     let mut file = None;
-    for argument in arguments.iter().skip(1) {
+    let mut world_file: Option<Vec<u8>> = None;
+    let mut arguments = arguments.into_iter().skip(1);
+    while let Some(argument) = arguments.next() {
         match argument.as_slice() {
             b"--no-stdlib" => stdlib = false,
-            _ => file = Some(argument.clone()),
+            b"--world" => match arguments.next() {
+                Some(name) => world_file = Some(name),
+                None => {
+                    say(2, "agel: --world needs a file name\n");
+                    process.exit(2);
+                }
+            },
+            _ => file = Some(argument),
         }
     }
     let source = match &file {
@@ -590,8 +602,46 @@ extern "C" fn main() -> ! {
             }
         }
     }
+    // A world file: the world saved by an earlier run, as a delta over a
+    // world built exactly this way, applied to a copy of this one.
+    let keeper = world_file.map(|name| {
+        let base = world.clone();
+        match read_file(&name) {
+            Ok(bytes) => match World::from_canonical_over(base.clone(), &bytes) {
+                Ok(saved) => {
+                    say(
+                        1,
+                        &format!(
+                            "agel: world read from {} at revision {}\n",
+                            String::from_utf8_lossy(&name),
+                            saved.revision()
+                        ),
+                    );
+                    world = saved;
+                }
+                Err(error) => {
+                    say(2, &format!("agel: world file: {error}\n"));
+                    process.exit(1);
+                }
+            },
+            Err(-2) => say(
+                1,
+                &format!(
+                    "agel: new world, kept in {}\n",
+                    String::from_utf8_lossy(&name)
+                ),
+            ),
+            Err(error) => {
+                process.write(2, b"agel: ");
+                process.write(2, &name);
+                process.report(2, b": error ", -error, b"\n");
+                process.exit((-error) as u64);
+            }
+        }
+        Keeper { name, base }
+    });
     let Some(source) = source else {
-        session(&mut world, &options)
+        session(&mut world, &options, keeper.as_ref())
     };
     match world.evaluate_with(&source, &options) {
         Ok(commit) => {
@@ -607,6 +657,9 @@ extern "C" fn main() -> ! {
                     commit.revision
                 ),
             );
+            if let Some(keeper) = &keeper {
+                keeper.save(&world);
+            }
             process.exit(0)
         }
         Err(error) => {
@@ -616,13 +669,65 @@ extern "C" fn main() -> ! {
     }
 }
 
+/// The file a world is kept in, and the base its delta is taken over.
+struct Keeper {
+    name: Vec<u8>,
+    base: World,
+}
+
+impl Keeper {
+    /// Write the world as a delta over the base, replacing the file; a
+    /// file that will not fit or cannot be written is reported, and the
+    /// world stays as it is in the process.
+    fn save(&self, world: &World) {
+        let bytes = world.to_canonical_over(&self.base);
+        let process = process();
+        let descriptor = process.open(
+            namespace_path_bytes(&self.name),
+            abi::O_WRONLY | abi::O_CREAT,
+        );
+        if descriptor < 0 {
+            process.write(2, b"agel: world file: open: error ");
+            process.report(2, b"", -descriptor, b"\n");
+            return;
+        }
+        let truncated = process.ftruncate(descriptor as u64, 0);
+        let written = if truncated < 0 {
+            truncated as u64
+        } else {
+            process.write(descriptor as u64, &bytes)
+        };
+        process.close(descriptor as u64);
+        if (written as i64) < 0 || written as usize != bytes.len() {
+            process.report(
+                2,
+                b"agel: world file: not written whole: ",
+                written as i64,
+                b" (the file may not fit the filesystem's limit)\n",
+            );
+        }
+    }
+}
+
+fn namespace_path_bytes(path: &[u8]) -> &[u8] {
+    let mut path = path;
+    while let Some(rest) = path.strip_prefix(b"/") {
+        path = rest;
+    }
+    if path.is_empty() {
+        b"."
+    } else {
+        path
+    }
+}
+
 /// The most bytes of one typed line the session keeps.
 const LINE_BYTES: usize = 4096;
 
 /// A session: lines from the console, each one transaction in the same
 /// world, values printed as they commit, an error leaving the world as it
 /// was; over at the end of input, with the world's revision as the report.
-fn session(world: &mut World, options: &EvaluationOptions) -> ! {
+fn session(world: &mut World, options: &EvaluationOptions, keeper: Option<&Keeper>) -> ! {
     let process = process();
     say(
         1,
@@ -654,6 +759,9 @@ fn session(world: &mut World, options: &EvaluationOptions) -> ! {
                 Ok(commit) => {
                     for value in &commit.values {
                         say(1, &format!("=> {value}\n"));
+                    }
+                    if let Some(keeper) = keeper {
+                        keeper.save(world);
                     }
                 }
                 Err(error) => say(2, &format!("agel: error: {error}\n")),

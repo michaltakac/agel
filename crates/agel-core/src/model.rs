@@ -1,7 +1,7 @@
-use crate::canon::{Canon, Encoder};
+use crate::canon::{fixed, Canon, CanonError, Decoder, Encoder};
 use agel_integrity::Digest;
 use alloc::collections::BTreeMap;
-use alloc::string::String;
+use alloc::{format, string::String};
 use core::fmt;
 
 pub type EffectKey = Digest;
@@ -167,6 +167,17 @@ impl Canon for ModelOutcome {
             }
         }
     }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        Ok(match input.tag()? {
+            "success" => Self::Success(input.text()?),
+            "failure" => Self::Failure {
+                kind: input.text()?,
+                message: input.text()?,
+            },
+            other => return input.fail(format!("not a model outcome: {other}")),
+        })
+    }
 }
 
 impl Canon for ModelRequestStatus {
@@ -179,6 +190,15 @@ impl Canon for ModelRequestStatus {
                 outcome.canon(out);
             }
         }
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        Ok(match input.tag()? {
+            "pending" => Self::Pending,
+            "dispatching" => Self::Dispatching,
+            "completed" => Self::Completed(ModelOutcome::decode(input)?),
+            other => return input.fail(format!("not a request status: {other}")),
+        })
     }
 }
 
@@ -194,6 +214,20 @@ impl Canon for ModelRequest {
         out.bytes(self.prompt_digest.as_bytes());
         out.bytes(self.effect_key.as_bytes());
     }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("request")?;
+        Ok(Self {
+            id: input.u64()?,
+            world_id: input.u64()?,
+            requester: input.u64()?,
+            reply_to: input.u64()?,
+            provider: input.text()?,
+            prompt: input.text()?,
+            prompt_digest: Digest::from_bytes(fixed::<32>(input, "a prompt digest")?),
+            effect_key: Digest::from_bytes(fixed::<32>(input, "an effect key")?),
+        })
+    }
 }
 
 impl Canon for ModelRecord {
@@ -201,5 +235,13 @@ impl Canon for ModelRecord {
         out.tag("record");
         self.request.canon(out);
         self.status.canon(out);
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("record")?;
+        Ok(Self {
+            request: ModelRequest::decode(input)?,
+            status: ModelRequestStatus::decode(input)?,
+        })
     }
 }

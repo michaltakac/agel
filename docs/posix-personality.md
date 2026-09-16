@@ -651,6 +651,14 @@ input at revision N` at `:eof`. A panic in a program that called
 `Process::report_panics` is written to descriptor 2 with status 101
 rather than spun on.
 
+`agel --world NAME` (v0.2.83) keeps the world in `NAME` in the
+namespace: read at the start as a delta over the freshly installed
+library (`agel: world read from NAME at revision N`, or `new world, kept
+in NAME`), written back after every committed transaction, so the next
+run continues the session, agents and mailboxes included; a file that
+will not fit the filesystem's 64 KiB or cannot be written is reported and
+the world stays in the process.
+
 `agel [--no-stdlib] FILE`: the file is read through the namespace `:exec`
 granted, the standard library is installed from the program's own image
 unless `--no-stdlib`, the file is evaluated as one transaction with fifty

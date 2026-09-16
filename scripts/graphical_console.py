@@ -150,11 +150,17 @@ class Machine:
                 raise RuntimeError("Input connection lost synchronization; restart the viewer")
             self.ready = False
             # Acknowledge each byte: a burst can overrun the emulated UART
-            # while the guest redraws the command bar between characters.
+            # while the guest redraws the command bar between characters. A
+            # program that runs while the operator types (a game, a process
+            # that outlived its command) prints between the echoes; its
+            # bytes are skipped until the echo, which is the byte sent.
             for byte in encoded:
                 self.serial.sendall(bytes([byte]))
-                if self.serial.recv(1) != bytes([byte]):
-                    raise RuntimeError("Agel input echo lost synchronization; restart the viewer")
+                skipped = 0
+                while self.serial.recv(1) != bytes([byte]):
+                    skipped += 1
+                    if skipped > 65536:
+                        raise RuntimeError("Agel input echo lost synchronization; restart the viewer")
             self.serial.sendall(b"\n")
             result = self.until_prompt(seconds).decode("utf-8", errors="replace")
             self.ready = True

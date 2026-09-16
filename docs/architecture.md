@@ -461,6 +461,12 @@ Each rung must be runnable and differentially testable against the rung below:
    builds its world without rollback history, since a history of whole
    states filled the window; a panic or an exhausted window is reported on
    the console and ends the process rather than spinning.
+78. **World files (v0.2.83):** the canonical encoding decodes, refusing
+   anything the encoder never wrote, so a world is a file: whole, or as a
+   delta over a world built the same way, which is how the loaded runtime
+   keeps a session — nine kilobytes over the library's megabyte, within
+   what a file holds — reading it at the start and writing it after every
+   transaction, the world's identity kept so its capabilities still permit.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

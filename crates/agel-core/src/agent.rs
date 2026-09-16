@@ -1,4 +1,4 @@
-use crate::canon::{Canon, Encoder};
+use crate::canon::{Canon, CanonError, Decoder, Encoder};
 use crate::value::{Capability, Closure};
 use crate::Value;
 use alloc::collections::{BTreeMap, VecDeque};
@@ -163,6 +163,14 @@ impl AgentStatus {
             Self::Stopped => "stopped",
         }
     }
+
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        match name {
+            "running" => Some(Self::Running),
+            "stopped" => Some(Self::Stopped),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +234,25 @@ impl EventKind {
             Self::ModelDeliveryDropped => "model-delivery-dropped",
         }
     }
+
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        const ALL: [EventKind; 13] = [
+            EventKind::Spawned,
+            EventKind::MessageQueued,
+            EventKind::TurnStarted,
+            EventKind::TurnCommitted,
+            EventKind::TurnFailed,
+            EventKind::Restarted,
+            EventKind::Stopped,
+            EventKind::Escalated,
+            EventKind::ModelRequested,
+            EventKind::ModelDispatchStarted,
+            EventKind::ModelCompleted,
+            EventKind::ModelFailed,
+            EventKind::ModelDeliveryDropped,
+        ];
+        ALL.into_iter().find(|kind| kind.name() == name)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -273,6 +300,14 @@ impl Canon for TypeSpec {
     fn canon(&self, out: &mut Encoder) {
         out.text(self.name());
     }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        let name = input.text()?;
+        match Self::parse(&name) {
+            Some(spec) => Ok(spec),
+            None => input.fail(format!("not a type: {name}")),
+        }
+    }
 }
 
 impl Canon for Protocol {
@@ -280,6 +315,13 @@ impl Canon for Protocol {
         out.tag("protocol");
         out.text(&self.name);
         out.entries(self.messages.iter());
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("protocol")?;
+        let name = input.text()?;
+        let messages = input.entries::<Vec<TypeSpec>>()?;
+        Ok(Self::new(name, messages))
     }
 }
 
@@ -290,6 +332,21 @@ impl Canon for Event {
         out.text(self.kind.name());
         out.u64(self.agent);
         self.detail.canon(out);
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("event")?;
+        let sequence = input.u64()?;
+        let kind = input.text()?;
+        let Some(kind) = EventKind::parse(&kind) else {
+            return input.fail(format!("not an event kind: {kind}"));
+        };
+        Ok(Self {
+            sequence,
+            kind,
+            agent: input.u64()?,
+            detail: Value::decode(input)?,
+        })
     }
 }
 
@@ -311,5 +368,44 @@ impl Canon for Agent {
         out.u64(u64::from(self.restart_count));
         out.text(self.status.name());
         out.items(self.capabilities.iter());
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("agent")?;
+        let name = input.text()?;
+        let mailbox = VecDeque::from(input.items::<Value>()?);
+        let behavior = input.option::<Closure>()?.map(Arc::new);
+        let heap = Value::decode(input)?;
+        let initial_heap = Value::decode(input)?;
+        let protocol = input.option()?;
+        let supervisor = if input.none() {
+            None
+        } else {
+            Some(input.u64()?)
+        };
+        let action = input.text()?;
+        let Some(failure_action) = FailureAction::parse(&action) else {
+            return input.fail(format!("not a failure policy: {action}"));
+        };
+        let max_restarts = u32::try_from(input.u64()?).unwrap_or(u32::MAX);
+        let restart_count = u32::try_from(input.u64()?).unwrap_or(u32::MAX);
+        let status = input.text()?;
+        let Some(status) = AgentStatus::parse(&status) else {
+            return input.fail(format!("not an agent status: {status}"));
+        };
+        Ok(Self {
+            name,
+            mailbox,
+            behavior,
+            heap,
+            initial_heap,
+            protocol,
+            supervisor,
+            failure_action,
+            max_restarts,
+            restart_count,
+            status,
+            capabilities: input.items()?,
+        })
     }
 }

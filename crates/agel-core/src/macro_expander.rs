@@ -1,4 +1,4 @@
-use crate::canon::{Canon, Encoder};
+use crate::canon::{Canon, CanonError, Decoder, Encoder};
 use crate::Expr;
 use alloc::collections::BTreeMap;
 use alloc::{borrow::ToOwned, format, string::String, vec, vec::Vec};
@@ -413,6 +413,15 @@ impl Canon for MacroDef {
         out.items(self.params.iter());
         self.template.canon(out);
         out.option(self.definition_module.as_ref());
+    }
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        input.expect("macro")?;
+        Ok(Self {
+            params: input.items()?,
+            template: Expr::decode(input)?,
+            definition_module: input.option()?,
+        })
     }
 }
 
