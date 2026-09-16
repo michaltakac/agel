@@ -428,6 +428,14 @@ Each rung must be runnable and differentially testable against the rung below:
    evaluates the file as one transaction. Modules, macros, agents and the
    metacircular evaluator run unprivileged in the OS for the first time; the
    native fixed evaluator still runs the desktop, and the two share nothing.
+74. **Effects for the runtime in the OS (v0.2.79):** `agel-core` takes host
+   words — a name, a capability kind and a function — bound by a world and
+   applied through the table in the evaluation's options, the evaluator
+   checking the caller's capabilities before the word runs. The loaded
+   runtime supplies the desktop's vocabulary (`file-read`, `file-write`,
+   `file-append`, `file-list`, `clock`, `console-log`, `exec`) over the
+   process protocol, so the hosted capability model governs real effects
+   in the OS: an agent spawned without a capability cannot write a file.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

@@ -70,11 +70,38 @@ pub struct Pulse {
     pub hook: fn(),
 }
 
+/// A word the embedding supplies to the language: its name, the capability
+/// kind a caller must hold to apply it (`""` for none), and the function.
+/// The evaluator binds each to `Builtin::Host(index)` when a world installs
+/// a table, and applies it through the table in the options an evaluation
+/// runs with, so a world's bindings never hold a pointer. A word that needs
+/// a capability is refused with `capability/denied` when the caller — the
+/// agent whose turn it is, or the evaluation's own set — holds none of that
+/// kind, whatever the word would do: the check is the evaluator's.
+#[derive(Clone, Copy, Debug)]
+pub struct HostWord {
+    pub name: &'static str,
+    pub capability: &'static str,
+    pub call: fn(&[Value]) -> Result<Value, HostError>,
+}
+
+/// What a host word signals: a condition kind and message, raised in the
+/// caller's transaction like any other.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostError {
+    pub kind: String,
+    pub message: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct EvaluationOptions {
     pub budget: Budget,
     pub capabilities: Vec<Capability>,
     pub pulse: Option<Pulse>,
+    /// The host words an evaluation may apply; a world's bindings made by
+    /// `install_host` index this table, and an evaluation without it
+    /// answers `host/unavailable` for them.
+    pub host: &'static [HostWord],
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -499,6 +526,20 @@ impl World {
             values,
             steps_used,
         })
+    }
+
+    /// Bind every word of `host` in the global environment, as
+    /// `Builtin::Host(index)`. The same table must be in the options of the
+    /// evaluations that apply them. Meant for a world's setup, before its
+    /// first transaction: the bindings are state like the seed builtins,
+    /// not a revision.
+    pub fn install_host(&mut self, host: &'static [HostWord]) {
+        for (index, word) in host.iter().enumerate() {
+            let index = u16::try_from(index).expect("a host table holds fewer than 65,536 words");
+            self.state
+                .bindings
+                .insert(word.name.into(), Value::Builtin(Builtin::Host(index)));
+        }
     }
 
     pub fn issue_capability(

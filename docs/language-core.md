@@ -106,6 +106,21 @@ permits an agent to commit an inference intent for the scoped provider. The
 trusted host owns actual process execution. No file, network, clock, or FFI
 capabilities are exposed to Agel code.
 
+### Host words (v0.2.79)
+
+An embedding can give the language words of its own: `HostWord { name,
+capability, call }` names a function pointer and the capability kind a
+caller must hold, `World::install_host` binds a table of them, and
+`EvaluationOptions::host` carries the table an evaluation may apply. A
+binding is an index, never a pointer, so an evaluation without the table
+answers `host/unavailable`. Before a word with a kind runs, the caller —
+the agent whose turn it is, or the evaluation's own set — must hold a
+capability of that kind whose scope permits the word's first text
+argument (`*` when there is none); otherwise `capability/denied`, before
+anything happens. The process the Agel supervisor loads supplies the
+desktop's file, clock, console and `exec` words this way
+([`posix-personality.md`](posix-personality.md)).
+
 ## Deterministic budgets
 
 Each transaction has limits for source bytes, parse nesting, evaluation fuel,

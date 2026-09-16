@@ -262,6 +262,7 @@ fn call_depth_budget_stops_recursion_and_rolls_back() {
         },
         capabilities: Vec::new(),
         pulse: None,
+        host: &[],
     };
     let error = world
         .evaluate_with("(def loop (fn () (loop))) (loop)", &options)
@@ -281,6 +282,7 @@ fn fuel_and_collection_budgets_are_deterministic() {
         },
         capabilities: Vec::new(),
         pulse: None,
+        host: &[],
     };
     let error = world.evaluate_with("(+ 1 2)", &low_fuel).unwrap_err();
     assert!(error.to_string().contains("resource/fuel-exhausted"));
@@ -292,6 +294,7 @@ fn fuel_and_collection_budgets_are_deterministic() {
         },
         capabilities: Vec::new(),
         pulse: None,
+        host: &[],
     };
     let error = world
         .evaluate_with("(list 1 2 3)", &tiny_collection)
@@ -309,6 +312,7 @@ fn macro_expansion_is_preflighted_against_resource_limits() {
         },
         capabilities: Vec::new(),
         pulse: None,
+        host: &[],
     };
     let error = world
         .evaluate_with(
@@ -331,6 +335,7 @@ fn recursive_macro_expansion_is_depth_bounded_and_transactional() {
         },
         capabilities: Vec::new(),
         pulse: None,
+        host: &[],
     };
     let error = world
         .evaluate_with(
@@ -353,6 +358,7 @@ fn reader_limits_apply_before_candidate_evaluation() {
         },
         capabilities: Vec::new(),
         pulse: None,
+        host: &[],
     };
     assert!(world.evaluate_with("(def x 1)", &source_limited).is_err());
     let depth_limited = EvaluationOptions {
@@ -362,6 +368,7 @@ fn reader_limits_apply_before_candidate_evaluation() {
         },
         capabilities: Vec::new(),
         pulse: None,
+        host: &[],
     };
     assert!(world.evaluate_with("((x))", &depth_limited).is_err());
     assert_eq!(world.revision(), 0);
@@ -423,4 +430,95 @@ fn integer_ordering_is_checked_and_type_safe() {
     assert_eq!(last(&mut world, "(< -10 0)"), Value::Bool(true));
     let error = world.evaluate("(< 1 'two)").unwrap_err();
     assert!(error.to_string().contains("< expects two integers"));
+}
+
+mod host_words {
+    use agel_core::{EvaluationOptions, HostError, HostWord, Value, World};
+
+    fn twice(arguments: &[Value]) -> Result<Value, HostError> {
+        match arguments {
+            [Value::Int(value)] => Ok(Value::Int(value * 2)),
+            _ => Err(HostError {
+                kind: "type".into(),
+                message: "twice expects an integer".into(),
+            }),
+        }
+    }
+
+    fn secret(_: &[Value]) -> Result<Value, HostError> {
+        Ok(Value::Symbol("opened".into()))
+    }
+
+    static HOST: [HostWord; 2] = [
+        HostWord {
+            name: "twice",
+            capability: "",
+            call: twice,
+        },
+        HostWord {
+            name: "secret",
+            capability: "vault/read",
+            call: secret,
+        },
+    ];
+
+    fn options() -> EvaluationOptions {
+        EvaluationOptions {
+            host: &HOST,
+            ..EvaluationOptions::default()
+        }
+    }
+
+    #[test]
+    fn a_host_word_applies_through_the_options_table() {
+        let mut world = World::default();
+        world.install_host(&HOST);
+        let commit = world.evaluate_with("(twice 21)", &options()).unwrap();
+        assert_eq!(commit.values, vec![Value::Int(42)]);
+        let error = world.evaluate_with("(twice 'x)", &options()).unwrap_err();
+        assert!(
+            error.to_string().contains("twice expects an integer"),
+            "{error}"
+        );
+        // The same binding with no table behind it is refused, not applied.
+        let error = world.evaluate("(twice 21)").unwrap_err();
+        assert!(error.to_string().contains("host/unavailable"), "{error}");
+    }
+
+    #[test]
+    fn a_host_word_needs_its_capability_kind() {
+        let mut world = World::default();
+        world.install_host(&HOST);
+        let error = world.evaluate_with("(secret)", &options()).unwrap_err();
+        assert!(error.to_string().contains("capability/denied"), "{error}");
+        let capability = world.issue_capability("vault/read", "*").unwrap();
+        let mut granted = options();
+        granted.capabilities.push(capability);
+        let commit = world.evaluate_with("(secret)", &granted).unwrap();
+        assert_eq!(commit.values, vec![Value::Symbol("opened".into())]);
+        // An agent holds only what it was spawned with: the evaluation's
+        // capabilities do not reach its turn.
+        world
+            .evaluate_with(
+                "(def peek (fn (self heap message) (secret)))
+                 (def bare (spawn \"bare\" peek nil nil))
+                 (send bare 'go) (run 1)",
+                &granted,
+            )
+            .unwrap();
+        let status = world
+            .evaluate_with("(get (agent-info bare) 'status)", &granted)
+            .unwrap();
+        assert_eq!(status.values, vec![Value::Symbol("stopped".into())]);
+        let commit = world
+            .evaluate_with(
+                "(def cap (request-capability 'vault/read \"*\"))
+                 (def keeper (spawn \"keeper\" peek nil nil nil 'stop 0 (list cap)))
+                 (send keeper 'go) (run 1)
+                 (get (agent-info keeper) 'status)",
+                &granted,
+            )
+            .unwrap();
+        assert_eq!(commit.values.last(), Some(&Value::Symbol("running".into())));
+    }
 }

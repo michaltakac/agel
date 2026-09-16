@@ -180,6 +180,7 @@ impl AbSupervisor {
             budget: candidate.budget().clone(),
             capabilities: Vec::new(),
             pulse: None,
+            host: &[],
         };
         for check in checks {
             let mut canary = rebuilt.world().fork_isolated();

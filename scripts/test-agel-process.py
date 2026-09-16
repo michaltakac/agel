@@ -96,6 +96,25 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         assert "=> 75025" in reply, reply
         assert "process agel exited with status 0" in reply, reply
         print(f"long evaluation: {time.monotonic() - started:.1f} s")
+        # Effect words: the namespace, the console, the clock and the program
+        # table through the process protocol, each behind a capability. The
+        # evaluation holds every kind; an agent holds what it was spawned
+        # with, so a bare agent's write fails its turn and a keeper's lands.
+        check(machine, '(file-write "effects.agel" "(file-write \\"out.txt\\" \\"hello from the runtime\\")\\n(file-append \\"out.txt\\" \\" +1\\")\\n")', "\r\n")
+        check(machine, '(file-append "effects.agel" "(file-read \\"out.txt\\")\\n(file-list \\"/\\")\\n(console-log \\"logged from the runtime\\")\\n(type-of (clock))\\n(exec \\"hello\\")\\n")', "\r\n")
+        check(machine, '(file-append "effects.agel" "(def scribe (fn (self heap message) (file-write \\"agent.txt\\" message)))\\n(def bare (spawn \\"bare\\" scribe nil nil))\\n(send bare \\"without\\")\\n(run 1)\\n")', "\r\n")
+        check(machine, '(file-append "effects.agel" "(get (agent-info bare) (quote status))\\n(def cap (request-capability (quote file/write) \\"*\\"))\\n")', "\r\n")
+        check(machine, '(file-append "effects.agel" "(def keeper (spawn \\"keeper\\" scribe nil nil nil (quote stop) 0 (list cap)))\\n(send keeper \\"kept by a capability\\")\\n(run 1)\\n(file-read \\"agent.txt\\")\\n")', "\r\n")
+        reply = run(machine, ":exec agel -- --no-stdlib effects.agel", 120)
+        for wanted in (
+            "=> 22", "=> 3", '=> "hello from the runtime +1"', '"out.txt"', "logged from the runtime",
+            "=> int", "hello from a loaded process", "=> 42", "=> stopped", '=> "kept by a capability"',
+            "process agel exited with status 0",
+        ):
+            assert wanted in reply, (wanted, reply)
+        # The files are the filesystem's: the desktop's evaluator reads them.
+        check(machine, '(file-read "out.txt")', "hello from the runtime +1")
+        check(machine, '(file-read "agent.txt")', "kept by a capability")
         # A failing form: the transaction rolls back, the error is reported,
         # the status is 1.
         check(machine, '(file-write "bad.agel" "(def ok 1)\\n(/ 1 0)\\n")', "\r\n")

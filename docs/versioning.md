@@ -352,6 +352,9 @@ promise.
   without `std`, and `boot/posix/agel` runs it with the standard library as
   a loaded process that evaluates a file from its namespace, yielding to
   the supervisor as it goes.
+  `v0.2.79` gives that runtime effects: host words in `agel-core`, each
+  behind a capability the evaluator checks, and the desktop's file, clock,
+  console and `exec` vocabulary in the process over the process protocol.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -28,6 +28,6 @@ pub use model::{
 pub use reader::{read_all, read_all_with_limits, ReadError, ReadLimits};
 pub use value::{Capability, Expr, Value};
 pub use world::{
-    AuthorityError, Budget, Commit, EvaluationOptions, Pulse, ReplayError, ReplayInput,
-    ReplayReport, Snapshot, TransactionError, World,
+    AuthorityError, Budget, Commit, EvaluationOptions, HostError, HostWord, Pulse, ReplayError,
+    ReplayInput, ReplayReport, Snapshot, TransactionError, World,
 };

@@ -60,6 +60,10 @@ pub enum Builtin {
     RequestCapability,
     CapabilityKind,
     CapabilityScope,
+    /// A word the embedding supplied: an index into the host table of the
+    /// options an evaluation runs with (`EvaluationOptions::host`), bound
+    /// by `World::install_host`.
+    Host(u16),
 }
 
 #[doc(hidden)]

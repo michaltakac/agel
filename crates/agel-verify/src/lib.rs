@@ -150,6 +150,7 @@ impl Verifier {
             budget: proposal.budget.clone(),
             capabilities: Vec::new(),
             pulse: None,
+            host: &[],
         };
         let mut canary = world.fork_isolated();
         canary
@@ -212,6 +213,7 @@ impl Verifier {
             budget: proposal.budget.clone(),
             capabilities: Vec::new(),
             pulse: None,
+            host: &[],
         };
         world
             .evaluate_with(&proposal.source, &options)

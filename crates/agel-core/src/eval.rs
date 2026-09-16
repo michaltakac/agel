@@ -797,6 +797,7 @@ fn apply_builtin(
         Builtin::PendingModelRequests => pending_model_requests(arguments, state, runtime),
         Builtin::Signal => signal_condition(arguments),
         Builtin::RequestCapability => request_capability(arguments, runtime),
+        Builtin::Host(index) => apply_host(index, arguments, runtime),
         Builtin::CapabilityKind => capability_field(arguments, true),
         Builtin::CapabilityScope => capability_field(arguments, false),
     }
@@ -1887,6 +1888,46 @@ fn signal_condition(arguments: Vec<Value>) -> Result<Value, Signal> {
         arguments.get(2).cloned().unwrap_or(Value::Nil),
     )
     .into())
+}
+
+/// Apply a host word: a capability of the kind its table entry names must
+/// be held by the caller for the word's first text argument as the scope
+/// (a path, for the file words), or for `*` when there is none; then the
+/// embedding's function runs, its error a condition.
+fn apply_host(index: u16, arguments: Vec<Value>, runtime: &Runtime<'_>) -> Result<Value, Signal> {
+    let Some(word) = runtime.options.host.get(usize::from(index)) else {
+        return Err(condition(
+            "host/unavailable",
+            "this evaluation has no host word for that binding",
+        ));
+    };
+    if !word.capability.is_empty() {
+        let capabilities = runtime
+            .agent_capabilities
+            .as_deref()
+            .unwrap_or(&runtime.options.capabilities);
+        let scope = match arguments.first() {
+            Some(Value::String(scope)) => scope.as_str(),
+            _ => "*",
+        };
+        if !capabilities.iter().any(|capability| {
+            capability.permits(
+                word.capability,
+                scope,
+                runtime.world_id,
+                runtime.authority_epoch,
+            )
+        }) {
+            return Err(condition(
+                "capability/denied",
+                format!(
+                    "no supplied capability permits {} for {}",
+                    word.capability, word.name
+                ),
+            ));
+        }
+    }
+    (word.call)(&arguments).map_err(|error| condition(error.kind, error.message))
 }
 
 fn request_capability(arguments: Vec<Value>, runtime: &Runtime<'_>) -> Result<Value, Signal> {

@@ -620,6 +620,17 @@ agel: 13 forms, 26824 steps, revision 2
 process agel exited with status 0
 ```
 
+Since v0.2.79 the program supplies the desktop's effect words —
+`file-read`, `file-write`, `file-append`, `file-list`, `clock`,
+`console-log` and `exec` — over the process protocol: the file words are
+the namespace (`/` its root), `clock` whole seconds since the machine
+came up, `console-log` a line on descriptor 1 as it runs, `exec NAME` a
+child from the program table with this process's namespace and console,
+answering its exit status. Each is behind a capability kind the
+evaluator checks (`file/read`, `file/write`, `clock/read`,
+`console/write`, `process/run`); the evaluation holds them all for every
+scope, an agent only what it was spawned with.
+
 `agel [--no-stdlib] FILE`: the file is read through the namespace `:exec`
 granted, the standard library is installed from the program's own image
 unless `--no-stdlib`, the file is evaluated as one transaction with fifty

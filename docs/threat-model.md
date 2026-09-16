@@ -1766,6 +1766,33 @@ files; the runtime's effect journal, snapshots and images stay on the
 host. The desktop's evaluator and this one share no state, so what a file
 defines is invisible to the workbench and the reverse.
 
+## v0.2.79
+
+- **A host word is applied only through the table an evaluation was
+  given:** a world's bindings hold an index, never a pointer, so a
+  snapshot, an image or a replay carries no code, and an evaluation
+  without the table answers `host/unavailable` rather than calling
+  anything.
+- **The capability check is the evaluator's, not the word's:** before a
+  word with a capability kind runs, the caller must hold a capability of
+  that kind, issued by this world in this authority epoch, whose scope
+  permits the word's first text argument. An agent's caller set is what it
+  was spawned with, never the evaluation's; a bare agent's `file-write` is
+  `capability/denied` in its own turn, which fails and stops it, and the
+  file is untouched.
+- **The namespace bounds every path:** the words open through the process
+  protocol, so a path outside the namespace `:exec` granted is `ENOENT`
+  or `EACCES` however it is spelled, capability or not; the words add
+  gating inside the process, they do not widen its authority.
+- **`exec` is a child with this process's namespace and console** and no
+  descriptors of its own; the supervisor's process table, tick budget and
+  reporting apply to it as to any child.
+
+Not claimed: effects are not rolled back with a failed transaction; a
+write reached before a later failure stays. The check is by kind and
+scope; it does not inspect what a word does with its arguments beyond the
+first.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the
