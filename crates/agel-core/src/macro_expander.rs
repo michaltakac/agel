@@ -1,3 +1,4 @@
+use crate::canon::{Canon, Encoder};
 use crate::Expr;
 use alloc::collections::BTreeMap;
 use alloc::{borrow::ToOwned, format, string::String, vec, vec::Vec};
@@ -404,6 +405,15 @@ fn is_core_syntax(name: &str) -> bool {
             | "with-restart"
             | "invoke-restart"
     )
+}
+
+impl Canon for MacroDef {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("macro");
+        out.items(self.params.iter());
+        self.template.canon(out);
+        out.option(self.definition_module.as_ref());
+    }
 }
 
 #[cfg(test)]

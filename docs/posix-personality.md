@@ -240,7 +240,10 @@ read on a closed descriptor to answer `EBADF`.
 
 ### What stratum 1 does not claim (before stratum 2)
 
-The stale-descriptor path is implemented and not exercised: a process runs
+The stale-descriptor path was implemented and not exercised until v0.2.81
+(`scripts/test-stale.sh`: the `stale` program sleeps holding a descriptor
+while the desktop's `:fs-restart` replaces the service, and its next read
+answers 116): a process runs
 to its end within one `:exec`, and there is no way yet to restart the
 service while one holds a descriptor, so `ESTALE` is code the tests have
 not reached. Files held one extent until v0.2.61; there was no `unlink`, `rename`, `seek`,

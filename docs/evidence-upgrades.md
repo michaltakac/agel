@@ -78,10 +78,14 @@ explicitly reissue current authority.
 
 ## Honest limitation
 
-The v0.0.5 content digest is cryptographic but its payload is still an explicitly
-versioned representation of the Rust seed's state. v0.0.7 replaces this with the
-portable canonical image encoding required for cross-version persistence and
-diverse-bootstrap comparison. That encoding exists since v0.2.22, and since
-v0.2.24 portable images and promotion evidence carry detached Ed25519
-signatures from the project's own verifier; see
+The v0.0.5 content digest was cryptographic but its payload was a debug
+rendering of the Rust seed's state, so a change in that rendering would have
+invalidated stored proposals. Since v0.2.81 the digest is SHA-256 over a
+canonical encoding of the state (`crates/agel-core/src/canon.rs`): every value,
+closure environment, agent, event, macro, module and model record written as
+tagged, length-delimited bytes in a fixed order, versioned by the digest's
+prefix `agel-world-canonical-v1`, the same on any build, and pinned by a test
+vector for a fresh world. Portable images use their own entry-chain encoding
+(since v0.2.22), and since v0.2.24 images and promotion evidence carry detached
+Ed25519 signatures from the project's own verifier; see
 [`portable-images.md`](portable-images.md).

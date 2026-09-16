@@ -359,6 +359,11 @@ promise.
   linker and compiler frontend read, link and compile a module bundle in
   the OS, the desktop loads the linked definition, and the result is
   byte-equal to the host toolchain's.
+  `v0.2.81` closes three partial rows: the digest binding evidence to a
+  world state is over a canonical encoding of the state, `ESTALE` is
+  exercised by a process holding a descriptor across a filesystem restart,
+  and a model-driven episode runs through the host bridge in CI with the
+  echo policy; `model-result` now spends the answer it reads.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

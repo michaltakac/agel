@@ -272,7 +272,8 @@ over a sixty-four by twenty-five grid; `(look-line)` is the program's
 last console line and `(look-field n)` the n-th integer in it, so the
 agent reads `doom: state map 1 x 1055 y -3611 ...` as fields; and
 `(model-request text)` with `(model-result)` let a step ask a model and
-read its answer. They read a copy the desktop placed in the shared page,
+read its answer, once (since v0.2.81 a read spends it, so a program that
+asks each step asks anew). They read a copy the desktop placed in the shared page,
 never process memory or a device; a world that was given nothing to look
 at answers with an error, and the request text is bounded to two hundred
 bytes. The scripted `doom-agent` asks no model: it goes forward and

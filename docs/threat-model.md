@@ -1811,6 +1811,24 @@ first.
 Not claimed: the IR is not executed in the guest, so no machine code is
 produced or run there.
 
+## v0.2.81
+
+- **The evidence digest is over a canonical encoding:** every value,
+  closure environment, agent, event, macro, module and model record is
+  written as tagged, length-delimited bytes in a fixed order, so the same
+  state gives the same bytes on any build and two different states cannot
+  give the same bytes; the digest's prefix names the encoding's version,
+  and a test pins a fresh world's digest. A stored proposal is no longer
+  invalidated by a change in a debug rendering; it is invalidated by a
+  change in the state, or in the encoding's version.
+- **A descriptor's authority dies with its service, shown:** the `stale`
+  program's read through a descriptor from before `:fs-restart` answers
+  `ESTALE`, and the file is reached again only through a fresh descriptor.
+- **A model's answer is read once:** `model-result` spends what it
+  reads, so a step's decision is for the request that step made, never a
+  stale answer to an earlier observation; the reply is still text the
+  program parses, never a command.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

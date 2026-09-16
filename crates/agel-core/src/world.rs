@@ -1,4 +1,5 @@
 use crate::agent::{Agent, Event};
+use crate::canon::{Canon, Encoder};
 use crate::eval::{eval_all, EvalError};
 use crate::macro_expander::MacroDef;
 use crate::model::{
@@ -793,19 +794,66 @@ impl World {
     }
 }
 
+impl Canon for Module {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("module");
+        out.entries(self.bindings.iter());
+        out.entries(self.macros.iter());
+        out.seq(self.exports.len());
+        for name in &self.exports {
+            out.text(name);
+        }
+    }
+}
+
+impl Canon for State {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("state");
+        out.entries(self.bindings.iter());
+        out.entries(self.macros.iter());
+        out.entries(self.modules.iter());
+        out.seq(self.agents.len());
+        for (id, agent) in &self.agents {
+            out.u64(*id);
+            agent.canon(out);
+        }
+        out.items(self.ready_queue.iter());
+        out.items(self.events.iter());
+        out.u64(self.next_event_sequence);
+        out.u64(self.next_agent_id);
+        out.u64(self.next_syntax_id);
+        out.seq(self.model_requests.len());
+        for (id, record) in &self.model_requests {
+            out.u64(*id);
+            record.canon(out);
+        }
+        out.u64(self.next_model_request_id);
+    }
+}
+
+/// The state's canonical encoding (`canon.rs`): the same bytes for the
+/// same state on any build.
+fn canonical_bytes(state: &State) -> Vec<u8> {
+    let mut encoder = Encoder::new();
+    state.canon(&mut encoder);
+    encoder.finish()
+}
+
+/// A replay checksum over the canonical encoding: not a cryptographic
+/// proof, and the same state on every build.
 fn state_digest(state: &State) -> u64 {
-    // Stable for a given Agel runtime version because all unordered state uses
-    // BTree collections. This is a replay checksum, not a cryptographic proof.
-    format!("{state:?}")
-        .bytes()
+    canonical_bytes(state)
+        .iter()
         .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
         })
 }
 
+/// The digest that binds evidence to a world state: SHA-256 over the
+/// canonical encoding, versioned by its prefix.
 fn state_content_digest(state: &State) -> agel_integrity::Digest {
-    let mut bytes = b"agel-world-debug-v1\0".to_vec();
-    bytes.extend_from_slice(format!("{state:?}").as_bytes());
+    let mut bytes = b"agel-world-canonical-v1\0".to_vec();
+    bytes.extend_from_slice(&canonical_bytes(state));
     agel_integrity::sha256(&bytes)
 }
 

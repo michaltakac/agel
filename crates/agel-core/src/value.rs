@@ -1,7 +1,8 @@
 use crate::agent::Protocol;
+use crate::canon::{Canon, Encoder};
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
-use alloc::{string::String, vec, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
 use core::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -255,6 +256,131 @@ fn escape_string(value: &str) -> String {
             other => vec![other],
         })
         .collect()
+}
+
+impl Canon for Expr {
+    fn canon(&self, out: &mut Encoder) {
+        match self {
+            Self::Nil => out.tag("nil"),
+            Self::Bool(value) => {
+                out.tag("bool");
+                out.bool(*value);
+            }
+            Self::Int(value) => {
+                out.tag("int");
+                out.i64(*value);
+            }
+            Self::String(value) => {
+                out.tag("string");
+                out.text(value);
+            }
+            Self::Symbol(value) => {
+                out.tag("symbol");
+                out.text(value);
+            }
+            Self::List(items) => {
+                out.tag("list");
+                out.items(items.iter());
+            }
+            Self::ScopedSymbol { name, module } => {
+                out.tag("scoped");
+                out.text(name);
+                out.option(module.as_ref());
+            }
+        }
+    }
+}
+
+impl Canon for Value {
+    fn canon(&self, out: &mut Encoder) {
+        match self {
+            Self::Nil => out.tag("nil"),
+            Self::Bool(value) => {
+                out.tag("bool");
+                out.bool(*value);
+            }
+            Self::Int(value) => {
+                out.tag("int");
+                out.i64(*value);
+            }
+            Self::String(value) => {
+                out.tag("string");
+                out.text(value);
+            }
+            Self::Symbol(value) => {
+                out.tag("symbol");
+                out.text(value);
+            }
+            Self::List(items) => {
+                out.tag("list");
+                out.items(items.iter());
+            }
+            Self::Map(entries) => {
+                out.tag("map");
+                out.seq(entries.len());
+                for (key, value) in entries {
+                    key.canon(out);
+                    value.canon(out);
+                }
+            }
+            Self::Agent(id) => {
+                out.tag("agent");
+                out.u64(*id);
+            }
+            Self::Protocol(protocol) => protocol.canon(out),
+            Self::Module(name) => {
+                out.tag("module");
+                out.text(name);
+            }
+            Self::Capability(capability) => capability.canon(out),
+            Self::Closure(closure) => closure.canon(out),
+            Self::Builtin(builtin) => {
+                out.tag("builtin");
+                out.text(&format!("{builtin:?}"));
+            }
+        }
+    }
+}
+
+impl Canon for Capability {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("capability");
+        out.u64(self.id);
+        out.text(&self.kind);
+        out.text(&self.scope);
+        out.u64(self.issuer_world);
+        out.u64(self.epoch);
+    }
+}
+
+impl Canon for Closure {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("fn");
+        out.items(self.params.iter());
+        out.items(self.body.iter());
+        self.env.canon(out);
+        out.option(self.module.as_ref());
+    }
+}
+
+impl Canon for Env {
+    /// Frames innermost first, each its bindings in order; shared frames are
+    /// written wherever they are reached.
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("env");
+        let mut frames = 0;
+        let mut frame = Some(self);
+        while let Some(current) = frame {
+            frames += 1;
+            frame = current.parent.as_deref();
+        }
+        out.seq(frames);
+        let mut frame = Some(self);
+        while let Some(current) = frame {
+            out.entries(current.bindings.iter());
+            frame = current.parent.as_deref();
+        }
+    }
 }
 
 #[cfg(test)]

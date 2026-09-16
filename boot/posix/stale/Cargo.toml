@@ -1,0 +1,12 @@
+[package]
+name = "stale"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "stale"
+path = "src/main.rs"
+
+[dependencies]
+agel-process-abi = { path = "../abi" }

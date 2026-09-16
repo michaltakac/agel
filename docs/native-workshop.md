@@ -57,7 +57,8 @@ running in a window: `look` and `look-mean` read a sixty-four by
 twenty-five grid of shades the desktop sampled from the played window,
 `look-line` and `look-field` read the program's last console line and the
 integers in it, and `model-request`/`model-result` ask a model and read
-its answer. They answer only inside a played world (`:load doom-agent`,
+its answer, once: read, the answer is spent, so a program that asks each
+step asks anew (since v0.2.81). They answer only inside a played world (`:load doom-agent`,
 then `:play`); elsewhere there is nothing to look at.
 
 Since v0.2.23 atoms also include strings with the hosted escapes, and quoted

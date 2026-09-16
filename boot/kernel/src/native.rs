@@ -566,7 +566,7 @@ impl Session {
     }
 
     /// Deliver a model's answer to request `number`; `(model-result)` reads
-    /// it while that request is the latest.
+    /// it once while that request is the latest.
     #[cfg(any(feature = "isolation-selftest", test))]
     pub fn deliver(&mut self, number: u32, text: &[u8]) {
         let length = text.len().min(REQUEST_BYTES);
@@ -3476,7 +3476,8 @@ mod tests {
 /// block of cells, `(look-line)` the program's last console line,
 /// `(look-field n)` the n-th integer in that line or nil, `(model-request
 /// text)` records a request and answers its number, and `(model-result)` is
-/// the answer delivered to the latest request, or nil while there is none.
+/// the answer delivered to the latest request, read once, or nil while
+/// there is none or it has been read.
 fn look_builtin(
     builtin: Builtin,
     arguments: &[RuntimeValue],
@@ -3591,6 +3592,11 @@ fn look_builtin(
                 let length = usize::from(context.reply_length);
                 copy[..length].copy_from_slice(&context.reply[..length]);
                 let (start, len) = world.heap.alloc_text(&copy[..length])?;
+                // Read once: the answer is to the request that asked, and a
+                // program that asks each step must not see it again on the
+                // next. The request is done; the next `model-request` asks
+                // anew. This is world state, so a failed form leaves it.
+                world.request_length = 0;
                 Scalar::Text { start, len }
             }
         }

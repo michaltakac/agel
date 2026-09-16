@@ -522,3 +522,36 @@ mod host_words {
         assert_eq!(commit.values.last(), Some(&Value::Symbol("running".into())));
     }
 }
+
+mod canonical_digest {
+    use agel_core::{Snapshot, World};
+
+    /// The content digest of a fresh world, pinned: the canonical encoding
+    /// changes only with its version prefix, and this vector catches an
+    /// accidental change to either.
+    const FRESH_WORLD: &str = "44a2357b2daf253d400069de6ab46390b76871619e8ad9923fbee7d2b0fe9ebe";
+
+    #[test]
+    fn a_fresh_world_has_the_pinned_digest() {
+        assert_eq!(World::default().content_digest().to_hex(), FRESH_WORLD);
+    }
+
+    #[test]
+    fn equal_states_digest_equal_and_a_definition_changes_it() {
+        let mut left = World::default();
+        let mut right = World::default();
+        for world in [&mut left, &mut right] {
+            world
+                .evaluate("(def twice (fn (x) (* x 2))) (def worker (spawn \"worker\")) (send worker 'hello)")
+                .unwrap();
+        }
+        assert_eq!(left.content_digest(), right.content_digest());
+        assert_eq!(left.state_digest(), right.state_digest());
+        right.evaluate("(def more 1)").unwrap();
+        assert_ne!(left.content_digest(), right.content_digest());
+        // A snapshot restores the same state, and the same digest.
+        let snapshot: Snapshot = left.snapshot();
+        let restored = World::from_snapshot(&snapshot).unwrap();
+        assert_eq!(restored.content_digest(), left.content_digest());
+    }
+}

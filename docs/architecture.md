@@ -446,6 +446,14 @@ Each rung must be runnable and differentially testable against the rung below:
    byte-equal to the host toolchain's output for the same module. The IR is
    produced in the guest and not executed there: the backend is Cranelift on
    the host.
+76. **Three partial rows closed (v0.2.81):** the digest binding upgrade
+   evidence to a world state is SHA-256 over a canonical, versioned,
+   length-delimited encoding of the state (`agel-core/src/canon.rs`), pinned
+   by a test vector; a process holding a descriptor across a restart of the
+   filesystem service is shown to get `ESTALE`; and a model-driven DOOM
+   episode runs through the host bridge in CI, every step a request the
+   program makes and a reply the policy gives, `model-result` spending what
+   it reads.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

@@ -1,3 +1,4 @@
+use crate::canon::{Canon, Encoder};
 use crate::value::{Capability, Closure};
 use crate::Value;
 use alloc::collections::{BTreeMap, VecDeque};
@@ -266,4 +267,49 @@ pub(crate) struct Agent {
     pub restart_count: u32,
     pub status: AgentStatus,
     pub capabilities: Vec<Capability>,
+}
+
+impl Canon for TypeSpec {
+    fn canon(&self, out: &mut Encoder) {
+        out.text(self.name());
+    }
+}
+
+impl Canon for Protocol {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("protocol");
+        out.text(&self.name);
+        out.entries(self.messages.iter());
+    }
+}
+
+impl Canon for Event {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("event");
+        out.u64(self.sequence);
+        out.text(self.kind.name());
+        out.u64(self.agent);
+        self.detail.canon(out);
+    }
+}
+
+impl Canon for Agent {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("agent");
+        out.text(&self.name);
+        out.items(self.mailbox.iter());
+        out.option(self.behavior.as_deref());
+        self.heap.canon(out);
+        self.initial_heap.canon(out);
+        out.option(self.protocol.as_ref());
+        match self.supervisor {
+            Some(id) => out.u64(id),
+            None => out.none(),
+        }
+        out.text(self.failure_action.name());
+        out.u64(u64::from(self.max_restarts));
+        out.u64(u64::from(self.restart_count));
+        out.text(self.status.name());
+        out.items(self.capabilities.iter());
+    }
 }

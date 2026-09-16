@@ -1,3 +1,4 @@
+use crate::canon::{Canon, Encoder};
 use agel_integrity::Digest;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -151,3 +152,54 @@ impl fmt::Display for ModelCompletionError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for ModelCompletionError {}
+
+impl Canon for ModelOutcome {
+    fn canon(&self, out: &mut Encoder) {
+        match self {
+            Self::Success(text) => {
+                out.tag("success");
+                out.text(text);
+            }
+            Self::Failure { kind, message } => {
+                out.tag("failure");
+                out.text(kind);
+                out.text(message);
+            }
+        }
+    }
+}
+
+impl Canon for ModelRequestStatus {
+    fn canon(&self, out: &mut Encoder) {
+        match self {
+            Self::Pending => out.tag("pending"),
+            Self::Dispatching => out.tag("dispatching"),
+            Self::Completed(outcome) => {
+                out.tag("completed");
+                outcome.canon(out);
+            }
+        }
+    }
+}
+
+impl Canon for ModelRequest {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("request");
+        out.u64(self.id);
+        out.u64(self.world_id);
+        out.u64(self.requester);
+        out.u64(self.reply_to);
+        out.text(&self.provider);
+        out.text(&self.prompt);
+        out.bytes(self.prompt_digest.as_bytes());
+        out.bytes(self.effect_key.as_bytes());
+    }
+}
+
+impl Canon for ModelRecord {
+    fn canon(&self, out: &mut Encoder) {
+        out.tag("record");
+        self.request.canon(out);
+        self.status.canon(out);
+    }
+}

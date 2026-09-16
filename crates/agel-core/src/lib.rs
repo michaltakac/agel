@@ -11,6 +11,7 @@
 extern crate alloc;
 
 mod agent;
+mod canon;
 mod eval;
 mod macro_expander;
 mod model;
