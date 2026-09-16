@@ -178,6 +178,23 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         reply = check(machine, ":eof", "END OF INPUT")
         reply += until_text(machine, b"PROCESS ENDED", 30) + quiet(machine)
         assert "agel: end of input at revision 6" in reply, reply
+        # The backend in the guest: the x86-64 backend written in Agel turns
+        # the IR into a static ELF as hex text; the desktop installs it and
+        # runs it as a process, which prints its result and exits with it.
+        check(machine, '(file-write "backend.agel" "(import agel/native)\\n(import agel/native-x86)\\n(def fib (quote (fn (self n) (if (< n 2) n (+ (self self (- n 1)) (self self (- n 2)))))))\\n")', "\r\n")
+        check(machine, '(file-append "backend.agel" "(file-write \\"fib.hex\\" (native-x86-emit (native-compile fib) (quote (10))))\\n")', "\r\n")
+        check(machine, '(file-append "backend.agel" "(def scaled (quote (fn (n) (let ((k 2) (j 3)) (* n (+ k j))))))\\n(file-write \\"scaled.hex\\" (native-x86-emit (native-compile scaled) (quote (8))))\\n")', "\r\n")
+        check(machine, '(file-append "backend.agel" "(def total (quote (fn (self n acc) (if (= n 0) acc (self self (- n 1) (+ acc n))))))\\n(file-write \\"total.hex\\" (native-x86-emit (native-compile total) (quote (100 0))))\\n")', "\r\n")
+        check(machine, '(file-append "backend.agel" "(def broken (quote (fn (n) (/ n 0))))\\n(file-write \\"broken.hex\\" (native-x86-emit (native-compile broken) (quote (7))))\\n")', "\r\n")
+        started = time.monotonic()
+        reply = run(machine, ":exec agel -- backend.agel", 600)
+        assert "process agel exited with status 0" in reply, reply
+        print(f"backend: four programs emitted in {time.monotonic() - started:.1f} s")
+        for name, wanted, status in (("fib", "55", 55), ("scaled", "40", 40), ("total", "5050", 5050 & 255), ("broken", None, 111)):
+            check(machine, f":install {name} /{name}.hex", f"INSTALLED {name}: ")
+            reply = check(machine, f":exec {name}", f"process {name} exited with status {status}")
+            if wanted is not None:
+                assert f"\r\n{wanted}\r\n" in reply, (name, reply)
         # A failing form: the transaction rolls back, the error is reported,
         # the status is 1.
         check(machine, '(file-write "bad.agel" "(def ok 1)\\n(/ 1 0)\\n")', "\r\n")

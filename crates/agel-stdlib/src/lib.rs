@@ -7,6 +7,9 @@ use agel_core::{Commit, EvaluationOptions, TransactionError, World};
 pub const NATIVE_COMPILER: &str = include_str!("../native-compiler.agel");
 pub const NATIVE_READER: &str = include_str!("../native-reader.agel");
 pub const NATIVE_MODULES: &str = include_str!("../native-modules.agel");
+/// The x86-64 backend written in Agel: the native IR to a static ELF process
+/// image for the Agel supervisor, as hex text.
+pub const NATIVE_X86: &str = include_str!("../native-x86.agel");
 
 pub const SOURCE: &str = concat!(
     include_str!("../stdlib.agel"),
@@ -35,7 +38,9 @@ pub const SOURCE: &str = concat!(
     ") (def native-system-builder-source '",
     include_str!("../native-system-builder.agel"),
     "))\n",
-    include_str!("../native-agents.agel")
+    include_str!("../native-agents.agel"),
+    "\n",
+    include_str!("../native-x86.agel")
 );
 
 pub fn install(world: &mut World, options: &EvaluationOptions) -> Result<Commit, TransactionError> {

@@ -134,8 +134,9 @@ Each rung must be runnable and differentially testable against the rung below:
    every kernel semantic. Rungs 32 through 36 supply the reader, a restricted
    expander, a compiled agent kernel and the compiler frontend as Agel; since
    rung 75 (v0.2.80) the reader, linker and compiler frontend run in the
-   guest; the image codec and the machine-code backend remain Rust and
-   host-side.
+   guest, and since rung 80 (v0.2.85) a backend written in Agel emits x86-64
+   for the integer subset there; the image codec and the full backend (the
+   JIT's) remain Rust, and the kernel itself is Rust.
 17. **Native evaluator world (complete at v0.1.6):** the fixed-memory evaluator
    runs at the lowest privilege level on all three research backends. The x86-64
    interactive workshop sends source over a bounded shared page and prints
@@ -474,6 +475,14 @@ Each rung must be runnable and differentially testable against the rung below:
    last, so `:exec NAME` runs it; a name already in the table is replaced
    in place. The step the backend road needs: what a program in the OS
    writes can be a program the OS runs.
+80. **The backend in Agel (v0.2.85):** `agel/native-x86`, in the standard
+   library, assembles the native IR's integer subset into x86-64 machine
+   code in a static ELF for the process window — functions with static
+   links, closures, the self convention, a tagged integer representation,
+   the process protocol for its output and exit — as hex text the desktop
+   installs. The loaded runtime runs it in the OS and the OS runs what it
+   makes. The process window is 64 MiB. See
+   [`native-backend.md`](native-backend.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

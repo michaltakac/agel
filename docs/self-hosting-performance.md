@@ -1,8 +1,13 @@
 # Self-hosting without permanent interpreter overhead
 
+Current follow-up: [v0.2.85](release-v0.2.85.md) writes an x86-64 backend in
+Agel for the IR's integer subset and runs it in the guest, the OS installing and
+running what it emits ([`native-backend.md`](native-backend.md)); the JIT's
+Cranelift backend stays the full one, on the host.
+
 Current follow-up: [v0.2.80](release-v0.2.80.md) runs the reader, linker and
 compiler frontend in the guest, under the hosted runtime loaded into a protection
-domain (v0.2.78); the machine-code backend stays on the host.
+domain (v0.2.78).
 
 Current follow-up: v0.2.23 puts strings, lists and maps into the freestanding
 evaluator's transactional world with a copying collector at commit. The native

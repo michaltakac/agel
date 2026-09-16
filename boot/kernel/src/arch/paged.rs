@@ -67,12 +67,12 @@ pub const ASSET_SLOT_BYTES: u64 = 0x0020_0000;
 pub const CANVAS_BASE: u64 =
     ASSET_BASE + crate::world::shared::ASSET_SLOTS as u64 * ASSET_SLOT_BYTES;
 
-/// Where a loaded process's segments live: a 16 MiB window well above the
+/// Where a loaded process's segments live: a 64 MiB window well above the
 /// stack, shared page and frame window, inside the domain's private region.
 #[cfg(feature = "process")]
 pub const PROCESS_BASE: u64 = DOMAIN_BASE + 0x1000_0000;
 #[cfg(feature = "process")]
-pub const PROCESS_BYTES: u64 = 0x0100_0000;
+pub const PROCESS_BYTES: u64 = 0x0400_0000;
 
 /// A process's floating-point state on AArch64: the thirty-two SIMD
 /// registers and `FPCR`, `FPSR`, saved when the domain leaves and restored

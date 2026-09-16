@@ -1010,10 +1010,12 @@ impl World {
     /// `base` with a delta from `to_canonical_over` applied, and the
     /// delta's header: the world that was saved, over the library the base
     /// carries.
-    pub fn from_canonical_over(base: Self, bytes: &[u8]) -> Result<Self, CanonError> {
+    pub fn from_canonical_over(mut base: Self, bytes: &[u8]) -> Result<Self, CanonError> {
         let mut input = Decoder::new(bytes);
         let header = Self::decode_header(&mut input)?;
-        let state = State::decode_over(base.state.clone(), &mut input)?;
+        // The base's state is consumed, not copied: a world with the library
+        // is megabytes, and the process that restores one holds few.
+        let state = State::decode_over(core::mem::take(&mut base.state), &mut input)?;
         if !input.finished() {
             return input.fail("bytes after the state");
         }

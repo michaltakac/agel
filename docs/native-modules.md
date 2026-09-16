@@ -120,8 +120,10 @@ loaded runtime (`boot/posix/agel`, the hosted runtime without `std` in a
 protection domain) reads, links and compiles a module bundle with the same
 library functions and writes the linked definition for the desktop to load,
 producing what this host bridge produces; see
-[`release-v0.2.80.md`](release-v0.2.80.md). The machine-code backend stays on the
-host. General procedural/hygienic macros, dynamically linked modules and module
+[`release-v0.2.80.md`](release-v0.2.80.md). Since v0.2.85 an x86-64 backend
+written in Agel emits the integer subset as a process image in the guest
+([`native-backend.md`](native-backend.md)); the JIT's Cranelift backend, with
+its managed heap, stays on the host. General procedural/hygienic macros, dynamically linked modules and module
 bundle persistence remain subsequent milestones.
 
 ## Verification

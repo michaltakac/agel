@@ -48,7 +48,7 @@ process hostile faulted: page-fault at 0x9000002c touching 0x10; contained
 
 The loader checks the image's CRC-32 against its table row, then requires a
 little-endian ELF64 static executable for this machine whose `PT_LOAD`
-segments lie inside the **process window**, 16 MiB at a fixed address in
+segments lie inside the **process window**, 64 MiB since v0.2.85 (16 before) at a fixed address in
 the domain's private region (`PROCESS_BASE`, per machine), are
 page-congruent with their file offsets, do not share pages, and are never
 writable and executable together. Each page is a frame allocated with the

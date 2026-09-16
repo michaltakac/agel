@@ -375,6 +375,10 @@ promise.
   `v0.2.84` installs programs from files: `:install NAME PATH` decodes hex
   text the OS can read into the program region, where `:exec NAME` finds
   it, so what a program in the OS writes can become a program the OS runs.
+  `v0.2.85` writes the backend in Agel: `agel/native-x86` turns the native
+  IR's integer subset into x86-64 machine code in a static ELF, in the
+  guest, and the desktop installs and runs what it made; the process
+  window grows to 64 MiB.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

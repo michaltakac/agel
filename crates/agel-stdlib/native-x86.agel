@@ -1,0 +1,299 @@
+; An x86-64 backend for the native IR, in Agel: `native-x86-emit` turns
+; the IR `native-compile` produces into a static ELF process image for
+; the Agel supervisor, as hex text a file can hold and `:install` reads.
+;
+; What it compiles: integers, #t, #f and nil; `+ - * / = <` on two
+; arguments; `if`, `begin`; functions with lexical addressing through a
+; static link, so `let` (a nested function called at once) and closures
+; over enclosing frames work; calls through closure values, the explicit
+; self convention included. Values are tagged: an integer n is 2n, #f is 1,
+; #t is 3, nil is 5. A tail call is a call and a return, so a loop is
+; bounded by the process's stack. The image runs the compiled function
+; on the constant arguments given, prints the result as a decimal line on
+; the console and exits with its low byte as the status; a division by
+; zero exits 111. Not compiled: lists, texts, maps, other builtins, a
+; builtin as a value.
+;
+; Code is a tree: a leaf is a short list of bytes, `(label NAME)`,
+; `(rel32 NAME)` (four bytes, relative to the end of the item) or
+; `(abs64 NAME)` (eight bytes, an address); a node is `(seq LEFT RIGHT)`.
+; Every pass recurses by the tree's depth, never by its length, so the
+; evaluator's call-depth budget holds for a program of any size.
+(module agel/native-x86
+  (export native-x86-emit native-x86-source)
+
+  (def image-base 550024249344)          ; 0x8010000000, the process window
+  (def arena-offset 1048576)             ; closure records, 1 MiB above the code
+  (def header-bytes 176)                 ; ELF header and two program headers
+
+  (def fail (fn (what) (signal 'native-x86/unsupported what)))
+  (def nth (fn (xs n) (if (= n 0) (car xs) (nth (cdr xs) (- n 1)))))
+  (def length (fn (xs) (len xs 0)))
+  (def len (fn (xs n) (if (= xs nil) n (len (cdr xs) (+ n 1)))))
+  (def not (fn (x) (if x #f #t)))
+  (def append (fn (left right) (if (= left nil) right (cons (car left) (append (cdr left) right)))))
+
+  ; Trees.
+  (def seq (fn (left right) (if (= left nil) right (if (= right nil) left (list 'seq left right)))))
+  (def cat (fn (parts) (if (= parts nil) nil (seq (car parts) (cat (cdr parts))))))
+  (def leaf? (fn (tree) (= (type-of (car tree)) 'int)))
+  (def kind (fn (tree) (car tree)))
+
+  ; Little-endian bytes of an integer, two's complement for a negative one.
+  (def le (fn (n count)
+    (if (= count 0) nil
+        (if (< n 0)
+            (invert (le (- (- 0 n) 1) count))
+            (cons (- n (* (/ n 256) 256)) (le (/ n 256) (- count 1)))))))
+  (def invert (fn (bytes) (if (= bytes nil) nil (cons (- 255 (car bytes)) (invert (cdr bytes))))))
+  (def le4 (fn (n) (le n 4)))
+  (def le8 (fn (n) (le n 8)))
+
+  ; Pass one: the size of a tree and where its labels are, as (size table).
+  (def measure (fn (tree at table)
+    (if (= tree nil) (list 0 table)
+        (if (leaf? tree) (list (length tree) table)
+            (let ((k (kind tree)))
+              (if (= k 'seq)
+                  (let ((left (measure (car (cdr tree)) at table)))
+                    (let ((right (measure (car (cdr (cdr tree))) (+ at (car left)) (car (cdr left)))))
+                      (list (+ (car left) (car right)) (car (cdr right)))))
+                  (if (= k 'label) (list 0 (assoc table (car (cdr tree)) at))
+                      (if (= k 'rel32) (list 4 table) (list 8 table)))))))))
+
+  ; Pass two: the hex text of a tree, a line per leaf.
+  (def render (fn (tree at table)
+    (if (= tree nil) ""
+        (if (leaf? tree) (hex tree "")
+            (let ((k (kind tree)))
+              (if (= k 'seq)
+                  (let ((left (car (cdr tree))))
+                    (text-concat (render left at table)
+                                 (render (car (cdr (cdr tree)))
+                                         (+ at (car (measure left at table))) table)))
+                  (if (= k 'label) ""
+                      (let ((target (get table (car (cdr tree)))))
+                        (if (= target nil) (fail "an undefined label")
+                            (if (= k 'rel32)
+                                (hex (le4 (- target (+ at 4))) "")
+                                (hex (le8 (+ image-base (+ header-bytes target))) "")))))))))))
+  (def hex-digit (fn (n) (text-slice "0123456789abcdef" n (+ n 1))))
+  (def hex (fn (bytes out)
+    (if (= bytes nil) (text-concat out "\n")
+        (let ((b (car bytes)))
+          (hex (cdr bytes) (text-concat out (text-concat (hex-digit (/ b 16)) (hex-digit (- b (* (/ b 16) 16))))))))))
+
+  ; Instructions, as byte lists. rax holds a value; rbx the other operand;
+  ; rbp the frame; [rbp-8] the static link; r12 the link passed to a
+  ; callee; r13 the arena's bump pointer; r15 the shared page.
+  (def mov-rax-imm (fn (n) (append (list 72 184) (le8 n))))
+  (def mov-rbx-abs (fn (name) (seq (list 72 187) (list 'abs64 name))))
+  (def push-rax (list 80))
+  (def pop-rax (list 88))
+  (def mov-rbx-rax (list 72 137 195))
+  (def mov-rax-rbp (list 72 137 232))
+  (def mov-rax-link (list 72 139 64 248))                  ; mov rax, [rax-8]
+  (def mov-rax-frame (fn (disp) (append (list 72 139 128) (le4 disp))))   ; mov rax, [rax+disp]
+  (def mov-rax-stack (fn (disp) (append (list 72 139 132 36) (le4 disp)))) ; mov rax, [rsp+disp]
+  (def add-rsp (fn (n) (append (list 72 129 196) (le4 n))))
+  (def prologue (list 85 72 137 229 65 84))                ; push rbp; mov rbp,rsp; push r12
+  (def epilogue (list 72 137 236 93 195))                  ; mov rsp,rbp; pop rbp; ret
+  (def call-closure                                         ; r11 = rax; rax = [r11]; r12 = [r11+8]; call rax
+    (list 73 137 195 73 139 3 77 139 99 8 255 208))
+  (def jmp (fn (name) (seq (list 233) (list 'rel32 name))))
+  (def je (fn (name) (seq (list 15 132) (list 'rel32 name))))
+  (def jne (fn (name) (seq (list 15 133) (list 'rel32 name))))
+  (def jl (fn (name) (seq (list 15 140) (list 'rel32 name))))
+  (def jns (fn (name) (seq (list 15 137) (list 'rel32 name))))
+  (def label (fn (name) (list 'label name)))
+  (def cmp-rax-rbx (list 72 57 216))
+  (def cmp-rax-1 (list 72 131 248 1))
+  (def cmp-rax-5 (list 72 131 248 5))
+  (def test-rax (list 72 133 192))
+  (def test-rbx (list 72 133 219))
+  (def record-closure (fn (name)                            ; rax = new record {code, rbp}
+    (cat (list (list 76 137 232)                            ; mov rax, r13
+               (mov-rbx-abs name) (list 73 137 93 0)        ; mov rbx, code; mov [r13], rbx
+               (list 72 137 235 73 137 93 8)                ; mov rbx, rbp; mov [r13+8], rbx
+               (list 73 131 197 16)))))                     ; add r13, 16
+
+  ; Labels from the path to a node, unique by construction.
+  (def at (fn (path n) (text-concat path (text-concat "." (digits n)))))
+  (def digits (fn (n) (if (< n 10) (text-slice "0123456789" n (+ n 1))
+                          (text-concat (digits (/ n 10)) (digits (- n (* (/ n 10) 10)))))))
+  (def name (fn (path what) (text-symbol (text-concat path what))))
+
+  ; The value a constant node carries, tagged.
+  (def tagged (fn (v)
+    (if (= (type-of v) 'int) (* v 2)
+        (if (= v #t) 3 (if (= v #f) 1 (if (= v nil) 5 (fail "a constant that is not an integer, a boolean or nil")))))))
+
+  ; Code for a node: (code functions), the functions a tree to place after
+  ; the entry; `scopes` are the arities of the frames, the innermost
+  ; first; `path` names the node for its labels.
+  (def gen (fn (node scopes path)
+    (let ((head (car node)))
+      (if (= head 'const) (list (mov-rax-imm (tagged (car (cdr node)))) nil)
+      (if (= head 'local) (gen-local (car (cdr node)) (car (cdr (cdr node))) scopes)
+      (if (= head 'builtin) (fail "a builtin used as a value")
+      (if (= head 'fn) (gen-fn (car (cdr node)) (car (cdr (cdr node))) scopes path)
+      (if (= head 'if) (gen-if (cdr node) scopes path)
+      (if (= head 'begin) (gen-begin (cdr node) scopes path 0)
+      (if (= head 'call) (gen-call (car (cdr node)) (car (cdr (cdr node))) scopes path)
+      (if (= head 'tail-call) (gen-call (car (cdr node)) (car (cdr (cdr node))) scopes path)
+      (fail "an IR node this backend does not know"))))))))))))
+
+  (def gen-local (fn (depth slot scopes)
+    (let ((arity (nth scopes depth)))
+      (list (cat (list mov-rax-rbp (links depth) (mov-rax-frame (+ 16 (* 8 (- (- arity 1) slot)))))) nil))))
+  (def links (fn (depth) (if (= depth 0) nil (seq mov-rax-link (links (- depth 1))))))
+
+  (def gen-fn (fn (arity body scopes path)
+    (let ((code-name (name path "f")))
+      (let ((inner (gen body (cons arity scopes) (at path 0))))
+        (list (record-closure code-name)
+              (cat (list (label code-name) prologue (car inner) epilogue (car (cdr inner)))))))))
+
+  (def gen-if (fn (parts scopes path)
+    (let ((test (gen (car parts) scopes (at path 0)))
+          (yes (gen (car (cdr parts)) scopes (at path 1)))
+          (no (gen (car (cdr (cdr parts))) scopes (at path 2)))
+          (else-name (name path "e"))
+          (end-name (name path "x")))
+      (list (cat (list (car test) cmp-rax-1 (je else-name) cmp-rax-5 (je else-name)
+                       (car yes) (jmp end-name) (label else-name) (car no) (label end-name)))
+            (cat (list (car (cdr test)) (car (cdr yes)) (car (cdr no))))))))
+
+  (def gen-begin (fn (forms scopes path index)
+    (if (= forms nil) (list nil nil)
+        (let ((first (gen (car forms) scopes (at path index)))
+              (rest (gen-begin (cdr forms) scopes path (+ index 1))))
+          (list (seq (car first) (car rest)) (seq (car (cdr first)) (car (cdr rest))))))))
+
+  (def gen-call (fn (callee arguments scopes path)
+    (if (= (car callee) 'builtin)
+        (gen-primitive (car (cdr callee)) arguments scopes path)
+        (let ((target (gen callee scopes (at path 0)))
+              (pushed (gen-arguments arguments scopes path 1))
+              (count (length arguments)))
+          (list (cat (list (car target) push-rax (car pushed)
+                           (mov-rax-stack (* 8 count)) call-closure (add-rsp (* 8 (+ count 1)))))
+                (seq (car (cdr target)) (car (cdr pushed))))))))
+  (def gen-arguments (fn (arguments scopes path index)
+    (if (= arguments nil) (list nil nil)
+        (let ((first (gen (car arguments) scopes (at path index)))
+              (rest (gen-arguments (cdr arguments) scopes path (+ index 1))))
+          (list (cat (list (car first) push-rax (car rest))) (seq (car (cdr first)) (car (cdr rest))))))))
+
+  (def gen-primitive (fn (op arguments scopes path)
+    (if (not (= (length arguments) 2)) (fail "a primitive with other than two arguments")
+        (let ((left (gen (car arguments) scopes (at path 0)))
+              (right (gen (car (cdr arguments)) scopes (at path 1))))
+          (list (cat (list (car left) push-rax (car right) mov-rbx-rax pop-rax (primitive op path)))
+                (seq (car (cdr left)) (car (cdr right))))))))
+  (def primitive (fn (op path)
+    (if (= op '+) (list 72 1 216)
+    (if (= op '-) (list 72 41 216)
+    (if (= op '*) (list 72 209 248 72 209 251 72 15 175 195 72 209 224)      ; sar, sar, imul, shl
+    (if (= op '/) (cat (list (list 72 209 248 72 209 251) test-rbx (je 'fault)
+                             (list 72 153 72 247 251 72 209 224)))           ; cqo; idiv rbx; shl
+    (if (= op '=) (compare (je (name path "t")) path)
+    (if (= op '<) (compare (jl (name path "t")) path)
+    (fail "a primitive this backend does not compile")))))))))
+  (def compare (fn (jump path)
+    (cat (list cmp-rax-rbx jump (mov-rax-imm 1) (jmp (name path "d"))
+               (label (name path "t")) (mov-rax-imm 3) (label (name path "d"))))))
+
+  ; The request to the supervisor: `endpoint.send` on its slot.
+  (def yield
+    (list 72 199 192 2 4 0 0                                 ; mov rax, 0x402
+          72 199 199 31 0 0 0                                ; mov rdi, 31
+          72 49 246 72 49 210 77 49 210 77 49 192            ; xor rsi, rdx, r10, r8
+          205 128))                                          ; int 0x80
+
+  ; rax tagged. Booleans and nil become 1, 0 and 2; an integer is printed
+  ; as a decimal line and its low byte is the status.
+  (def print-and-exit
+    (cat (list (list 73 137 198)                             ; mov r14, rax
+               (list 72 137 195 72 131 227 1 72 133 219)     ; mov rbx, rax; and rbx, 1; test rbx, rbx
+               (jne 'odd)
+               (list 72 209 248)                             ; sar rax, 1
+               (list 72 199 199 0 4 0 0)                     ; mov rdi, 1024
+               test-rax (jns 'nonnegative)
+               (list 72 247 216)                             ; neg rax
+               (list 65 198 4 63 45 72 255 199)              ; mov byte [r15+rdi], '-'; inc rdi
+               (label 'nonnegative)
+               (list 72 199 193 64 4 0 0)                    ; mov rcx, 1088
+               (list 72 199 195 10 0 0 0)                    ; mov rbx, 10
+               (label 'digit)
+               (list 49 210 72 247 243 72 131 194 48)        ; xor edx,edx; div rbx; add rdx,48
+               (list 72 255 201 65 136 20 15)                ; dec rcx; mov [r15+rcx], dl
+               test-rax (jne 'digit)
+               (label 'copy)
+               (list 65 138 4 15 65 136 4 63)                ; mov al,[r15+rcx]; mov [r15+rdi],al
+               (list 72 255 193 72 255 199)                  ; inc rcx; inc rdi
+               (list 72 129 249 64 4 0 0) (jne 'copy)        ; cmp rcx, 1088
+               (list 65 198 4 63 10 72 255 199)              ; mov byte [r15+rdi], 10; inc rdi
+               (list 72 129 239 0 4 0 0)                     ; sub rdi, 1024
+               (list 73 199 135 0 2 0 0 2 0 0 0)             ; mov qword [r15+512], 2 (WRITE)
+               (list 73 199 135 8 2 0 0 1 0 0 0)             ; mov qword [r15+520], 1 (descriptor)
+               (list 73 137 191 16 2 0 0)                    ; mov [r15+528], rdi (length)
+               yield
+               (list 76 137 240 72 209 248)                  ; mov rax, r14; sar rax, 1
+               (jmp 'exit)
+               (label 'odd)                                  ; #f 1 -> 0, #t 3 -> 1, nil 5 -> 2
+               (list 72 209 248)                             ; sar rax, 1
+               (jmp 'exit)
+               (label 'fault)
+               (list 72 199 192 111 0 0 0)                   ; mov rax, 111
+               (label 'exit)
+               (list 72 37 255 0 0 0)                        ; and rax, 255
+               (list 73 199 135 0 2 0 0 1 0 0 0)             ; mov qword [r15+512], 1 (EXIT)
+               (list 73 137 135 8 2 0 0)                     ; mov [r15+520], rax
+               yield
+               (list 235 254))))                             ; jmp $
+
+  ; The entry: the shared page in rdi, the arena, the program's closure,
+  ; the arguments (the closure first under the self convention), the call,
+  ; the result printed and returned as the status.
+  (def entry
+    (cat (list (list 73 137 255)                             ; mov r15, rdi
+               (append (list 73 189) (le8 (+ image-base arena-offset))) ; mov r13, arena
+               (list 72 137 229))))                          ; mov rbp, rsp
+  (def push-arguments (fn (arguments)
+    (if (= arguments nil) nil
+        (cat (list (mov-rax-imm (tagged (car arguments))) push-rax (push-arguments (cdr arguments)))))))
+  (def finish (fn (arity arguments)                          ; rax = the closure record
+    (let ((self? (= arity (+ (length arguments) 1))))
+      (if (not (if self? #t (= arity (length arguments)))) (fail "the arguments do not match the function's arity")
+          (cat (list push-rax (if self? push-rax nil) (push-arguments arguments)
+                     (mov-rax-stack (* 8 arity)) call-closure (add-rsp (* 8 (+ arity 1)))
+                     print-and-exit))))))
+
+  ; The ELF: a header, a code segment holding the file, and an arena
+  ; segment of fresh pages a megabyte above it, one closure record each 16
+  ; bytes. The entry follows the headers.
+  (def elf-header (fn (size)
+    (cat (list
+      (list 127 69 76 70 2 1 1 0 0 0 0 0 0 0 0 0)             ; magic, 64-bit, little-endian, version, System V
+      (list 2 0 62 0) (le4 1)                                 ; ET_EXEC, x86-64, version
+      (le8 (+ image-base header-bytes))                       ; entry
+      (le8 64) (le8 0)                                        ; program headers at 64, no sections
+      (le4 0) (list 64 0 56 0 2 0 0 0 0 0 0 0)                ; flags, ehsize, phentsize, phnum, sh*
+      (le4 1) (le4 5) (le8 0) (le8 image-base) (le8 image-base) (le8 size) (le8 size) (le8 4096)
+      (le4 1) (le4 6) (le8 0) (le8 (+ image-base arena-offset)) (le8 (+ image-base arena-offset))
+      (le8 0) (le8 arena-offset) (le8 4096)))))
+
+  ; The IR `native-compile` answers: `(agel/native-v2 (fn ARITY BODY))`.
+  (def native-x86-emit (fn (ir arguments)
+    (if (not (= (car ir) 'agel/native-v2)) (fail "not agel/native-v2 IR")
+        (let ((function (car (cdr ir))))
+          (if (not (= (car function) 'fn)) (fail "the IR is not a function")
+              (let ((arity (car (cdr function))))
+                (let ((main (gen function nil "L")))
+                  (let ((code (cat (list entry (car main) (finish arity arguments) (car (cdr main))))))
+                    (let ((measured (measure code 0 (dict))))
+                      (text-concat (render (elf-header (+ header-bytes (car measured))) 0 (dict))
+                                   (render code 0 (car (cdr measured)))))))))))))
+
+  (def native-x86-source 'in-the-library))

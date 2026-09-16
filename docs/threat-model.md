@@ -1891,6 +1891,22 @@ produced or run there.
   chunks, holding one sector and one chunk, so a file of any size the
   region can take is installed without a buffer to overflow.
 
+## v0.2.85
+
+- **Machine code made in the guest is a program like any other:** the
+  backend's output is a file, installed with the operator's authority,
+  loaded under the loader's rules (segments in the window, never writable
+  and executable together, page-congruent), and run in a protection
+  domain with a process's authority and budget. Nothing about its origin
+  is trusted or checked; a wrong emitter makes a program that faults or
+  misbehaves inside its domain, and the supervisor reports it.
+- **The backend runs under the evaluator's budgets:** fuel, call depth
+  and collection limits bound the assembler as they bound any program;
+  it is Agel code in the library, with no authority of its own.
+- **A 64 MiB process window** is address space, not memory: frames are
+  mapped as a process asks, from the same pool, and a process that asks
+  for more than the pool holds is refused at `brk` as before.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the
