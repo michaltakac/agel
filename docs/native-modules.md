@@ -115,9 +115,14 @@ per request; a persistent compiler service is future performance work.
 Rust remains the host bootstrap/runtime/backend and guest evaluator substrate.
 The reader, linker, macro expansion, compiler frontend and source adapter are
 Agel. Guest scheduling, behavior turns, scene drawing and source persistence run
-in the actual OS. The self-hosted toolchain itself is **not yet running in the
-guest**. General procedural/hygienic macros, dynamically linked modules, module
-bundle persistence and an in-guest compiler/runtime remain subsequent milestones.
+in the actual OS. Since v0.2.80 the toolchain itself runs in the guest too: the
+loaded runtime (`boot/posix/agel`, the hosted runtime without `std` in a
+protection domain) reads, links and compiles a module bundle with the same
+library functions and writes the linked definition for the desktop to load,
+producing what this host bridge produces; see
+[`release-v0.2.80.md`](release-v0.2.80.md). The machine-code backend stays on the
+host. General procedural/hygienic macros, dynamically linked modules and module
+bundle persistence remain subsequent milestones.
 
 ## Verification
 

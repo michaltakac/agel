@@ -132,8 +132,10 @@ Each rung must be runnable and differentially testable against the rung below:
 16. **Complete self-host (in progress):** reader, hygienic expander, agent
    runtime, image codec, and compiler in Agel; extend diverse comparison to
    every kernel semantic. Rungs 32 through 36 supply the reader, a restricted
-   expander, a compiled agent kernel and the compiler frontend as Agel; the
-   image codec, the backend and the in-guest toolchain remain Rust or host-side.
+   expander, a compiled agent kernel and the compiler frontend as Agel; since
+   rung 75 (v0.2.80) the reader, linker and compiler frontend run in the
+   guest; the image codec and the machine-code backend remain Rust and
+   host-side.
 17. **Native evaluator world (complete at v0.1.6):** the fixed-memory evaluator
    runs at the lowest privilege level on all three research backends. The x86-64
    interactive workshop sends source over a bounded shared page and prints
@@ -436,6 +438,14 @@ Each rung must be runnable and differentially testable against the rung below:
    `file-append`, `file-list`, `clock`, `console-log`, `exec`) over the
    process protocol, so the hosted capability model governs real effects
    in the OS: an agent spawned without a capability cannot write a file.
+75. **The compiler in the guest (v0.2.80):** the loaded runtime runs the
+   toolchain written in Agel: `native-read`, `native-link` and
+   `native-compile` read, link and compile a module bundle from the data
+   region in the OS, `print-form` writes the linked definition as source,
+   the desktop's evaluator loads and runs it, and the adapted definition is
+   byte-equal to the host toolchain's output for the same module. The IR is
+   produced in the guest and not executed there: the backend is Cranelift on
+   the host.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

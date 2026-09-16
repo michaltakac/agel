@@ -1793,6 +1793,24 @@ write reached before a later failure stays. The check is by kind and
 scope; it does not inspect what a word does with its arguments beyond the
 first.
 
+## v0.2.80
+
+- **The toolchain in the guest is the library's Agel, interpreted:** the
+  reader, linker and compiler run under the loaded runtime's fuel, depth
+  and collection budgets, and their own limits (65,536 bytes of source,
+  a syntax depth of 64), in a process with a process's authority. A
+  malformed module is a condition in the transaction, not a fault.
+- **`print-form` is pure** and holds no capability; what it prints is a
+  value the program computed, and writing it is `file-write` behind
+  `file/write` as before.
+- **A compiled definition is a file:** loaded by `:load-file` with the
+  operator's authority, unsigned, like any program file since v0.2.77;
+  the guest toolchain adds no trust to its output, and the byte-equality
+  with the host toolchain is a test's check, not a runtime one.
+
+Not claimed: the IR is not executed in the guest, so no machine code is
+produced or run there.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

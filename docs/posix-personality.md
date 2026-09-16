@@ -629,7 +629,12 @@ child from the program table with this process's namespace and console,
 answering its exit status. Each is behind a capability kind the
 evaluator checks (`file/read`, `file/write`, `clock/read`,
 `console/write`, `process/run`); the evaluation holds them all for every
-scope, an agent only what it was spawned with.
+scope, an agent only what it was spawned with. `print-form VALUE`
+(v0.2.80) is the printed form of a value as text, pure: with it the
+toolchain written in Agel — `native-read`, `native-link`,
+`native-compile` from the library — reads, links and compiles a module
+bundle in the OS and writes the linked definition as source for the
+desktop to load.
 
 `agel [--no-stdlib] FILE`: the file is read through the namespace `:exec`
 granted, the standard library is installed from the program's own image

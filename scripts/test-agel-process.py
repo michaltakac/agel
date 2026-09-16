@@ -7,6 +7,7 @@ no authority beyond the namespace and console it was given. A failing
 form is a transaction that rolls back and an exit status of 1."""
 import socket
 import sys
+from pathlib import Path
 import tempfile
 import time
 import graphical_console as module
@@ -115,6 +116,24 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         # The files are the filesystem's: the desktop's evaluator reads them.
         check(machine, '(file-read "out.txt")', "hello from the runtime +1")
         check(machine, '(file-read "agent.txt")', "kept by a capability")
+        # The compiler in the guest: the reader, linker and compiler written
+        # in Agel run in the process, on a module from the data region; the
+        # linked definition is written as source the desktop loads, and the
+        # adapted one is byte-equal to what the host toolchain produces.
+        check(machine, '(file-write "compile.agel" "(import agel/native-reader)\\n(import agel/native-modules)\\n(import agel/native)\\n(def forms (native-read (file-read \\"/data/dock.agel\\") 65536 64))\\n")', "\r\n")
+        check(machine, '(file-append "compile.agel" "(def linked (native-link forms (quote dock) (quote behavior)))\\n(def ir (native-compile linked))\\n(type-of ir)\\n")', "\r\n")
+        check(machine, '(file-append "compile.agel" "(def adapt (fn (b) (list (quote def) (quote behavior) (list (quote fn) (quote (s h m)) (list (quote (fn (n) (begin (paint s n) n))) (list b (quote s) (quote h) (quote m)))))))\\n")', "\r\n")
+        check(machine, '(file-append "compile.agel" "(file-write \\"behavior.agel\\" (print-form (adapt linked)))\\n(file-write \\"linked.agel\\" (print-form (list (quote def) (quote behavior) linked)))\\n")', "\r\n")
+        started = time.monotonic()
+        reply = run(machine, ":exec agel -- compile.agel", 600)
+        assert "=> list" in reply, reply
+        assert "process agel exited with status 0" in reply, reply
+        print(f"read, link, compile: {time.monotonic() - started:.1f} s")
+        check(machine, ":load-file /linked.agel", "LOADED 1 FORMS FROM /linked.agel")
+        check(machine, "(behavior nil 40 1)", "\r\n42\r\n")
+        expected = module.compile_module(Path("examples/jit-module-dock.agel").read_text())
+        reply = machine.submit('(file-read "behavior.agel")')
+        assert expected in reply, (expected, reply)
         # A failing form: the transaction rolls back, the error is reported,
         # the status is 1.
         check(machine, '(file-write "bad.agel" "(def ok 1)\\n(/ 1 0)\\n")', "\r\n")

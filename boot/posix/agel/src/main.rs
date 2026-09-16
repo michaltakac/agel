@@ -264,13 +264,14 @@ fn pulse() {
 // Effect words
 // ---------------------------------------------------------------------------
 
-/// The words the process gives the language, the desktop's vocabulary for
+/// The words the process gives the language: the desktop's vocabulary for
 /// its own evaluator (`file-read`, `file-write`, `file-append`,
 /// `file-list`, `clock`, `console-log`, `exec`), each over the process
 /// protocol and each behind a capability kind the evaluator checks before
-/// the word runs: the evaluation's own set holds every kind, an agent
-/// holds what it was spawned with.
-static HOST: [HostWord; 7] = [
+/// the word runs — the evaluation's own set holds every kind, an agent
+/// holds what it was spawned with — and `print-form`, the printed form of
+/// a value as text, pure, so a program can write source the reader reads.
+static HOST: [HostWord; 8] = [
     HostWord {
         name: "file-read",
         capability: "file/read",
@@ -305,6 +306,11 @@ static HOST: [HostWord; 7] = [
         name: "exec",
         capability: "process/run",
         call: exec,
+    },
+    HostWord {
+        name: "print-form",
+        capability: "",
+        call: print_form,
     },
 ];
 
@@ -472,6 +478,12 @@ fn console_log(arguments: &[Value]) -> Result<Value, HostError> {
     process.write(1, line.as_bytes());
     process.write(1, b"\n");
     Ok(Value::Nil)
+}
+
+/// The printed form of a value: what the reader reads back.
+fn print_form(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("print-form", arguments, 1)?;
+    Ok(Value::String(format!("{}", arguments[0])))
 }
 
 /// Run a program from the table as a child with this process's namespace,

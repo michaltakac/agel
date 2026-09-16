@@ -355,6 +355,10 @@ promise.
   `v0.2.79` gives that runtime effects: host words in `agel-core`, each
   behind a capability the evaluator checks, and the desktop's file, clock,
   console and `exec` vocabulary in the process over the process protocol.
+  `v0.2.80` runs the toolchain written in Agel in that process: the reader,
+  linker and compiler frontend read, link and compile a module bundle in
+  the OS, the desktop loads the linked definition, and the result is
+  byte-equal to the host toolchain's.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
