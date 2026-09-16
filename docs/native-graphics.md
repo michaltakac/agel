@@ -237,7 +237,10 @@ program lives, repainting the terminal panel when the program wrote and
 the whole frame, with the report and a fresh prompt, when it ends. The
 process serves `write`, `draw` and its children the same way in either
 mode; a second `:exec` while one ran was refused with
-`A PROCESS IS RUNNING` until v0.2.65.
+`A PROCESS IS RUNNING` until v0.2.65. Since v0.2.82 a program that reads
+the console gets the prompt back the same way with `PROCESS READING`, and
+then owns the lines typed at that prompt (`LINE GIVEN TO THE PROGRAM`)
+until `:eof` ends its input.
 
 `boot/posix/c/sketch.c` opens a window, waits for events, puts a dot
 where each press lands and writes the press to the console; a key clears

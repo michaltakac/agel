@@ -2926,6 +2926,7 @@ fn execute_workshop(
                 }
                 crate::process::Progress::Listening => &b"PROCESS LISTENING"[..],
                 crate::process::Progress::Sleeping => &b"PROCESS SLEEPING"[..],
+                crate::process::Progress::Reading => &b"PROCESS READING"[..],
                 crate::process::Progress::Ended => {
                     crate::process::finish(machine, run, services.console);
                     return StatusLine::new(b"PROCESS ENDED");
@@ -4208,7 +4209,8 @@ fn interactive(
                         match crate::process::step_run(machine, &mut services, run) {
                             crate::process::Progress::Running => {}
                             crate::process::Progress::Listening
-                            | crate::process::Progress::Sleeping => break,
+                            | crate::process::Progress::Sleeping
+                            | crate::process::Progress::Reading => break,
                             crate::process::Progress::Ended => {
                                 ended = true;
                                 break;
@@ -4643,32 +4645,51 @@ fn interactive(
                     console::write("INVALID UTF-8\nlive-desktop> ");
                     continue;
                 }
+                // A program reading the console owns the line, as a
+                // terminal's foreground program does; `:eof` alone ends
+                // its input, the way a terminal's end-of-file key does.
+                let fed = match running.as_mut().filter(|run| run.reading_console()) {
+                    Some(run) => {
+                        status = if trim(&line[..length]) == b":eof" {
+                            run.end_console();
+                            StatusLine::new(b"END OF INPUT")
+                        } else if run.feed_console(&line[..length]) {
+                            StatusLine::new(b"LINE GIVEN TO THE PROGRAM")
+                        } else {
+                            StatusLine::new(b"THE PROGRAM'S INPUT IS FULL")
+                        };
+                        true
+                    }
+                    None => false,
+                };
                 #[cfg(target_arch = "x86_64")]
                 let clock = clock_driver.as_mut();
                 #[cfg(not(target_arch = "x86_64"))]
                 let clock: Option<&mut ServiceDomain> = None;
-                status = execute_workshop(
-                    machine,
-                    compositor,
-                    Some(&mut inputs),
-                    &mut evaluator,
-                    &mut storage,
-                    filesystem.as_mut(),
-                    &mut console_driver,
-                    clock,
-                    &mut recovery,
-                    &mut kernel,
-                    &mut current,
-                    &mut previous,
-                    &mut scene_revision,
-                    &mut evaluator_revision,
-                    &mut workspace,
-                    &mut committed_workspace,
-                    &mut generation,
-                    &mut dirty,
-                    &mut running,
-                    &line[..length],
-                );
+                if !fed {
+                    status = execute_workshop(
+                        machine,
+                        compositor,
+                        Some(&mut inputs),
+                        &mut evaluator,
+                        &mut storage,
+                        filesystem.as_mut(),
+                        &mut console_driver,
+                        clock,
+                        &mut recovery,
+                        &mut kernel,
+                        &mut current,
+                        &mut previous,
+                        &mut scene_revision,
+                        &mut evaluator_revision,
+                        &mut workspace,
+                        &mut committed_workspace,
+                        &mut generation,
+                        &mut dirty,
+                        &mut running,
+                        &line[..length],
+                    );
+                }
                 current.terminal.dirty = false;
                 current.previewing = trim(&line[..length]).starts_with(b":preview ")
                     && status.get().starts_with(b"CANDIDATE VALIDATED");

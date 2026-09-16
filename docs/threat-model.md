@@ -1829,6 +1829,28 @@ produced or run there.
   stale answer to an earlier observation; the reply is still text the
   program parses, never a command.
 
+## v0.2.82
+
+- **A line given to a program is data:** while a live process reads the
+  console, the desktop hands it every line typed, with its newline, and
+  runs none of them as a command; the one exception is `:eof` alone,
+  which ends the input. The program therefore owns the operator's lines
+  until its input ends, as a terminal's foreground program does, and the
+  desktop's own commands are unreachable meanwhile — which the operator
+  chose by starting a program that reads.
+- **Input is bounded:** 1 KiB of typed lines per run; a line with no room
+  is refused (`THE PROGRAM'S INPUT IS FULL`) and nothing is dropped
+  silently. A read takes at most a block. Descriptor 0 is the console
+  only for a process the operator started; a child reads what it was
+  spawned with.
+- **A session is one world with one process's authority,** and each line
+  is a transaction: a failed line changes nothing. `:eof` ends it and
+  nothing persists but the files.
+- **Failure is reported, not spun:** a panic in a program that asked for
+  it is a line on descriptor 2 and status 101; an exhausted window in
+  `agel` is a line and status 12. Before, both were a spin the supervisor
+  stopped as an exhausted tick budget, which said nothing about the cause.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

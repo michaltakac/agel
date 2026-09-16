@@ -37,25 +37,31 @@ def until_text(machine, needle, seconds):
     return buffer.decode("utf-8", errors="replace")
 
 
+def quiet(machine, seconds=2):
+    """Everything the console prints until it has been silent for `seconds`:
+    what a process prints between prompts, and the desktop's report of its
+    end, which comes on a later pass."""
+    text = ""
+    machine.serial.settimeout(seconds)
+    try:
+        while True:
+            byte = machine.serial.recv(1)
+            if not byte:
+                raise RuntimeError("Agel stopped")
+            text += byte.decode("utf-8", errors="replace")
+    except socket.timeout:
+        pass
+    finally:
+        machine.serial.settimeout(15)
+    return text
+
+
 def run(machine, line, seconds):
     """`:exec` and everything the process prints until the desktop reports
-    its end: the desktop returns its prompt while a long process runs, and
-    reports the end on a later pass, so the rest is read until the console
-    is quiet."""
+    its end: the desktop returns its prompt while a long process runs."""
     reply = machine.submit(line, seconds)
     if "PROCESS RUNNING" in reply:
-        reply += until_text(machine, b"exited with status", seconds)
-        machine.serial.settimeout(2)
-        try:
-            while True:
-                byte = machine.serial.recv(1)
-                if not byte:
-                    raise RuntimeError("Agel stopped")
-                reply += byte.decode("utf-8", errors="replace")
-        except socket.timeout:
-            pass
-        finally:
-            machine.serial.settimeout(15)
+        reply += until_text(machine, b"exited with status", seconds) + quiet(machine)
     return reply
 
 
@@ -134,6 +140,24 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         expected = module.compile_module(Path("examples/jit-module-dock.agel").read_text())
         reply = machine.submit('(file-read "behavior.agel")')
         assert expected in reply, (expected, reply)
+        # A session: without a file the runtime reads the console line by
+        # line, each line a transaction in the same world; the desktop hands
+        # the prompt back while it reads and gives it the lines typed, and
+        # `:eof` ends its input.
+        def converse(line, wanted, seconds=30):
+            reply = check(machine, line, "LINE GIVEN TO THE PROGRAM")
+            return reply + until_text(machine, wanted.encode(), seconds) + quiet(machine, 1)
+        reply = check(machine, ":exec agel -- --no-stdlib", "agel: session")
+        assert "PROCESS READING" in reply, reply
+        converse("(def x 40)", "=> 40")
+        converse("(+ x 2)", "=> 42")
+        reply = converse("(begin (def x 0) (/ 1 0))", "agel: error:")
+        assert "division by zero" in reply, reply
+        converse("x", "=> 40")
+        reply = check(machine, ":eof", "END OF INPUT")
+        reply += until_text(machine, b"PROCESS ENDED", 30) + quiet(machine)
+        assert "agel: end of input at revision 3" in reply, reply
+        assert "process agel exited with status 0" in reply, reply
         # A failing form: the transaction rolls back, the error is reported,
         # the status is 1.
         check(machine, '(file-write "bad.agel" "(def ok 1)\\n(/ 1 0)\\n")', "\r\n")

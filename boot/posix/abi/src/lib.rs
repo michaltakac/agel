@@ -4,6 +4,8 @@
 #![no_std]
 
 use core::arch::asm;
+use core::fmt::Write as _;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Shared-page word indices of the request block.
 pub const KIND: usize = 64;
@@ -403,7 +405,50 @@ unsafe fn yield_to_supervisor() {
     }
 }
 
+/// The shared page of the process that asked for panics to be reported,
+/// or 0: a panic then spins until the supervisor stops the process.
+static PANIC_PAGE: AtomicU64 = AtomicU64::new(0);
+
+/// A line for the panic handler: formatted without a heap, which may be
+/// what failed.
+struct Line {
+    bytes: [u8; 256],
+    length: usize,
+}
+
+impl core::fmt::Write for Line {
+    fn write_str(&mut self, text: &str) -> core::fmt::Result {
+        let take = text.len().min(self.bytes.len() - self.length);
+        self.bytes[self.length..self.length + take].copy_from_slice(&text.as_bytes()[..take]);
+        self.length += take;
+        Ok(())
+    }
+}
+
+impl Process {
+    /// Have a panic reported on descriptor 2 and end the process with
+    /// status 101, rather than spin until the supervisor stops it for
+    /// exhausting its tick budget: the message says what happened.
+    pub fn report_panics(&self) {
+        PANIC_PAGE.store(self.page as u64, Ordering::Relaxed);
+    }
+}
+
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
-    loop {}
+fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
+    let page = PANIC_PAGE.load(Ordering::Relaxed);
+    if page == 0 {
+        loop {}
+    }
+    // Safety: the page is the one `report_panics` was given, this
+    // process's own, and nothing else runs in it.
+    let process = unsafe { Process::new(page) };
+    let mut line = Line {
+        bytes: [0; 256],
+        length: 0,
+    };
+    let _ = write!(line, "panic: {info}");
+    process.write(2, &line.bytes[..line.length]);
+    process.write(2, b"\n");
+    process.exit(101)
 }

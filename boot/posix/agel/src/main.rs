@@ -4,7 +4,9 @@
 //! library, loaded by the supervisor as a process like any other: `:exec
 //! agel ROOT -- FILE` reads `FILE` from the namespace it was given, installs
 //! the standard library, evaluates the file as one transaction and prints
-//! each form's value on its console descriptor. It holds no authority the
+//! each form's value on its console descriptor. Without a file it is a
+//! session: it reads the console line by line, each line a transaction in
+//! the same world, until the end of input. It holds no authority the
 //! supervisor did not hand it: a namespace, descriptors 1 and 2, pages at
 //! its break. Its effect words reach the namespace, the console, the clock
 //! and the program table through the process protocol, each behind a
@@ -128,7 +130,16 @@ unsafe fn carve(heap: &mut Heap, bytes: usize, align: usize) -> *mut u8 {
         let pieces = missing.div_ceil(PAGE * abi::BRK_PAGES as usize) as u64;
         let mapped = map_pages(pieces * abi::BRK_PAGES);
         if mapped < 0 {
-            return core::ptr::null_mut();
+            // The window is full: say so and end, rather than fail the
+            // allocation into a panic that names only the bytes.
+            let process = process();
+            process.report(
+                2,
+                b"agel: out of memory: the process window is full after ",
+                ((heap.end - heap.bump) / PAGE) as i64,
+                b" free pages\n",
+            );
+            process.exit(12);
         }
         if heap.bump == 0 {
             heap.bump = mapped as usize;
@@ -197,6 +208,7 @@ static ALLOCATOR: Allocator = Allocator;
 #[link_section = ".text.entry"]
 pub extern "C" fn _start(shared_page: u64) -> ! {
     SHARED_PAGE.store(shared_page as usize, Ordering::Relaxed);
+    process().report_panics();
     let base = map_pages(STACK_PAGES);
     if base < 0 {
         process().report(2, b"agel: no pages for a stack: error ", -base, b"\n");
@@ -518,24 +530,28 @@ extern "C" fn main() -> ! {
             _ => file = Some(argument.clone()),
         }
     }
-    let Some(path) = file else {
-        say(2, "usage: agel [--no-stdlib] FILE\n");
-        process.exit(2);
+    let source = match &file {
+        Some(path) => match read_file(path) {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(source) => Some(source),
+                Err(_) => {
+                    say(2, "agel: the file is not UTF-8\n");
+                    process.exit(1);
+                }
+            },
+            Err(error) => {
+                process.write(2, b"agel: ");
+                process.write(2, path);
+                process.report(2, b": error ", -error, b"\n");
+                process.exit((-error) as u64);
+            }
+        },
+        None => None,
     };
-    let source = match read_file(&path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            process.write(2, b"agel: ");
-            process.write(2, &path);
-            process.report(2, b": error ", -error, b"\n");
-            process.exit((-error) as u64);
-        }
-    };
-    let Ok(source) = String::from_utf8(source) else {
-        say(2, "agel: the file is not UTF-8\n");
-        process.exit(1);
-    };
-    let mut world = World::default();
+    // No rollback history: a transaction rolls back through its own copy,
+    // and a history of whole states would fill the window with the
+    // library's state a few transactions in.
+    let mut world = World::new(0);
     world.install_host(&HOST);
     let mut capabilities = Vec::new();
     for kind in CAPABILITY_KINDS {
@@ -574,6 +590,9 @@ extern "C" fn main() -> ! {
             }
         }
     }
+    let Some(source) = source else {
+        session(&mut world, &options)
+    };
     match world.evaluate_with(&source, &options) {
         Ok(commit) => {
             for value in &commit.values {
@@ -593,6 +612,56 @@ extern "C" fn main() -> ! {
         Err(error) => {
             say(2, &format!("agel: error: {error}\n"));
             process.exit(1)
+        }
+    }
+}
+
+/// The most bytes of one typed line the session keeps.
+const LINE_BYTES: usize = 4096;
+
+/// A session: lines from the console, each one transaction in the same
+/// world, values printed as they commit, an error leaving the world as it
+/// was; over at the end of input, with the world's revision as the report.
+fn session(world: &mut World, options: &EvaluationOptions) -> ! {
+    let process = process();
+    say(
+        1,
+        "agel: session; each line is a transaction, :eof ends it\n",
+    );
+    let mut pending: Vec<u8> = Vec::new();
+    let mut block = [0_u8; abi::BLOCK_BYTES];
+    loop {
+        let count = process.read(0, &mut block);
+        if count < 0 {
+            process.report(2, b"agel: console: error ", -count, b"\n");
+            process.exit(1);
+        }
+        if count == 0 {
+            say(
+                1,
+                &format!("agel: end of input at revision {}\n", world.revision()),
+            );
+            process.exit(0);
+        }
+        pending.extend_from_slice(&block[..count as usize]);
+        while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = pending.drain(..=end).collect();
+            let line = String::from_utf8_lossy(&line[..end]).into_owned();
+            if line.trim().is_empty() {
+                continue;
+            }
+            match world.evaluate_with(&line, options) {
+                Ok(commit) => {
+                    for value in &commit.values {
+                        say(1, &format!("=> {value}\n"));
+                    }
+                }
+                Err(error) => say(2, &format!("agel: error: {error}\n")),
+            }
+        }
+        if pending.len() > LINE_BYTES {
+            say(2, "agel: a line longer than the session keeps\n");
+            pending.clear();
         }
     }
 }

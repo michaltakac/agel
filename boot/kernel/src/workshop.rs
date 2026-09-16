@@ -188,6 +188,9 @@ pub fn exec_program(
                 process::abandon(machine, &mut services, run);
                 break;
             }
+            // Nothing here feeds a line either: the console's input ends
+            // at once, and the read answers 0.
+            process::Progress::Reading => run.end_console(),
             process::Progress::Ended => break,
         }
     }

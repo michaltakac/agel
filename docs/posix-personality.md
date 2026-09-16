@@ -639,6 +639,18 @@ toolchain written in Agel — `native-read`, `native-link`,
 bundle in the OS and writes the linked definition as source for the
 desktop to load.
 
+Since v0.2.82 a process the operator started reads the console at
+descriptor 0: a `read` there answers what was typed, a block at a time,
+or blocks with the run reported `PROCESS READING`; the desktop hands the
+prompt back and gives the program the lines typed until `:eof`, which
+ends the input (the read answers 0). The serial workshop, having no line
+to give, ends the input at once. `agel` without a file is a session on
+that input: each line a transaction in one world, `=> VALUE` as it
+commits, `agel: error: ...` leaving the world as it was, `agel: end of
+input at revision N` at `:eof`. A panic in a program that called
+`Process::report_panics` is written to descriptor 2 with status 101
+rather than spun on.
+
 `agel [--no-stdlib] FILE`: the file is read through the namespace `:exec`
 granted, the standard library is installed from the program's own image
 unless `--no-stdlib`, the file is evaluated as one transaction with fifty

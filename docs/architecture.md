@@ -454,6 +454,13 @@ Each rung must be runnable and differentially testable against the rung below:
    episode runs through the host bridge in CI, every step a request the
    program makes and a reply the policy gives, `model-result` spending what
    it reads.
+77. **A session in the OS (v0.2.82):** a process the operator started reads
+   the console at descriptor 0 — the desktop gives a reading process the
+   lines typed at its prompt and `:eof` ends the input — and `agel` without
+   a file keeps one world across lines, each a transaction. The process
+   builds its world without rollback history, since a history of whole
+   states filled the window; a panic or an exhausted window is reported on
+   the console and ends the process rather than spinning.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

@@ -364,6 +364,9 @@ promise.
   exercised by a process holding a descriptor across a filesystem restart,
   and a model-driven episode runs through the host bridge in CI with the
   echo policy; `model-result` now spends the answer it reads.
+  `v0.2.82` gives processes the console as input — descriptor 0 reads what
+  the operator types, `:eof` ends it — and makes `agel` without a file a
+  session: each line a transaction in one world kept between lines.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

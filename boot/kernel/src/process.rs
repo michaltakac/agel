@@ -97,6 +97,12 @@ impl Descriptor {
         writable: true,
         ..Self::FREE
     };
+    /// Descriptor 0 of a process the operator started: what they type.
+    const CONSOLE_INPUT: Self = Self {
+        kind: Kind::Console,
+        readable: true,
+        ..Self::FREE
+    };
 }
 
 /// Error numbers a request answers with, negated: the POSIX values, which
@@ -473,6 +479,9 @@ enum State {
     Listening(u64),
     /// Asleep until the clock reads this many microseconds.
     Sleeping(u64),
+    /// A read of the console with nothing typed yet; answered when the
+    /// desktop feeds a line, or with 0 at the end of input.
+    ReadingConsole(u64),
     Ended(Exit),
 }
 
@@ -521,6 +530,30 @@ impl Pipe {
 struct Table {
     processes: [Option<Process>; process::PROCESSES],
     pipes: [Pipe; process::PIPES],
+    console: ConsoleInput,
+}
+
+/// What the operator typed for the process reading the console: lines
+/// the desktop feeds while a process reads descriptor 0, handed out by a
+/// read like a pipe's bytes, and an end of input the operator declares.
+/// One buffer per run: the console is one, and the process reading it is
+/// whichever asked.
+struct ConsoleInput {
+    buffer: [u8; CONSOLE_INPUT_BYTES],
+    head: usize,
+    length: usize,
+    ended: bool,
+}
+
+const CONSOLE_INPUT_BYTES: usize = 1024;
+
+impl ConsoleInput {
+    const EMPTY: Self = Self {
+        buffer: [0; CONSOLE_INPUT_BYTES],
+        head: 0,
+        length: 0,
+        ended: false,
+    };
 }
 
 /// The programs in flight: one table, in which each `:exec` is a root
@@ -548,6 +581,45 @@ impl Run {
     }
 }
 
+/// The console's input, which the desktop feeds line by line and the
+/// serial workshop ends at once, having no line to give a process.
+impl Run {
+    /// Whether a live process is reading the console and nothing typed
+    /// is waiting for it: the next line the operator types is its.
+    #[cfg(feature = "native-graphics")]
+    pub fn reading_console(&self) -> bool {
+        self.table.console.length == 0
+            && !self.table.console.ended
+            && self.table.processes.iter().any(|process| {
+                matches!(
+                    process.as_ref().map(|process| process.state),
+                    Some(State::ReadingConsole(_))
+                )
+            })
+    }
+
+    /// Feed one typed line, with its newline, to the console's reader:
+    /// false when the buffer has no room for it.
+    #[cfg(feature = "native-graphics")]
+    pub fn feed_console(&mut self, line: &[u8]) -> bool {
+        let console = &mut self.table.console;
+        if console.length + line.len() + 1 > CONSOLE_INPUT_BYTES {
+            return false;
+        }
+        for byte in line.iter().chain(b"\n") {
+            console.buffer[(console.head + console.length) % CONSOLE_INPUT_BYTES] = *byte;
+            console.length += 1;
+        }
+        true
+    }
+
+    /// Declare the end of the console's input: a read past what was typed
+    /// answers 0, as a pipe's does when its last writer closed.
+    pub fn end_console(&mut self) {
+        self.table.console.ended = true;
+    }
+}
+
 /// Where a run lives: on the serial workshop's stack for one `:exec`, in
 /// a static of the desktop's for a run that outlasts a command.
 pub struct RunSlot(core::mem::MaybeUninit<Run>);
@@ -568,6 +640,7 @@ impl RunSlot {
             for index in 0..process::PIPES {
                 core::ptr::addr_of_mut!((*run).table.pipes[index]).write(Pipe::EMPTY);
             }
+            core::ptr::addr_of_mut!((*run).table.console).write(ConsoleInput::EMPTY);
             &mut *run
         }
     }
@@ -582,6 +655,9 @@ pub enum Progress {
     Listening,
     /// Nothing moved, and a live process is asleep: time will wake it.
     Sleeping,
+    /// Nothing moved, and a live process is reading the console: the next
+    /// line the operator types is what it waits for.
+    Reading,
     /// Every process has ended.
     Ended,
 }
@@ -615,6 +691,7 @@ pub fn start(
     }
     place_arguments(&mut domain, &block[..used]);
     let mut descriptors = [Descriptor::FREE; process::DESCRIPTORS];
+    descriptors[0] = Descriptor::CONSOLE_INPUT;
     descriptors[1] = Descriptor::CONSOLE;
     descriptors[2] = Descriptor::CONSOLE;
     run.table.processes[slot] = Some(Process {
@@ -758,6 +835,7 @@ pub fn step_run(
     let mut alive = false;
     let mut listening = false;
     let mut sleeping = false;
+    let mut reading = false;
     let now = arch::monotonic_microseconds();
     for index in 0..process::PROCESSES {
         let state = match table.processes[index].as_ref() {
@@ -801,6 +879,15 @@ pub fn step_run(
                     sleeping = true;
                 }
             }
+            State::ReadingConsole(length) => {
+                alive = true;
+                if let Some(result) = console_read(table, index, length) {
+                    answer(table, index, result);
+                    progressed = true;
+                } else {
+                    reading = true;
+                }
+            }
             State::Listening(window) => {
                 alive = true;
                 match services.display.as_deref_mut() {
@@ -832,11 +919,35 @@ pub fn step_run(
     if sleeping {
         return Progress::Sleeping;
     }
+    if reading {
+        return Progress::Reading;
+    }
     if listening {
         return Progress::Listening;
     }
     stop_all(machine, services, table);
     Progress::Ended
+}
+
+/// Bytes the operator typed into the block area of process `index`, at
+/// most `length` and a block: `None` when nothing is typed yet and the
+/// input has not ended, so the caller blocks; 0 at the end of input.
+fn console_read(table: &mut Table, index: usize, length: u64) -> Option<u64> {
+    let Some(process) = table.processes[index].as_mut() else {
+        return Some(error(EBADF));
+    };
+    let console = &mut table.console;
+    if console.length == 0 {
+        return console.ended.then_some(0);
+    }
+    let take = (length as usize).min(BLOCK_BYTES).min(console.length);
+    for offset in 0..take {
+        let byte = console.buffer[(console.head + offset) % CONSOLE_INPUT_BYTES];
+        process.domain.core().write_block(offset, byte);
+    }
+    console.head = (console.head + take) % CONSOLE_INPUT_BYTES;
+    console.length -= take;
+    Some(take as u64)
 }
 /// Write a request's answer and make the process runnable again.
 fn answer(table: &mut Table, index: usize, result: u64) {
@@ -900,6 +1011,16 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
             _ => error(EBADF),
         },
         process::READ => match kind_of(table, index, arguments[0]) {
+            // The console is read at descriptor 0 only, what the operator
+            // types; a process started from the workshop has no other
+            // input, and one spawned with a pipe there reads the pipe.
+            Kind::Console if arguments[0] == 0 => match console_read(table, index, arguments[1]) {
+                Some(result) => result,
+                None => {
+                    block(table, index, State::ReadingConsole(arguments[1]));
+                    return;
+                }
+            },
             Kind::File => file_read(table, index, services, arguments[0], arguments[1]),
             Kind::PipeRead => match pipe_read(table, index, arguments[0], arguments[1]) {
                 Some(result) => result,
