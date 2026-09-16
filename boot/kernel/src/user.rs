@@ -174,34 +174,66 @@ unsafe fn divide_by_zero() {
 /// this same code is refused by hardware rather than by a check, which is what
 /// makes the device a capability rather than a convention.
 ///
+/// How many times the transmitter is polled before a byte is given up
+/// on for this entry: far more than a byte takes to leave at any rate,
+/// far fewer than the entry's tick budget. A byte not written is answered
+/// as not written, so the supervisor re-enters the driver with a fresh
+/// budget rather than the driver spinning until the budget stops it for
+/// good and every later line is lost, as happened when the machine
+/// running QEMU drained its serial socket slowly.
+const TRANSMIT_POLLS: u32 = 200_000;
+
+/// Write one byte to the console device: false when the transmitter
+/// stayed busy for every poll, the byte then not written.
+///
 /// # Safety
 /// Faults unless this domain was granted the console device.
 #[inline(always)]
-unsafe fn console_byte(byte: u8) {
+unsafe fn console_byte(byte: u8) -> bool {
     #[cfg(target_arch = "x86_64")]
     unsafe {
         // Poll the line-status register, then write the transmit holding
         // register. Both ports are inside the eight this domain was granted.
         let mut status: u8;
+        let mut polls = 0;
         loop {
             asm!("in al, dx", in("dx") 0x3fd_u16, out("al") status, options(nomem, nostack));
             if status & 0x20 != 0 {
                 break;
             }
+            polls += 1;
+            if polls == TRANSMIT_POLLS {
+                return false;
+            }
         }
         asm!("out dx, al", in("dx") 0x3f8_u16, in("al") byte, options(nomem, nostack));
+        true
     }
     #[cfg(target_arch = "aarch64")]
     unsafe {
         let base = crate::arch::CONSOLE_DEVICE_VADDR;
-        while ((base + 0x18) as *const u32).read_volatile() & (1 << 5) != 0 {}
+        let mut polls = 0;
+        while ((base + 0x18) as *const u32).read_volatile() & (1 << 5) != 0 {
+            polls += 1;
+            if polls == TRANSMIT_POLLS {
+                return false;
+            }
+        }
         (base as *mut u8).write_volatile(byte);
+        true
     }
     #[cfg(target_arch = "riscv64")]
     unsafe {
         let base = crate::arch::CONSOLE_DEVICE_VADDR;
-        while ((base + 5) as *const u8).read_volatile() & (1 << 5) == 0 {}
+        let mut polls = 0;
+        while ((base + 5) as *const u8).read_volatile() & (1 << 5) == 0 {
+            polls += 1;
+            if polls == TRANSMIT_POLLS {
+                return false;
+            }
+        }
         (base as *mut u8).write_volatile(byte);
+        true
     }
 }
 
@@ -640,9 +672,13 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
                 // mapped writable for this domain, and the count is bounded by
                 // the payload size regardless of what the supervisor wrote.
                 let byte = unsafe { payload.add(offset).read_volatile() };
-                unsafe { console_byte(byte) };
+                if !unsafe { console_byte(byte) } {
+                    break;
+                }
                 offset += 1;
             }
+            // How many left: the supervisor sends the rest again.
+            unsafe { page.add(shared::VALUES).write_volatile(offset as u64) };
         } else if command == shared::COMMAND_READ_CONSOLE {
             // Nonblocking: the supervisor polls, so a driver entry never waits
             // on a human and its tick budget still means something.
@@ -655,7 +691,7 @@ pub unsafe extern "C" fn agel_world_main(shared_page: u64) -> ! {
         } else if command == shared::COMMAND_FAULT_DEVICE {
             // The same instruction the driver domain runs, in a world that was
             // never granted the device.
-            unsafe { console_byte(b'!') };
+            let _ = unsafe { console_byte(b'!') };
         } else if command == shared::COMMAND_SPIN {
             // No trap, no memory fault, no cooperation. Only the timer can end
             // this, which is the property the test exists to demonstrate.

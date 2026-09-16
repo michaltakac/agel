@@ -379,6 +379,9 @@ promise.
   IR's integer subset into x86-64 machine code in a static ELF, in the
   guest, and the desktop installs and runs what it made; the process
   window grows to 64 MiB.
+  `v0.2.86` bounds the console driver's transmitter poll and has the
+  supervisor resend what did not leave, so a host that drains the serial
+  line slowly no longer stops the driver and loses every later line.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -434,16 +434,40 @@ impl ServiceDomain {
     ) -> Result<(), ServiceError> {
         self.check(handle)?;
         let count = bytes.len().min(PAYLOAD_BYTES);
-        for (offset, byte) in bytes.iter().take(count).enumerate() {
-            self.domain.core().write_payload(offset, *byte);
+        // The driver answers how many bytes left; a transmitter the host
+        // drains slowly leaves some, and the rest go in the next entry, with
+        // a fresh budget. This many entries in a row with nothing leaving
+        // (each a bounded poll, seconds in all) is a stall given up on, the
+        // rest dropped, rather than the supervisor waiting on the host
+        // forever.
+        const STALL_ENTRIES: u32 = 4_000;
+        let mut done = 0;
+        let mut stalled = 0;
+        while done < count {
+            let chunk = &bytes[done..count];
+            for (offset, byte) in chunk.iter().enumerate() {
+                self.domain.core().write_payload(offset, *byte);
+            }
+            self.domain
+                .core()
+                .write_shared(shared::ARGUMENTS, chunk.len() as u64);
+            match self.domain.provoke(shared::COMMAND_WRITE_CONSOLE) {
+                Stop::Replied => {}
+                _ => return Err(ServiceError::Faulted),
+            }
+            let written =
+                (self.domain.core().read_shared(shared::VALUES) as usize).min(chunk.len());
+            done += written;
+            if written > 0 {
+                stalled = 0;
+            } else {
+                stalled += 1;
+                if stalled == STALL_ENTRIES {
+                    return Ok(());
+                }
+            }
         }
-        self.domain
-            .core()
-            .write_shared(shared::ARGUMENTS, count as u64);
-        match self.domain.provoke(shared::COMMAND_WRITE_CONSOLE) {
-            Stop::Replied => Ok(()),
-            _ => Err(ServiceError::Faulted),
-        }
+        Ok(())
     }
 
     /// Ask the driver to do something that will stop it, for the test that

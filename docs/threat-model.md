@@ -1907,6 +1907,20 @@ produced or run there.
   mapped as a process asks, from the same pool, and a process that asks
   for more than the pool holds is refused at `brk` as before.
 
+## v0.2.86
+
+- **The host cannot stop the console driver by reading slowly:** the
+  driver's transmit poll is bounded, a byte the transmitter will not
+  take is answered as not written, and the supervisor resends it in a
+  later entry. Before, a slow serial consumer made the driver exhaust its
+  tick budget and be stopped for good, and every later line from every
+  process was lost silently — a denial of the console by the host, which
+  the CI machine performed by accident.
+- **The supervisor does not wait on the host forever:** four thousand
+  entries with nothing leaving end the write with the rest dropped, so a
+  host that stops draining cannot hang the desktop; that loss is silent
+  on the console, since the console is what is lost.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the
