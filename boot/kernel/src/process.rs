@@ -130,7 +130,7 @@ pub const ESTALE: i64 = 116;
 pub const TABLE_SECTOR: u32 = process::PROGRAM_TABLE_SECTOR;
 /// Last sector of the program region, inclusive.
 pub const LAST_SECTOR: u32 = process::PROGRAM_LAST_SECTOR;
-const REGION: Region = Region {
+pub(crate) const REGION: Region = Region {
     table: TABLE_SECTOR,
     last: LAST_SECTOR,
     magic: b"AGELPR1\0",

@@ -467,6 +467,13 @@ Each rung must be runnable and differentially testable against the rung below:
    keeps a session — nine kilobytes over the library's megabyte, within
    what a file holds — reading it at the start and writing it after every
    transaction, the world's identity kept so its capabilities still permit.
+79. **Programs installed from files (v0.2.84):** the desktop's `:install
+   NAME PATH` reads hex text through the filesystem service — a file in the
+   region or under `/data` — decodes it sector by sector into the first
+   free sectors of the program region, checksums it and writes the table
+   last, so `:exec NAME` runs it; a name already in the table is replaced
+   in place. The step the backend road needs: what a program in the OS
+   writes can be a program the OS runs.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

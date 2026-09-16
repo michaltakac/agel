@@ -3048,6 +3048,45 @@ fn execute_workshop(
         crate::workshop::filesystem_command(Some(storage), filesystem, &mut tee, command);
         return StatusLine::new(b"FILESYSTEM");
     }
+    // A program installed from a file: `:install NAME PATH`, hex text the
+    // OS can read (the data region's files included) into the program
+    // region, where `:exec NAME` finds it.
+    if let Some(rest) = command_argument(line, b":install ") {
+        let mut words = rest
+            .split(|byte| *byte == b' ')
+            .filter(|word| !word.is_empty());
+        let (Some(name), Some(path)) = (words.next(), words.next()) else {
+            return StatusLine::new(b"usage: :install NAME PATH");
+        };
+        let mut tee = Tee {
+            serial,
+            terminal: &mut current.terminal,
+        };
+        let mut host = EffectHost {
+            storage: &mut *storage,
+            filesystem: filesystem.as_deref_mut(),
+            console: &mut tee,
+            clock: clock.as_deref_mut(),
+        };
+        let mut source = InstallSource {
+            host: &mut host,
+            path,
+            missing: false,
+        };
+        return match crate::process::REGION.install(&mut source, name) {
+            Ok(entry) => {
+                let mut report = StatusLine::new(b"INSTALLED ");
+                report.push(name);
+                report.push(b": ");
+                report.number_u64(u64::from(entry.length));
+                report.push(b" BYTES AT SECTOR ");
+                report.number_u64(u64::from(entry.start));
+                report
+            }
+            Err(_) if source.missing => StatusLine::new(b"NO SUCH FILE"),
+            Err(reason) => StatusLine::new(reason.as_bytes()),
+        };
+    }
     if line == b":fs-restart" {
         let mut tee = Tee {
             serial,
@@ -3451,13 +3490,19 @@ impl EffectHost<'_> {
     /// A file's bytes into `out`, as many as it holds: the effect word's
     /// read, and the loader's.
     fn read_file(&mut self, path: &[u8], out: &mut [u8]) -> Result<usize, u64> {
+        self.read_file_from(path, 0, out)
+    }
+
+    /// Bytes of a file from `from`, at most `out`'s length: how many, 0 at
+    /// the end; a reader of a file too large to hold walks it this way.
+    fn read_file_from(&mut self, path: &[u8], from: usize, out: &mut [u8]) -> Result<usize, u64> {
         use crate::world::fs;
         let [entry, length, kind] = self.open(path, 0)?;
         if kind == fs::KIND_DIRECTORY {
             return Err(21);
         }
-        let wanted = (length as usize).min(out.len());
-        let mut offset = 0;
+        let wanted = (length as usize).min(from.saturating_add(out.len()));
+        let mut offset = from;
         while offset < wanted {
             let chunk = (wanted - offset).min(crate::world::BLOCK_BYTES);
             let [count, _, _] =
@@ -3468,11 +3513,11 @@ impl EffectHost<'_> {
             }
             let filesystem = self.filesystem.as_deref_mut().ok_or(38_u64)?;
             for index in 0..count {
-                out[offset + index] = filesystem.read_block(index);
+                out[offset - from + index] = filesystem.read_block(index);
             }
             offset += count;
         }
-        Ok(offset)
+        Ok(offset - from)
     }
 
     fn file_write(
@@ -3636,6 +3681,40 @@ fn next_form(source: &[u8], mut from: usize) -> Option<(usize, usize)> {
 /// answering its effects. The first form that fails stops the load and
 /// says so; the forms before it stay. A form is still one shared-page
 /// payload, so a form longer than that is refused by size, not parsed.
+/// The install's I/O: the file through the effect host's filesystem
+/// service, the region's sectors through its storage driver.
+struct InstallSource<'a, 'b> {
+    host: &'a mut EffectHost<'b>,
+    path: &'a [u8],
+    missing: bool,
+}
+
+impl crate::region::InstallIo for InstallSource<'_, '_> {
+    fn read_sector(&mut self, lba: u32, sector: &mut [u8; 512]) -> Result<(), &'static str> {
+        crate::workspace::read_sector(self.host.storage, lba, sector)
+    }
+
+    fn write_sector(&mut self, lba: u32, sector: &[u8; 512]) -> Result<(), &'static str> {
+        crate::workspace::write_sector(self.host.storage, lba, sector)
+    }
+
+    fn flush(&mut self) -> Result<(), &'static str> {
+        crate::workspace::flush(self.host.storage)
+    }
+
+    fn read_source(&mut self, offset: usize, out: &mut [u8]) -> Result<usize, &'static str> {
+        match self.host.read_file_from(self.path, offset, out) {
+            Ok(count) => Ok(count),
+            Err(2) => {
+                self.missing = true;
+                Err("no such file")
+            }
+            Err(38) => Err("no filesystem service"),
+            Err(_) => Err("the file could not be read"),
+        }
+    }
+}
+
 fn load_file(
     evaluator: &mut arch::Domain,
     evaluator_revision: &mut u64,

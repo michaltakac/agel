@@ -372,6 +372,9 @@ promise.
   world-file API, and `agel --world NAME` reads the world at the start and
   writes it back after every transaction; the digest prefix is
   `agel-world-canonical-v2`.
+  `v0.2.84` installs programs from files: `:install NAME PATH` decodes hex
+  text the OS can read into the program region, where `:exec NAME` finds
+  it, so what a program in the OS writes can become a program the OS runs.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

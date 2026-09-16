@@ -240,7 +240,10 @@ mode; a second `:exec` while one ran was refused with
 `A PROCESS IS RUNNING` until v0.2.65. Since v0.2.82 a program that reads
 the console gets the prompt back the same way with `PROCESS READING`, and
 then owns the lines typed at that prompt (`LINE GIVEN TO THE PROGRAM`)
-until `:eof` ends its input.
+until `:eof` ends its input. `:install NAME PATH` (v0.2.84) decodes hex
+text the filesystem service can read — a file in the region, or under
+`/data` — into the program region as `NAME`, replacing an entry of that
+name in place, and `:exec NAME` runs it.
 
 `boot/posix/c/sketch.c` opens a window, waits for events, puts a dot
 where each press lands and writes the press to the console; a key clears

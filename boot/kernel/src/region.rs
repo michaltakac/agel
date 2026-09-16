@@ -10,6 +10,19 @@ use crate::workspace::read_sector;
 #[cfg(feature = "native-graphics")]
 use crate::workspace::Crc;
 
+/// What installing an entry needs: the region's sectors through the
+/// storage driver, and the bytes to install, read from wherever they are
+/// (a file through the filesystem service, which relays through the same
+/// driver between sectors).
+#[cfg(feature = "native-graphics")]
+pub trait InstallIo {
+    fn read_sector(&mut self, lba: u32, sector: &mut [u8; 512]) -> Result<(), &'static str>;
+    fn write_sector(&mut self, lba: u32, sector: &[u8; 512]) -> Result<(), &'static str>;
+    fn flush(&mut self) -> Result<(), &'static str>;
+    /// Bytes of the source from `offset`: how many, 0 at its end.
+    fn read_source(&mut self, offset: usize, out: &mut [u8]) -> Result<usize, &'static str>;
+}
+
 const ENTRY_BYTES: usize = 32;
 const MAX_ENTRIES: usize = (512 - 16) / ENTRY_BYTES;
 /// Names are short and ASCII; the table pads them with zeros.
@@ -91,6 +104,120 @@ pub struct Listing<const N: usize> {
 }
 
 impl Region {
+    /// Install an entry named `name` holding the bytes `source` yields as
+    /// hex text (whitespace ignored), at the first sectors past every
+    /// entry the table holds. An entry of that name is replaced in the
+    /// table and its old sectors are left as a hole, which the host's
+    /// installer compacts; a table that is not this region's is begun.
+    /// Written sector by sector as the text is decoded, so nothing is held
+    /// whole; the table is written last, so a failure leaves the old one.
+    #[cfg(feature = "native-graphics")]
+    pub fn install(self, io: &mut dyn InstallIo, name: &[u8]) -> Result<Entry, &'static str> {
+        if name.is_empty() || name.len() > NAME_BYTES || !name.iter().all(u8::is_ascii_graphic) {
+            return Err("a program name is 1 to 16 printable ASCII bytes");
+        }
+        let mut table = [0_u8; 512];
+        io.read_sector(self.table, &mut table)?;
+        let count = if table.starts_with(self.magic) {
+            (u32::from_le_bytes([table[8], table[9], table[10], table[11]]) as usize)
+                .min(MAX_ENTRIES)
+        } else {
+            table = [0; 512];
+            table[..8].copy_from_slice(self.magic);
+            0
+        };
+        let mut first_free = self.table + 1;
+        let mut existing = None;
+        for index in 0..count {
+            let row = &table[16 + index * ENTRY_BYTES..16 + (index + 1) * ENTRY_BYTES];
+            let start = u32::from_le_bytes([row[16], row[17], row[18], row[19]]);
+            let length = u32::from_le_bytes([row[20], row[21], row[22], row[23]]);
+            let end = start.saturating_add(length.div_ceil(512));
+            first_free = first_free.max(end);
+            let stored = row[..NAME_BYTES]
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(NAME_BYTES);
+            if &row[..stored] == name {
+                existing = Some(index);
+            }
+        }
+        if existing.is_none() && count == MAX_ENTRIES {
+            return Err("the program table is full");
+        }
+        let mut crc = Crc::new();
+        let mut sector = [0_u8; 512];
+        let mut filled = 0;
+        let mut length = 0_u32;
+        let mut lba = first_free;
+        let mut chunk = [0_u8; 1024];
+        let mut offset = 0;
+        let mut high: Option<u8> = None;
+        loop {
+            let got = io.read_source(offset, &mut chunk)?;
+            if got == 0 {
+                break;
+            }
+            offset += got;
+            for byte in &chunk[..got] {
+                let digit = match byte {
+                    b'0'..=b'9' => byte - b'0',
+                    b'a'..=b'f' => byte - b'a' + 10,
+                    b'A'..=b'F' => byte - b'A' + 10,
+                    b' ' | b'\n' | b'\r' | b'\t' => continue,
+                    _ => return Err("the file is not hex text"),
+                };
+                let Some(upper) = high.take() else {
+                    high = Some(digit);
+                    continue;
+                };
+                let value = (upper << 4) | digit;
+                sector[filled] = value;
+                filled += 1;
+                crc.update(&[value]);
+                length += 1;
+                if filled == 512 {
+                    if lba > self.last {
+                        return Err("the program region is full");
+                    }
+                    io.write_sector(lba, &sector)?;
+                    lba += 1;
+                    filled = 0;
+                    sector = [0; 512];
+                }
+            }
+        }
+        if high.is_some() {
+            return Err("the hex text has an odd digit");
+        }
+        if length == 0 {
+            return Err("the file holds no bytes");
+        }
+        if filled > 0 {
+            if lba > self.last {
+                return Err("the program region is full");
+            }
+            io.write_sector(lba, &sector)?;
+        }
+        let checksum = crc.finish();
+        let index = existing.unwrap_or(count);
+        let row = &mut table[16 + index * ENTRY_BYTES..16 + (index + 1) * ENTRY_BYTES];
+        row.fill(0);
+        row[..name.len()].copy_from_slice(name);
+        row[16..20].copy_from_slice(&first_free.to_le_bytes());
+        row[20..24].copy_from_slice(&length.to_le_bytes());
+        row[24..28].copy_from_slice(&checksum.to_le_bytes());
+        let rows = if existing.is_some() { count } else { count + 1 } as u32;
+        table[8..12].copy_from_slice(&rows.to_le_bytes());
+        io.write_sector(self.table, &table)?;
+        io.flush()?;
+        Ok(Entry {
+            start: first_free,
+            length,
+            checksum,
+        })
+    }
+
     /// Every name in the table, for a launcher to show.
     #[cfg(feature = "native-graphics")]
     pub fn list<const N: usize>(

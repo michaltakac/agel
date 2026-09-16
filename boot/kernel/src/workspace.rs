@@ -218,7 +218,7 @@ pub(crate) fn read_sector(
         .map_err(storage_message)
 }
 
-fn write_sector(
+pub(crate) fn write_sector(
     storage: &mut ServiceDomain,
     lba: u32,
     sector: &[u8; 512],
@@ -229,7 +229,7 @@ fn write_sector(
         .map_err(storage_message)
 }
 
-fn flush(storage: &mut ServiceDomain) -> Result<(), &'static str> {
+pub(crate) fn flush(storage: &mut ServiceDomain) -> Result<(), &'static str> {
     let handle = storage.handle();
     storage.flush(handle).map_err(storage_message)
 }

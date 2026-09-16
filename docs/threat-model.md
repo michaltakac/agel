@@ -1873,6 +1873,24 @@ produced or run there.
   records with their mailboxes; the first evaluation after a restore is
   the operator's next line.
 
+## v0.2.84
+
+- **Installing is the operator's act,** at the workshop's prompt, with
+  the operator's authority: the program region has a CRC-32 and no
+  signature, as before, and what `:install` writes there is whatever the
+  file held. A program installed this way is as trusted as one the host's
+  installer wrote, which is to say checked against its checksum and
+  nothing else; it runs in a protection domain like any program.
+- **The table is written last:** the sectors are filled first, and a
+  refusal — a name longer than sixteen bytes or not printable ASCII, text
+  that is not hex, an odd digit, an empty file, a full region or table, a
+  read that fails — leaves the old table in place. A replaced entry's old
+  sectors are a hole the host's installer compacts; nothing points at
+  them.
+- **The desktop reads the file through the filesystem service** in
+  chunks, holding one sector and one chunk, so a file of any size the
+  region can take is installed without a buffer to overflow.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the
