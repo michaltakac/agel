@@ -1695,6 +1695,26 @@ Not claimed: every form the desktop evaluates may use every effect word;
 there is no capability a world must hold to write a file yet. An effect
 performed by a form that then fails is not undone.
 
+## v0.2.76
+
+- **Larger bounds are still bounds:** every native limit is a constant the
+  evaluator enforces and `:limits` reports; a form that would exceed one is
+  rejected whole and the committed world is untouched. The banks are larger
+  and live on a larger private stack from the pool, not in an allocator.
+- **A stack region that cannot meet a window:** the evaluator's stack grew
+  to 4 MiB and moved to its own place in the domain's space, with an absent
+  page beneath it and above it. At the old base a 4 MiB stack would have
+  reached the shared page and the device windows a megabyte above it; the
+  move keeps the guarantee that an overflow faults into nothing.
+- **The legacy privileged self-test is retired, not weakened:** it ran the
+  evaluator directly on the BIOS stage's low-memory stack, which the larger
+  banks outgrew; the evaluator is tested where it runs, in a protection
+  domain (`scripts/test-native-repl.sh`).
+
+Not claimed: the evaluator's memory is still copied whole at every commit,
+so a form's cost grows with the banks. The persisted workspace still holds
+sixteen source cells; more persisted cells wait on a later rung.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

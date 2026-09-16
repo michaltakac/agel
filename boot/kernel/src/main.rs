@@ -25,11 +25,7 @@ mod world;
 // The interactive workshop replaces the policy model with the disk-backed
 // `recovery` plane on every machine; the self-tests still exercise the model.
 #[cfg(all(
-    not(any(
-        feature = "selftest",
-        feature = "native-selftest",
-        feature = "native-graphics"
-    )),
+    not(any(feature = "selftest", feature = "native-graphics")),
     not(feature = "isolated-repl")
 ))]
 mod monitor;
@@ -170,23 +166,9 @@ pub fn agel_main() -> ! {
 
     #[cfg(all(
         target_arch = "x86_64",
-        feature = "native-selftest",
         not(any(
             feature = "selftest",
             feature = "monitor-selftest",
-            feature = "isolation-selftest"
-        ))
-    ))]
-    {
-        repl::native_selftest()
-    }
-
-    #[cfg(all(
-        target_arch = "x86_64",
-        not(any(
-            feature = "selftest",
-            feature = "monitor-selftest",
-            feature = "native-selftest",
             feature = "isolation-selftest",
             feature = "native-graphics"
         ))

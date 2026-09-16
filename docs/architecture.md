@@ -410,6 +410,10 @@ Each rung must be runnable and differentially testable against the rung below:
    evaluator to the desktop answers `file-*`, `clock`, `console-log` and `exec`
    in the shared page; the agent keeps its own log in the filesystem
    region and reads it back.
+71. **Room to write (v0.2.76):** the native evaluator's bounds raised to
+   programs of kilobytes, its transactional banks larger, and its private
+   stack grown to 4 MiB in its own region of the domain's space so the
+   larger banks and deeper recursion cannot reach the shared page; the legacy low-memory self-test is retired for the domain path.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

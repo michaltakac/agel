@@ -5,12 +5,10 @@
 //! The interactive v0.1.7 workshop lives in `isolated_repl` and runs the same
 //! evaluator in a protection domain.
 
-#[cfg(not(feature = "native-selftest"))]
 use crate::monitor::RecoveryMonitor;
 use crate::{arch, console, native};
 
 /// The interactive Agel workshop.
-#[cfg(not(feature = "native-selftest"))]
 pub fn native_repl() -> ! {
     let mut session = native::Session::new();
     let mut monitor = RecoveryMonitor::new();
@@ -85,7 +83,6 @@ pub fn native_repl() -> ! {
     }
 }
 
-#[cfg(not(feature = "native-selftest"))]
 fn read_line(buffer: &mut [u8]) -> usize {
     let mut length = 0;
     loop {
@@ -108,7 +105,6 @@ fn read_line(buffer: &mut [u8]) -> usize {
     }
 }
 
-#[cfg(not(feature = "native-selftest"))]
 fn read_form(buffer: &mut [u8]) -> usize {
     let mut length = 0;
     loop {
@@ -122,7 +118,6 @@ fn read_form(buffer: &mut [u8]) -> usize {
     }
 }
 
-#[cfg(not(feature = "native-selftest"))]
 fn write_value(value: native::Value, rendered: &[u8]) {
     match value {
         native::Value::Int(value) => console::write_i64(value),
@@ -145,75 +140,8 @@ fn write_value(value: native::Value, rendered: &[u8]) {
     console::write("\n");
 }
 
-#[cfg(not(feature = "native-selftest"))]
 fn write_error(error: native::Error) {
     console::write("error: ");
     console::write(error.0);
     console::write(" (transaction rolled back)\n");
-}
-
-/// The non-interactive native evaluator conformance run.
-#[cfg(feature = "native-selftest")]
-pub fn native_selftest() -> ! {
-    let mut session = native::Session::new();
-    let passed = expect_int(&mut session, b"(+ 20 22)", 42)
-        && expect_int(&mut session, b"-9223372036854775808", i64::MIN)
-        && expect_int(&mut session, b"((fn (x) ((fn (x) (+ x 1)) 41)) 0)", 42)
-        && expect_int(&mut session, b"(((fn (x) (fn (y) (+ x y))) 40) 2)", 42)
-        && session.evaluate(b"(def + 9)").is_err()
-        && session.evaluate(b"(fn (x x) x)").is_err()
-        // Since v0.2.37 a closure made inside a lexical call can be defined:
-        // the stored function carries its captured scalar.
-        && session
-            .evaluate(b"((fn (x) (def add-x (fn (y) (+ x y)))) 40)")
-            .is_ok()
-        && expect_int(&mut session, b"(add-x 2)", 42)
-        && session.evaluate(b"(def f (fn (x) 1))").is_ok()
-        && expect_int(&mut session, b"(f (begin (def f (fn (x) 2)) 0))", 1)
-        && session.evaluate(b"(def square (fn (x) (* x x)))").is_ok()
-        && expect_int(&mut session, b"(square 9)", 81)
-        && expect_int(&mut session, b"(eval '(+ 40 2))", 42)
-        && session.evaluate(b"(def x 1)").is_ok()
-        && session.evaluate(b"(def x 2)").is_ok()
-        && session.evaluate(b"(begin (def x 3) (/ 1 0))").is_err()
-        && session.rollback().is_ok()
-        && session.integer(b"x") == Some(1)
-        && session
-            .evaluate(b"(def fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1))))))")
-            .is_ok()
-        && expect_int(&mut session, b"(fact 6)", 720)
-        && session
-            .evaluate(b"(def add-message (fn (self state message) (+ state message)))")
-            .is_ok()
-        && session.evaluate(b"(def native-actor (spawn add-message 0))")
-            == Ok(native::Value::Agent(1))
-        && expect_int(&mut session, b"(send native-actor 40)", 1)
-        && expect_int(&mut session, b"(send native-actor 2)", 2)
-        && expect_int(&mut session, b"(run 2)", 2)
-        && expect_int(&mut session, b"(agent-state native-actor)", 42)
-        && session
-            .evaluate(b"(begin (send native-actor 1) (send native-actor 2) (send native-actor 3) (send native-actor 4) (send native-actor 5) (send native-actor 6) (send native-actor 7) (send native-actor 8) (send native-actor 9))")
-            .is_err()
-        && expect_int(&mut session, b"(agent-pending native-actor)", 0)
-        && session
-            .evaluate(b"(def fail-after-send (fn (self state message) (begin (send state message) (/ 1 0))))")
-            .is_ok()
-        && session
-            .evaluate(b"(def failing-actor (spawn fail-after-send native-actor))")
-            .is_ok()
-        && expect_int(&mut session, b"(send failing-actor 9)", 1)
-        && expect_int(&mut session, b"(run 1)", 1)
-        && expect_int(&mut session, b"(agent-pending native-actor)", 0);
-    if passed {
-        console::write("AGEL_NATIVE_OK\n");
-        arch::exit(true)
-    } else {
-        console::write("AGEL_NATIVE_FAILED\n");
-        arch::exit(false)
-    }
-}
-
-#[cfg(feature = "native-selftest")]
-fn expect_int(session: &mut native::Session, source: &[u8], expected: i64) -> bool {
-    session.evaluate(source) == Ok(native::Value::Int(expected))
 }

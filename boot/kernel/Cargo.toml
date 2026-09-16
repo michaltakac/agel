@@ -14,7 +14,6 @@ agel-integrity = { path = "../../crates/agel-integrity", default-features = fals
 [features]
 selftest = []
 monitor-selftest = []
-native-selftest = []
 isolation-selftest = []
 contract-memory = ["agel-kernel-abi/memory"]
 # Extra pages mapped into a domain after it is built: a loaded process's

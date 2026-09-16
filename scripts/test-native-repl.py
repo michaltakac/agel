@@ -1331,9 +1331,9 @@ def main() -> int:
         harness.send(":defs", "definitions (3): native-answer x fact", 10)
         harness.send(
             ":limits",
-            "source=256 nodes=128 globals=24 name=24 params=4 locals=8 "
-            "args=8 body=192 depth=24 fuel=2000 agents=8 mailbox=8 run-turns=32 scene-rects=12 "
-            "cells=384 text=2048 look-columns=64 look-rows=25 request=200 effect-text=1024",
+            "source=256 nodes=512 globals=96 name=24 params=6 locals=12 "
+            "args=12 body=224 depth=48 fuel=10000 agents=32 mailbox=16 run-turns=128 scene-rects=12 "
+            "cells=4096 text=16384 look-columns=64 look-rows=25 request=200 effect-text=1024",
             10,
         )
         harness.send(
@@ -1416,6 +1416,15 @@ def main() -> int:
         harness.send("(add40 2)", "42", 51)
         harness.send("(def make-adder (fn (n) (fn (m) (+ n m))))", "#<native-function>", 52)
         harness.send("((make-adder 5) 6)", "11", 53)
+        # Room (v0.2.76): recursion past the old depth, more globals than the
+        # old table, a list of many cells, text of thousands of bytes.
+        harness.send("(def rec (fn (n) (if (= n 0) 0 (+ 1 (rec (- n 1))))))", "#<native-function>", 54)
+        harness.send("(rec 12)", "12", 55)
+        harness.send('(def s "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")', '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"', 56)
+        harness.send("(text-bytes (def s4 (text-concat (text-concat s s) (text-concat s s))))", "800", 57)
+        harness.send("(text-bytes (def s16 (text-concat (text-concat s4 s4) (text-concat s4 s4))))", "3200", 58)
+        harness.send("(count (def wide (list 1 2 3 4 5 6 7 8 9 10 11 12)))", "12", 59)
+        harness.send("(begin (def g1 1) (def g2 2) (def g3 3) (def g4 4) (def g5 5) (def g6 6) (def g7 7) (def g8 8) (def g9 9) (def g10 10))", "10", 60)
 
         assert harness.process.stdin is not None
         for byte in b":shutdown":

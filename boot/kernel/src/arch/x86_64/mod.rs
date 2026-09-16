@@ -125,7 +125,6 @@ pub fn console_write_byte(byte: u8) {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest",
     feature = "isolation-selftest"
 )))]
 pub fn console_read_byte() -> u8 {

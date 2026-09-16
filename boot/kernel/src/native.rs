@@ -5,21 +5,24 @@
 
 use core::mem;
 
-const MAX_NODES: usize = 128;
-const MAX_BINDINGS: usize = 24;
+// Raised at v0.2.76 so a program is kilobytes, not a postcard. The banks
+// live on the evaluator's 4 MiB private stack (grown and moved to its own
+// region for the room). Every bound is fixed and reported by `:limits`.
+const MAX_NODES: usize = 512;
+const MAX_BINDINGS: usize = 96;
 const MAX_NAME: usize = 24;
-const MAX_PARAMS: usize = 4;
-const MAX_LOCALS: usize = 8;
-const MAX_BODY: usize = 192;
-const MAX_ARGUMENTS: usize = 8;
-const MAX_DEPTH: u8 = 24;
-const INITIAL_FUEL: u16 = 2_000;
-const MAX_AGENTS: usize = 8;
-const MAX_MAILBOX: usize = 8;
-const MAX_RUN_TURNS: usize = 32;
+const MAX_PARAMS: usize = 6;
+const MAX_LOCALS: usize = 12;
+const MAX_BODY: usize = 224;
+const MAX_ARGUMENTS: usize = 12;
+const MAX_DEPTH: u8 = 48;
+const INITIAL_FUEL: u16 = 10_000;
+const MAX_AGENTS: usize = 32;
+const MAX_MAILBOX: usize = 16;
+const MAX_RUN_TURNS: usize = 128;
 const MAX_SCENE_RECTS: usize = 12;
-const MAX_CELLS: usize = 384;
-const MAX_TEXT: usize = 2048;
+const MAX_CELLS: usize = 4096;
+const MAX_TEXT: usize = 16384;
 /// Rendered result bytes retained for the frontends; one shared-page payload.
 const RESULT_BYTES: usize = 256;
 /// The native scene's drawable geometry, validated here inside the evaluator
@@ -102,7 +105,6 @@ impl Context {
 /// Every fixed native resource bound, named and reported from the constants the
 /// evaluator actually enforces. `:limits` renders this table, so the console can
 /// never drift away from the implementation or the documentation.
-#[cfg(not(feature = "native-selftest"))]
 pub const LIMITS: &[(&str, u64)] = &[
     ("nodes", MAX_NODES as u64),
     ("globals", MAX_BINDINGS as u64),
@@ -576,7 +578,6 @@ impl Session {
     /// The last successful evaluation's value, rendered in Agel syntax. Data
     /// values are rendered before the commit-time collection so that a result
     /// need not be a heap root to be reported.
-    #[cfg(not(feature = "native-selftest"))]
     pub fn result(&self) -> &[u8] {
         &self.result[..self.result_length as usize]
     }
@@ -710,12 +711,10 @@ impl Session {
         Ok(())
     }
 
-    #[cfg(not(feature = "native-selftest"))]
     pub fn revision(&self) -> u64 {
         self.revision
     }
 
-    #[cfg(not(feature = "native-selftest"))]
     pub fn binding_count(&self) -> usize {
         self.active
             .bindings
@@ -724,7 +723,6 @@ impl Session {
             .count()
     }
 
-    #[cfg(not(feature = "native-selftest"))]
     pub fn binding_name(&self, index: usize) -> Option<&[u8]> {
         self.active
             .bindings
@@ -732,15 +730,6 @@ impl Session {
             .filter(|binding| !matches!(binding.value, StoredValue::Empty))
             .nth(index)
             .map(|binding| binding.name.as_bytes())
-    }
-
-    #[cfg(feature = "native-selftest")]
-    pub fn integer(&self, name: &[u8]) -> Option<i64> {
-        let binding = &self.active.bindings[self.active.find(name)?];
-        match binding.value {
-            StoredValue::Scalar(Scalar::Int(value)) => Some(value),
-            _ => None,
-        }
     }
 }
 
@@ -3273,7 +3262,7 @@ mod tests {
             "(let ((1 2)) 3)",
             "(let ())",
             "(let ((if 1)) 1)",
-            "(let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6) (g 7) (h 8) (i 9)) i)",
+            "(let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6) (g 7) (h 8) (i 9) (j 10) (k 11) (l 12) (m 13)) m)",
             "(/ 1)",
             "(/ 1 0 2)",
             "(-)",
@@ -3365,9 +3354,12 @@ mod tests {
             eval(&mut session, "(spawn tick 0)");
         }
         assert!(session.evaluate(b"(spawn tick 0)").is_err());
-        assert!(session.evaluate(b"(run 33)").is_err());
+        assert!(session.evaluate(b"(run 129)").is_err());
         assert!(session.evaluate(b"(run -1)").is_err());
-        assert_eq!(eval(&mut session, "(agent-pending a)"), Value::Int(8));
+        assert_eq!(
+            eval(&mut session, "(agent-pending a)"),
+            Value::Int(MAX_MAILBOX as i64)
+        );
     }
 
     #[test]
@@ -3418,12 +3410,18 @@ mod tests {
             eval(&mut session, "(spawn tick 0)");
         }
         assert!(session.evaluate(b"(spawn tick 0)").is_err());
-        assert_eq!(eval(&mut session, "(agent-count)"), Value::Int(8));
+        assert_eq!(
+            eval(&mut session, "(agent-count)"),
+            Value::Int(MAX_AGENTS as i64)
+        );
         eval(&mut session, "(scene-rect 1 1 4 4 0 0)");
         eval(&mut session, "(scene-bind 7 a)");
         assert_eq!(eval(&mut session, "(scene-owner 7)"), Value::Agent(1));
         assert_eq!(eval(&mut session, "(reap-agent a)"), Value::Bool(true));
-        assert_eq!(eval(&mut session, "(agent-count)"), Value::Int(7));
+        assert_eq!(
+            eval(&mut session, "(agent-count)"),
+            Value::Int(MAX_AGENTS as i64 - 1)
+        );
         assert_eq!(
             session.evaluate(b"(send a 1)"),
             Err(Error("stale native agent"))
@@ -3438,7 +3436,10 @@ mod tests {
             eval(&mut session, "(def b (spawn tick 5))"),
             Value::Agent(1 | (1 << 8))
         );
-        assert_eq!(eval(&mut session, "(agent-count)"), Value::Int(8));
+        assert_eq!(
+            eval(&mut session, "(agent-count)"),
+            Value::Int(MAX_AGENTS as i64)
+        );
         assert_eq!(
             session.evaluate(b"(agent-state a)"),
             Err(Error("stale native agent"))
@@ -3453,7 +3454,7 @@ mod tests {
     #[test]
     fn shared_fuel_exhaustion_aborts_all_turns() {
         let mut session = Session::new();
-        let work = "(+ 1 1) ".repeat(20);
+        let work = "(+ 1 1) ".repeat(23);
         eval(
             &mut session,
             &format!("(def tick (fn (self state message) (begin {work}(send self 1) state)))"),
@@ -3461,7 +3462,7 @@ mod tests {
         eval(&mut session, "(def a (spawn tick 0))");
         eval(&mut session, "(send a 1)");
         assert_eq!(
-            session.evaluate(b"(run 32)"),
+            session.evaluate(b"(run 128)"),
             Err(Error("native evaluator fuel exhausted"))
         );
         assert_eq!(eval(&mut session, "(agent-turns a)"), Value::Int(0));

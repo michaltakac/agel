@@ -55,7 +55,7 @@ are values (`#<native-agent:N>`), not ambient pointers or kernel capabilities.
 ## Hard bounds and durability
 
 The seed admits eight agents, eight queued messages per agent, and at
-most 32 scheduler turns per `run`. All work shares the submitted form's 2,000
+most 128 scheduler turns per `run` (32 before v0.2.76). All work shares the submitted form's 10,000
 evaluation-step budget. `:limits` reports these constants from the running
 implementation.
 

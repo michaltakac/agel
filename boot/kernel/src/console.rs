@@ -44,7 +44,6 @@ pub fn write(text: &str) {
     not(any(
         feature = "selftest",
         feature = "monitor-selftest",
-        feature = "native-selftest",
         feature = "isolation-selftest"
     ))
 ))]
@@ -58,7 +57,6 @@ pub fn write_bytes(bytes: &[u8]) {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest",
     feature = "isolation-selftest"
 )))]
 pub fn write_u64(mut value: u64) {
@@ -79,7 +77,6 @@ pub fn write_u64(mut value: u64) {
 #[cfg(not(any(
     feature = "selftest",
     feature = "monitor-selftest",
-    feature = "native-selftest",
     feature = "isolation-selftest"
 )))]
 pub fn write_i64(value: i64) {
@@ -124,7 +121,6 @@ macro_rules! kprint {
         not(any(
             feature = "selftest",
             feature = "monitor-selftest",
-            feature = "native-selftest",
             feature = "isolation-selftest"
         ))
     )

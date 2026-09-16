@@ -336,8 +336,8 @@ words say so in their names.
 
 What this is not: the words are available to every form the desktop
 evaluates, as `:fs-ls` is to every operator; a capability a world must
-hold to write is the next step, with the runtime that can hold more than
-sixteen cells.
+hold to write is the next step. v0.2.76 raised the evaluator's bounds so a
+program can be kilobytes rather than a postcard.
 
 ### Built where CI builds (v0.2.73)
 

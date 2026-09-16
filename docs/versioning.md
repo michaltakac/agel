@@ -338,6 +338,12 @@ promise.
   `file-append`, `file-list`, `clock`, `console-log` and `exec`, answered by the
   desktop through a synchronous port in the evaluator's shared page; the
   DOOM agent keeps its own `play.log`.
+  `v0.2.76` raises the native evaluator's bounds to programs of kilobytes
+  (96 globals, 4,096 heap cells, 16 KiB of text, 10,000 steps, 48 call
+  levels, 32 agents) and gives the evaluator domain a 4 MiB private stack
+  in its own region, moved clear of the shared page and device windows; it
+  retires the legacy privileged `native-selftest`, whose low-memory stack
+  the larger banks outgrew, since the domain path tests the same evaluator.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

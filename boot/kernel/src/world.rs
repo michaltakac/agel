@@ -34,9 +34,11 @@ pub const STACK_PAGES: u64 = 4;
 /// Pages reserved for a native evaluator domain.
 ///
 /// The evaluator keeps its fixed transactional worlds and recursive parser on
-/// this private stack. 512 KiB is a hard bound, not a growable heap; the absent
-/// page beneath it still turns overflow into a contained fault.
-pub const EVALUATOR_STACK_PAGES: u64 = 128;
+/// this private stack. 4 MiB since v0.2.76, when the worlds grew (512 KiB
+/// before); a hard bound, not a growable heap, and the absent page beneath it
+/// still turns overflow into a contained fault. It needs its own region away
+/// from the shared page, which [`crate::arch`] gives it (`STACK_BASE`).
+pub const EVALUATOR_STACK_PAGES: u64 = 1024;
 
 /// Offsets, in 64-bit words, of the supervisor/world handshake block.
 ///

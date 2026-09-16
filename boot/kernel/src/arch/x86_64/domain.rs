@@ -12,7 +12,7 @@ use crate::world::{DomainCore, Fault, Stop};
 use agel_kernel_abi::{Request, Response, Status};
 
 /// Virtual address of a domain's stack region.
-const STACK_BASE: u64 = DOMAIN_BASE;
+const STACK_BASE: u64 = DOMAIN_BASE + 0x0C00_0000;
 /// Virtual address of the page a domain shares with the supervisor.
 const SHARED_BASE: u64 = DOMAIN_BASE + 0x0010_0000;
 /// Virtual address at which a display domain sees its framebuffer grant.

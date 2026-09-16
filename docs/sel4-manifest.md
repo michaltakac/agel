@@ -16,7 +16,7 @@ are the same for everyone who builds this system. CI checks them.
 | Microkit loader | `c4518e30a3b548ce92516b78e2631371648fc8f9bf04ce2192589b317e865f0e` |
 | Microkit monitor | `10ab4477e52ea63c2bbc23e82c2df0f6717d1101ef6f17e42cbda74c54a43e47` |
 | `libmicrokit.a` | `cc1cdd51dcb2a2007cb1d5d9b27e1f067503f038fc513bcd1d155cbd03ef4910` |
-| System description | `e698bf9690675ce67dd799811e87b08755ca566e87503c0ddee4bf062a45470d` |
+| System description | `10cffeb45df45c8ae9163dc54b3b9060e20b2c63e3cbe870d6a290cbba49d4dc` |
 
 ## This build
 

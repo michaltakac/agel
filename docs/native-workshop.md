@@ -64,7 +64,7 @@ of integers from their identities, `-` negates one argument or folds several,
 and `/` requires at least two. `=` and `<` still compare exactly two integers.
 Parallel `let` evaluates every initializer in the enclosing scope and binds the
 names for a sequence of body forms; a repeated name takes its last value.
-`fn` accepts at most four parameters and any number of body forms, which a
+`fn` accepts at most six parameters (four before v0.2.76) and any number of body forms, which a
 persisted definition stores as one explicit `begin` sequence. Bindings from
 parameters and `let` share the eight bounded local slots that `:limits`
 reports. Named functions resolve globals at call time, enabling top-level
@@ -81,8 +81,9 @@ The scene and agent primitives are specified in [`native-scenes.md`](native-scen
 
 ## The native heap
 
-Data lives in a bounded heap inside the transactional world: 384 cons cells
-and a 2,048-byte immutable text arena, both reported by `:limits`. Allocation
+Data lives in a bounded heap inside the transactional world: 4,096 cons
+cells and a 16 KiB immutable text arena since v0.2.76 (384 cells and 2,048
+bytes before), both reported by `:limits`. Allocation
 only appends, so a form that would overrun either bound is rejected whole and
 the committed world is untouched. At every commit boundary (an evaluated form,
 a validated preview, a staged source cell) a copying collector keeps exactly
@@ -166,9 +167,10 @@ build reads the recovery record with `:recovery` and never changes it by hand. T
 
 The native seed permits 128 syntax nodes, 24 global definitions, 24-byte names,
 four function parameters, eight arguments/local slots, 192-byte stored bodies,
-24 reader/call levels, 2,000 evaluation steps per submitted form, eight native
-agents, eight messages per mailbox, 32 turns per `run`, 384 heap cells and
-2,048 bytes of text. The serial
+48 reader/call levels, 10,000 evaluation steps per submitted form, 32 native
+agents, 16 messages per mailbox, 128 turns per `run`, 4,096 heap cells and
+16 KiB of text (v0.2.76; before it 24 levels, 2,000 steps, eight agents,
+eight messages, 32 turns, 384 cells and 2,048 bytes). The serial
 input buffer is 256 bytes. These are explicit resource policy, not accidental
 allocation failures. `:limits` renders the table directly from the constants the
 evaluator enforces, so the console, this document, and the implementation cannot
@@ -207,7 +209,6 @@ proves edit → save → reboot → reject a checksummed but semantically invali
 newest slot → corrupt it → simulate an invalidated/partially written slot →
 recover the previous generation in every case.
 
-`./scripts/test-native.sh` exercises the evaluator inside QEMU without input.
 `./scripts/test-native-repl.sh` additionally drives the real UART reader and
 isolated REPL through a stateful, recursive, rollback-producing session.
 
@@ -320,4 +321,7 @@ same on all three. `./scripts/run-qemu.sh aarch64` keeps its workshop in
 `target/boot/agel-aarch64.img`. Started without a disk, the workshop says
 "storage: no virtio block device" and keeps the editor in memory. This is a
 protected language workshop, not yet the full hosted agent runtime or a
-durable self-hosted environment.
+durable self-hosted environment.48 reader/call levels, 10,000 evaluation steps per submitted form, 32 native
+agents, 16 messages per mailbox, 128 turns per `run`, 4,096 heap cells and
+16 KiB of text (v0.2.76; before it 24 levels, 2,000 steps, eight agents,
+eight messages, 32 turns, 384 cells and 2,048 bytes). 
