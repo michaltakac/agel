@@ -218,6 +218,7 @@ impl Image {
             options: EvaluationOptions {
                 budget: self.budget.clone(),
                 capabilities: Vec::new(),
+                pulse: None,
             },
             image: Image::new(self.budget.clone(), self.history_limit),
         };
@@ -257,6 +258,7 @@ impl ImageSession {
             options: EvaluationOptions {
                 budget: budget.clone(),
                 capabilities: Vec::new(),
+                pulse: None,
             },
             image: Image::new(budget, history_limit),
         }

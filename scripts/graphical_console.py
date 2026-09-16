@@ -123,9 +123,9 @@ class Machine:
                 if "return" in result:
                     return result["return"]
 
-    def until_prompt(self):
+    def until_prompt(self, seconds=30):
         result = bytearray()
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + seconds
         while not result.endswith(b"live-desktop> "):
             if time.monotonic() > deadline or len(result) > 65536:
                 raise TimeoutError("Agel did not return its prompt")
@@ -135,7 +135,9 @@ class Machine:
             result.extend(byte)
         return bytes(result)
 
-    def submit(self, source):
+    def submit(self, source, seconds=30):
+        """Send one line and return everything up to the next prompt; a
+        command that runs a program may need longer than `seconds`."""
         encoded = source.encode("utf-8")
         if not encoded or len(encoded) > 256:
             raise ValueError("Enter one form, at most 256 UTF-8 bytes")
@@ -154,7 +156,7 @@ class Machine:
                 if self.serial.recv(1) != bytes([byte]):
                     raise RuntimeError("Agel input echo lost synchronization; restart the viewer")
             self.serial.sendall(b"\n")
-            result = self.until_prompt().decode("utf-8", errors="replace")
+            result = self.until_prompt(seconds).decode("utf-8", errors="replace")
             self.ready = True
             return result
 

@@ -5,12 +5,22 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["std"]
+# Without `std` the crate is `no_std` over `alloc`: the reader, expander,
+# evaluator, agents and worlds are all there, which is how a process the
+# Agel supervisor loads carries the language into a protection domain. What
+# `std` adds: `std::error::Error` for the error types, a thread-safe effect
+# journal, and stacker, which grows the hosted embedding thread's machine
+# stack ahead of deep recursion (the process gives itself a large stack).
+std = ["dep:stacker", "dep:psm", "agel-integrity/std"]
+
 [dependencies]
-agel-integrity = { path = "../agel-integrity" }
-stacker = "0.1.25"
+agel-integrity = { path = "../agel-integrity", default-features = false, features = ["alloc"] }
+stacker = { version = "0.1.25", optional = true }
 # Stacker's compatible range otherwise selects psm releases requiring Rust 1.88.
 # Keep the hosted bootstrap build compatible with the declared Rust 1.75 MSRV.
-psm = "=0.1.24"
+psm = { version = "=0.1.24", optional = true }
 
 [lints]
 workspace = true

@@ -348,6 +348,10 @@ promise.
   file form by form, `:load NAME` reads `/NAME.agel` for a name the desktop
   does not carry, a failing form stops a load with the forms before it kept,
   and `/init.agel` runs at boot before the first prompt.
+  `v0.2.78` brings the language into a domain: the hosted runtime builds
+  without `std`, and `boot/posix/agel` runs it with the standard library as
+  a loaded process that evaluates a file from its namespace, yielding to
+  the supervisor as it goes.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

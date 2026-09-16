@@ -8,10 +8,27 @@ use crate::model::{
 use crate::reader::{read_all_with_limits, ReadError, ReadLimits};
 use crate::value::Builtin;
 use crate::{Capability, Value};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+#[cfg(not(feature = "std"))]
+use alloc::rc::Rc;
+#[cfg(feature = "std")]
+use alloc::sync::Arc;
+use alloc::{boxed::Box, format, string::String, vec::Vec};
+#[cfg(not(feature = "std"))]
+use core::cell::{RefCell, RefMut};
+use core::fmt;
+use core::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "std")]
+use std::sync::{Mutex, MutexGuard};
+
+/// The effect journal a world shares with its snapshots: behind a mutex in
+/// an `Arc` where the hosted runtime may cross threads, behind a `RefCell`
+/// in an `Rc` in the `no_std` build, which a loaded process links and
+/// never threads.
+#[cfg(feature = "std")]
+type Journal = Arc<Mutex<EffectJournal>>;
+#[cfg(not(feature = "std"))]
+type Journal = Rc<RefCell<EffectJournal>>;
 
 const DEFAULT_HISTORY_LIMIT: usize = 64;
 static NEXT_WORLD_ID: AtomicU64 = AtomicU64::new(1);
@@ -41,10 +58,23 @@ impl Default for Budget {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// A hook the evaluator calls every `every` fuel ticks, so an embedding
+/// whose supervisor stops a domain that computes too long between requests
+/// can make one: the process the Agel supervisor loads asks for the clock,
+/// which is an entry boundary. A plain function pointer, so options stay
+/// `Copy`-cheap to clone; the hook sees no evaluator state. Options with a
+/// hook are not comparable: two function pointers are not.
+#[derive(Clone, Copy, Debug)]
+pub struct Pulse {
+    pub every: u64,
+    pub hook: fn(),
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct EvaluationOptions {
     pub budget: Budget,
     pub capabilities: Vec<Capability>,
+    pub pulse: Option<Pulse>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -154,6 +184,7 @@ impl fmt::Display for TransactionError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for TransactionError {}
 
 impl From<ReadError> for TransactionError {
@@ -177,6 +208,7 @@ impl fmt::Display for AuthorityError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for AuthorityError {}
 
 #[derive(Clone, Debug)]
@@ -188,7 +220,7 @@ pub struct Snapshot {
     digest: u64,
     world_id: u64,
     authority_epoch: u64,
-    effect_journal: Arc<Mutex<EffectJournal>>,
+    effect_journal: Journal,
 }
 
 impl Snapshot {
@@ -238,6 +270,7 @@ impl fmt::Display for ReplayError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for ReplayError {}
 
 #[derive(Clone, Debug)]
@@ -250,7 +283,7 @@ pub struct World {
     history_limit: usize,
     world_id: u64,
     authority_epoch: u64,
-    effect_journal: Arc<Mutex<EffectJournal>>,
+    effect_journal: Journal,
 }
 
 impl Default for World {
@@ -270,7 +303,7 @@ impl World {
             history_limit,
             world_id: next_world_id(),
             authority_epoch: 1,
-            effect_journal: Arc::new(Mutex::new(EffectJournal::default())),
+            effect_journal: new_journal(),
         }
     }
 
@@ -311,7 +344,7 @@ impl World {
             digest: self.state_digest(),
             world_id: self.world_id,
             authority_epoch: self.authority_epoch,
-            effect_journal: Arc::clone(&self.effect_journal),
+            effect_journal: self.effect_journal.clone(),
         }
     }
 
@@ -328,7 +361,7 @@ impl World {
             history_limit: DEFAULT_HISTORY_LIMIT,
             world_id: snapshot.world_id,
             authority_epoch: snapshot.authority_epoch,
-            effect_journal: Arc::clone(&snapshot.effect_journal),
+            effect_journal: snapshot.effect_journal.clone(),
         })
     }
 
@@ -395,7 +428,7 @@ impl World {
         options: &EvaluationOptions,
     ) -> Result<ReplayReport, ReplayError> {
         let mut world = Self::from_snapshot(snapshot)?;
-        world.effect_journal = Arc::new(Mutex::new(EffectJournal::default()));
+        world.effect_journal = new_journal();
         let initial_events = world.events().len();
         let mut values = Vec::with_capacity(inputs.len());
         let mut steps_used = 0_u64;
@@ -714,7 +747,7 @@ impl World {
             history_limit: self.history_limit,
             world_id: next_world_id(),
             authority_epoch: 1,
-            effect_journal: Arc::new(Mutex::new(EffectJournal::default())),
+            effect_journal: new_journal(),
         }
     }
 }
@@ -739,10 +772,26 @@ fn next_world_id() -> u64 {
     NEXT_WORLD_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-fn lock_journal(journal: &Arc<Mutex<EffectJournal>>) -> MutexGuard<'_, EffectJournal> {
+#[cfg(feature = "std")]
+fn new_journal() -> Journal {
+    Arc::new(Mutex::new(EffectJournal::default()))
+}
+
+#[cfg(not(feature = "std"))]
+fn new_journal() -> Journal {
+    Rc::new(RefCell::new(EffectJournal::default()))
+}
+
+#[cfg(feature = "std")]
+fn lock_journal(journal: &Journal) -> MutexGuard<'_, EffectJournal> {
     journal
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(not(feature = "std"))]
+fn lock_journal(journal: &Journal) -> RefMut<'_, EffectJournal> {
+    journal.borrow_mut()
 }
 
 fn model_replay_error(kind: &str, message: String, id: u64) -> ReplayError {

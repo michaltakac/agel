@@ -592,3 +592,47 @@ sleeps holds the serial workshop's `:exec` until it wakes, as any
 process holds it until it ends; the desktop hands the prompt back. `qsort` is quadratic. The
 heap grows by whole pages and never shrinks. Each is a step this stratum takes when
 a program needs it, with a test.
+
+## The language as a process (v0.2.78)
+
+The hosted Agel runtime (`agel-core`, built without `std`) and the
+standard library are one more program in `boot/posix`: `agel`. It is
+loaded like `hello`, holds what a process holds, and evaluates a file
+from its namespace with the whole language.
+
+```text
+live-desktop> :exec agel -- prog.agel
+agel: standard library installed, 834 steps
+=> #<module:agel/sequence>
+=> #<closure>
+=> 610
+=> 385
+=> unless
+=> expanded
+=> #<module:agel/meta>
+=> #<module:agel/meta-agent>
+=> #<agent:1>
+=> 20
+=> 22
+=> {turns 2 pending 0 events 4}
+=> 42
+agel: 13 forms, 26824 steps, revision 2
+process agel exited with status 0
+```
+
+`agel [--no-stdlib] FILE`: the file is read through the namespace `:exec`
+granted, the standard library is installed from the program's own image
+unless `--no-stdlib`, the file is evaluated as one transaction with fifty
+million steps of fuel, each form's value is written to descriptor 1 as
+`=> VALUE`, and the status is 0; 1 with the error on descriptor 2 for a
+transaction that failed, which rolled back; the error number for a file it
+could not read; 2 for no file. Before the runtime runs, the program maps
+1,024 pages at its break and moves its stack there, then takes its heap
+from further pages, in power-of-two classes from 16 bytes with a free list
+each and whole page runs above 64 KiB. Every 4,096 evaluation steps it asks
+the clock, so a long evaluation is many entries under the tick budget
+rather than one it exhausts; a program the desktop's `:exec` hands the
+prompt back on is reported when it ends, like any other. The proof is
+`scripts/test-agel-process.sh`; what it does not claim (no effects beyond
+the console and the namespace, no session, no model adapters) is in
+[`release-v0.2.78.md`](release-v0.2.78.md).

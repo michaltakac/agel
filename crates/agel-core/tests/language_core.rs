@@ -261,6 +261,7 @@ fn call_depth_budget_stops_recursion_and_rolls_back() {
             ..Budget::default()
         },
         capabilities: Vec::new(),
+        pulse: None,
     };
     let error = world
         .evaluate_with("(def loop (fn () (loop))) (loop)", &options)
@@ -279,6 +280,7 @@ fn fuel_and_collection_budgets_are_deterministic() {
             ..Budget::default()
         },
         capabilities: Vec::new(),
+        pulse: None,
     };
     let error = world.evaluate_with("(+ 1 2)", &low_fuel).unwrap_err();
     assert!(error.to_string().contains("resource/fuel-exhausted"));
@@ -289,6 +291,7 @@ fn fuel_and_collection_budgets_are_deterministic() {
             ..Budget::default()
         },
         capabilities: Vec::new(),
+        pulse: None,
     };
     let error = world
         .evaluate_with("(list 1 2 3)", &tiny_collection)
@@ -305,6 +308,7 @@ fn macro_expansion_is_preflighted_against_resource_limits() {
             ..Budget::default()
         },
         capabilities: Vec::new(),
+        pulse: None,
     };
     let error = world
         .evaluate_with(
@@ -326,6 +330,7 @@ fn recursive_macro_expansion_is_depth_bounded_and_transactional() {
             ..Budget::default()
         },
         capabilities: Vec::new(),
+        pulse: None,
     };
     let error = world
         .evaluate_with(
@@ -347,6 +352,7 @@ fn reader_limits_apply_before_candidate_evaluation() {
             ..Budget::default()
         },
         capabilities: Vec::new(),
+        pulse: None,
     };
     assert!(world.evaluate_with("(def x 1)", &source_limited).is_err());
     let depth_limited = EvaluationOptions {
@@ -355,6 +361,7 @@ fn reader_limits_apply_before_candidate_evaluation() {
             ..Budget::default()
         },
         capabilities: Vec::new(),
+        pulse: None,
     };
     assert!(world.evaluate_with("((x))", &depth_limited).is_err());
     assert_eq!(world.revision(), 0);

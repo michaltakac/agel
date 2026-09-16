@@ -1,4 +1,5 @@
 //! Agel's standard library, written in Agel and installed atomically.
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use agel_core::{Commit, EvaluationOptions, TransactionError, World};
 

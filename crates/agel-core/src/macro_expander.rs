@@ -1,5 +1,6 @@
 use crate::Expr;
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::{borrow::ToOwned, format, string::String, vec, vec::Vec};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MacroDef {

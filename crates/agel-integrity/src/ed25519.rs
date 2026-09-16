@@ -7,6 +7,8 @@
 //! be used where an adversary can time the signer. Verification carries no
 //! secret and is the operation the trust boundaries depend on.
 
+#[cfg(feature = "alloc")]
+use alloc::{string::String, vec::Vec};
 use core::fmt;
 
 // ---------------------------------------------------------------------------
@@ -716,7 +718,7 @@ impl SigningKey {
         }
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     pub fn from_hex(text: &str) -> Result<Self, SignatureError> {
         let bytes = decode_hex(text.trim())?;
         let seed: [u8; 32] = bytes
@@ -758,7 +760,7 @@ impl VerifyingKey {
             .ok_or(SignatureError::InvalidKey)
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     pub fn from_hex(text: &str) -> Result<Self, SignatureError> {
         let bytes = decode_hex(text.trim())?;
         let bytes: [u8; 32] = bytes
@@ -772,7 +774,7 @@ impl VerifyingKey {
         self.0
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     pub fn to_hex(self) -> String {
         encode_hex(&self.0)
     }
@@ -822,7 +824,7 @@ impl Signature {
         Self(bytes)
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     pub fn from_hex(text: &str) -> Result<Self, SignatureError> {
         let bytes = decode_hex(text.trim())?;
         let bytes: [u8; 64] = bytes
@@ -836,7 +838,7 @@ impl Signature {
         self.0
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     pub fn to_hex(self) -> String {
         encode_hex(&self.0)
     }
@@ -862,7 +864,7 @@ pub fn fmt_hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
     Ok(())
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub fn encode_hex(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -872,7 +874,7 @@ pub fn encode_hex(bytes: &[u8]) -> String {
     output
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub fn decode_hex(text: &str) -> Result<Vec<u8>, SignatureError> {
     if text.len() % 2 != 0 {
         return Err(SignatureError::InvalidHex);

@@ -1,7 +1,9 @@
 use crate::value::{Capability, Closure};
 use crate::Value;
-use std::collections::{BTreeMap, VecDeque};
-use std::fmt;
+use alloc::collections::{BTreeMap, VecDeque};
+use alloc::sync::Arc;
+use alloc::{format, string::String, vec, vec::Vec};
+use core::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TypeSpec {
@@ -254,7 +256,7 @@ impl Event {
 pub(crate) struct Agent {
     pub name: String,
     pub mailbox: VecDeque<Value>,
-    pub behavior: Option<std::sync::Arc<Closure>>,
+    pub behavior: Option<Arc<Closure>>,
     pub heap: Value,
     pub initial_heap: Value,
     pub protocol: Option<Protocol>,

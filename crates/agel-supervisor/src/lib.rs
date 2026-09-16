@@ -179,6 +179,7 @@ impl AbSupervisor {
         let options = EvaluationOptions {
             budget: candidate.budget().clone(),
             capabilities: Vec::new(),
+            pulse: None,
         };
         for check in checks {
             let mut canary = rebuilt.world().fork_isolated();

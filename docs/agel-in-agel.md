@@ -109,7 +109,12 @@ nontermination, actor rollback and the executable example.
 
 ## Honest boundary
 
-This is a hosted functional interpreter, **not yet the native OS evaluator**.
+This is a hosted functional interpreter, **not the native OS evaluator**.
+Since v0.2.78 it does run *in* the OS: the hosted runtime builds without
+`std` and `boot/posix/agel` loads it, with this library, into a protection
+domain as a process (`scripts/test-agel-process.sh` runs a `make-meta-agent`
+counter there); see [`release-v0.2.78.md`](release-v0.2.78.md). The
+native fixed evaluator that runs the desktop is still a different program.
 It does not implement `def`, modules, macros, condition/restart syntax or the
 entire standard library inside itself. The Rust reader, allocation, primitive
 arithmetic/collections, scheduler, capability enforcement and recovery machinery

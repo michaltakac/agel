@@ -5,7 +5,7 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.77.** It runs DOOM, Agel plays it with the loop an Agel program in the OS, the program keeps its own log there, and the desktop loads Agel programs from its own filesystem: see [`docs/doom.md`](docs/doom.md). What is done, partial and open is in
+**Current release: v0.2.78.** It runs DOOM, Agel plays it with the loop an Agel program in the OS, the desktop loads Agel programs from its own filesystem, and the whole language — the hosted runtime and standard library, built without `std` — runs as a process in a protection domain: see [`docs/doom.md`](docs/doom.md) and [`docs/release-v0.2.78.md`](docs/release-v0.2.78.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 

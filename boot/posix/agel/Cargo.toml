@@ -1,0 +1,17 @@
+[package]
+name = "agel"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "agel"
+path = "src/main.rs"
+
+[dependencies]
+agel-process-abi = { path = "../abi" }
+# The hosted runtime and standard library, built without `std`: the same
+# reader, expander, evaluator and agents the workstation runs, linked into
+# a process the supervisor loads into a protection domain.
+agel-core = { path = "../../../crates/agel-core", default-features = false }
+agel-stdlib = { path = "../../../crates/agel-stdlib", default-features = false }

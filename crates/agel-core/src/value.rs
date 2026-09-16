@@ -1,7 +1,8 @@
 use crate::agent::Protocol;
-use std::collections::BTreeMap;
-use std::fmt;
-use std::sync::Arc;
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use alloc::{string::String, vec, vec::Vec};
+use core::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr {

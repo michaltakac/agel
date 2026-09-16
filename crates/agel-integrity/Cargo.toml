@@ -7,10 +7,12 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-# Without `std` the crate is `no_std`: SHA-512 and Ed25519 verification and
-# signing remain; hex encoding, SHA-256 digests and `std::error::Error` need
-# an allocator and are compiled out. The native kernel links it this way.
-std = []
+# Without `std` the crate is `no_std`. SHA-512 and Ed25519 verification and
+# signing always remain; `alloc` adds what needs an allocator (hex text and
+# SHA-256 digests), which is how the runtime a loaded process links it; `std`
+# adds `std::error::Error`. The native kernel links it with neither.
+std = ["alloc"]
+alloc = []
 
 [lints]
 workspace = true

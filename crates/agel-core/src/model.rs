@@ -1,6 +1,7 @@
 use agel_integrity::Digest;
-use std::collections::BTreeMap;
-use std::fmt;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use core::fmt;
 
 pub type EffectKey = Digest;
 
@@ -132,6 +133,7 @@ impl fmt::Display for ModelDispatchError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for ModelDispatchError {}
 
 impl fmt::Display for ModelCompletionError {
@@ -147,4 +149,5 @@ impl fmt::Display for ModelCompletionError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for ModelCompletionError {}

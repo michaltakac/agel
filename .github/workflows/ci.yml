@@ -32,6 +32,10 @@ jobs:
       - run: cargo clippy --manifest-path boot/posix/Cargo.toml --target x86_64-unknown-none --release -- -D warnings
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The runtime a loaded process links: agel-core and the standard library
+      # without std, and agel-integrity with neither std nor alloc, as the kernel links it.
+      - run: cargo clippy -p agel-core -p agel-stdlib --no-default-features --target x86_64-unknown-none -- -D warnings
+      - run: cargo clippy -p agel-integrity --no-default-features --target x86_64-unknown-none -- -D warnings
       - run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
       - run: ./scripts/test-bootstrap.sh
       - run: ./scripts/test-fixed-point.sh
@@ -85,6 +89,7 @@ jobs:
       - run: ./scripts/test-doom.sh
       - run: ./scripts/test-play.sh
       - run: ./scripts/test-programs.sh
+      - run: ./scripts/test-agel-process.sh
       - run: ./scripts/test-isolation.sh
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none -- -D warnings
       - run: cargo clippy --manifest-path boot/kernel/Cargo.toml --target x86_64-unknown-none --features selftest -- -D warnings

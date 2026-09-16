@@ -3,6 +3,26 @@
 version = 4
 
 [[package]]
+name = "agel"
+version = "0.1.0"
+dependencies = [
+ "agel-core",
+ "agel-process-abi",
+ "agel-stdlib",
+]
+
+[[package]]
+name = "agel-core"
+version = "0.2.78"
+dependencies = [
+ "agel-integrity",
+]
+
+[[package]]
+name = "agel-integrity"
+version = "0.2.78"
+
+[[package]]
 name = "agel-libc"
 version = "0.1.0"
 dependencies = [
@@ -12,6 +32,13 @@ dependencies = [
 [[package]]
 name = "agel-process-abi"
 version = "0.1.0"
+
+[[package]]
+name = "agel-stdlib"
+version = "0.2.78"
+dependencies = [
+ "agel-core",
+]
 
 [[package]]
 name = "hello"

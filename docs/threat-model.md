@@ -1737,6 +1737,35 @@ Not claimed: a program file is not signed or checked against anything; the
 splitter is a bracket counter that respects strings and comments, not a
 reader, and hands each form to the evaluator to judge.
 
+## v0.2.78
+
+- **The hosted runtime is a process, with a process's authority:** the
+  namespace `:exec` granted, descriptors 1 and 2, and pages at its break.
+  It is loaded from the program region like `hello`, runs at the lowest
+  privilege in its own address space, and reaches nothing else: the hosted
+  core has no file, clock or window words, so a program it evaluates can
+  compute and print, and that is all.
+- **Its memory is its window:** a 4 MiB stack and a heap of pages at the
+  break, both inside the 16 MiB process window, with the loader's guard page
+  below the stack. An evaluation that outgrows the window fails an
+  allocation, which is a panic, which spins until the tick budget stops the
+  process; the desktop reports it stopped. Fuel bounds an evaluation at
+  fifty million steps; the language's call depth stays at 256.
+- **The yield is a request:** every 4,096 evaluation steps the runtime asks
+  the clock, which ends one entry and starts the next with a fresh budget.
+  The budget therefore bounds a run of steps, not a program; a program that
+  never yields (the pulse is the runtime's, not the program's) is stopped as
+  before, which was confirmed once with the pulse disabled.
+- **The standard library comes from the image, the program from the disk:**
+  the library's source is in the program's ELF, checked by the region's
+  CRC-32 like any program; the file is the operator's, unsigned, run with
+  no authority but the process's own.
+
+Not claimed: a session. Nothing persists between two `:exec`s but the
+files; the runtime's effect journal, snapshots and images stay on the
+host. The desktop's evaluator and this one share no state, so what a file
+defines is invisible to the workbench and the reverse.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

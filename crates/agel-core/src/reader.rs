@@ -1,5 +1,6 @@
 use crate::Expr;
-use std::fmt;
+use alloc::{borrow::ToOwned, format, string::String, vec, vec::Vec};
+use core::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReadLimits {
@@ -37,6 +38,7 @@ impl fmt::Display for ReadError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for ReadError {}
 
 pub fn read_all(source: &str) -> Result<Vec<Expr>, ReadError> {
@@ -171,7 +173,7 @@ impl Reader<'_> {
                 Some(byte) if byte.is_ascii() => value.push(char::from(byte)),
                 Some(_) => {
                     let character_start = self.offset - 1;
-                    let remaining = std::str::from_utf8(&self.source[character_start..])
+                    let remaining = core::str::from_utf8(&self.source[character_start..])
                         .map_err(|_| ReadError::new(character_start, "string is not UTF-8"))?;
                     let character = remaining
                         .chars()
@@ -193,7 +195,7 @@ impl Reader<'_> {
         {
             self.offset += 1;
         }
-        let atom = std::str::from_utf8(&self.source[start..self.offset])
+        let atom = core::str::from_utf8(&self.source[start..self.offset])
             .map_err(|_| ReadError::new(start, "symbols must be UTF-8"))?;
         match atom {
             "nil" => Ok(Expr::Nil),

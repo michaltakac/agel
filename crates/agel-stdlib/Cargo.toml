@@ -5,8 +5,14 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["std"]
+# Without `std` the crate is `no_std`, as the runtime it installs into is:
+# the library is Agel source and the installer is one call.
+std = ["agel-core/std"]
+
 [dependencies]
-agel-core = { path = "../agel-core" }
+agel-core = { path = "../agel-core", default-features = false }
 
 [lints]
 workspace = true

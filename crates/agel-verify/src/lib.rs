@@ -149,6 +149,7 @@ impl Verifier {
         let options = EvaluationOptions {
             budget: proposal.budget.clone(),
             capabilities: Vec::new(),
+            pulse: None,
         };
         let mut canary = world.fork_isolated();
         canary
@@ -210,6 +211,7 @@ impl Verifier {
         let options = EvaluationOptions {
             budget: proposal.budget.clone(),
             capabilities: Vec::new(),
+            pulse: None,
         };
         world
             .evaluate_with(&proposal.source, &options)

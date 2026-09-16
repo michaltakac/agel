@@ -6,8 +6,17 @@ use crate::model::{
 use crate::value::{Builtin, Capability, Closure, Env};
 use crate::world::{EvaluationOptions, Module, State};
 use crate::{Expr, Value};
-use std::collections::BTreeMap;
-use std::fmt;
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use alloc::{
+    borrow::ToOwned,
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use core::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Condition {
@@ -51,6 +60,7 @@ impl fmt::Display for EvalError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for EvalError {}
 
 #[derive(Debug)]
@@ -98,6 +108,11 @@ impl<'a> Runtime<'a> {
             ));
         }
         self.fuel_remaining -= 1;
+        if let Some(pulse) = self.options.pulse {
+            if pulse.every > 0 && self.fuel_remaining % pulse.every == 0 {
+                (pulse.hook)();
+            }
+        }
         Ok(())
     }
 
@@ -168,9 +183,16 @@ fn eval(
     // Language depth and fuel must fail before the embedding thread's machine
     // stack does. Linux debug builds use appreciably larger frames than macOS.
     // This is hosted bootstrap machinery, never linked into the native kernel.
-    stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+    #[cfg(feature = "std")]
+    {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            eval_inner(expression, state, env, module, runtime)
+        })
+    }
+    #[cfg(not(feature = "std"))]
+    {
         eval_inner(expression, state, env, module, runtime)
-    })
+    }
 }
 
 fn eval_inner(
@@ -319,7 +341,7 @@ fn eval_fn(items: &[Expr], env: &Env, module: Option<&str>) -> Result<Value, Sig
         return Err(condition("arity", "fn expects parameters and a body"));
     }
     let params = parse_params("fn", &items[1])?;
-    Ok(Value::Closure(std::sync::Arc::new(Closure {
+    Ok(Value::Closure(Arc::new(Closure {
         params,
         body: items[2..].to_vec(),
         env: env.clone(),
@@ -663,9 +685,16 @@ fn apply(
     runtime: &mut Runtime<'_>,
 ) -> Result<Value, Signal> {
     // `apply` can also recurse through the ordinary apply builtin without eval.
-    stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+    #[cfg(feature = "std")]
+    {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+            apply_inner(function, arguments, state, runtime)
+        })
+    }
+    #[cfg(not(feature = "std"))]
+    {
         apply_inner(function, arguments, state, runtime)
-    })
+    }
 }
 
 fn apply_inner(

@@ -1,16 +1,22 @@
 //! Minimal dependency-free integrity primitives used at Agel trust boundaries.
 //!
 //! With the default `std` feature this is the hosted crate. Without it the
-//! crate is `no_std`: SHA-512 and Ed25519 stay, and everything that needs an
-//! allocator (hex text, SHA-256 digests) is compiled out, which is how the
-//! native kernel links it to admit signed candidate kernels.
+//! crate is `no_std`: SHA-512 and Ed25519 stay; hex text and SHA-256 digests
+//! need an allocator and come with the `alloc` feature, which the runtime a
+//! loaded process links asks for; the native kernel links it with neither, to
+//! admit signed candidate kernels.
 #![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 
 pub mod ed25519;
 
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 use core::fmt;
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub use ed25519::{decode_hex, encode_hex};
 pub use ed25519::{sha512, Sha512, Signature, SignatureError, SigningKey, VerifyingKey};
 
@@ -28,33 +34,33 @@ impl Digest {
         &self.0
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     pub fn to_hex(self) -> String {
         ed25519::encode_hex(&self.0)
     }
 
-    #[cfg(feature = "std")]
+    #[cfg(feature = "alloc")]
     pub fn from_hex(text: &str) -> Option<Self> {
         let bytes = decode_hex(text.trim()).ok()?;
         bytes.as_slice().try_into().ok().map(Self)
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 impl fmt::Debug for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_hex())
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 impl fmt::Display for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_hex())
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(feature = "alloc")]
 pub fn sha256(input: &[u8]) -> Digest {
     const INITIAL: [u32; 8] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,

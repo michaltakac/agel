@@ -419,6 +419,15 @@ Each rung must be runnable and differentially testable against the rung below:
    `/NAME.agel`, and `/init.agel` at boot; an Agel form can write a program
    with `file-write` and load it, the language extending the system from
    inside it.
+73. **The language in a domain (v0.2.78):** the hosted runtime (`agel-core`)
+   builds without `std` over `alloc`, and `boot/posix/agel` links it with
+   the standard library into a process the supervisor loads like any other.
+   It gives itself a 4 MiB stack at its break, allocates from pages there,
+   yields to the supervisor every 4,096 evaluation steps so the tick budget
+   never stops it, reads a file from its namespace, installs the library and
+   evaluates the file as one transaction. Modules, macros, agents and the
+   metacircular evaluator run unprivileged in the OS for the first time; the
+   native fixed evaluator still runs the desktop, and the two share nothing.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
