@@ -1715,6 +1715,28 @@ Not claimed: the evaluator's memory is still copied whole at every commit,
 so a form's cost grows with the banks. The persisted workspace still holds
 sixteen source cells; more persisted cells wait on a later rung.
 
+## v0.2.77
+
+- **A loaded program is forms, each a transaction:** `:load-file` reads a
+  file of at most 16 KiB through the filesystem service the effect words
+  use, splits it into top-level forms in the supervisor, and evaluates each
+  as if typed, effects answered the same way. A form that fails rolls back
+  alone and stops the load; the forms before it stay committed, and the
+  status says how many. A form longer than the shared page's 256 bytes is
+  refused by size before it is parsed.
+- **`/init.agel` runs at boot with the operator's authority,** as any
+  typed form would: the filesystem region is the operator's, and a program
+  there is theirs. It runs after the workspace is restored and before the
+  first prompt, its report on the console, and a failing form in it stops
+  it without stopping the desktop.
+- **Nothing loaded is trusted more than typed:** the same bounds, the same
+  effects, the same rollback. There is still no capability a program must
+  hold to write a file or to be loaded; that is unchanged from v0.2.75.
+
+Not claimed: a program file is not signed or checked against anything; the
+splitter is a bracket counter that respects strings and comments, not a
+reader, and hands each form to the evaluator to judge.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

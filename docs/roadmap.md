@@ -23,6 +23,7 @@ code. Each release moves lines here; the release-by-release history is in
 | Managed JIT with an opt-in integer path | done | `cargo run --release -p agel-jit --example self_host` |
 | The hosted agent runtime running inside a protection domain | open | the native evaluator runs unprivileged; the hosted runtime's effects, model adapters and rich protocols have not moved |
 | Room in the native evaluator for programs of kilobytes: 96 globals, 4,096 heap cells, 16 KiB of text, 10,000 steps, 48 call levels, 32 agents | done | `scripts/test-native-repl.sh`: recursion past the old depth, text of thousands of bytes, more globals than a postcard held; the evaluator domain keeps its own 4 MiB stack, moved clear of the shared page |
+| Programs from files: the desktop loads Agel from its own filesystem (`:load-file`, `:load NAME` as `/NAME.agel`, `/init.agel` at boot), and an Agel form can write a program and load it | done | `scripts/test-programs.sh`: a form writes `tool.agel`, `:load-file` runs it, a failing form stops a load with the forms before it kept, and `/init.agel` runs at the next boot |
 | The compiler and reader running in the guest | partial | the native reader exists; the compiler does not fit the native bounds, so compilation stays on the host; function-valued captures in native closures are refused |
 
 ## The kernel contract and its backends

@@ -337,7 +337,10 @@ words say so in their names.
 What this is not: the words are available to every form the desktop
 evaluates, as `:fs-ls` is to every operator; a capability a world must
 hold to write is the next step. v0.2.76 raised the evaluator's bounds so a
-program can be kilobytes rather than a postcard.
+program can be kilobytes rather than a postcard, and v0.2.77 lets the
+desktop load a program from its own filesystem, so an agent can write a
+tool in Agel with `file-write` and run it with `:load-file`, or leave it at
+`/init.agel` for the next boot.
 
 ### Built where CI builds (v0.2.73)
 

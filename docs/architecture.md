@@ -414,6 +414,11 @@ Each rung must be runnable and differentially testable against the rung below:
    programs of kilobytes, its transactional banks larger, and its private
    stack grown to 4 MiB in its own region of the domain's space so the
    larger banks and deeper recursion cannot reach the shared page; the legacy low-memory self-test is retired for the domain path.
+72. **Programs from files (v0.2.77):** the desktop loads Agel from its own
+   filesystem, form by form and each a transaction, by path, by name as
+   `/NAME.agel`, and `/init.agel` at boot; an Agel form can write a program
+   with `file-write` and load it, the language extending the system from
+   inside it.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

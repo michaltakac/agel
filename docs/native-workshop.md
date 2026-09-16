@@ -41,6 +41,17 @@ asked has committed. Each is one request the evaluator yields to the
 desktop with, answered in place; the serial workshop answers them "no
 service", and a world with no desktop answers an error.
 
+Since v0.2.77 the desktop loads programs from its own filesystem.
+`:load-file PATH` evaluates every top-level form of an Agel file in order,
+each its own transaction with effects answered; the first form that fails
+stops the load and the status says how many came before it. `:load NAME`
+for a name the desktop does not carry reads `/NAME.agel` the same way. A
+form is still one shared-page payload of 256 bytes; a longer one is refused
+by size. A program left at `/init.agel` runs at the next boot, before the
+first prompt, and its report is printed on the console. An Agel program can
+write such a file with `file-write` and load it: the language extending the
+system from inside it.
+
 Since v0.2.74 the `look` and `model` words let an Agel program play a game
 running in a window: `look` and `look-mean` read a sixty-four by
 twenty-five grid of shades the desktop sampled from the played window,

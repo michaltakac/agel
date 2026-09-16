@@ -344,6 +344,10 @@ promise.
   in its own region, moved clear of the shared page and device windows; it
   retires the legacy privileged `native-selftest`, whose low-memory stack
   the larger banks outgrew, since the domain path tests the same evaluator.
+  `v0.2.77` loads programs from files: `:load-file PATH` evaluates an Agel
+  file form by form, `:load NAME` reads `/NAME.agel` for a name the desktop
+  does not carry, a failing form stops a load with the forms before it kept,
+  and `/init.agel` runs at boot before the first prompt.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -41,7 +41,7 @@ const MAX_SCENE_COMMANDS: usize = 224;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":load NAME :play STEPS | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* look-* model-* | :cell :run :show :delete :cells :save :reload | :exec NAME :close :minimize/maximize N | :rollback :shutdown";
+const HELP_POSTCARD: &[u8] = b":load NAME|FILE :play STEPS | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* look-* model-* | :cell :run :show :delete :cells :save :reload | :exec NAME :close :min/max N | :rollback :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 26;
 
@@ -2745,6 +2745,45 @@ fn play(
 
 /// The process slot that owns window `slot`, or one no run has, so a window
 /// whose owner went away reads as ended.
+/// Load one of the programs the desktop carries into a fresh empty world,
+/// each form a cell, the status it names when in.
+fn load_program(
+    program: &Program,
+    evaluator: &mut arch::Domain,
+    evaluator_revision: &mut u64,
+    workspace: &mut Workspace,
+    dirty: &mut bool,
+) -> StatusLine {
+    if workspace.count() != 0 || *evaluator_revision != 0 {
+        return StatusLine::new(b"A PROGRAM NEEDS A FRESH EMPTY WORLD");
+    }
+    let mut candidate = *workspace;
+    for (index, source) in program
+        .source
+        .split(|byte| *byte == b'\n')
+        .filter(|line| line.starts_with(b"("))
+        .enumerate()
+    {
+        let mut cell = StatusLine::new(program.prefix);
+        cell.number_u64(index as u64);
+        if let Err(reason) = candidate.upsert(cell.get(), source) {
+            return StatusLine::new(reason.as_bytes());
+        }
+    }
+    match replay_workspace(evaluator, &candidate) {
+        Ok(revision) => {
+            *workspace = candidate;
+            *evaluator_revision = revision;
+            *dirty = true;
+            StatusLine::new(program.ready)
+        }
+        Err(failure) => {
+            let _ = replay_workspace(evaluator, workspace);
+            StatusLine::new(failure.message().as_bytes())
+        }
+    }
+}
+
 fn slot_owner(current: &Scene, slot: usize) -> usize {
     current.windows[slot]
         .and_then(|window| window.owner)
@@ -2791,38 +2830,18 @@ fn execute_workshop(
     } else {
         command_argument(line, b":load ")
     };
+    // A program to load from a file: `:load-file PATH`, or `:load NAME` for a
+    // name the desktop does not carry, read as `/NAME.agel`.
+    let mut load_path: Option<StatusLine> =
+        command_argument(line, b":load-file ").map(StatusLine::new);
     if let Some(name) = program {
-        let Some(program) = PROGRAMS.iter().find(|program| program.name == name) else {
-            return StatusLine::new(b"NO SUCH PROGRAM - :LOAD WORKBENCH OR DOOM-AGENT");
-        };
-        if workspace.count() != 0 || *evaluator_revision != 0 {
-            return StatusLine::new(b"A PROGRAM NEEDS A FRESH EMPTY WORLD");
+        if let Some(program) = PROGRAMS.iter().find(|program| program.name == name) {
+            return load_program(program, evaluator, evaluator_revision, workspace, dirty);
         }
-        let mut candidate = *workspace;
-        for (index, source) in program
-            .source
-            .split(|byte| *byte == b'\n')
-            .filter(|line| line.starts_with(b"("))
-            .enumerate()
-        {
-            let mut cell = StatusLine::new(program.prefix);
-            cell.number_u64(index as u64);
-            if let Err(reason) = candidate.upsert(cell.get(), source) {
-                return StatusLine::new(reason.as_bytes());
-            }
-        }
-        return match replay_workspace(evaluator, &candidate) {
-            Ok(revision) => {
-                *workspace = candidate;
-                *evaluator_revision = revision;
-                *dirty = true;
-                StatusLine::new(program.ready)
-            }
-            Err(failure) => {
-                let _ = replay_workspace(evaluator, workspace);
-                StatusLine::new(failure.message().as_bytes())
-            }
-        };
+        let mut path = StatusLine::new(b"/");
+        path.push(name);
+        path.push(b".agel");
+        load_path = Some(path);
     }
     if let Some(rest) = command_argument(line, b":play ") {
         let mut words = rest
@@ -3234,7 +3253,7 @@ fn execute_workshop(
         };
     }
     let command = match line {
-        _ if cell_length.is_some() => shared::COMMAND_EVALUATE,
+        _ if cell_length.is_some() || load_path.is_some() => shared::COMMAND_EVALUATE,
         b":promote" => shared::COMMAND_EVALUATOR_PROMOTE,
         b":discard" => shared::COMMAND_EVALUATOR_DISCARD,
         b":rollback" => shared::COMMAND_EVALUATOR_ROLLBACK,
@@ -3262,7 +3281,10 @@ fn execute_workshop(
             console: &mut tee,
             clock: clock.as_deref_mut(),
         };
-        evaluate_status(evaluator, evaluator_revision, command, source, &mut host)
+        match load_path.as_ref() {
+            Some(path) => load_file(evaluator, evaluator_revision, path.get(), &mut host),
+            None => evaluate_status(evaluator, evaluator_revision, command, source, &mut host),
+        }
     };
     // A program the form asked for starts now that the form has committed,
     // as `:exec` would start it, and both are reported.
@@ -3421,12 +3443,19 @@ impl EffectHost<'_> {
         path: &[u8],
         out: &mut [u8; EFFECT_BYTES],
     ) -> Result<(u64, usize), u64> {
+        let read = self.read_file(path, out)?;
+        Ok((read as u64, read))
+    }
+
+    /// A file's bytes into `out`, as many as it holds: the effect word's
+    /// read, and the loader's.
+    fn read_file(&mut self, path: &[u8], out: &mut [u8]) -> Result<usize, u64> {
         use crate::world::fs;
         let [entry, length, kind] = self.open(path, 0)?;
         if kind == fs::KIND_DIRECTORY {
             return Err(21);
         }
-        let wanted = (length as usize).min(EFFECT_BYTES);
+        let wanted = (length as usize).min(out.len());
         let mut offset = 0;
         while offset < wanted {
             let chunk = (wanted - offset).min(crate::world::BLOCK_BYTES);
@@ -3442,7 +3471,7 @@ impl EffectHost<'_> {
             }
             offset += count;
         }
-        Ok((offset as u64, offset))
+        Ok(offset)
     }
 
     fn file_write(
@@ -3535,6 +3564,122 @@ impl EffectHost<'_> {
             }
         }
     }
+}
+
+/// The most a program file may hold; the supervisor reads it whole.
+const PROGRAM_FILE_BYTES: usize = 16384;
+
+/// The next top-level form of a program from `from`: its byte range. Space
+/// and `;` comments are skipped; a list runs to its matching parenthesis,
+/// with strings and their escapes respected; anything else is an atom to
+/// the next space. An unbalanced list runs to the end and the evaluator
+/// says what is wrong with it.
+fn next_form(source: &[u8], mut from: usize) -> Option<(usize, usize)> {
+    loop {
+        while from < source.len() && source[from].is_ascii_whitespace() {
+            from += 1;
+        }
+        if from >= source.len() {
+            return None;
+        }
+        if source[from] != b';' {
+            break;
+        }
+        while from < source.len() && source[from] != b'\n' {
+            from += 1;
+        }
+    }
+    let start = from;
+    let list =
+        source[from] == b'(' || (source[from] == b'\'' && source.get(from + 1) == Some(&b'('));
+    if !list {
+        let mut at = from;
+        while at < source.len() && !source[at].is_ascii_whitespace() {
+            at += 1;
+        }
+        return Some((start, at));
+    }
+    let (mut depth, mut in_string, mut escaped, mut at) = (0_usize, false, false, from);
+    while at < source.len() {
+        let byte = source[at];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else if byte == b'"' {
+            in_string = true;
+        } else if byte == b';' {
+            while at < source.len() && source[at] != b'\n' {
+                at += 1;
+            }
+            continue;
+        } else if byte == b'(' {
+            depth += 1;
+        } else if byte == b')' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Some((start, at + 1));
+            }
+        }
+        at += 1;
+    }
+    Some((start, source.len()))
+}
+
+/// Load a program from a file in the filesystem region: every top-level
+/// form evaluated in order, each its own transaction with the desktop
+/// answering its effects. The first form that fails stops the load and
+/// says so; the forms before it stay. A form is still one shared-page
+/// payload, so a form longer than that is refused by size, not parsed.
+fn load_file(
+    evaluator: &mut arch::Domain,
+    evaluator_revision: &mut u64,
+    path: &[u8],
+    host: &mut EffectHost<'_>,
+) -> StatusLine {
+    let mut source = [0_u8; PROGRAM_FILE_BYTES];
+    let length = match host.read_file(path, &mut source) {
+        Ok(length) => length,
+        Err(2) => return StatusLine::new(b"NO SUCH FILE"),
+        Err(38) => return StatusLine::new(b"NO FILESYSTEM SERVICE"),
+        Err(_) => return StatusLine::new(b"THE FILE COULD NOT BE READ"),
+    };
+    let mut from = 0;
+    let mut count = 0_u64;
+    while let Some((start, end)) = next_form(&source[..length], from) {
+        from = end;
+        let mut report = StatusLine::new(b"LOADED ");
+        report.number_u64(count);
+        if end - start > PAYLOAD_BYTES {
+            report.push(b" FORMS THEN FORM ");
+            report.number_u64(count + 1);
+            report.push(b" EXCEEDS 256 BYTES");
+            return report;
+        }
+        let before = *evaluator_revision;
+        let reply = evaluate_status(
+            evaluator,
+            evaluator_revision,
+            shared::COMMAND_EVALUATE,
+            &source[start..end],
+            host,
+        );
+        if *evaluator_revision == before {
+            report.push(b" FORMS THEN ");
+            report.push(reply.get());
+            return report;
+        }
+        count += 1;
+    }
+    let mut report = StatusLine::new(b"LOADED ");
+    report.number_u64(count);
+    report.push(b" FORMS FROM ");
+    report.push(path);
+    report
 }
 
 /// Evaluate one form with the desktop answering its effects: the rendered
@@ -3965,6 +4110,37 @@ fn interactive(
                 );
             }
             _ => kprint!("clock: unavailable\n"),
+        }
+    }
+    // A program the operator left at `/init.agel` runs now, form by form,
+    // with the desktop answering its effects: the desktop's own behaviour
+    // extended from its own disk, before the first prompt.
+    if filesystem.is_some() {
+        let mut tee = Tee {
+            serial: &mut console_driver,
+            terminal: &mut current.terminal,
+        };
+        #[cfg(target_arch = "x86_64")]
+        let clock = clock_driver.as_mut();
+        #[cfg(not(target_arch = "x86_64"))]
+        let clock: Option<&mut ServiceDomain> = None;
+        let mut host = EffectHost {
+            storage: &mut storage,
+            filesystem: filesystem.as_mut(),
+            console: &mut tee,
+            clock,
+        };
+        if host.open(b"/init.agel", 0).is_ok() {
+            let report = load_file(
+                &mut evaluator,
+                &mut evaluator_revision,
+                b"/init.agel",
+                &mut host,
+            );
+            kprint!(
+                "init.agel: {}\n",
+                core::str::from_utf8(report.get()).unwrap_or("?")
+            );
         }
     }
     #[cfg(target_arch = "x86_64")]
