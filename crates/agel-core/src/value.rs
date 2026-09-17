@@ -315,7 +315,7 @@ impl Canon for Expr {
         }
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         Ok(match input.tag()? {
             "nil" => Self::Nil,
             "bool" => Self::Bool(input.bool()?),
@@ -382,7 +382,7 @@ impl Canon for Value {
         }
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         Ok(match input.peek_tag()? {
             "protocol" => Self::Protocol(Protocol::decode(input)?),
             "capability" => Self::Capability(Capability::decode(input)?),
@@ -429,7 +429,7 @@ impl Canon for Capability {
         out.u64(self.epoch);
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("capability")?;
         let id = input.u64()?;
         let kind = input.text()?;
@@ -449,7 +449,7 @@ impl Canon for Closure {
         out.option(self.module.as_ref());
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("fn")?;
         Ok(Self {
             params: input.items()?,
@@ -479,10 +479,13 @@ impl Canon for Env {
         }
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("env")?;
         let count = input.seq()?;
-        let mut frames = Vec::with_capacity(count.min(4096));
+        if count == 0 || count > crate::canon::MAX_DECODE_DEPTH {
+            return input.fail("environment frame count exceeds the depth limit or is zero");
+        }
+        let mut frames = Vec::with_capacity(count);
         for _ in 0..count {
             frames.push(input.entries::<Value>()?);
         }

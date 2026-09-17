@@ -225,6 +225,7 @@ the compiler bootstrap and the opt-in integer JIT (`cargo run --release -q
 ## Documents
 
 - [`docs/roadmap.md`](docs/roadmap.md): what is done, partial and open, line by line, with the test that proves each.
+- [`docs/review-v0.2.20-v0.2.88.md`](docs/review-v0.2.20-v0.2.88.md): cross-system review, regression fixes, remaining boundaries and research priorities.
 - [`docs/architecture.md`](docs/architecture.md): the trust boundaries and the bootstrap ladder, one rung per milestone.
 - [`docs/versioning.md`](docs/versioning.md): every release and what it claimed.
 - [`docs/threat-model.md`](docs/threat-model.md): what each release does and does not defend.

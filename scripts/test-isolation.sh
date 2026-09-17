@@ -12,7 +12,7 @@
 set -eu
 
 run_x86_64() {
-  image=$(./scripts/build-kernel.sh x86_64 | tail -n 1)
+  image=$(./scripts/build-kernel.sh x86_64 --features pages | tail -n 1)
   qemu-system-x86_64 \
     -machine pc,accel=tcg -m 64M -display none -monitor none -serial stdio -no-reboot \
     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
@@ -30,7 +30,7 @@ virtio_disk() {
 }
 
 run_aarch64() {
-  image=$(./scripts/build-kernel.sh aarch64 | tail -n 1)
+  image=$(./scripts/build-kernel.sh aarch64 --features pages | tail -n 1)
   disk=$(virtio_disk)
   # There is no debug-exit device on `virt`; the kernel leaves through PSCI, so
   # a clean exit is status 0 and the success token carries the verdict.
@@ -45,7 +45,7 @@ run_aarch64() {
 }
 
 run_riscv64() {
-  image=$(./scripts/build-kernel.sh riscv64 | tail -n 1)
+  image=$(./scripts/build-kernel.sh riscv64 --features pages | tail -n 1)
   disk=$(virtio_disk)
   qemu-system-riscv64 \
     -machine virt -m 128M -display none -monitor none -serial stdio -no-reboot -bios default \
@@ -152,6 +152,8 @@ run_architecture() {
   grep -q "isolation\[$architecture\]: contained a world touching a device it was not granted" \
     "$output_file"
   grep -q 'watchdog fault: rolled back to slot A' "$output_file"
+
+  grep -q "extra pages and page tables reclaimed, including a failed mapping" "$output_file"
 
   # Phase 3: the console driver is an unprivileged domain the supervisor can
   # lose and replace. The transcript diffed above was printed by it, so the

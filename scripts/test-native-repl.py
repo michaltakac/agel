@@ -1116,7 +1116,8 @@ def breadth_test(image: str, architecture: str, disk: str) -> None:
                 b"formatter: widths, flags, precision, truncation",
                 b"strings: strtol, strstr, strrchr, ctype, strcat, qsort",
                 b"streams: fopen, fprintf, append, fgets, feof, lseek",
-                b"breadth: 24 checks passed",
+                b"offsets: append across writers and seek, zero-filled holes, descriptor rights",
+                b"breadth: 39 checks passed",
                 b"process c-breadth exited with status 0",
             ],
         )

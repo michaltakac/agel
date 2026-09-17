@@ -755,9 +755,14 @@ pub struct VerifyingKey([u8; 32]);
 
 impl VerifyingKey {
     pub fn from_bytes(bytes: [u8; 32]) -> Result<Self, SignatureError> {
-        decode_point(&curve(), &bytes)
-            .map(|_| Self(bytes))
-            .ok_or(SignatureError::InvalidKey)
+        let point = decode_point(&curve(), &bytes).ok_or(SignatureError::InvalidKey)?;
+        // A low-order public key admits forgeries without knowing a secret.
+        // Multiplication by the cofactor sends every such point to identity.
+        let cleared = point.double().double().double();
+        if cleared.x.is_zero() && cleared.y == cleared.z {
+            return Err(SignatureError::InvalidKey);
+        }
+        Ok(Self(bytes))
     }
 
     #[cfg(feature = "alloc")]
@@ -984,6 +989,20 @@ mod tests {
                 .verify(message, &Signature::from_bytes(malleable)),
             Err(SignatureError::InvalidSignature)
         );
+        // Identity (order 1), y = -1 (order 2), and y = 0 (order 4)
+        // must not become trusted signers. For identity, R = B and s = 1
+        // would otherwise verify for every message without a signing key.
+        let mut identity = [0_u8; 32];
+        identity[0] = 1;
+        let mut order_two = [0xff; 32];
+        order_two[0] = 0xec;
+        order_two[31] = 0x7f;
+        for weak in [identity, order_two, [0; 32]] {
+            assert_eq!(
+                VerifyingKey::from_bytes(weak),
+                Err(SignatureError::InvalidKey)
+            );
+        }
         // Non-canonical and off-curve public keys are refused at construction.
         assert_eq!(
             VerifyingKey::from_bytes([0xff; 32]),

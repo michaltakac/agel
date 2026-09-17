@@ -23,7 +23,17 @@ pub(crate) struct Encoder {
 /// A type with a canonical encoding, both ways.
 pub(crate) trait Canon: Sized {
     fn canon(&self, out: &mut Encoder);
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError>;
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError>;
+
+    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+        if input.depth >= MAX_DECODE_DEPTH {
+            return input.fail("canonical nesting exceeds the depth limit");
+        }
+        input.depth += 1;
+        let result = Self::decode_inner(input);
+        input.depth -= 1;
+        result
+    }
 }
 
 /// What a decoding refused: the byte offset, and why.
@@ -133,15 +143,22 @@ impl Encoder {
 pub(crate) struct Decoder<'a> {
     bytes: &'a [u8],
     at: usize,
+    depth: usize,
 }
 
 /// Items a sequence may name before its bytes are read: a bound on what
 /// a claimed count allocates ahead of the data.
 const RESERVE_AT_MOST: usize = 4096;
+/// Bound recursive values and closure environments independently of file size.
+pub(crate) const MAX_DECODE_DEPTH: usize = 256;
 
 impl<'a> Decoder<'a> {
     pub(crate) fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, at: 0 }
+        Self {
+            bytes,
+            at: 0,
+            depth: 0,
+        }
     }
 
     pub(crate) fn finished(&self) -> bool {
@@ -294,11 +311,23 @@ impl<'a> Decoder<'a> {
     }
 
     pub(crate) fn entries<T: Canon>(&mut self) -> Result<BTreeMap<String, T>, CanonError> {
+        self.keyed_entries()
+    }
+
+    pub(crate) fn keyed_entries<K: Canon + Ord, V: Canon>(
+        &mut self,
+    ) -> Result<BTreeMap<K, V>, CanonError> {
         let count = self.seq()?;
         let mut entries = BTreeMap::new();
         for _ in 0..count {
-            let key = self.text()?;
-            let value = T::decode(self)?;
+            let key = K::decode(self)?;
+            if entries
+                .last_key_value()
+                .is_some_and(|(previous, _)| previous >= &key)
+            {
+                return self.fail("map keys must be unique and in canonical order");
+            }
+            let value = V::decode(self)?;
             entries.insert(key, value);
         }
         Ok(entries)
@@ -310,7 +339,7 @@ impl Canon for String {
         out.text(self);
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.text()
     }
 }
@@ -320,7 +349,7 @@ impl Canon for u64 {
         out.u64(*self);
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.u64()
     }
 }
@@ -330,7 +359,7 @@ impl<T: Canon> Canon for Vec<T> {
         out.items(self.iter());
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.items()
     }
 }
@@ -350,6 +379,34 @@ pub(crate) fn fixed<const N: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deeply_nested_values_fail_without_exhausting_the_stack() {
+        let mut out = Encoder::new();
+        for _ in 0..1000 {
+            out.tag("list");
+            out.seq(1);
+        }
+        out.tag("nil");
+        let bytes = out.finish();
+        let error = crate::Value::decode(&mut Decoder::new(&bytes)).unwrap_err();
+        assert!(error.message.contains("depth limit"), "{error}");
+    }
+
+    #[test]
+    fn maps_reject_duplicate_and_out_of_order_keys() {
+        for keys in [["a", "a"], ["b", "a"]] {
+            let mut out = Encoder::new();
+            out.seq(2);
+            for key in keys {
+                out.text(key);
+                out.u64(1);
+            }
+            let bytes = out.finish();
+            let error = Decoder::new(&bytes).entries::<u64>().unwrap_err();
+            assert!(error.message.contains("canonical order"), "{error}");
+        }
+    }
 
     #[test]
     fn primitives_round_trip_and_refuse_what_was_never_written() {

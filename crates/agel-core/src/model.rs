@@ -168,7 +168,7 @@ impl Canon for ModelOutcome {
         }
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         Ok(match input.tag()? {
             "success" => Self::Success(input.text()?),
             "failure" => Self::Failure {
@@ -192,7 +192,7 @@ impl Canon for ModelRequestStatus {
         }
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         Ok(match input.tag()? {
             "pending" => Self::Pending,
             "dispatching" => Self::Dispatching,
@@ -215,7 +215,7 @@ impl Canon for ModelRequest {
         out.bytes(self.effect_key.as_bytes());
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("request")?;
         Ok(Self {
             id: input.u64()?,
@@ -237,7 +237,7 @@ impl Canon for ModelRecord {
         self.status.canon(out);
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("record")?;
         Ok(Self {
             request: ModelRequest::decode(input)?,

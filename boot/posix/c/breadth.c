@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,6 +100,42 @@ int main(int argc, char **argv) {
     fclose(in);
     check(fopen("missing", "r") == NULL && errno == ENOENT, "fopen missing");
     printf("streams: fopen, fprintf, append, fgets, feof, lseek\n");
+
+    /* Append is chosen at each write, even after a seek or another writer. */
+    int first = open("offsets", O_RDWR | O_CREAT | O_APPEND);
+    int second = open("offsets", O_WRONLY | O_APPEND);
+    check(first >= 0 && second >= 0, "append descriptors");
+    check(write(first, "abc", 3) == 3, "first append");
+    check(write(second, "def", 3) == 3, "independent append uses current end");
+    check(lseek(first, 0, SEEK_SET) == 0, "seek append descriptor");
+    check(write(first, "g", 1) == 1, "append ignores seek for writing");
+    check(lseek(first, 0, SEEK_CUR) == 7, "append updates offset");
+    check(lseek(first, 0, SEEK_SET) == 0, "read append contents");
+    char appended[8] = {0};
+    check(read(first, appended, 7) == 7 && strcmp(appended, "abcdefg") == 0, "append preserves both writers");
+    close(first);
+    close(second);
+
+    /* Reusing a retained block after truncation must not disclose old data. */
+    first = open("offsets", O_RDWR);
+    check(first >= 0 && ftruncate(first, 2) == 0, "truncate before sparse write");
+    check(lseek(first, 5000, SEEK_SET) == 5000, "seek across an unallocated block");
+    check(write(first, "z", 1) == 1, "write beyond EOF");
+    check(lseek(first, 0, SEEK_SET) == 0, "read sparse file");
+    char sparse[5001];
+    size_t used = 0;
+    while (used < sizeof sparse) {
+        ssize_t n = read(first, sparse + used, sizeof sparse - used);
+        if (n <= 0) break;
+        used += n;
+    }
+    int zeroed = used == sizeof sparse && sparse[0] == 'a' && sparse[1] == 'b' && sparse[5000] == 'z';
+    for (size_t at = 2; at < 5000 && zeroed; at++) zeroed = sparse[at] == 0;
+    check(zeroed, "the entire hole is zero, including retained bytes");
+    close(first);
+    check(unlink("offsets") == 0, "remove offsets fixture");
+    check(write(0, "x", 1) == -1 && errno == EBADF, "stdin is not writable");
+    printf("offsets: append across writers and seek, zero-filled holes, descriptor rights\n");
 
     printf("breadth: %d checks passed\n", checks);
     return 0;

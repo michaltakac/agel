@@ -130,9 +130,17 @@ impl Serial {
         }
     }
 
-    fn text_from(&self, from: usize) -> String {
+    /// Read complete lines and advance their byte cursor under one lock.
+    /// Bytes appended afterwards belong to the next read, and a split UTF-8
+    /// sequence stays buffered until its line is complete.
+    fn take_lines(&self, cursor: &mut usize) -> String {
         let buffer = self.received.lock().expect("serial buffer");
-        String::from_utf8_lossy(&buffer[from.min(buffer.len())..]).into_owned()
+        let start = (*cursor).min(buffer.len());
+        let Some(last) = buffer[start..].iter().rposition(|byte| *byte == b'\n') else {
+            return String::new();
+        };
+        *cursor = start + last + 1;
+        String::from_utf8_lossy(&buffer[start..*cursor]).into_owned()
     }
 
     fn len(&self) -> usize {
@@ -143,27 +151,21 @@ impl Serial {
     /// them, and wait for the prompt; the reply text.
     fn submit(&mut self, line: &str, timeout: Duration) -> Result<String, String> {
         let start = self.len();
-        for byte in line.bytes() {
-            self.stream
-                .write_all(&[byte])
-                .map_err(|error| error.to_string())?;
-            self.wait_for_byte(byte, Duration::from_secs(5))?;
-        }
-        self.stream
-            .write_all(b"\n")
-            .map_err(|error| error.to_string())?;
+        self.send_line(line)?;
         let end = self.wait_for(start, b"live-desktop> ", timeout)?;
-        Ok(self.text_from(start)[..end - start].to_owned())
+        let buffer = self.received.lock().expect("serial buffer");
+        Ok(String::from_utf8_lossy(&buffer[start..end]).into_owned())
     }
 
     /// Type a line at the workshop prompt, echo-waited, without waiting for
     /// the next prompt: `:play` speaks for a long time before returning.
     fn send_line(&mut self, line: &str) -> Result<(), String> {
         for byte in line.bytes() {
+            let start = self.len();
             self.stream
                 .write_all(&[byte])
                 .map_err(|error| error.to_string())?;
-            self.wait_for_byte(byte, Duration::from_secs(5))?;
+            self.wait_for_byte(start, byte, Duration::from_secs(5))?;
         }
         self.stream
             .write_all(b"\n")
@@ -182,15 +184,14 @@ impl Serial {
             .map_err(|error| error.to_string())
     }
 
-    fn wait_for_byte(&self, byte: u8, timeout: Duration) -> Result<(), String> {
+    fn wait_for_byte(&self, mut seen: usize, byte: u8, timeout: Duration) -> Result<(), String> {
         let deadline = Instant::now() + timeout;
-        let mut seen = self.len().saturating_sub(1);
         loop {
             let buffer = self.received.lock().expect("serial buffer");
             if buffer[seen.min(buffer.len())..].contains(&byte) {
                 return Ok(());
             }
-            seen = buffer.len().saturating_sub(1);
+            seen = buffer.len();
             drop(buffer);
             if Instant::now() > deadline {
                 return Err(format!("the console did not echo {byte:#x}"));
@@ -238,9 +239,13 @@ impl Monitor {
 
     fn read_line(&mut self) -> Result<String, String> {
         let mut line = String::new();
-        self.reader
+        let count = self
+            .reader
             .read_line(&mut line)
             .map_err(|error| error.to_string())?;
+        if count == 0 {
+            return Err("QEMU closed the monitor connection".to_owned());
+        }
         Ok(line)
     }
 
@@ -253,20 +258,25 @@ impl Monitor {
             .map_err(|error| error.to_string())?;
         loop {
             let line = self.read_line()?;
-            if line.contains("\"error\"") {
+            let reply: serde_json::Value =
+                serde_json::from_str(&line).map_err(|error| error.to_string())?;
+            if reply.get("error").is_some() {
                 return Err(format!("QEMU refused {json}: {line}"));
             }
-            if line.contains("\"return\"") {
+            if reply.get("return").is_some() {
                 return Ok(line);
             }
         }
     }
 
     fn screendump(&mut self, path: &Path) -> Result<(), String> {
-        self.command(&format!(
-            r#"{{"execute":"screendump","arguments":{{"filename":"{}","format":"ppm"}}}}"#,
-            path.display()
-        ))
+        self.command(
+            &serde_json::json!({
+                "execute": "screendump",
+                "arguments": {"filename": path.to_string_lossy(), "format": "ppm"},
+            })
+            .to_string(),
+        )
         .map(|_| ())
     }
 }
@@ -669,22 +679,18 @@ fn play(
     let mut request_number = 0_u64;
     let mut state_line = String::new();
     let deadline = Instant::now() + Duration::from_secs(1800);
-    let mut leftover = String::new();
     loop {
         if Instant::now() > deadline {
             return Err("the in-OS play loop did not finish in time".to_owned());
         }
-        let fresh = serial.text_from(cursor);
-        cursor = serial.len();
+        let fresh = serial.take_lines(&mut cursor);
         if fresh.is_empty() {
             thread::sleep(Duration::from_millis(50));
             continue;
         }
-        leftover.push_str(&fresh);
         let mut done = false;
-        while let Some(at) = leftover.find('\n') {
-            let line = leftover[..at].trim_end_matches('\r').to_owned();
-            leftover = leftover[at + 1..].to_owned();
+        for line in fresh.lines() {
+            let line = line.trim_end_matches('\r');
             if line.starts_with("doom: state") {
                 state_line = line.trim_end_matches(" paused").to_owned();
             }
@@ -706,13 +712,13 @@ fn play(
                     .parse()
                     .unwrap_or(0);
                 block.clear();
-                block.push_str(&line);
+                block.push_str(line);
                 block.push('\n');
                 in_block = true;
                 continue;
             }
             if in_block {
-                block.push_str(&line);
+                block.push_str(line);
                 block.push('\n');
                 continue;
             }
@@ -743,16 +749,18 @@ fn play(
                     Ok(frame) => frame.ascii(),
                     Err(_) => String::new(),
                 };
-                let record = format!(
-                    "{{\"step\":{index},\"frame\":{:?},\"policy\":{:?},\"program\":{:?},\"state\":{:?},\"keys\":{:?},\"reason\":{:?},\"ascii\":{:?}}}\n",
-                    frame_path.display().to_string(),
-                    policy.name(),
-                    policy.program(),
-                    state_line,
-                    keys,
-                    reason.trim_matches('"'),
-                    ascii
-                );
+                let record = serde_json::json!({
+                    "step": index,
+                    "frame": frame_path.to_string_lossy(),
+                    "policy": policy.name(),
+                    "program": policy.program(),
+                    "state": state_line,
+                    "keys": keys,
+                    "reason": reason.trim_matches('"'),
+                    "ascii": ascii,
+                })
+                .to_string()
+                    + "\n";
                 log.write_all(record.as_bytes())
                     .map_err(|error| error.to_string())?;
                 println!("agel-play: step {index}: {keys} [{state_line}]");
@@ -767,4 +775,55 @@ fn play(
     }
     println!("agel-play: done; the dataset is {}", dataset.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serial_keeps_incomplete_lines_and_split_utf8() {
+        let (stream, _peer) = UnixStream::pair().unwrap();
+        let serial = Serial {
+            stream,
+            received: Arc::new(Mutex::new(b"first\n\xc3".to_vec())),
+        };
+        let mut cursor = 0;
+        assert_eq!(serial.take_lines(&mut cursor), "first\n");
+        assert_eq!(serial.take_lines(&mut cursor), "");
+        serial
+            .received
+            .lock()
+            .unwrap()
+            .extend_from_slice(b"\xa9\nnext\n");
+        assert_eq!(serial.take_lines(&mut cursor), "é\nnext\n");
+        assert_eq!(serial.take_lines(&mut cursor), "");
+        assert!(serial.wait_for_byte(cursor, b'\n', Duration::ZERO).is_err());
+        serial.received.lock().unwrap().push(b'\n');
+        assert!(serial.wait_for_byte(cursor, b'\n', Duration::ZERO).is_ok());
+    }
+
+    #[test]
+    fn monitor_escapes_paths_ignores_events_and_reports_eof() {
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let mut monitor = Monitor {
+            reader: BufReader::new(stream.try_clone().unwrap()),
+            stream,
+        };
+        let path = "frame\"\\\t.ppm";
+        let server = thread::spawn(move || {
+            let mut reader = BufReader::new(peer.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["arguments"]["filename"], path);
+            peer.write_all(
+                b"{\"event\":\"notice\",\"data\":{\"error\":\"irrelevant\"}}\n{\"return\":{}}\n",
+            )
+            .unwrap();
+        });
+        monitor.screendump(Path::new(path)).unwrap();
+        server.join().unwrap();
+        assert!(monitor.read_line().unwrap_err().contains("closed"));
+    }
 }

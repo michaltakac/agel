@@ -2528,7 +2528,7 @@ impl Filesystem {
 
     /// Store the block area's first `length` bytes at `offset` of `entry`.
     #[link_section = ".user_text"]
-    unsafe fn write(&mut self, index: usize, offset: u64, length: u64) -> Result<u64, u64> {
+    unsafe fn write(&mut self, index: usize, offset: u64, length: u64) -> Result<(u64, u64), u64> {
         use crate::world::fs;
         if index >= usize::from(fs::DATA_DIRECTORY) {
             return Err(fs::EACCES);
@@ -2538,14 +2538,28 @@ impl Filesystem {
         if entry.kind != fs::KIND_FILE as u8 {
             return Err(fs::EINVAL);
         }
+        let offset = if offset == fs::APPEND_OFFSET {
+            u64::from(entry.length)
+        } else {
+            offset
+        };
         let length = length.min(512);
-        if offset + length > fs::FILE_BYTES {
+        if length == 0 {
+            return Ok((0, offset));
+        }
+        if offset > fs::FILE_BYTES || length > fs::FILE_BYTES - offset {
             return Err(fs::EFBIG);
         }
         let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *const u8;
         let mut data = [0_u8; 512];
         for (position, byte) in data.iter_mut().enumerate().take(length as usize) {
             *byte = unsafe { block.add(position).read_volatile() };
+        }
+        // Save the payload before truncate yields through the shared block.
+        // A seek beyond EOF must read back as zero-filled space, including
+        // bytes left in the last block after a previous truncation.
+        if offset > u64::from(entry.length) {
+            unsafe { self.truncate(index, offset)? };
         }
         let mut done = 0_u64;
         while done < length {
@@ -2574,7 +2588,7 @@ impl Filesystem {
             }
             unsafe { self.flush_entry(index)? };
         }
-        Ok(length)
+        Ok((length, offset + length))
     }
 
     /// Remove what `path` names from `root`: a file, or a directory with
@@ -2804,7 +2818,7 @@ pub unsafe extern "C" fn agel_fs_main(shared_page: u64) -> ! {
                 .map(|count| [count, 0, 0])
         } else if command == fs::COMMAND_WRITE {
             unsafe { filesystem.write(arguments[0] as usize, arguments[1], arguments[2]) }
-                .map(|count| [count, 0, 0])
+                .map(|(count, end)| [count, end, 0])
         } else if command == fs::COMMAND_LIST {
             unsafe { filesystem.list(arguments[0] as u16, arguments[1]) }
                 .map(|(entry, kind, length)| [entry as u64, u64::from(kind), u64::from(length)])

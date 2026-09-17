@@ -109,7 +109,7 @@ fn frame_bit(frame: u64) -> (usize, u64) {
 /// loaded process with a canvas and a large heap as much as a driver with
 /// a page, and every domain carries the same fixed-size record of them.
 /// The pool records every frame it hands out while a ledger is open, and
-/// a frame mapped later is pushed.
+/// extending a domain records both its new pages and their page tables.
 #[derive(Clone, Copy)]
 pub struct FrameLedger {
     bits: [u64; POOL_WORDS],
@@ -126,13 +126,6 @@ impl FrameLedger {
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn count(&self) -> usize {
         self.count as usize
-    }
-
-    /// Add a frame allocated after the domain was built, so it is reclaimed
-    /// with the rest: a loaded process's code and data pages, or an asset.
-    #[cfg(feature = "pages")]
-    pub fn push(&mut self, frame: u64) -> Result<(), MemoryError> {
-        self.record(frame)
     }
 
     fn record(&mut self, frame: u64) -> Result<(), MemoryError> {
@@ -231,6 +224,25 @@ impl FramePool {
     /// Stop recording and return what was handed out since the ledger opened.
     pub fn close_ledger(&mut self) -> FrameLedger {
         self.ledger.take().unwrap_or(FrameLedger::EMPTY)
+    }
+
+    /// Record every allocation made while extending a domain, including
+    /// intermediate page tables. Keep them even on failure: a partially
+    /// installed table is still reachable until the domain is destroyed.
+    #[cfg(feature = "pages")]
+    pub fn record_allocations<T>(
+        &mut self,
+        frames: &mut FrameLedger,
+        action: impl FnOnce(&mut Self) -> Result<T, MemoryError>,
+    ) -> Result<T, MemoryError> {
+        self.open_ledger();
+        let result = action(self);
+        let added = self.close_ledger();
+        for (held, new) in frames.bits.iter_mut().zip(added.bits) {
+            frames.count += (new & !*held).count_ones();
+            *held |= new;
+        }
+        result
     }
 
     /// Give a dead domain's frames back. The caller must have dropped every

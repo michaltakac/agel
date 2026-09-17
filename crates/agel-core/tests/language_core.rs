@@ -597,6 +597,25 @@ mod proper_tail_calls {
     }
 
     #[test]
+    fn apply_forwards_tail_calls_including_apply_to_itself() {
+        let mut world = World::default();
+        let mut options = options(1_000_000);
+        options.budget.max_call_depth = 8;
+        let commit = world.evaluate_with(
+            "(def loop (fn (n) (if (= n 0) 42 (apply apply (list loop (list (- n 1))))))) (loop 5000)",
+            &options,
+        ).unwrap();
+        assert_eq!(commit.values.last(), Some(&Value::Int(42)));
+        let error = world.evaluate_with("(apply loop 1)", &options).unwrap_err();
+        assert!(error.to_string().contains("apply expects an argument list"));
+        let error = world.evaluate_with(
+            "(def nested (fn (n) (if (= n 0) 0 (+ 1 (apply nested (list (- n 1))))))) (nested 20)",
+            &options,
+        ).unwrap_err();
+        assert!(error.to_string().contains("resource/call-depth"));
+    }
+
+    #[test]
     fn mutual_recursion_in_tail_position_is_a_loop_too() {
         let mut world = World::default();
         let commit = world

@@ -374,7 +374,7 @@ impl WorkspaceBroker {
         let path = VirtualPath::new(path)?;
         let bytes = bytes.into();
         let intent = file_intent(principal, EffectKind::FileWrite, "write", &path, &bytes);
-        self.mutate(intent, |workspace| workspace.write(path.as_str(), bytes))
+        self.mutate(intent, path, Some(bytes))
     }
 
     pub fn delete(
@@ -384,13 +384,14 @@ impl WorkspaceBroker {
     ) -> Result<Decision, EffectError> {
         let path = VirtualPath::new(path)?;
         let intent = file_intent(principal, EffectKind::FileWrite, "delete", &path, &[]);
-        self.mutate(intent, |workspace| workspace.delete(path.as_str()))
+        self.mutate(intent, path, None)
     }
 
     fn mutate(
         &mut self,
         intent: EffectIntent,
-        change: impl FnOnce(&mut CowWorkspace) -> Result<(), EffectError>,
+        path: VirtualPath,
+        bytes: Option<Vec<u8>>,
     ) -> Result<Decision, EffectError> {
         let decision = self.policy.decide(&intent);
         match &decision {
@@ -403,26 +404,20 @@ impl WorkspaceBroker {
                 self.audit.append(&intent, AuditOutcome::Allowed)
             }
         }
-        // Stage in the overlay first so an invalid change cannot half-apply.
-        let staged = self.workspace.diff();
-        if let Err(error) = change(&mut self.workspace) {
-            self.workspace.rollback();
-            for change in staged {
-                match change {
-                    Change::Write { path, bytes } => {
-                        self.workspace.overlay.insert(path, Some(bytes));
-                    }
-                    Change::Delete { path } => {
-                        self.workspace.overlay.insert(path, None);
-                    }
+        // The path was validated before consulting policy. Approval applies
+        // only to this operation, never to unrelated virtualized changes.
+        if decision == Decision::Allow {
+            self.workspace.overlay.remove(&path);
+            match bytes {
+                Some(bytes) => {
+                    self.workspace.base.insert(path, bytes);
+                }
+                None => {
+                    self.workspace.base.remove(&path);
                 }
             }
-            self.audit
-                .append(&intent, AuditOutcome::Failed(error.to_string()));
-            return Err(error);
-        }
-        if decision == Decision::Allow {
-            self.workspace.commit();
+        } else {
+            self.workspace.overlay.insert(path, bytes);
         }
         self.audit
             .append(&intent, AuditOutcome::Succeeded { status: 0 });
@@ -907,6 +902,46 @@ mod tests {
             allowed.run(Principal::host(), "model/infer/codex/request/7", spec()),
             Err(EffectError::Denied(_))
         ));
+    }
+
+    #[test]
+    fn allowed_changes_do_not_commit_unrelated_virtualized_changes() {
+        struct ByPath;
+        impl Policy for ByPath {
+            fn decide(&self, intent: &EffectIntent) -> Decision {
+                if intent.resource == "/direct" {
+                    Decision::Allow
+                } else {
+                    Decision::Virtualize
+                }
+            }
+        }
+        let workspace = CowWorkspace::from_files([
+            ("/staged".into(), b"original".to_vec()),
+            ("/deleted".into(), b"kept".to_vec()),
+        ])
+        .unwrap();
+        let mut broker = WorkspaceBroker::new(ByPath, workspace);
+        broker
+            .write(Principal::host(), "/staged", b"pending")
+            .unwrap();
+        broker.delete(Principal::host(), "/deleted").unwrap();
+        broker
+            .write(Principal::host(), "/direct", b"approved")
+            .unwrap();
+        assert_eq!(broker.diff().len(), 2);
+        broker.delete(Principal::host(), "/direct").unwrap();
+        assert_eq!(broker.diff().len(), 2);
+        broker.rollback();
+        assert_eq!(
+            broker.read(Principal::host(), "/staged").unwrap(),
+            Some(b"original".to_vec())
+        );
+        assert_eq!(
+            broker.read(Principal::host(), "/deleted").unwrap(),
+            Some(b"kept".to_vec())
+        );
+        assert_eq!(broker.read(Principal::host(), "/direct").unwrap(), None);
     }
 
     #[test]

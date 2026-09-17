@@ -301,7 +301,7 @@ impl Canon for TypeSpec {
         out.text(self.name());
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         let name = input.text()?;
         match Self::parse(&name) {
             Some(spec) => Ok(spec),
@@ -317,7 +317,7 @@ impl Canon for Protocol {
         out.entries(self.messages.iter());
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("protocol")?;
         let name = input.text()?;
         let messages = input.entries::<Vec<TypeSpec>>()?;
@@ -334,7 +334,7 @@ impl Canon for Event {
         self.detail.canon(out);
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("event")?;
         let sequence = input.u64()?;
         let kind = input.text()?;
@@ -370,7 +370,7 @@ impl Canon for Agent {
         out.items(self.capabilities.iter());
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("agent")?;
         let name = input.text()?;
         let mailbox = VecDeque::from(input.items::<Value>()?);

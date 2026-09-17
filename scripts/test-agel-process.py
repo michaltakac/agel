@@ -178,6 +178,19 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         reply = check(machine, ":eof", "END OF INPUT")
         reply += until_text(machine, b"PROCESS ENDED", 30) + quiet(machine)
         assert "agel: end of input at revision 6" in reply, reply
+        # A failed oversized save must preserve the last loadable world.
+        check(machine, ":exec agel -- --no-stdlib --world budget.agel", "agel: new world, kept in budget.agel")
+        converse("(def x 42)", "=> 42")
+        converse('(begin (def huge ((fn (self n s) (if (= n 0) s (self self (- n 1) (text-concat s s)))) (fn (self n s) (if (= n 0) s (self self (- n 1) (text-concat s s)))) 16 "x")) nil)', "previous save kept")
+        check(machine, ":eof", "END OF INPUT")
+        until_text(machine, b"PROCESS ENDED", 30)
+        quiet(machine)
+        check(machine, ":exec agel -- --no-stdlib --world budget.agel", "agel: world read from budget.agel")
+        converse("x", "=> 42")
+        converse("huge", "agel: error:")
+        check(machine, ":eof", "END OF INPUT")
+        until_text(machine, b"PROCESS ENDED", 30)
+        quiet(machine)
         # The backend in the guest: the x86-64 backend written in Agel turns
         # the IR into a static ELF as hex text; the desktop installs it and
         # runs it as a process, which prints its result and exits with it.
@@ -189,12 +202,15 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         # A million tail calls through a `let`, in the frame of the first
         # call: the loop's stack does not grow.
         check(machine, '(file-append "backend.agel" "(def loop (quote (fn (self n acc) (if (= n 0) acc (let ((m (- n 1))) (self self m (+ acc n)))))))\\n(file-write \\"loop.hex\\" (native-x86-emit (native-compile loop) (quote (1000000 0))))\\n")', "\r\n")
-        # A tail call through a parameter whose arity differs from the frame's.
+        # A let in an operand must return to the enclosing addition, even
+        # though its IR lambda ends with a call marked as tail.
+        check(machine, '(file-append "backend.agel" "(def nested (quote (fn (self n) (if (= n 0) 0 (+ (let ((m (- n 1))) (self self m)) 1)))))\\n")', "\r\n")
+        check(machine, '(file-append "backend.agel" "(file-write \\"nested.hex\\" (native-x86-emit (native-compile nested) (quote (5))))\\n")', "\r\n")
         started = time.monotonic()
         reply = run(machine, ":exec agel -- backend.agel", 600)
         assert "process agel exited with status 0" in reply, reply
         print(f"backend: six programs emitted in {time.monotonic() - started:.1f} s")
-        for name, wanted, status in (("fib", "55", 55), ("scaled", "40", 40), ("total", "5050", 5050 & 255), ("broken", None, 111), ("loop", "500000500000", 500000500000 & 255)):
+        for name, wanted, status in (("fib", "55", 55), ("scaled", "40", 40), ("total", "5050", 5050 & 255), ("broken", None, 111), ("loop", "500000500000", 500000500000 & 255), ("nested", "5", 5)):
             check(machine, f":install {name} /{name}.hex", f"INSTALLED {name}: ")
             reply = check(machine, f":exec {name}", f"process {name} exited with status {status}")
             if wanted is not None:

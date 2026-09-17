@@ -293,10 +293,11 @@ impl Domain {
         virtual_address: u64,
         access: Access,
     ) -> Result<u64, MemoryError> {
-        let frame = pool.allocate()?;
-        self.frames.push(frame)?;
-        self.space.map(pool, virtual_address, frame, access)?;
-        Ok(frame)
+        pool.record_allocations(&mut self.frames, |pool| {
+            let frame = pool.allocate()?;
+            self.space.map(pool, virtual_address, frame, access)?;
+            Ok(frame)
+        })
     }
 
     /// Build the tables under `pages` pages from `base`, every one mapped
@@ -309,13 +310,14 @@ impl Domain {
         base: u64,
         pages: u64,
     ) -> Result<(), MemoryError> {
-        let blank = pool.allocate()?;
-        self.frames.push(blank)?;
-        for page in 0..pages {
-            self.space
-                .map(pool, base + page * PAGE, blank, Access::UserReadOnly)?;
-        }
-        Ok(())
+        pool.record_allocations(&mut self.frames, |pool| {
+            let blank = pool.allocate()?;
+            for page in 0..pages {
+                self.space
+                    .map(pool, base + page * PAGE, blank, Access::UserReadOnly)?;
+            }
+            Ok(())
+        })
     }
 
     /// Point a prepared page at a frame another domain owns, read-only.

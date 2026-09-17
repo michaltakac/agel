@@ -681,6 +681,15 @@ impl Keeper {
     /// world stays as it is in the process.
     fn save(&self, world: &World) {
         let bytes = world.to_canonical_over(&self.base);
+        // Refuse a known size failure before opening or truncating the last
+        // saved world. In-memory state remains available to the session.
+        if bytes.len() > FILE_READ_BYTES {
+            say(
+                2,
+                "agel: world file exceeds 65536 bytes; previous save kept\n",
+            );
+            return;
+        }
         let process = process();
         let descriptor = process.open(
             namespace_path_bytes(&self.name),

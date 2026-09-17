@@ -90,6 +90,22 @@ fn a_tail_recursive_loop_reuses_its_frame() {
 }
 
 #[test]
+fn an_inlined_lambda_in_an_operand_preserves_its_continuation() {
+    let (mut world, options) = world();
+    let elf = emit(
+        &mut world,
+        &options,
+        "(fn (self n) (if (= n 0) 0 (+ (let ((m (- n 1))) (self self m)) 1)))",
+        "(5)",
+    )
+    .unwrap();
+    assert!(
+        !elf.windows(3).any(|w| w == [0x41, 0xff, 0x23]),
+        "the recursive call must return to the addition; the guest suite checks its result"
+    );
+}
+
+#[test]
 fn what_it_cannot_compile_is_refused() {
     let (mut world, options) = world();
     let error = emit(&mut world, &options, "(fn (x) (cons x nil))", "(1)").unwrap_err();

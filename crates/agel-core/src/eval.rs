@@ -315,6 +315,18 @@ fn eval_application(
     for item in &items[1..] {
         arguments.push(eval(item, state, env, module, runtime)?);
     }
+    resolve_application(function, arguments)
+}
+
+/// `apply` forwards the same continuation to its target. Unwrap it before
+/// deciding whether to enter a frame, including `apply` applied to itself.
+fn resolve_application(
+    mut function: Value,
+    mut arguments: Vec<Value>,
+) -> Result<(Value, Vec<Value>), Signal> {
+    while matches!(function, Value::Builtin(Builtin::Apply)) {
+        (function, arguments) = apply_arguments(arguments)?;
+    }
     Ok((function, arguments))
 }
 
@@ -943,7 +955,10 @@ fn apply_builtin(
         | Builtin::TextSlice
         | Builtin::TextConcat
         | Builtin::TextSymbol => text_operation(builtin, arguments, runtime),
-        Builtin::Apply => apply_values(arguments, state, runtime),
+        Builtin::Apply => {
+            let (function, values) = apply_arguments(arguments)?;
+            apply(function, values, state, runtime)
+        }
         Builtin::Spawn => spawn(arguments, state, runtime),
         Builtin::Send => send(arguments, state, runtime),
         Builtin::Receive => receive(arguments, state, runtime),
@@ -1209,16 +1224,11 @@ fn type_of(arguments: Vec<Value>) -> Result<Value, Signal> {
     Ok(Value::Symbol(arguments[0].type_name().into()))
 }
 
-fn apply_values(
-    arguments: Vec<Value>,
-    state: &mut State,
-    runtime: &mut Runtime<'_>,
-) -> Result<Value, Signal> {
+fn apply_arguments(mut arguments: Vec<Value>) -> Result<(Value, Vec<Value>), Signal> {
     expect_arity("apply", arguments.len(), 2)?;
-    let function = arguments[0].clone();
-    let values = match &arguments[1] {
+    let values = match arguments.pop().expect("two arguments checked") {
         Value::Nil => Vec::new(),
-        Value::List(values) => values.clone(),
+        Value::List(values) => values,
         other => {
             return Err(condition(
                 "type",
@@ -1226,7 +1236,7 @@ fn apply_values(
             ))
         }
     };
-    apply(function, values, state, runtime)
+    Ok((arguments.pop().expect("function argument checked"), values))
 }
 
 fn map_insert(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {

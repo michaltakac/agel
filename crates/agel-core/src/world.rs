@@ -809,15 +809,15 @@ impl Canon for Module {
         }
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("module")?;
         let bindings = input.entries()?;
         let macros = input.entries()?;
-        let count = input.seq()?;
-        let mut exports = BTreeSet::new();
-        for _ in 0..count {
-            exports.insert(input.text()?);
+        let names = input.items::<String>()?;
+        if names.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return input.fail("exports must be unique and in canonical order");
         }
+        let exports = names.into_iter().collect();
         Ok(Self {
             bindings,
             macros,
@@ -835,7 +835,7 @@ impl Canon for State {
         self.canon_tail(out);
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("state")?;
         let mut state = Self {
             bindings: input.entries()?,
@@ -870,23 +870,13 @@ impl State {
     }
 
     fn decode_tail(&mut self, input: &mut Decoder<'_>) -> Result<(), CanonError> {
-        let count = input.seq()?;
-        self.agents = BTreeMap::new();
-        for _ in 0..count {
-            let id = input.u64()?;
-            self.agents.insert(id, Agent::decode(input)?);
-        }
+        self.agents = input.keyed_entries()?;
         self.ready_queue = VecDeque::from(input.items::<u64>()?);
         self.events = input.items()?;
         self.next_event_sequence = input.u64()?;
         self.next_agent_id = input.u64()?;
         self.next_syntax_id = input.u64()?;
-        let count = input.seq()?;
-        self.model_requests = BTreeMap::new();
-        for _ in 0..count {
-            let id = input.u64()?;
-            self.model_requests.insert(id, ModelRecord::decode(input)?);
-        }
+        self.model_requests = input.keyed_entries()?;
         self.next_model_request_id = input.u64()?;
         Ok(())
     }

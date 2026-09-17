@@ -29,22 +29,38 @@ ROW = 32
 MAX_ROWS = (SECTOR - 16) // ROW
 
 
+def valid_name(name: str) -> bool:
+    return 0 < len(name) <= NAME_BYTES and all(0x21 <= ord(c) <= 0x7E for c in name)
+
+
 def read_table(image: str) -> list[dict]:
     with open(image, "rb") as disk:
         disk.seek(TABLE * SECTOR)
         sector = disk.read(SECTOR)
     if sector[:8] != MAGIC:
         return []
-    count = min(int.from_bytes(sector[8:12], "little"), MAX_ROWS)
+    count = int.from_bytes(sector[8:12], "little")
+    if len(sector) != SECTOR or count > MAX_ROWS:
+        raise ValueError("invalid region table")
     rows = []
     for index in range(count):
         row = sector[16 + index * ROW : 16 + (index + 1) * ROW]
         name = row[:NAME_BYTES].split(b"\0", 1)[0].decode("ascii")
+        start = int.from_bytes(row[16:20], "little")
+        length = int.from_bytes(row[20:24], "little")
+        end = start + -(-length // SECTOR)
+        if not valid_name(name) or any(previous["name"] == name for previous in rows):
+            raise ValueError("invalid or duplicate entry name")
+        if length == 0 or start <= TABLE or end > LAST + 1:
+            raise ValueError("table entry is outside its region")
+        if any(start < previous["start"] + -(-previous["length"] // SECTOR)
+               and previous["start"] < end for previous in rows):
+            raise ValueError("overlapping region entries")
         rows.append(
             {
                 "name": name,
-                "start": int.from_bytes(row[16:20], "little"),
-                "length": int.from_bytes(row[20:24], "little"),
+                "start": start,
+                "length": length,
                 "crc": int.from_bytes(row[24:28], "little"),
             }
         )
@@ -71,8 +87,10 @@ def install(image: str, name: str, elf: bytes) -> dict:
     """Add or replace NAME, repacking the region so replaced entries leave
     no holes: every other entry is read back and laid out again from the
     first sector after the table, in table order, then the new one."""
-    if not name or len(name) > NAME_BYTES or not name.isascii():
-        raise ValueError("a program name is 1 to 16 ASCII bytes")
+    if not valid_name(name):
+        raise ValueError("a program name is 1 to 16 printable ASCII bytes")
+    if not elf:
+        raise ValueError("an entry must hold at least one byte")
     kept = [row for row in read_table(image) if row["name"] != name]
     if len(kept) >= MAX_ROWS:
         raise ValueError("the program table is full")
@@ -85,13 +103,15 @@ def install(image: str, name: str, elf: bytes) -> dict:
                 raise ValueError(f"entry {row['name']} on the disk does not match its table row")
             contents.append((row["name"], data))
     contents.append((name, elf))
+    # Repacking moves live entries. Validate the entire layout before the
+    # first write, so a full region cannot corrupt the still-current table.
+    if sum(-(-len(data) // SECTOR) for _, data in contents) > LAST - TABLE:
+        raise ValueError("the program region is full")
     rows = []
     next_free = TABLE + 1
     with open(image, "r+b") as disk:
         for entry_name, data in contents:
             sectors = -(-len(data) // SECTOR)
-            if next_free + sectors - 1 > LAST:
-                raise ValueError("the program region is full")
             disk.seek(next_free * SECTOR)
             disk.write(data.ljust(sectors * SECTOR, b"\0"))
             rows.append({"name": entry_name, "start": next_free, "length": len(data), "crc": zlib.crc32(data) & 0xFFFFFFFF})

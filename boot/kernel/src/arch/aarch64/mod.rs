@@ -276,7 +276,7 @@ impl Machine {
 
     /// Give a process domain one more page at `virtual_address`, and return
     /// the frame behind it for the loader to fill.
-    #[cfg(feature = "process")]
+    #[cfg(feature = "pages")]
     pub fn map_process_page(
         &mut self,
         domain: &mut Domain,

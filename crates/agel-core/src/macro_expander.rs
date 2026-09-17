@@ -415,7 +415,7 @@ impl Canon for MacroDef {
         out.option(self.definition_module.as_ref());
     }
 
-    fn decode(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
+    fn decode_inner(input: &mut Decoder<'_>) -> Result<Self, CanonError> {
         input.expect("macro")?;
         Ok(Self {
             params: input.items()?,

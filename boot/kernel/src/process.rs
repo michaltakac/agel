@@ -74,8 +74,9 @@ struct Descriptor {
     entry: u16,
     pipe: u8,
     offset: u64,
-    /// The file's length as last seen, for `O_APPEND` and seeking to the end.
+    /// The file's length as last seen, for seeking to the end.
     length: u64,
+    append: bool,
     readable: bool,
     writable: bool,
     handle: ServiceHandle,
@@ -88,6 +89,7 @@ impl Descriptor {
         pipe: 0,
         offset: 0,
         length: 0,
+        append: false,
         readable: false,
         writable: false,
         handle: ServiceHandle::NONE,
@@ -992,7 +994,9 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
             return;
         }
         process::WRITE => match kind_of(table, index, arguments[0]) {
-            Kind::Console => write_console(table, index, services.console, arguments[1]),
+            Kind::Console => {
+                write_console(table, index, services.console, arguments[0], arguments[1])
+            }
             Kind::File => file_write(table, index, services, arguments[0], arguments[1]),
             Kind::PipeWrite => match pipe_write(table, index, arguments[0], arguments[1]) {
                 Some(result) => result,
@@ -1467,7 +1471,12 @@ fn open(
         return error(EBADF);
     };
     let namespace = process.namespace;
-    let wants_write = flags & (process::O_WRONLY | process::O_RDWR) != 0;
+    let mode = flags & (process::O_WRONLY | process::O_RDWR);
+    if mode == process::O_WRONLY | process::O_RDWR {
+        return error(EINVAL);
+    }
+    let wants_write = mode != 0;
+    let wants_read = mode != process::O_WRONLY;
     let wants_create = flags & process::O_CREAT != 0;
     // The namespace's rights bound the request before the service sees it:
     // a process without `write` cannot open for writing, without `create`
@@ -1475,7 +1484,7 @@ fn open(
     if (wants_write && !namespace.write) || (wants_create && !namespace.create) {
         return error(EACCES);
     }
-    if !wants_write && !namespace.read {
+    if wants_read && !namespace.read {
         return error(EACCES);
     }
     let Some(number) = free_descriptor(&process.descriptors) else {
@@ -1510,7 +1519,8 @@ fn open(
                         0
                     },
                     length,
-                    readable: !wants_write || flags & process::O_RDWR != 0,
+                    append: flags & process::O_APPEND != 0,
+                    readable: wants_read,
                     writable: wants_write,
                     handle,
                 };
@@ -1807,7 +1817,11 @@ fn spawn(
             block_length
         };
         let namespace = if arguments[3] & process::SPAWN_READ_ONLY != 0 {
-            Namespace::read_only(parent.namespace.root)
+            Namespace {
+                write: false,
+                create: false,
+                ..parent.namespace
+            }
         } else {
             parent.namespace
         };
@@ -1877,18 +1891,12 @@ fn file_read(
     descriptor: u64,
     length: u64,
 ) -> u64 {
-    let Some(process) = table.processes[index].as_mut() else {
-        return error(EBADF);
-    };
-    let Some(slot) = process.descriptors.get_mut(descriptor as usize) else {
-        return error(EBADF);
-    };
-    if slot.kind != Kind::File || !slot.readable {
-        return error(EBADF);
-    }
-    let Some(filesystem) = services.filesystem.as_deref_mut() else {
-        return error(ENOSYS);
-    };
+    let (process, filesystem) =
+        match file_request(table, index, &mut services.filesystem, descriptor, false) {
+            Ok(found) => found,
+            Err(number) => return error(number),
+        };
+    let slot = &mut process.descriptors[descriptor as usize];
     let length = length.min(BLOCK_BYTES as u64);
     let outcome = filesystem.filesystem_request(
         slot.handle,
@@ -1932,11 +1940,19 @@ fn file_write(
         slot.handle,
         services.storage,
         fs::COMMAND_WRITE,
-        [u64::from(slot.entry), slot.offset, length],
+        [
+            u64::from(slot.entry),
+            if slot.append {
+                fs::APPEND_OFFSET
+            } else {
+                slot.offset
+            },
+            length,
+        ],
     );
     match service_error(outcome) {
-        Ok([count, _, _]) => {
-            slot.offset += count;
+        Ok([count, end, _]) => {
+            slot.offset = end;
             slot.length = slot.length.max(slot.offset);
             count
         }
@@ -1948,10 +1964,23 @@ fn file_write(
 /// line discipline applied here: a newline becomes a carriage return and a
 /// newline, so the process may write text as text.
 #[inline(never)]
-fn write_console(table: &mut Table, index: usize, console: &mut dyn Console, length: u64) -> u64 {
+fn write_console(
+    table: &mut Table,
+    index: usize,
+    console: &mut dyn Console,
+    descriptor: u64,
+    length: u64,
+) -> u64 {
     let Some(process) = table.processes[index].as_mut() else {
         return error(EBADF);
     };
+    if !process
+        .descriptors
+        .get(descriptor as usize)
+        .is_some_and(|slot| slot.writable)
+    {
+        return error(EBADF);
+    }
     let length = (length as usize).min(BLOCK_BYTES);
     let mut bytes = [0_u8; BLOCK_BYTES * 2];
     let mut count = 0;

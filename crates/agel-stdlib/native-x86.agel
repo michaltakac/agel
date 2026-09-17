@@ -152,16 +152,19 @@
 
   ; Code for a node: (code functions), the functions a tree to place after
   ; the entry; `path` names the node for its labels. rax holds the value.
-  (def gen (fn (node scopes stack path)
+  ; `tail?` says whether this position returns from the physical frame:
+  ; an inlined lambda's IR may say `tail-call` even inside an operand,
+  ; where its enclosing computation still has work to do.
+  (def gen (fn (node scopes stack path tail?)
     (let ((head (car node)))
       (if (= head 'const) (list (mov-rax-imm (tagged (car (cdr node)))) nil)
       (if (= head 'local) (gen-local (car (cdr node)) (car (cdr (cdr node))) scopes)
       (if (= head 'builtin) (fail "a builtin used as a value")
       (if (= head 'fn) (gen-fn (car (cdr node)) (car (cdr (cdr node))) scopes path)
-      (if (= head 'if) (gen-if (cdr node) scopes stack path)
-      (if (= head 'begin) (gen-begin (cdr node) scopes stack path 0)
+      (if (= head 'if) (gen-if (cdr node) scopes stack path tail?)
+      (if (= head 'begin) (gen-begin (cdr node) scopes stack path 0 tail?)
       (if (= head 'call) (gen-call (car (cdr node)) (car (cdr (cdr node))) scopes stack path #f)
-      (if (= head 'tail-call) (gen-call (car (cdr node)) (car (cdr (cdr node))) scopes stack path #t)
+      (if (= head 'tail-call) (gen-call (car (cdr node)) (car (cdr (cdr node))) scopes stack path tail?)
       (fail "an IR node this backend does not know"))))))))))))
 
   (def gen-local (fn (depth slot scopes)
@@ -173,24 +176,24 @@
   ; The callee pops its own block of arguments and closure on return.
   (def gen-fn (fn (arity body scopes path)
     (let ((code-name (name path "f")))
-      (let ((inner (gen body (cons (list 'frame arity) scopes) 0 (at path 0))))
+      (let ((inner (gen body (cons (list 'frame arity) scopes) 0 (at path 0) #t)))
         (list (record-closure code-name)
               (cat (list (label code-name) prologue (car inner) (epilogue arity) (car (cdr inner)))))))))
 
-  (def gen-if (fn (parts scopes stack path)
-    (let ((test (gen (car parts) scopes stack (at path 0)))
-          (yes (gen (car (cdr parts)) scopes stack (at path 1)))
-          (no (gen (car (cdr (cdr parts))) scopes stack (at path 2)))
+  (def gen-if (fn (parts scopes stack path tail?)
+    (let ((test (gen (car parts) scopes stack (at path 0) #f))
+          (yes (gen (car (cdr parts)) scopes stack (at path 1) tail?))
+          (no (gen (car (cdr (cdr parts))) scopes stack (at path 2) tail?))
           (else-name (name path "e"))
           (end-name (name path "x")))
       (list (cat (list (car test) cmp-rax-1 (je else-name) cmp-rax-5 (je else-name)
                        (car yes) (jmp end-name) (label else-name) (car no) (label end-name)))
             (cat (list (car (cdr test)) (car (cdr yes)) (car (cdr no))))))))
 
-  (def gen-begin (fn (forms scopes stack path index)
+  (def gen-begin (fn (forms scopes stack path index tail?)
     (if (= forms nil) (list nil nil)
-        (let ((first (gen (car forms) scopes stack (at path index)))
-              (rest (gen-begin (cdr forms) scopes stack path (+ index 1))))
+        (let ((first (gen (car forms) scopes stack (at path index) (if (= (cdr forms) nil) tail? #f)))
+              (rest (gen-begin (cdr forms) scopes stack path (+ index 1) tail?)))
           (list (seq (car first) (car rest)) (seq (car (cdr first)) (car (cdr rest))))))))
 
   ; A call. A builtin is inlined. A function literal applied at once is
@@ -205,10 +208,10 @@
     (if (= (car callee) 'builtin)
         (gen-primitive (car (cdr callee)) arguments scopes stack path)
     (if (= (car callee) 'fn)
-        (gen-let (car (cdr callee)) (car (cdr (cdr callee))) arguments scopes stack path)
+        (gen-let (car (cdr callee)) (car (cdr (cdr callee))) arguments scopes stack path tail?)
     (if (if tail? (if (= (car callee) 'local) (reusable? callee arguments scopes) #f) #f)
         (gen-tail callee arguments scopes stack path)
-        (let ((target (gen callee scopes stack (at path 0)))
+        (let ((target (gen callee scopes stack (at path 0) #f))
               (pushed (gen-arguments arguments scopes (+ stack 1) path 1))
               (count (length arguments)))
           (list (cat (list (car target) push-rax (car pushed)
@@ -221,17 +224,17 @@
               (frame? (nth scopes (car (cdr callee)))))))))
   (def gen-arguments (fn (arguments scopes stack path index)
     (if (= arguments nil) (list nil nil)
-        (let ((first (gen (car arguments) scopes stack (at path index)))
+        (let ((first (gen (car arguments) scopes stack (at path index) #f))
               (rest (gen-arguments (cdr arguments) scopes (+ stack 1) path (+ index 1))))
           (list (cat (list (car first) push-rax (car rest))) (seq (car (cdr first)) (car (cdr rest))))))))
 
   ; A `let`: the values pushed as slots FIRST.. of this frame, the body
   ; with them in scope, the slots dropped after (dead code after a tail
   ; call that reused the frame, harmless).
-  (def gen-let (fn (count body arguments scopes stack path)
+  (def gen-let (fn (count body arguments scopes stack path tail?)
     (if (not (= (length arguments) count)) (fail "a let whose values do not match its names")
         (let ((pushed (gen-arguments arguments scopes stack path 1))
-              (inner (gen body (cons (list 'inline count stack) scopes) (+ stack count) (at path 0))))
+              (inner (gen body (cons (list 'inline count stack) scopes) (+ stack count) (at path 0) tail?)))
           (list (cat (list (car pushed) (car inner) (add-rsp (* 8 count))))
                 (seq (car (cdr pushed)) (car (cdr inner))))))))
 
@@ -243,7 +246,7 @@
   ; closure's code jumped to with its environment in r12. The callee then
   ; returns to this frame's caller, popping the block it was given.
   (def gen-tail (fn (callee arguments scopes stack path)
-    (let ((target (gen callee scopes stack (at path 0)))
+    (let ((target (gen callee scopes stack (at path 0) #f))
           (pushed (gen-arguments arguments scopes (+ stack 1) path 1))
           (m (length arguments))
           (n (frame-arity scopes)))
@@ -267,8 +270,8 @@
 
   (def gen-primitive (fn (op arguments scopes stack path)
     (if (not (= (length arguments) 2)) (fail "a primitive with other than two arguments")
-        (let ((left (gen (car arguments) scopes stack (at path 0)))
-              (right (gen (car (cdr arguments)) scopes (+ stack 1) (at path 1))))
+        (let ((left (gen (car arguments) scopes stack (at path 0) #f))
+              (right (gen (car (cdr arguments)) scopes (+ stack 1) (at path 1) #f)))
           (list (cat (list (car left) push-rax (car right) mov-rbx-rax pop-rax (primitive op path)))
                 (seq (car (cdr left)) (car (cdr right))))))))
   (def primitive (fn (op path)
@@ -370,7 +373,7 @@
         (let ((function (car (cdr ir))))
           (if (not (= (car function) 'fn)) (fail "the IR is not a function")
               (let ((arity (car (cdr function))))
-                (let ((main (gen function nil 0 "L")))
+                (let ((main (gen function nil 0 "L" #f)))
                   (let ((code (cat (list entry (car main) (finish arity arguments) (car (cdr main))))))
                     (let ((measured (measure code 0 (dict))))
                       (text-concat (render (elf-header (+ header-bytes (car measured))) 0 (dict))

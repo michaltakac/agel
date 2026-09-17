@@ -62,6 +62,8 @@ pub fn run() -> ! {
     run_conformance(&mut machine, &mut console);
     #[cfg(feature = "contract-memory")]
     run_memory(&mut machine);
+    #[cfg(all(feature = "pages", feature = "contract-memory"))]
+    run_page_reclamation(&mut machine);
     run_native_evaluator(&mut machine, &mut console);
     run_containment(&mut machine);
     run_driver_restart(&mut machine, &mut console);
@@ -85,6 +87,47 @@ pub fn run() -> ! {
 
     console::write("AGEL_ISOLATION_OK\n");
     arch::exit(true)
+}
+
+/// Extending a domain must account for new page tables as well as pages,
+/// including allocations made by a mapping that ultimately fails.
+#[cfg(all(feature = "pages", feature = "contract-memory"))]
+fn run_page_reclamation(machine: &mut arch::Machine) {
+    let before = machine.frames_remaining();
+    let entry = crate::user::agel_world_main as *const () as usize as u64;
+    let frames = {
+        let mut world = machine
+            .create_world(entry, 8)
+            .unwrap_or_else(|reason| failed(reason));
+        for offset in [0x20_0000, 0x40_0000] {
+            machine
+                .map_process_page(
+                    &mut world,
+                    arch::FRAME_WINDOW_BASE + offset,
+                    crate::memory::Access::UserData,
+                )
+                .unwrap_or_else(|reason| failed(reason));
+        }
+        if machine
+            .map_process_page(
+                &mut world,
+                arch::FRAME_WINDOW_BASE + 1,
+                crate::memory::Access::UserData,
+            )
+            .is_ok()
+        {
+            failed("a misaligned mapping was accepted");
+        }
+        *world.frames()
+    };
+    machine.reclaim(&frames);
+    if machine.frames_remaining() != before {
+        failed("extending a domain leaked pages or page tables");
+    }
+    kprint!(
+        "isolation[{}]: extra pages and page tables reclaimed, including a failed mapping\n",
+        arch::NAME
+    );
 }
 
 /// The memory group is real: a world maps a frame into its window and writes

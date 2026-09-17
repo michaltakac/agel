@@ -650,8 +650,10 @@ pub mod fs {
     /// `arguments[0]` into the block area; values: bytes read.
     pub const COMMAND_READ: u64 = 0xb200;
     /// Write the block area's `arguments[2]` bytes at offset `arguments[1]`
-    /// of entry `arguments[0]`; values: bytes written.
+    /// of entry `arguments[0]`; values: bytes written, new offset. With
+    /// `APPEND_OFFSET`, the service chooses the current end inside the write.
     pub const COMMAND_WRITE: u64 = 0xb300;
+    pub const APPEND_OFFSET: u64 = u64::MAX;
     /// The `arguments[1]`-th child of directory `arguments[0]`: its name in
     /// the payload, values: entry, kind, length, or status `not found` past
     /// the last.

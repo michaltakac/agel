@@ -65,7 +65,7 @@ mod memory;
 mod pointer;
 #[cfg(feature = "process")]
 mod process;
-#[cfg(feature = "pages")]
+#[cfg(feature = "process")]
 mod region;
 #[cfg(feature = "isolation-selftest")]
 mod service;

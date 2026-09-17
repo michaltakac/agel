@@ -41,7 +41,7 @@ tree-walker with no tail-call elimination and a call depth of 256.
    the transaction is already a region and the agent turn already an
    arena (discard on rollback). For the backend the first real collector
    should be a Cheney semispace per agent with a shadow stack for roots,
-   collected at safepoints/commit — three to six hundred lines of Agel.
+   collected at safepoints/commit. Collector size and suitability need a prototype and measurements, not a line-count estimate.
    For the hosted runtime, the clone-per-transaction cost is best cut by
    persistent, structurally shared collections before any GC work.
    Perceus-style reference counting with reuse (Koka, Lean 4) is the
@@ -52,13 +52,12 @@ tree-walker with no tail-call elimination and a call depth of 256.
    model, lists and texts with known layouts, tail calls, explicit roots,
    no runtime macros) in which the evaluator itself is written, run first
    interpreted by the hosted runtime, then compiled by the backend in the
-   guest, then boot-imaged — each step proven by three-way byte-equality
+   guest, then boot-imaged — each step checked on a shared corpus by three-way equality
    of digests (Rust reference, Slang-interpreted, Slang-compiled). The
    host stage is kept forever (Jikes RVM, Maxine, Racket CS): the metric
    is Rust's shrinking share, not zero Rust.
 7. **What an OS for agents needs, and where Agel stands.** Deterministic
-   replay with a model-effect journal (Agel has it; no surveyed agent
-   platform does), capability-scoped effects (Agel has it), no hidden
+   replay with a model-effect journal (Agel has it), capability-scoped effects (Agel has it), no hidden
    state (largely), and — Realtalk's strength and Agel's clearest gap —
    *provenance*: who currently claims a fact, since when, on what
    evidence, as a query rather than a replay. A claims/wishes/`when`
@@ -83,14 +82,17 @@ tree-walker with no tail-call elimination and a call depth of 256.
   bodies of `with-handler` and `with-restart` are deliberately not tail
   positions, since their result is inspected. Proofs in
   `crates/agel-core/tests/language_core.rs` (`proper_tail_calls`).
-- **Next, in order:** (1) real tail calls in `agel/native-x86` with a
-  separate argument area; (2) a Cheney semispace per agent with a
-  shadow stack in the backend, growing its IR coverage to lists and
-  texts — the step that lets the guest compile `agel/meta`; (3)
-  persistent collections for the hosted runtime's transactions; (4)
-  fuel inside the backend's emitted code with a conformance test; (5)
-  `agel/claims` with provenance; (6) Agel Slang v0 and the three-way
-  proof. The roadmap carries each as a row.
+- **Updated after v0.2.88 review (2026-09-17):** backend frame reuse is now
+  implemented for supported calls, and the review fixes lost continuations
+  in inlined `let` operands. The next order is: (1) compiled-code fuel,
+  allocation limits and closure-lifetime conformance; (2) an explicit replay
+  contract for all host effects, including failures and effect identity across
+  restart; (3) measured transaction-copy improvements and a small heap/collector
+  prototype; (4) provenance that distinguishes evidence from authority;
+  (5) broader backend coverage and the Agel Slang corpus comparison.
+  Persistent collections and a semispace collector are candidates, not
+  commitments before profiling. See the [review](../review-v0.2.20-v0.2.88.md)
+  for current research and remaining boundaries.
 - **Not doing:** a tracing or meta-tracing JIT, inline caches, OSR,
   WebAssembly as a target, MMTk as a dependency, general continuations
   (agents and mailboxes are the cheaper mechanism), an exotic notation
@@ -103,5 +105,6 @@ They were written from a description, not the code. Two corrections:
 `with-handler` in `agel-core` is a Rust `match` over the body's result,
 not a handler stack, so the tail-call change needed no explicit
 handler-frame bookkeeping (the body is simply not a tail position); and
-the model-effect journal is `agel-core`'s, not `agel-effects`'. Nothing
-else material.
+the model-effect journal is `agel-core`'s, not `agel-effects`'. These briefs
+are design inputs, not implementation verification; subsequent review
+findings and updated priorities are recorded above.
