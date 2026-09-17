@@ -493,6 +493,16 @@ Each rung must be runnable and differentially testable against the rung below:
    Agel, persistent collections for the host, fuel in emitted code, a
    claims store with provenance, Agel Slang — is in
    [`research/decisions-2026-09.md`](research/decisions-2026-09.md).
+82. **Real tail calls in the backend written in Agel (v0.2.88):**
+   `agel/native-x86` compiles a call in tail position through a parameter
+   as reuse of the current frame — the closure and arguments are evaluated,
+   copied over the frame's block from the top down, the caller's frame
+   restored, and the closure's code jumped to — and a `let` as slots of
+   the frame it appears in, so a loop written as a function calling itself
+   last runs in constant stack, `let`s and all. The calling convention
+   became callee-pops (`ret 8(arity+1)`) to make this safe; a tail call
+   whose callee takes more arguments than the frame holds is a plain call.
+   The OS runs a million-iteration loop the backend compiled in one frame.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

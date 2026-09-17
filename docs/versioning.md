@@ -386,6 +386,11 @@ promise.
   position runs in the caller's frame, depth counts non-tail nesting only,
   fuel bounds loops, step counts unchanged — and brings six research
   briefs and the decisions taken from them into `docs/research/`.
+  `v0.2.88` gives the backend written in Agel real tail calls: a call in
+  tail position through a parameter reuses the frame and a `let` is slots
+  of it, so a loop the backend compiles runs in constant stack; the callee
+  pops its own block, and a callee taking more arguments than the frame is
+  a plain call.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

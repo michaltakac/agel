@@ -63,8 +63,30 @@ fn fib_becomes_a_static_elf_for_the_process_window() {
     assert_eq!(filesz as usize, elf.len(), "the code segment is the file");
     let arena = u64::from_le_bytes(elf[120 + 16..120 + 24].try_into().unwrap());
     assert_eq!(arena, 0x80_1010_0000, "the arena a megabyte above");
-    // The entry: mov r15, rdi.
+    // The entry: mov r15, rdi. fib's self-calls are operands of `+`, not
+    // tail calls, so fib itself compiles with an ordinary call+ret.
     assert_eq!(&elf[176..179], &[0x49, 0x89, 0xff]);
+}
+
+#[test]
+fn a_tail_recursive_loop_reuses_its_frame() {
+    let (mut world, options) = world();
+    let elf = emit(
+        &mut world,
+        &options,
+        "(fn (self n acc) (if (= n 0) acc (self self (- n 1) (+ acc n))))",
+        "(10 0)",
+    )
+    .unwrap();
+    // The self call in tail position reuses the frame: a jump through the
+    // closure's code, not a call, and the callee pops its own block of
+    // three words (two arguments and the closure) on return.
+    assert!(elf.windows(3).any(|w| w == [0x41, 0xff, 0x23]), "jmp [r11]");
+    // The callee pops its own block of four words on return: three
+    // arguments and the closure, 8*(3+1) = 32. (The entry still makes one
+    // ordinary call to enter the top-level closure; only the self call in
+    // tail position is the jump.)
+    assert!(elf.windows(3).any(|w| w == [0xc2, 0x20, 0x00]), "ret 32");
 }
 
 #[test]

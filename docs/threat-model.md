@@ -1938,6 +1938,20 @@ produced or run there.
   ticks in tail position as it did recursing, so every replay, digest
   and documented step count holds.
 
+## v0.2.88
+
+- **The backend's calling convention is callee-pops:** every function
+  ends `ret 8(arity+1)`, popping the exact block it was given (its
+  closure and arguments). A tail call reuses the frame by copying the new
+  block over the old and jumping through the closure, so a loop the
+  backend compiled runs in constant stack rather than growing it until
+  the process is stopped. A tail call whose callee takes more arguments
+  than the frame holds is a plain call, correct and bounded by the stack
+  as before — reuse never writes past the frame it is given.
+- **The emitted code is a program like any other:** it runs in a
+  protection domain with a process's window and budget; a mis-emitted
+  jump faults inside the domain and the supervisor reports it.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

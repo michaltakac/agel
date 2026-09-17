@@ -15,8 +15,12 @@ The IR's integer subset: constants that are integers, `#t`, `#f` or `nil`;
 arity, addressed lexically through a static link, so a `let` (which the
 frontend lowers to a nested function called at once) and a closure over an
 enclosing frame both work; calls through closure values, the explicit-self
-convention included, so recursion works. A tail call is a call and a
-return: a loop is bounded by the process's stack, not constant in it.
+convention included, so recursion works. Since v0.2.88 a call in tail
+position through a parameter reuses the frame (the calling convention is
+callee-pops, `ret 8(arity+1)`), and a `let` is slots of the frame it
+appears in, so a loop written as a function calling itself last runs in
+constant stack; a tail call whose callee takes more arguments than the
+frame holds is a plain call.
 
 Not compiled, refused with `native-x86/unsupported`: lists, texts, maps,
 any other builtin, a builtin as a value, a primitive with other than two
@@ -45,9 +49,11 @@ sizes and labels, then bytes.
 
 ## Why a tree
 
-The evaluator's call-depth budget is 256 and it has no tail-call
-elimination, so a list of two thousand bytes cannot be walked by
-recursion. The backend's code is a binary tree of short leaves (an
+The evaluator's call-depth budget is 256, and walking a long list
+(`map`, `append`, `cat`) is not tail recursion — it conses on the way
+back — so a list of two thousand bytes cannot be walked as a flat
+sequence without meeting the budget, even with the proper tail calls
+v0.2.87 added. The backend's code is a binary tree of short leaves (an
 instruction's bytes, a label, a `rel32` or an `abs64`), and every pass —
 measuring, resolving, rendering to hex — recurses by the tree's depth,
 which is the program's nesting, never by its length. Hex text is built by

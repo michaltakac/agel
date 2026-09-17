@@ -186,11 +186,15 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         check(machine, '(file-append "backend.agel" "(def scaled (quote (fn (n) (let ((k 2) (j 3)) (* n (+ k j))))))\\n(file-write \\"scaled.hex\\" (native-x86-emit (native-compile scaled) (quote (8))))\\n")', "\r\n")
         check(machine, '(file-append "backend.agel" "(def total (quote (fn (self n acc) (if (= n 0) acc (self self (- n 1) (+ acc n))))))\\n(file-write \\"total.hex\\" (native-x86-emit (native-compile total) (quote (100 0))))\\n")', "\r\n")
         check(machine, '(file-append "backend.agel" "(def broken (quote (fn (n) (/ n 0))))\\n(file-write \\"broken.hex\\" (native-x86-emit (native-compile broken) (quote (7))))\\n")', "\r\n")
+        # A million tail calls through a `let`, in the frame of the first
+        # call: the loop's stack does not grow.
+        check(machine, '(file-append "backend.agel" "(def loop (quote (fn (self n acc) (if (= n 0) acc (let ((m (- n 1))) (self self m (+ acc n)))))))\\n(file-write \\"loop.hex\\" (native-x86-emit (native-compile loop) (quote (1000000 0))))\\n")', "\r\n")
+        # A tail call through a parameter whose arity differs from the frame's.
         started = time.monotonic()
         reply = run(machine, ":exec agel -- backend.agel", 600)
         assert "process agel exited with status 0" in reply, reply
-        print(f"backend: four programs emitted in {time.monotonic() - started:.1f} s")
-        for name, wanted, status in (("fib", "55", 55), ("scaled", "40", 40), ("total", "5050", 5050 & 255), ("broken", None, 111)):
+        print(f"backend: six programs emitted in {time.monotonic() - started:.1f} s")
+        for name, wanted, status in (("fib", "55", 55), ("scaled", "40", 40), ("total", "5050", 5050 & 255), ("broken", None, 111), ("loop", "500000500000", 500000500000 & 255)):
             check(machine, f":install {name} /{name}.hex", f"INSTALLED {name}: ")
             reply = check(machine, f":exec {name}", f"process {name} exited with status {status}")
             if wanted is not None:
