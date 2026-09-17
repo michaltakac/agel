@@ -483,6 +483,16 @@ Each rung must be runnable and differentially testable against the rung below:
    installs. The loaded runtime runs it in the OS and the OS runs what it
    makes. The process window is 64 MiB. See
    [`native-backend.md`](native-backend.md).
+81. **Proper tail calls (v0.2.87):** the hosted evaluator's tail positions
+   hand a pending call back to the closure loop in `apply`, which runs it
+   in the same frame: a loop of a hundred thousand tail calls costs one
+   level of depth, mutual recursion is a loop, and call depth bounds only
+   non-tail nesting while fuel bounds the loop. Fuel is charged exactly as
+   before. The decision, and the ladder it heads —
+   real tail calls and a per-agent collector in the backend written in
+   Agel, persistent collections for the host, fuel in emitted code, a
+   claims store with provenance, Agel Slang — is in
+   [`research/decisions-2026-09.md`](research/decisions-2026-09.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

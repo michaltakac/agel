@@ -121,6 +121,19 @@ anything happens. The process the Agel supervisor loads supplies the
 desktop's file, clock, console and `exec` words this way
 ([`posix-personality.md`](posix-personality.md)).
 
+## Proper tail calls (v0.2.87)
+
+A call in tail position — the branches of `if`, the last form of
+`begin`, of `let` and of a function body — runs in the frame of the
+function that made it, however many times: a loop written as a function
+calling itself last costs one level of depth, and two functions calling
+each other last are a loop too. The call-depth budget therefore bounds
+non-tail nesting (an operand, a handler body, `(+ 1 (self self …))`),
+and fuel bounds loops. The body of `with-handler` and `with-restart` is
+not a tail position: its result is the handler's to inspect. Fuel is
+charged identically either way, so a program costs the same steps
+whether its calls are tail calls or not.
+
 ## Deterministic budgets
 
 Each transaction has limits for source bytes, parse nesting, evaluation fuel,

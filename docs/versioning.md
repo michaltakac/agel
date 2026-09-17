@@ -382,6 +382,10 @@ promise.
   `v0.2.86` bounds the console driver's transmitter poll and has the
   supervisor resend what did not leave, so a host that drains the serial
   line slowly no longer stops the driver and loses every later line.
+  `v0.2.87` gives the hosted evaluator proper tail calls — a call in tail
+  position runs in the caller's frame, depth counts non-tail nesting only,
+  fuel bounds loops, step counts unchanged — and brings six research
+  briefs and the decisions taken from them into `docs/research/`.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

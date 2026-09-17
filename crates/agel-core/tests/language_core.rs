@@ -19,8 +19,10 @@ fn small_embedding_stack_preserves_language_depth_limit_and_rollback() {
         .stack_size(256 * 1024)
         .spawn(|| {
             let mut world = World::default();
+            // Not a tail call: the operand of `+` needs the frame, so the
+            // depth budget, not fuel, is what stops it.
             world
-                .evaluate("(def loop (fn (n) (loop (+ n 1))))")
+                .evaluate("(def loop (fn (n) (+ 1 (loop (+ n 1)))))")
                 .unwrap();
             let revision = world.revision();
             let options = EvaluationOptions {
@@ -264,10 +266,22 @@ fn call_depth_budget_stops_recursion_and_rolls_back() {
         pulse: None,
         host: &[],
     };
+    // `(loop)` in tail position is a loop and runs until fuel; `(+ 1 (loop))`
+    // needs a frame per call and meets the depth budget. Either way the
+    // failed transaction leaves nothing behind.
     let error = world
         .evaluate_with("(def loop (fn () (loop))) (loop)", &options)
         .unwrap_err();
-    assert!(error.to_string().contains("resource/call-depth"));
+    assert!(
+        error.to_string().contains("resource/fuel-exhausted"),
+        "{error}"
+    );
+    assert_eq!(world.binding("loop"), None);
+    assert_eq!(world.revision(), 0);
+    let error = world
+        .evaluate_with("(def loop (fn () (+ 1 (loop)))) (loop)", &options)
+        .unwrap_err();
+    assert!(error.to_string().contains("resource/call-depth"), "{error}");
     assert_eq!(world.binding("loop"), None);
     assert_eq!(world.revision(), 0);
 }
@@ -553,5 +567,123 @@ mod canonical_digest {
         let snapshot: Snapshot = left.snapshot();
         let restored = World::from_snapshot(&snapshot).unwrap();
         assert_eq!(restored.content_digest(), left.content_digest());
+    }
+}
+
+mod proper_tail_calls {
+    use agel_core::{Budget, EvaluationOptions, Value, World};
+
+    fn options(fuel: u64) -> EvaluationOptions {
+        EvaluationOptions {
+            budget: Budget {
+                fuel,
+                ..Budget::default()
+            },
+            ..EvaluationOptions::default()
+        }
+    }
+
+    #[test]
+    fn a_loop_of_a_hundred_thousand_tail_calls_runs_in_one_frame() {
+        let mut world = World::default();
+        let commit = world
+            .evaluate_with(
+                "(def sum (fn (self n acc) (if (= n 0) acc (self self (- n 1) (+ acc n)))))
+                 (sum sum 100000 0)",
+                &options(10_000_000),
+            )
+            .unwrap();
+        assert_eq!(commit.values.last(), Some(&Value::Int(5_000_050_000)));
+    }
+
+    #[test]
+    fn mutual_recursion_in_tail_position_is_a_loop_too() {
+        let mut world = World::default();
+        let commit = world
+            .evaluate_with(
+                "(def even? (fn (n) (if (= n 0) #t (odd? (- n 1)))))
+                 (def odd? (fn (n) (if (= n 0) #f (even? (- n 1)))))
+                 (list (even? 10001) (odd? 10001))",
+                &options(10_000_000),
+            )
+            .unwrap();
+        assert_eq!(
+            commit.values.last(),
+            Some(&Value::List(vec![Value::Bool(false), Value::Bool(true)]))
+        );
+    }
+
+    #[test]
+    fn tail_calls_through_begin_and_let_count_no_depth() {
+        let mut world = World::default();
+        let commit = world
+            .evaluate_with(
+                "(def count (fn (self n) (begin (let ((m (- n 1))) (if (< m 0) 'done (self self m))))))
+                 (count count 5000)",
+                &options(10_000_000),
+            )
+            .unwrap();
+        assert_eq!(commit.values.last(), Some(&Value::Symbol("done".into())));
+    }
+
+    #[test]
+    fn recursion_that_is_not_in_tail_position_is_still_bounded_by_depth() {
+        let mut world = World::default();
+        world
+            .evaluate_with(
+                "(def depth (fn (self n) (if (= n 0) 0 (+ 1 (self self (- n 1))))))",
+                &options(10_000_000),
+            )
+            .unwrap();
+        let error = world
+            .evaluate_with("(depth depth 300)", &options(10_000_000))
+            .unwrap_err();
+        assert!(error.to_string().contains("resource/call-depth"), "{error}");
+        let commit = world
+            .evaluate_with("(depth depth 200)", &options(10_000_000))
+            .unwrap();
+        assert_eq!(commit.values, vec![Value::Int(200)]);
+    }
+
+    #[test]
+    fn a_handler_still_catches_what_a_tail_call_signals() {
+        let mut world = World::default();
+        let commit = world
+            .evaluate_with(
+                "(def fail-after (fn (self n) (if (= n 0) (signal 'test/deep \"the end\") (self self (- n 1)))))
+                 (with-handler (test/deep c) 'caught (fail-after fail-after 1000))",
+                &options(10_000_000),
+            )
+            .unwrap();
+        assert_eq!(commit.values.last(), Some(&Value::Symbol("caught".into())));
+    }
+
+    #[test]
+    fn fuel_is_charged_the_same_whether_a_call_is_a_tail_call_or_not() {
+        // The same program, one form in tail position and one not: the tail
+        // form's steps are those of the non-tail form less the `+` that
+        // made it non-tail, so the accounting is the evaluator's, not the
+        // frame's.
+        let mut world = World::default();
+        let tail = world
+            .evaluate_with(
+                "(def f (fn (self n) (if (= n 0) 0 (self self (- n 1))))) (f f 50)",
+                &options(1_000_000),
+            )
+            .unwrap()
+            .steps_used;
+        let not_tail = world
+            .evaluate_with(
+                "(def g (fn (self n) (if (= n 0) 0 (+ 0 (self self (- n 1)))))) (g g 50)",
+                &options(1_000_000),
+            )
+            .unwrap()
+            .steps_used;
+        assert!(not_tail > tail, "{not_tail} vs {tail}");
+        assert_eq!(
+            not_tail - tail,
+            50 * 3,
+            "each `(+ 0 ...)` is a form, a symbol and a constant"
+        );
     }
 }

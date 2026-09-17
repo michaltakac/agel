@@ -1921,6 +1921,23 @@ produced or run there.
   host that stops draining cannot hang the desktop; that loss is silent
   on the console, since the console is what is lost.
 
+## v0.2.87
+
+- **Fuel is the bound on a loop; depth is the bound on nesting.** A
+  program that calls itself in tail position no longer meets the
+  call-depth limit: it runs until its fuel is spent, in one frame. Every
+  turn and transaction is still bounded, by the same fuel it always was,
+  and a program that needs a frame per call (an operand, a handler body)
+  still meets the depth limit at 256. What changed is which budget a
+  loop meets, not whether it meets one; the machine stack behind the
+  evaluator is used less, never more.
+- **Handlers see what they saw:** the body of `with-handler` and
+  `with-restart` is not a tail position, so a condition signalled by a
+  tail-called function inside it is still caught by it.
+- **The step counts are unchanged:** the evaluator charges the same
+  ticks in tail position as it did recursing, so every replay, digest
+  and documented step count holds.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

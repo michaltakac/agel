@@ -224,58 +224,174 @@ fn eval_list(
     module: Option<&str>,
     runtime: &mut Runtime<'_>,
 ) -> Result<Value, Signal> {
-    if let Expr::Symbol(name) = &items[0] {
-        match name.as_str() {
-            "quote" => return eval_quote(items, runtime),
-            "if" => return eval_if(items, state, env, module, runtime),
-            "begin" => return eval_sequence(&items[1..], state, env, module, runtime),
-            "def" => return eval_def(items, state, env, module, runtime),
-            "fn" => return eval_fn(items, env, module),
-            "let" => return eval_let(items, state, env, module, runtime),
-            "defmacro" => return eval_defmacro(items, state, module, runtime),
-            "defprotocol" => return eval_defprotocol(items, state, module, runtime),
-            "macroexpand-1" => return eval_macroexpand(items, state, module, runtime),
-            "module" => return eval_module(items, state, env, runtime),
-            "export" => return eval_export(items, state, module, runtime),
-            "import" => return eval_import(items, state, module, runtime),
-            "with-handler" => return eval_with_handler(items, state, env, module, runtime),
-            "with-restart" => return eval_with_restart(items, state, env, module, runtime),
-            "invoke-restart" => return eval_invoke_restart(items, state, env, module, runtime),
-            _ => {}
-        }
+    if let Some(result) = eval_special(items, state, env, module, runtime) {
+        return result;
     }
-
-    if let Some(definition) = find_macro(state, module, &items[0]) {
-        if runtime.macro_depth >= runtime.options.budget.max_parse_depth {
-            return Err(condition(
-                "resource/macro-depth",
-                format!(
-                    "macro expansion depth exceeds limit {}",
-                    runtime.options.budget.max_parse_depth
-                ),
-            ));
-        }
-        let (expanded, expansion_steps) = expand(
-            &definition,
-            &items[1..],
-            &mut state.next_syntax_id,
-            runtime.fuel_remaining,
-            runtime.options.budget.max_collection_len,
-        )
-        .map_err(expansion_condition)?;
-        runtime.charge(expansion_steps)?;
+    if let Some(expanded) = expand_macro(items, state, module, runtime)? {
         runtime.macro_depth += 1;
         let result = eval(&expanded, state, env, module, runtime);
         runtime.macro_depth -= 1;
         return result;
     }
+    let (function, arguments) = eval_application(items, state, env, module, runtime)?;
+    apply(function, arguments, state, runtime)
+}
 
+/// The special forms, evaluated in place: `None` for a list that is not
+/// one. `if`, `begin` and `let` are here for the ordinary (non-tail)
+/// path; `eval_tail` handles their tail positions itself.
+fn eval_special(
+    items: &[Expr],
+    state: &mut State,
+    env: &mut Env,
+    module: Option<&str>,
+    runtime: &mut Runtime<'_>,
+) -> Option<Result<Value, Signal>> {
+    let Expr::Symbol(name) = &items[0] else {
+        return None;
+    };
+    Some(match name.as_str() {
+        "quote" => eval_quote(items, runtime),
+        "if" => eval_if(items, state, env, module, runtime),
+        "begin" => eval_sequence(&items[1..], state, env, module, runtime),
+        "def" => eval_def(items, state, env, module, runtime),
+        "fn" => eval_fn(items, env, module),
+        "let" => eval_let(items, state, env, module, runtime),
+        "defmacro" => eval_defmacro(items, state, module, runtime),
+        "defprotocol" => eval_defprotocol(items, state, module, runtime),
+        "macroexpand-1" => eval_macroexpand(items, state, module, runtime),
+        "module" => eval_module(items, state, env, runtime),
+        "export" => eval_export(items, state, module, runtime),
+        "import" => eval_import(items, state, module, runtime),
+        "with-handler" => eval_with_handler(items, state, env, module, runtime),
+        "with-restart" => eval_with_restart(items, state, env, module, runtime),
+        "invoke-restart" => eval_invoke_restart(items, state, env, module, runtime),
+        _ => return None,
+    })
+}
+
+/// A macro call expanded, charged; `None` for a list whose head names no
+/// macro. The caller evaluates the expansion under `macro_depth`.
+fn expand_macro(
+    items: &[Expr],
+    state: &mut State,
+    module: Option<&str>,
+    runtime: &mut Runtime<'_>,
+) -> Result<Option<Expr>, Signal> {
+    let Some(definition) = find_macro(state, module, &items[0]) else {
+        return Ok(None);
+    };
+    if runtime.macro_depth >= runtime.options.budget.max_parse_depth {
+        return Err(condition(
+            "resource/macro-depth",
+            format!(
+                "macro expansion depth exceeds limit {}",
+                runtime.options.budget.max_parse_depth
+            ),
+        ));
+    }
+    let (expanded, expansion_steps) = expand(
+        &definition,
+        &items[1..],
+        &mut state.next_syntax_id,
+        runtime.fuel_remaining,
+        runtime.options.budget.max_collection_len,
+    )
+    .map_err(expansion_condition)?;
+    runtime.charge(expansion_steps)?;
+    Ok(Some(expanded))
+}
+
+/// The function and the arguments of an application, evaluated in order.
+fn eval_application(
+    items: &[Expr],
+    state: &mut State,
+    env: &mut Env,
+    module: Option<&str>,
+    runtime: &mut Runtime<'_>,
+) -> Result<(Value, Vec<Value>), Signal> {
     let function = eval(&items[0], state, env, module, runtime)?;
     let mut arguments = Vec::with_capacity(items.len() - 1);
     for item in &items[1..] {
         arguments.push(eval(item, state, env, module, runtime)?);
     }
-    apply(function, arguments, state, runtime)
+    Ok((function, arguments))
+}
+
+/// What a tail position comes to: a value, or a call still to be made,
+/// which the closure loop in `apply_inner` makes without a deeper frame.
+enum Tail {
+    Value(Value),
+    Call(Value, Vec<Value>),
+}
+
+/// Evaluate `expression` in tail position: the branches of `if`, the last
+/// form of `begin` and `let`, and an application there are not evaluated
+/// deeper but handed back, so a function that ends in a call — to itself,
+/// to another, through a `let` — runs in the frame it was called from,
+/// however many times. Fuel is charged exactly as `eval` charges it, so a
+/// program costs the same steps either way; only the depth differs.
+fn eval_tail(
+    expression: &Expr,
+    state: &mut State,
+    env: &mut Env,
+    module: Option<&str>,
+    runtime: &mut Runtime<'_>,
+) -> Result<Tail, Signal> {
+    let Expr::List(items) = expression else {
+        return eval(expression, state, env, module, runtime).map(Tail::Value);
+    };
+    if items.is_empty() {
+        return eval(expression, state, env, module, runtime).map(Tail::Value);
+    }
+    runtime.tick()?;
+    if let Expr::Symbol(name) = &items[0] {
+        match name.as_str() {
+            "if" => {
+                expect_arity("if", items.len() - 1, 3)?;
+                let branch = if eval(&items[1], state, env, module, runtime)?.is_truthy() {
+                    &items[2]
+                } else {
+                    &items[3]
+                };
+                return eval_tail(branch, state, env, module, runtime);
+            }
+            "begin" => return eval_body(&items[1..], state, env, module, runtime),
+            "let" => {
+                let (mut local, body) = let_bindings(items, state, env, module, runtime)?;
+                return eval_body(body, state, &mut local, module, runtime);
+            }
+            _ => {}
+        }
+    }
+    if let Some(result) = eval_special(items, state, env, module, runtime) {
+        return result.map(Tail::Value);
+    }
+    if let Some(expanded) = expand_macro(items, state, module, runtime)? {
+        runtime.macro_depth += 1;
+        let result = eval_tail(&expanded, state, env, module, runtime);
+        runtime.macro_depth -= 1;
+        return result;
+    }
+    let (function, arguments) = eval_application(items, state, env, module, runtime)?;
+    Ok(Tail::Call(function, arguments))
+}
+
+/// A body: every form but the last evaluated, the last in tail position.
+fn eval_body(
+    items: &[Expr],
+    state: &mut State,
+    env: &mut Env,
+    module: Option<&str>,
+    runtime: &mut Runtime<'_>,
+) -> Result<Tail, Signal> {
+    let Some((last, before)) = items.split_last() else {
+        return Ok(Tail::Value(Value::Nil));
+    };
+    for item in before {
+        eval(item, state, env, module, runtime)?;
+    }
+    eval_tail(last, state, env, module, runtime)
 }
 
 fn eval_quote(items: &[Expr], runtime: &Runtime<'_>) -> Result<Value, Signal> {
@@ -356,6 +472,18 @@ fn eval_let(
     module: Option<&str>,
     runtime: &mut Runtime<'_>,
 ) -> Result<Value, Signal> {
+    let (mut local, body) = let_bindings(items, state, env, module, runtime)?;
+    eval_sequence(body, state, &mut local, module, runtime)
+}
+
+/// The environment a `let` binds, and its body.
+fn let_bindings<'a>(
+    items: &'a [Expr],
+    state: &mut State,
+    env: &mut Env,
+    module: Option<&str>,
+    runtime: &mut Runtime<'_>,
+) -> Result<(Env, &'a [Expr]), Signal> {
     if items.len() < 3 {
         return Err(condition("arity", "let expects bindings and a body"));
     }
@@ -379,7 +507,7 @@ fn eval_let(
     for (name, value) in evaluated {
         local.insert(name, value);
     }
-    eval_sequence(&items[2..], state, &mut local, module, runtime)
+    Ok((local, &items[2..]))
 }
 
 fn eval_defmacro(
@@ -705,7 +833,7 @@ fn apply_inner(
 ) -> Result<Value, Signal> {
     match function {
         Value::Builtin(builtin) => apply_builtin(builtin, arguments, state, runtime),
-        Value::Closure(closure) => {
+        Value::Closure(mut closure) => {
             expect_arity("function", arguments.len(), closure.params.len())?;
             if runtime.call_depth >= runtime.options.budget.max_call_depth {
                 return Err(condition(
@@ -716,18 +844,49 @@ fn apply_inner(
                     ),
                 ));
             }
-            let mut call_env = closure.env.child();
-            for (param, value) in closure.params.iter().cloned().zip(arguments) {
-                call_env.insert(param, value);
-            }
+            // One frame for the whole chain of tail calls: a body that ends
+            // in a call hands the call back, and this loop makes it here,
+            // at the same depth, with the same fuel accounting as a deeper
+            // frame would have had. Only a call that is not the last thing
+            // a body does — an operand, a `with-handler` body — goes deeper.
             runtime.call_depth += 1;
-            let result = eval_sequence(
-                &closure.body,
-                state,
-                &mut call_env,
-                closure.module.as_deref(),
-                runtime,
-            );
+            let mut arguments = arguments;
+            let result = loop {
+                let mut call_env = closure.env.child();
+                for (param, value) in closure.params.iter().cloned().zip(arguments) {
+                    call_env.insert(param, value);
+                }
+                let module = closure.module.clone();
+                let outcome = eval_body(
+                    &closure.body,
+                    state,
+                    &mut call_env,
+                    module.as_deref(),
+                    runtime,
+                );
+                match outcome {
+                    Ok(Tail::Value(value)) => break Ok(value),
+                    Ok(Tail::Call(Value::Closure(next), next_arguments)) => {
+                        if let Err(error) =
+                            expect_arity("function", next_arguments.len(), next.params.len())
+                        {
+                            break Err(error);
+                        }
+                        closure = next;
+                        arguments = next_arguments;
+                    }
+                    Ok(Tail::Call(Value::Builtin(builtin), next_arguments)) => {
+                        break apply_builtin(builtin, next_arguments, state, runtime);
+                    }
+                    Ok(Tail::Call(other, _)) => {
+                        break Err(condition(
+                            "type/not-callable",
+                            format!("value is not callable: {other}"),
+                        ));
+                    }
+                    Err(error) => break Err(error),
+                }
+            };
             runtime.call_depth -= 1;
             result
         }
