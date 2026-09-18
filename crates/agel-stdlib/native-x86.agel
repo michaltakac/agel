@@ -14,7 +14,10 @@
 ; call. The image runs the compiled function
 ; on the constant arguments given, prints the result as a decimal line on
 ; the console and exits with its low byte as the status; a division by
-; zero exits 111. Not compiled: lists, texts, maps, other builtins, a
+; zero exits 111; exhausted IR fuel exits 112. Each evaluated IR node
+; costs one unit, including inlined callees; entry arguments and the
+; external invocation cost nothing. The default budget is 50 million.
+; Not compiled: lists, texts, maps, other builtins, a
 ; builtin as a value.
 ;
 ; Code is a tree: a leaf is a short list of bytes, `(label NAME)`,
@@ -23,7 +26,7 @@
 ; Every pass recurses by the tree's depth, never by its length, so the
 ; evaluator's call-depth budget holds for a program of any size.
 (module agel/native-x86
-  (export native-x86-emit native-x86-source)
+  (export native-x86-emit native-x86-emit-limited native-x86-source)
 
   (def image-base 550024249344)          ; 0x8010000000, the process window
   (def arena-offset 1048576)             ; closure records, 1 MiB above the code
@@ -88,7 +91,8 @@
 
   ; Instructions, as byte lists. rax holds a value; rbx the other operand;
   ; rbp the frame; [rbp-8] the static link; r12 the link passed to a
-  ; callee; r13 the arena's bump pointer; r15 the shared page.
+  ; callee; r13 the arena's bump pointer; r14 remaining IR fuel;
+  ; r15 the shared page. Printing may reuse r14 only after evaluation.
   (def mov-rax-imm (fn (n) (append (list 72 184) (le8 n))))
   (def mov-rbx-abs (fn (name) (seq (list 72 187) (list 'abs64 name))))
   (def push-rax (list 80))
@@ -115,6 +119,11 @@
   (def cmp-rax-5 (list 72 131 248 5))
   (def test-rax (list 72 133 192))
   (def test-rbx (list 72 133 219))
+  ; Test before decrement: a zero budget must fail, never wrap around.
+  ; These instructions preserve the value/argument registers and stack.
+  (def charge
+    (cat (list (list 77 133 246) (je 'fuel-exhausted) ; test r14,r14
+               (list 73 255 206))))                 ; dec r14
   (def record-closure (fn (name)                            ; rax = new record {code, rbp}
     (cat (list (list 76 137 232)                            ; mov rax, r13
                (mov-rbx-abs name) (list 73 137 93 0)        ; mov rbx, code; mov [r13], rbx
@@ -156,13 +165,18 @@
   ; an inlined lambda's IR may say `tail-call` even inside an operand,
   ; where its enclosing computation still has work to do.
   (def gen (fn (node scopes stack path tail?)
+    (let ((generated (gen-node node scopes stack path tail?)))
+      (list (seq charge (car generated)) (car (cdr generated))))))
+
+  (def gen-node (fn (node scopes stack path tail?)
     (let ((head (car node)))
       (if (= head 'const) (list (mov-rax-imm (tagged (car (cdr node)))) nil)
       (if (= head 'local) (gen-local (car (cdr node)) (car (cdr (cdr node))) scopes)
       (if (= head 'builtin) (fail "a builtin used as a value")
       (if (= head 'fn) (gen-fn (car (cdr node)) (car (cdr (cdr node))) scopes path)
       (if (= head 'if) (gen-if (cdr node) scopes stack path tail?)
-      (if (= head 'begin) (gen-begin (cdr node) scopes stack path 0 tail?)
+      (if (= head 'begin) (if (= (cdr node) nil) (list (mov-rax-imm 5) nil)
+                             (gen-begin (cdr node) scopes stack path 0 tail?))
       (if (= head 'call) (gen-call (car (cdr node)) (car (cdr (cdr node))) scopes stack path #f)
       (if (= head 'tail-call) (gen-call (car (cdr node)) (car (cdr (cdr node))) scopes stack path tail?)
       (fail "an IR node this backend does not know"))))))))))))
@@ -206,9 +220,9 @@
   ; stack, its code called with its environment in r12.
   (def gen-call (fn (callee arguments scopes stack path tail?)
     (if (= (car callee) 'builtin)
-        (gen-primitive (car (cdr callee)) arguments scopes stack path)
+        (charge-callee (gen-primitive (car (cdr callee)) arguments scopes stack path))
     (if (= (car callee) 'fn)
-        (gen-let (car (cdr callee)) (car (cdr (cdr callee))) arguments scopes stack path tail?)
+        (charge-callee (gen-let (car (cdr callee)) (car (cdr (cdr callee))) arguments scopes stack path tail?))
     (if (if tail? (if (= (car callee) 'local) (reusable? callee arguments scopes) #f) #f)
         (gen-tail callee arguments scopes stack path)
         (let ((target (gen callee scopes stack (at path 0) #f))
@@ -217,6 +231,9 @@
           (list (cat (list (car target) push-rax (car pushed)
                            (mov-rax-stack (* 8 count)) call-closure))
                 (seq (car (cdr target)) (car (cdr pushed))))))))))
+  ; Inlining removes callee code, not its semantic evaluation cost.
+  (def charge-callee (fn (generated)
+    (list (seq charge (car generated)) (car (cdr generated)))))
   (def reusable? (fn (callee arguments scopes)
     (let ((n (frame-arity scopes)))
       (if (= n nil) #f
@@ -327,6 +344,9 @@
                (label 'odd)                                  ; #f 1 -> 0, #t 3 -> 1, nil 5 -> 2
                (list 72 209 248)                             ; sar rax, 1
                (jmp 'exit)
+               (label 'fuel-exhausted)
+               (list 72 199 192 112 0 0 0)                   ; mov rax, 112
+               (jmp 'exit)
                (label 'fault)
                (list 72 199 192 111 0 0 0)                   ; mov rax, 111
                (label 'exit)
@@ -339,10 +359,11 @@
   ; The entry: the shared page in rdi, the arena, the program's closure,
   ; the arguments (the closure first under the self convention), the call,
   ; the result printed and returned as the status.
-  (def entry
+  (def entry (fn (fuel)
     (cat (list (list 73 137 255)                             ; mov r15, rdi
+               (append (list 73 190) (le8 fuel))              ; mov r14, fuel
                (append (list 73 189) (le8 (+ image-base arena-offset))) ; mov r13, arena
-               (list 72 137 229))))                          ; mov rbp, rsp
+               (list 72 137 229)))))                         ; mov rbp, rsp
   (def push-arguments (fn (arguments)
     (if (= arguments nil) nil
         (cat (list (mov-rax-imm (tagged (car arguments))) push-rax (push-arguments (cdr arguments)))))))
@@ -369,12 +390,20 @@
 
   ; The IR `native-compile` answers: `(agel/native-v2 (fn ARITY BODY))`.
   (def native-x86-emit (fn (ir arguments)
+    (native-x86-emit-limited ir arguments 50000000)))
+
+  (def native-x86-emit-limited (fn (ir arguments fuel)
+    (if (not (= (type-of fuel) 'int)) (fail "fuel must be a nonnegative integer")
+        (if (< fuel 0) (fail "fuel must be a nonnegative integer")
+            (emit-budgeted ir arguments fuel)))))
+
+  (def emit-budgeted (fn (ir arguments fuel)
     (if (not (= (car ir) 'agel/native-v2)) (fail "not agel/native-v2 IR")
         (let ((function (car (cdr ir))))
           (if (not (= (car function) 'fn)) (fail "the IR is not a function")
               (let ((arity (car (cdr function))))
                 (let ((main (gen function nil 0 "L" #f)))
-                  (let ((code (cat (list entry (car main) (finish arity arguments) (car (cdr main))))))
+                  (let ((code (cat (list (entry fuel) (car main) (finish arity arguments) (car (cdr main))))))
                     (let ((measured (measure code 0 (dict))))
                       (text-concat (render (elf-header (+ header-bytes (car measured))) 0 (dict))
                                    (render code 0 (car (cdr measured)))))))))))))

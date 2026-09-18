@@ -113,3 +113,30 @@ fn what_it_cannot_compile_is_refused() {
     let error = emit(&mut world, &options, "(fn (x) x)", "(1 2)").unwrap_err();
     assert!(error.contains("arity"), "{error}");
 }
+
+#[test]
+fn fuel_limits_must_be_nonnegative_integers() {
+    let (mut world, options) = world();
+    for budget in ["-1", "#f", "nil", "\"100\""] {
+        let error = world
+            .evaluate_with(
+                &format!("(native-x86-emit-limited (native-compile '(fn () 42)) nil {budget})"),
+                &options,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("fuel must be a nonnegative integer"),
+            "{error}"
+        );
+    }
+    for budget in ["0", "1", "9223372036854775807"] {
+        let commit = world
+            .evaluate_with(
+                &format!("(native-x86-emit-limited (native-compile '(fn () 42)) nil {budget})"),
+                &options,
+            )
+            .unwrap();
+        assert!(matches!(commit.values.last(), Some(Value::String(_))));
+    }
+}

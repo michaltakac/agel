@@ -1,4 +1,4 @@
-# The backend in Agel — v0.2.85
+# The backend in Agel
 
 `agel/native-x86` in the standard library (`crates/agel-stdlib/native-x86.agel`)
 is an x86-64 backend written in Agel: `(native-x86-emit IR ARGUMENTS)` turns
@@ -11,11 +11,12 @@ domain, in the OS.
 ## What it compiles
 
 The IR's integer subset: constants that are integers, `#t`, `#f` or `nil`;
-`+ - * / = <` applied to two arguments; `if` and `begin`; `fn` with any
-arity, addressed lexically through a static link, so a `let` (which the
+`+ - * / = <` applied to two arguments; `if` and `begin`; `fn` addressed
+lexically through a static link, so a `let` (which the
 frontend lowers to a nested function called at once) and a closure over an
-enclosing frame both work; calls through closure values, the explicit-self
-convention included, so recursion works. Since v0.2.88 a call in tail
+enclosing live frame work; calls through closure values include the
+explicit-self convention, so recursion works. Escaping closures still have
+unresolved lifetime hazards. Since v0.2.88 a call in tail
 position through a parameter reuses the frame (the calling convention is
 callee-pops, `ret 8(arity+1)`), and a `let` is slots of the frame it
 appears in, so a loop written as a function calling itself last runs in
@@ -24,7 +25,9 @@ frame holds is a plain call.
 
 Not compiled, refused with `native-x86/unsupported`: lists, texts, maps,
 any other builtin, a builtin as a value, a primitive with other than two
-arguments, arguments that do not match the function's arity.
+arguments, entry arguments that do not match the top-level function's
+arity, and mismatched arguments to an inlined function literal. Dynamic
+closure calls still need runtime arity/type checks.
 
 ## The image
 
@@ -37,15 +40,31 @@ arena, makes the program's closure record, pushes it (twice under the
 self convention), pushes the constant arguments, calls, then prints the
 result as a decimal line through a `write` request and exits with its low
 byte through an `exit` request, both by the process protocol's
-`endpoint.send` (`int 0x80`). A division by zero exits 111.
+`endpoint.send` (`int 0x80`). A division by zero exits 111; exhausted IR
+fuel exits 112. The entry initializes `r14` with the budget and all emitted
+node checks share it through ordinary and tail calls.
 
 Values are tagged: an integer n is 2n, `#f` is 1, `#t` is 3, `nil` is 5;
 `if` tests for 1 and 5. A frame is `rbp`; the static link is pushed under
 it; the caller pushes the callee's closure then the arguments in order, so
 argument *s* of an *n*-ary frame is at `rbp + 16 + 8(n − 1 − s)`, and
-the caller drops them after the return. Every jump is a `rel32` and every
-address a `movabs`, so the assembler is two passes over a tree of code:
+the callee pops the argument/closure block on return. Every jump is a
+`rel32` and every address a `movabs`, so the assembler is two passes over a tree of code:
 sizes and labels, then bytes.
+
+## Execution fuel
+
+Since v0.2.89, `native-x86-emit` supplies 50,000,000 units of fuel.
+`(native-x86-emit-limited IR ARGUMENTS FUEL)` accepts an explicit nonnegative
+integer, including zero. Each evaluated IR node costs one, including
+inlined callees; only the selected branch runs. The root function is charged,
+but entry arguments, the external invocation, printing and exit are not.
+Exhaustion checks zero before decrementing and exits 112 before the next
+node's operation. An empty `begin` costs one and returns nil.
+
+This cost model is tested against an independent IR interpreter, not the
+hosted source evaluator's `steps_used`. See [v0.2.89](release-v0.2.89.md) for
+the contract, exact-boundary tests and remaining allocation/lifetime limits.
 
 ## Why a tree
 
@@ -59,15 +78,18 @@ measuring, resolving, rendering to hex — recurses by the tree's depth,
 which is the program's nesting, never by its length. Hex text is built by
 concatenation at the nodes.
 
-## Proof
+## Validation
 
 `crates/agel-stdlib/tests/backend.rs` runs it hosted: the fib IR becomes
 a well-formed static ELF for the process window, and what it cannot
 compile is refused. `scripts/test-agel-process.sh` runs it in the OS: the
-loaded runtime compiles fib, a `let`, a tail-recursive sum to a hundred
-and a division by zero, writes the four images as hex, and the desktop
-installs and runs each — `55`, `40`, `5050` printed and returned as the
-status (5050 modulo 256), and 111 for the division:
+loaded runtime compiles fib, a `let`, tail-recursive sums, a nested-call
+regression and a division by zero. The desktop installs and executes the
+images. The suite also checks exact IR fuel boundaries; see the execution
+fuel section above.
+
+The following transcript is from v0.2.85; sizes and compiler steps change
+as the backend grows.
 
 ```text
 live-desktop> :exec agel -- backend.agel

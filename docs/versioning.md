@@ -391,6 +391,11 @@ promise.
   of it, so a loop the backend compiles runs in constant stack; the callee
   pops its own block, and a callee taking more arguments than the frame is
   a plain call.
+  `v0.2.89` meters the x86-64 code emitted by the Agel-written backend:
+  one unit per evaluated native-IR node, including inlined callees, with
+  a finite default budget and an explicit-limit entry point. Exhaustion
+  exits 112; exact limits are checked against an independent IR interpreter
+  in the guest. Source-evaluator fuel parity remains separate work.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -1952,6 +1952,22 @@ produced or run there.
   protection domain with a process's window and budget; a mis-emitted
   jump faults inside the domain and the supervisor reports it.
 
+## v0.2.89
+
+- **Emitted IR execution has a finite counter:** each evaluated node charges
+  before its operation. Calls and tail jumps share the counter; inlining does
+  not remove the callee's charge. Zero is tested before decrementing, and
+  exhaustion exits 112. The default is 50 million units, or the explicit limit
+  passed to `native-x86-emit-limited`.
+- **This is not a new protection boundary:** arbitrary ELF files need not
+  contain these checks. Compiler-generated metering does not validate forged
+  IR, dynamic calls, closure lifetimes or arena accesses. Kernel isolation and
+  scheduling remain responsible for containment; allocation and wall-clock
+  limits are distinct from IR fuel.
+- **Conformance is scoped:** exact-budget and one-short executions agree with
+  an independent IR interpreter on the checked corpus. Source evaluator and
+  managed JIT budgets have different cost models.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

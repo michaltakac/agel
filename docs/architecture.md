@@ -503,6 +503,11 @@ Each rung must be runnable and differentially testable against the rung below:
    became callee-pops (`ret 8(arity+1)`) to make this safe; a tail call
    whose callee takes more arguments than the frame holds is a plain call.
    The OS runs a million-iteration loop the backend compiled in one frame.
+83. **Fuel in emitted code (v0.2.89):** the Agel-written x86-64 backend
+   reserves `r14` for a shared IR budget and charges each executed node,
+   including inlined callees. Tail calls keep the counter while reusing the
+   frame. Exhaustion exits 112; an independent interpreter checks exact
+   boundaries in the guest. Source-level budget parity is separate work.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

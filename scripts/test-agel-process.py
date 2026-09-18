@@ -11,6 +11,7 @@ from pathlib import Path
 import tempfile
 import time
 import graphical_console as module
+import native_ir_fuel as fuel_reference
 
 
 def check(machine, form, wanted, seconds=30):
@@ -215,6 +216,45 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
             reply = check(machine, f":exec {name}", f"process {name} exited with status {status}")
             if wanted is not None:
                 assert f"\r\n{wanted}\r\n" in reply, (name, reply)
+        # Independent IR interpretation supplies exact budgets. Every case
+        # must succeed at N and exhaust at N-1 on the actual guest CPU.
+        def metered(ir, arguments, fuel, status, value=None):
+            source = "(import agel/native-x86)\n(file-write \"meter.hex\" (native-x86-emit-limited '" + fuel_reference.form(ir) + " '" + fuel_reference.form(arguments) + f" {fuel}))\n"
+            for offset in range(0, len(source), 100):
+                chunk = source[offset:offset + 100]
+                escaped = chunk.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+                operation = "file-write" if offset == 0 else "file-append"
+                check(machine, '(' + operation + ' "meter.agel" "' + escaped + '")', "\r\n")
+            reply = run(machine, ":exec agel -- meter.agel", 120)
+            assert "process agel exited with status 0" in reply, reply
+            check(machine, ":install meter /meter.hex", "INSTALLED meter: ")
+            reply = run(machine, ":exec meter", 30)
+            assert f"process meter exited with status {status}" in reply, reply
+            if value is not None:
+                assert f"\r\n{value}\r\n" in reply, reply
+
+        for name, ir, arguments in fuel_reference.cases():
+            reference = fuel_reference.Interpreter(10000)
+            value = reference.run(ir, arguments)
+            needed = 10000 - reference.remaining
+            assert fuel_reference.Interpreter(needed).run(ir, arguments) == value
+            try:
+                fuel_reference.Interpreter(needed - 1).run(ir, arguments)
+                raise AssertionError("the reference did not exhaust")
+            except fuel_reference.Exhausted:
+                pass
+            status = 2 if value is None else int(value) & 255
+            metered(ir, arguments, needed, status, value if type(value) is int else None)
+            metered(ir, arguments, needed - 1, 112)
+            print(f"IR fuel {name}: {needed} succeeds, {needed - 1} exhausts")
+        # Zero fuel, an unbounded tail loop, and fuel-versus-runtime-fault
+        # ordering must exit deliberately, not rely on the process watchdog.
+        forever = ['agel/native-v2', ['fn', 1, ['tail-call', ['local', 0, 0], [['local', 0, 0]]]]]
+        for budget in (0, 1, 64):
+            metered(forever, [], budget, 112)
+        divide = ['agel/native-v2', ['fn', 0, fuel_reference.call('/', fuel_reference.const(1), fuel_reference.const(0))]]
+        metered(divide, [], 4, 112)
+        metered(divide, [], 5, 111)
         # A failing form: the transaction rolls back, the error is reported,
         # the status is 1.
         check(machine, '(file-write "bad.agel" "(def ok 1)\\n(/ 1 0)\\n")', "\r\n")
