@@ -55,6 +55,10 @@ struct Options {
     /// Instead of an episode: judge every step of this recorded dataset
     /// with the provider, writing `judged.jsonl` beside it.
     judge_dataset: Option<PathBuf>,
+    /// `browse`: the pages installed into the data region, and the hosted
+    /// runtime that runs the browser written in Agel over them.
+    pages: PathBuf,
+    agel: PathBuf,
 }
 
 fn options() -> Result<Options, String> {
@@ -74,6 +78,8 @@ fn options() -> Result<Options, String> {
         scene: "doom".to_owned(),
         task: "list the files in the region, then finish".to_owned(),
         judge_dataset: None,
+        pages: PathBuf::from("examples/pages"),
+        agel: PathBuf::from("boot/posix/target/x86_64-unknown-none/release/agel"),
     };
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
@@ -93,12 +99,14 @@ fn options() -> Result<Options, String> {
             "--program" => options.program = Some(value()?),
             "--scene" => {
                 options.scene = value()?;
-                if options.scene != "doom" && options.scene != "desktop" {
-                    return Err("--scene is doom or desktop".to_owned());
+                if !["doom", "desktop", "browse"].contains(&options.scene.as_str()) {
+                    return Err("--scene is doom, desktop or browse".to_owned());
                 }
             }
             "--task" => options.task = value()?,
             "--judge-dataset" => options.judge_dataset = Some(PathBuf::from(value()?)),
+            "--pages" => options.pages = PathBuf::from(value()?),
+            "--agel" => options.agel = PathBuf::from(value()?),
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -406,18 +414,27 @@ impl Block {
         let mut state_line = String::new();
         let mut frame = String::new();
         let mut history = Vec::new();
+        let mut continued = false;
         for line in block.lines() {
             if let Some(rest) = line.strip_prefix("history: ") {
                 history.push(rest.to_owned());
                 continue;
             }
             if let Some(rest) = line.strip_prefix("model-request ") {
-                // `model-request N TEXT`: the number, a space, the program's text.
-                prompt = rest
-                    .trim_start_matches(|character: char| character.is_ascii_digit())
-                    .strip_prefix(' ')
-                    .unwrap_or("")
-                    .to_owned();
+                // `model-request N TEXT`: the number, a space, the program's
+                // text — or `model-request N:` from a process on the OS, whose
+                // text follows on the lines up to `model-request end`.
+                let rest = rest.trim_start_matches(|character: char| character.is_ascii_digit());
+                if rest == ":" {
+                    continued = true;
+                } else {
+                    prompt = rest.strip_prefix(' ').unwrap_or("").to_owned();
+                }
+            } else if continued && line != "model-request end" {
+                if !prompt.is_empty() {
+                    prompt.push('\n');
+                }
+                prompt.push_str(line);
             } else if let Some(rest) = line.strip_prefix("look-line: ") {
                 state_line = rest.to_owned();
             } else if let Some(rest) = line.strip_prefix("look: ") {
@@ -572,11 +589,17 @@ struct Judge {
     /// The task, when the program drives the desktop rather than the game:
     /// the judge sees it beside the desktop's own line and the shades.
     task: Option<String>,
+    /// The browser written in Agel asks with the task and the page already
+    /// in its request: nothing is added.
+    browse: bool,
     next_id: u64,
 }
 
 impl Judge {
-    fn request(block: &Block, task: Option<&str>) -> Result<JudgmentRequest, String> {
+    fn request(block: &Block, task: Option<&str>, browse: bool) -> Result<JudgmentRequest, String> {
+        if browse {
+            return JudgmentRequest::parse(&block.prompt);
+        }
         if let Some(task) = task {
             let mut request = JudgmentRequest::parse(&block.prompt)?;
             let history = if block.history.is_empty() {
@@ -633,18 +656,19 @@ impl Policy for Judge {
         let typed = block.prompt.trim_start().starts_with("(judge");
         let id = self.next_id;
         self.next_id += 1;
-        let judgment = Judge::request(&block, self.task.as_deref()).and_then(|request| {
-            self.provider
-                .judge(
-                    &request,
-                    Principal {
-                        world: 0,
-                        agent: Some(0),
-                    },
-                    &format!("model/infer/jev/request/{id}"),
-                )
-                .map_err(|error| error.to_string())
-        });
+        let judgment =
+            Judge::request(&block, self.task.as_deref(), self.browse).and_then(|request| {
+                self.provider
+                    .judge(
+                        &request,
+                        Principal {
+                            world: 0,
+                            agent: Some(0),
+                        },
+                        &format!("model/infer/jev/request/{id}"),
+                    )
+                    .map_err(|error| error.to_string())
+            });
         Some(match judgment {
             Ok(judgment) if typed => judgment.reply_text(),
             Ok(judgment) => match &judgment.answers[0].1 {
@@ -719,6 +743,57 @@ fn main() -> Result<(), String> {
             options.wad.to_str().unwrap_or(""),
         ])?;
     }
+    if options.scene == "browse" {
+        // The hosted runtime, the site's pages, and the agent's script with
+        // the task written into it, all into the image; the OS has no
+        // network, so the pages are what the browser can reach.
+        run_script(&[
+            "scripts/install-program.py",
+            disk.to_str().unwrap_or(""),
+            "agel",
+            options.agel.to_str().unwrap_or(""),
+        ])?;
+        let mut pages = fs::read_dir(&options.pages)
+            .map_err(|error| format!("{}: {error}", options.pages.display()))?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "html")
+            })
+            .collect::<Vec<_>>();
+        pages.sort();
+        for page in &pages {
+            let name = page
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            run_script(&[
+                "scripts/install-program.py",
+                "--region",
+                "data",
+                disk.to_str().unwrap_or(""),
+                name,
+                page.to_str().unwrap_or(""),
+            ])?;
+        }
+        let script = options.out.join("browse.agel");
+        fs::write(
+            &script,
+            format!(
+                "(import agel/browse)\n(browse-use file-read)\n(browse-open \"/data/index.html\")\n(browse-drive {:?} {} model-request console-log)\n",
+                options.task, options.steps
+            ),
+        )
+        .map_err(|error| error.to_string())?;
+        run_script(&[
+            "scripts/install-program.py",
+            "--region",
+            "data",
+            disk.to_str().unwrap_or(""),
+            "browse.agel",
+            script.to_str().unwrap_or(""),
+        ])?;
+    }
 
     let mut policy: Box<dyn Policy> = match options.policy.as_str() {
         "scripted" => Box::new(Scripted),
@@ -765,13 +840,15 @@ fn main() -> Result<(), String> {
             Box::new(Judge {
                 provider,
                 program: options.program.clone().unwrap_or_else(|| {
-                    if desktop {
-                        "desktop-agent".to_owned()
-                    } else {
-                        "doom-agent-judge".to_owned()
+                    match options.scene.as_str() {
+                        "desktop" => "desktop-agent",
+                        "browse" => "browse-agent",
+                        _ => "doom-agent-judge",
                     }
+                    .to_owned()
                 }),
                 task: desktop.then(|| options.task.clone()),
+                browse: options.scene == "browse",
                 next_id: 1,
             })
         }
@@ -972,15 +1049,18 @@ fn play(
     if !formatted.contains("formatted") {
         return Err(format!("the filesystem did not format: {formatted}"));
     }
-    let loaded = serial.submit(
-        &format!(":load {}", policy.program()),
-        Duration::from_secs(30),
-    )?;
-    if !loaded.contains("READY") {
-        return Err(format!("the agent did not load: {loaded}"));
-    }
     let desktop = options.scene == "desktop";
-    if !desktop {
+    let browse = options.scene == "browse";
+    if !browse {
+        let loaded = serial.submit(
+            &format!(":load {}", policy.program()),
+            Duration::from_secs(30),
+        )?;
+        if !loaded.contains("READY") {
+            return Err(format!("the agent did not load: {loaded}"));
+        }
+    }
+    if !desktop && !browse {
         let started = serial.submit(
             ":exec c-doom -- -iwad /data/doom1.wad -mb 8 -warp 1 -skill 2",
             Duration::from_secs(120),
@@ -1008,8 +1088,14 @@ fn play(
 
     // Start the in-OS loop; it runs for the whole game, speaking as it goes.
     let mut cursor = serial.len();
-    let loop_word = if desktop { ":drive" } else { ":play" };
-    serial.send_line(&format!("{loop_word} {} {}", options.steps, options.hold))?;
+    if browse {
+        // The browser is a process: its script drives itself for the
+        // steps written into it and asks on its own console.
+        serial.send_line(":exec agel -- /data/browse.agel")?;
+    } else {
+        let loop_word = if desktop { ":drive" } else { ":play" };
+        serial.send_line(&format!("{loop_word} {} {}", options.steps, options.hold))?;
+    }
 
     let mut block = String::new();
     let mut in_block = false;
@@ -1028,7 +1114,11 @@ fn play(
         }
         let mut done = false;
         for line in fresh.lines() {
-            let line = line.trim_end_matches('\r');
+            // The desktop prints its prompt without a newline after a
+            // typed reply, so a process's next line can follow it.
+            let line = line
+                .trim_end_matches('\r')
+                .trim_start_matches("live-desktop> ");
             if line.starts_with("doom: state") {
                 state_line = line.trim_end_matches(" paused").to_owned();
             }
@@ -1079,7 +1169,8 @@ fn play(
             let stepped = line
                 .strip_prefix("play: step ")
                 .map(|rest| (rest, "keys "))
-                .or_else(|| line.strip_prefix("drive: step ").map(|rest| (rest, "do ")));
+                .or_else(|| line.strip_prefix("drive: step ").map(|rest| (rest, "do ")))
+                .or_else(|| line.strip_prefix("browse: step ").map(|rest| (rest, "do ")));
             if let Some((rest, decided)) = stepped {
                 let index: usize = rest
                     .split(' ')
@@ -1132,6 +1223,7 @@ fn play(
                 || line.contains("PROCESS ENDED")
                 || line.starts_with("DROVE ")
                 || line.starts_with("DRIVE DONE")
+                || line.starts_with("process agel exited")
             {
                 done = true;
             }

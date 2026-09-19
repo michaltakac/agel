@@ -549,6 +549,14 @@ Each rung must be runnable and differentially testable against the rung below:
    off a dataset. The provider's score is a position among levels, no
    longer clamped to one. One run of each policy is reported, not a
    result. See [`doom.md`](doom.md).
+89. **A browser written in Agel (v0.2.95):** `agel/browse` in the
+   standard library parses a reader's subset of HTML into a numbered
+   accessibility tree, acts as a reader (link, fill, submit, back), and
+   carries its own agent: the tree becomes typed questions, the answer
+   line an action, the loop ending on the judge's done. On the OS it is
+   a process of the hosted runtime over pages in the data region, asking
+   on its own console; `agel-play --scene browse` relays. No window, no
+   network, no free text from the model. See [`browser.md`](browser.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

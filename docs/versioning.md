@@ -433,6 +433,13 @@ promise.
   reads a dataset; the provider's score is a position among levels, no
   longer clamped to one. One forty-step run of each policy is reported,
   not a result.
+  `v0.2.95` is a browser written in Agel: `agel/browse` parses a
+  reader's subset of HTML into a numbered accessibility tree, acts as a
+  reader, and carries its own agent asking a judge through
+  `model-request`; on the OS a process of the hosted runtime over pages
+  in the data region, through the bridge with `agel-play --scene
+  browse`. No network, no window, no free text from the model; live, one
+  task on the example site completed in two steps.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -104,3 +104,40 @@ if [ "$judged" -ne 4 ]; then
 fi
 python3 scripts/doom-score.py target/doom-runs/echo/steps.jsonl | grep -q "4 steps"
 echo "A recorded episode judged after the fact: 4 steps, each a typed judgment of the move and the state [ok]"
+
+# The browser written in Agel through the bridge: the hosted runtime and
+# the example site installed, the agent's script written with the task,
+# the process asking on its own console and the stand-in answering that
+# the task is done at once. One step, one record, the process exited.
+out=target/doom-runs/browse
+rm -rf "$out"
+mkdir -p "$out"
+cat > "$out/curl" <<'FAKE'
+#!/bin/sh
+cat > /dev/null
+for arg in "$@"; do case "$arg" in @*) body="${arg#@}";; esac; done
+cp "$body" "$(dirname "$0")/body-$$"
+# The page's options are in the request: every one gets a probability,
+# done all of it, as the endpoint answers.
+probabilities=""
+for key in $(sed -n 's/.*"act":{"criteria":{\([^}]*\)}.*/\1/p' "$body" | grep -o '"[^"]*":' | tr -d '":'); do
+  if [ "$key" = done ]; then p=0.9; else p=0.0; fi
+  probabilities="$probabilities\"$key\":$p,"
+done
+printf '{"model":"stand-in","answers":{"act":{"type":"choice","choice":"done","confidence":0.9,"probabilities":{%s}},"done":{"type":"noul","noul":0.95}},"usage":{"input_tokens":1,"output_tokens":1}}\n200' "${probabilities%,}"
+FAKE
+chmod +x "$out/curl"
+agel=$(./scripts/build-program.sh agel x86_64 | tail -n 1)
+TYPESAFEAI_API_KEY=stand-in cargo run -q --release -p agel-play -- --image "$image" --scene browse --agel "$agel" \
+  --task "find the price of the \"blue\" widget" --out "$out" --policy jev --curl-bin "$(pwd)/$out/curl" --steps 3 | tee "$out/console.log"
+grep -q "agel-play: model reply 1: act choice " "$out/console.log"
+grep -q "agel-play: step 1: done" "$out/console.log"
+grep -q "agel-play: done" "$out/console.log"
+grep -q '"task":"find the price of the \\"blue\\" widget"' "$out"/body-*
+grep -q '"page":"page: Widget & Co (/data/index.html) form: /data/search.html' "$out"/body-*
+steps=$(wc -l < "$out/steps.jsonl" | tr -d ' ')
+if [ "$steps" -ne 1 ]; then
+  printf 'expected 1 recorded step, got %s\n' "$steps" >&2
+  exit 1
+fi
+echo "The browser written in Agel through the bridge: the page as the judge's state, the answer typed to the process, the run recorded [ok]"

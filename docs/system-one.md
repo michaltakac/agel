@@ -243,13 +243,14 @@ which is what Agel's agents and effects are.
 
 The order of work from here, after the gate on the host (v0.2.92) and
 the desktop driven from inside by judgment (v0.2.93,
-[`computer-use.md`](computer-use.md)) and the game played and labeled
-by judgment (v0.2.94, [`doom.md`](doom.md)): a browser process on the OS
-whose accessibility tree is a state and whose actions are a choice;
-richer perception for the driving program than the status line; a use
-for the labeled datasets; and a learned judge of Agel's own behind
-`judge-locally`'s contract, small enough to run in a domain. None of that
-is claimed today.
+[`computer-use.md`](computer-use.md)), the game played and labeled by
+judgment (v0.2.94, [`doom.md`](doom.md)) and a browser written in Agel
+whose tree is the state and whose links and fields are the choices
+(v0.2.95, [`browser.md`](browser.md)): a fetch for the browser through
+the host, and a window for it; richer perception for the driving program
+than the status line; a use for the labeled datasets; and a learned
+judge of Agel's own behind `judge-locally`'s contract, small enough to
+run in a domain. None of that is claimed today.
 
 ## Not claimed
 

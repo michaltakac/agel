@@ -1,0 +1,13 @@
+; A browser written in Agel, driven by a judge, as a process on the OS:
+;   :exec agel -- /data/browse.agel      (installed as browse.agel)
+; The hosted runtime reads pages from the data region with file-read, the
+; agent prints the page's tree and asks the judge through model-request —
+; a block on this process's console, answered by whoever sits at the
+; desktop or by the host bridge (`agel-play --scene browse`) — and acts
+; on the answer: a link, a field filled with the task's quoted phrase, the
+; form, back, or done. The bridge writes this file with the task it was
+; given; this copy asks for a price.
+(import agel/browse)
+(browse-use file-read)
+(browse-open "/data/index.html")
+(browse-drive "Find the price of the \"blue\" widget; the task is complete once a page shows it." 6 model-request console-log)

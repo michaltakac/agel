@@ -2489,3 +2489,375 @@
         (let ((line (judge-locally (gate-state request) gate-question rules)))
           (list (if (< (answer-value (answer (judgment-parse line) "run")) threshold) 'deny 'allow)
                 line))))))
+
+; A browser written in Agel, for agents. It reads a page through a loader
+; the caller gives it — `file-read` on the OS, where pages live in the
+; data region, since the OS has no network — parses the subset of HTML
+; that carries meaning for a reader (headings, paragraphs and list items,
+; links, form fields and buttons, the title, a form's action), and keeps
+; the page as numbered elements: its accessibility tree. `browse-tree`
+; prints the tree as lines, `browse-state` as one line. Actions are the
+; reader's: follow a link, fill a field, submit the form, go back.
+;
+; The agent is in the same module. `browse-questions` turns the page into
+; typed questions — a choice among the page's links, fields, submit and
+; back, and whether the task is done — `browse-decide` reads the answer
+; line into an action, and `browse-drive` runs the loop with the two
+; words the caller hands it: one that asks the judge with a request text
+; and returns the answer line (`model-request` on the OS), and one that
+; says a line (`console-log`). A System One model writes nothing, so a
+; field is filled with the task's quoted phrase, never with the model's
+; words. There is no window and no network: the browser is a filter on
+; its own console, and the tree is what it shows.
+(module agel/browse
+  (export browse-use browse-open browse-link browse-fill browse-submit browse-back
+          browse-tree browse-state browse-page
+          browse-parse browse-questions browse-decide browse-act browse-drive quoted-part)
+  (import agel/judgment)
+
+  (def rev (fn (values acc) (if (= values nil) acc (rev (cdr values) (cons (car values) acc)))))
+  (def len (fn (values n) (if (= values nil) n (len (cdr values) (+ n 1)))))
+  (def nth (fn (values n) (if (= n 0) (car values) (nth (cdr values) (- n 1)))))
+  (def text? (fn (value) (= (type-of value) 'string)))
+  (def min2 (fn (a b) (if (< a b) a b)))
+
+  ; --- text
+  ; Byte by byte, so a search never slices inside a multi-byte character.
+  (def bytes-at? (fn (s i needle j m) (if (< j m) (if (= (text-byte s (+ i j)) (text-byte needle j)) (bytes-at? s i needle (+ j 1) m) #f) #t)))
+  (def find-loop
+    (fn (s needle i last m)
+      (if (< last i) nil (if (bytes-at? s i needle 0 m) i (find-loop s needle (+ i 1) last m)))))
+  (def find-from (fn (s needle i) (find-loop s needle i (- (text-bytes s) (text-bytes needle)) (text-bytes needle))))
+  (def find-byte (fn (s b i n) (if (< i n) (if (= (text-byte s i) b) i (find-byte s b (+ i 1) n)) n)))
+  (def space? (fn (b) (if (= b 32) #t (if (= b 10) #t (if (= b 13) #t (= b 9))))))
+  (def span-spaces (fn (s i n) (if (< i n) (if (space? (text-byte s i)) (span-spaces s (+ i 1) n) i) n)))
+  (def span-word (fn (s i n) (if (< i n) (if (space? (text-byte s i)) i (span-word s (+ i 1) n)) n)))
+  ; Runs of whitespace become one space; the ends are trimmed.
+  (def tidy-loop
+    (fn (s i n acc)
+      (if (< i n)
+          (if (space? (text-byte s i))
+              (tidy-loop s (span-spaces s i n) n (if (= acc "") acc (text-concat acc " ")))
+              (let ((j (span-word s i n)))
+                (tidy-loop s j n (text-concat acc (text-slice s i j)))))
+          (if (= acc "")
+              acc
+              (if (= (text-byte acc (- (text-bytes acc) 1)) 32)
+                  (text-slice acc 0 (- (text-bytes acc) 1))
+                  acc)))))
+  (def tidy (fn (s) (tidy-loop s 0 (text-bytes s) "")))
+  (def replace-from
+    (fn (s from to i)
+      (let ((at (find-from s from i)))
+        (if (= at nil)
+            s
+            (replace-from (text-concat (text-slice s 0 at) (text-concat to (text-slice s (+ at (text-bytes from)) (text-bytes s))))
+                          from to (+ at (text-bytes to)))))))
+  (def unescape
+    (fn (s)
+      (replace-from (replace-from (replace-from (replace-from (replace-from (replace-from s "&lt;" "<" 0) "&gt;" ">" 0) "&quot;" "\"" 0) "&#39;" "'" 0) "&nbsp;" " " 0) "&amp;" "&" 0)))
+  (def starts-with? (fn (s p) (if (< (text-bytes s) (text-bytes p)) #f (= (text-slice s 0 (text-bytes p)) p))))
+  (def cut (fn (s mark) (let ((at (find-from s mark 0))) (if (= at nil) s (text-slice s 0 at)))))
+  (def last-slash (fn (s i found) (if (< i (text-bytes s)) (last-slash s (+ i 1) (if (= (text-byte s i) 47) i found)) found)))
+  (def dir-of (fn (url) (let ((at (last-slash url 0 nil))) (if (= at nil) "" (text-slice url 0 (+ at 1))))))
+  (def resolve
+    (fn (base href)
+      (let ((path (cut (cut href "#") "?")))
+        (if (= path "") base (if (starts-with? path "/") path (text-concat (dir-of base) path))))))
+  ; The first phrase in double quotes, or the whole text.
+  (def quoted-part
+    (fn (task)
+      (let ((a (find-byte task 34 0 (text-bytes task))))
+        (if (< a (text-bytes task))
+            (let ((b (find-byte task 34 (+ a 1) (text-bytes task))))
+              (if (< b (text-bytes task)) (text-slice task (+ a 1) b) task))
+            task))))
+
+  ; --- attributes: name="value", name='value', or name=value
+  (def attr-quoted
+    (fn (attrs name quote)
+      (let ((at (find-from attrs (text-concat name (text-concat "=" quote)) 0)))
+        (if (= at nil)
+            nil
+            (let ((start (+ at (+ (text-bytes name) 2))))
+              (text-slice attrs start (find-byte attrs (text-byte quote 0) start (text-bytes attrs))))))))
+  (def attr
+    (fn (attrs name)
+      (let ((double (attr-quoted attrs name "\"")))
+        (if (= double nil)
+            (let ((single (attr-quoted attrs name "'")))
+              (if (= single nil)
+                  (let ((at (find-from attrs (text-concat name "=") 0)))
+                    (if (= at nil)
+                        nil
+                        (let ((start (+ at (+ (text-bytes name) 1))))
+                          (text-slice attrs start (span-word attrs start (text-bytes attrs))))))
+                  single))
+            double))))
+  (def attr-or (fn (attrs name default) (let ((value (attr attrs name))) (if (= value nil) default value))))
+
+  ; --- tokens: (tag NAME ATTRS), (close NAME), (text TEXT), (skip)
+  (def tag-name (fn (body) (let ((n (text-bytes body))) (text-slice body 0 (min2 (span-word body 0 n) (find-byte body 47 0 n))))))
+  (def tag-token
+    (fn (body)
+      (if (= body "")
+          (list 'skip)
+          (if (starts-with? body "/")
+              (list 'close (tag-name (text-slice body 1 (text-bytes body))))
+              (if (starts-with? body "!")
+                  (list 'skip)
+                  (if (starts-with? body "?")
+                      (list 'skip)
+                      (let ((name (tag-name body)))
+                        (list 'tag name (text-slice body (text-bytes name) (text-bytes body))))))))))
+  (def tok-loop
+    (fn (h i n acc)
+      (if (< i n)
+          (if (= (text-byte h i) 60)
+              (if (if (< (+ i 3) n) (bytes-at? h (+ i 1) "!--" 0 3) #f)
+                  (let ((end (find-from h "-->" i))) (tok-loop h (if (= end nil) n (+ end 3)) n acc))
+                  (let ((close (find-byte h 62 i n)))
+                    (tok-loop h (+ close 1) n (cons (tag-token (text-slice h (+ i 1) close)) acc))))
+              (let ((next (find-byte h 60 i n)))
+                (tok-loop h next n (cons (list 'text (text-slice h i next)) acc))))
+          (rev acc nil))))
+  (def tokenize (fn (h) (tok-loop h 0 (text-bytes h) nil)))
+
+  ; --- the tree: elements (INDEX KIND TEXT LINK VALUE), built from tokens.
+  (def kind-of
+    (fn (name)
+      (if (= name "h1") 'heading (if (= name "h2") 'heading (if (= name "h3") 'heading
+      (if (= name "p") 'text (if (= name "li") 'text (if (= name "td") 'text (if (= name "th") 'text (if (= name "label") 'text (if (= name "dd") 'text (if (= name "dt") 'text
+      (if (= name "a") 'link (if (= name "button") 'button (if (= name "title") 'title (if (= name "textarea") 'textarea nil))))))))))))))))
+  (def emit
+    (fn (acc index kind text link value)
+      (if (if (= text "") (= kind 'field) #t)
+          (cons (list (+ index 1) kind text link value) acc)
+          acc)))
+  (def next-index (fn (acc) (if (= acc nil) 0 (car (car acc)))))
+  ; open: nil or (KIND LINK-OR-NAME), buf: the text gathered inside it,
+  ; outer: the container a link interrupted, skip: a tag whose content is
+  ; skipped (script, style, select), title: the page's.
+  (def build
+    (fn (tokens acc open buf outer skip title form)
+      (if (= tokens nil)
+          (list (rev acc nil) title form)
+          (let ((token (car tokens)) (rest (cdr tokens)))
+            (if (= (car token) 'text)
+                (if (= skip nil)
+                    (if (= open nil)
+                        (build rest (emit acc (next-index acc) 'text (tidy (unescape (car (cdr token)))) nil nil) open buf outer skip title form)
+                        (build rest acc open (text-concat buf (car (cdr token))) outer skip title form))
+                    (build rest acc open buf outer skip title form))
+            (if (= (car token) 'tag)
+                (let ((name (car (cdr token))) (attrs (car (cdr (cdr token)))))
+                  (if (= skip nil)
+                      (if (if (= name "script") #t (if (= name "style") #t (= name "select")))
+                          (build rest acc open buf outer name title form)
+                      (if (= name "form")
+                          (build rest acc open buf outer skip title (attr-or attrs "action" ""))
+                      (if (= name "br")
+                          (build rest acc open (text-concat buf " ") outer skip title form)
+                      (if (= name "input")
+                          (let ((type (attr-or attrs "type" "text")))
+                            (if (= type "submit")
+                                (build rest (emit acc (next-index acc) 'button (attr-or attrs "value" "Submit") nil nil) open buf outer skip title form)
+                            (if (= type "hidden")
+                                (build rest acc open buf outer skip title form)
+                                (build rest (emit acc (next-index acc) 'field (attr-or attrs "name" "field") nil (unescape (attr-or attrs "value" ""))) open buf outer skip title form))))
+                      (if (= name "a")
+                          (if (= open nil)
+                              (build rest acc (list 'link (attr-or attrs "href" "")) "" nil skip title form)
+                              (build rest (flush acc open buf) (list 'link (attr-or attrs "href" "")) "" open skip title form))
+                      (let ((kind (kind-of name)))
+                        (if (= kind nil)
+                            (build rest acc open buf outer skip title form)
+                            (build rest (flush acc open buf) (list kind (attr-or attrs "name" "")) "" nil skip title form))))))))
+                      (build rest acc open buf outer skip title form)))
+            (if (= (car token) 'close)
+                (let ((name (car (cdr token))))
+                  (if (= skip nil)
+                      (if (= open nil)
+                          (build rest acc open buf outer skip title form)
+                          (if (= (kind-of name) (car open))
+                              (if (= (car open) 'title)
+                                  (build rest acc nil "" nil skip (tidy (unescape buf)) form)
+                              (if (= (car open) 'link)
+                                  (build rest (emit acc (next-index acc) 'link (tidy (unescape buf)) (car (cdr open)) nil) outer "" nil skip title form)
+                              (if (= (car open) 'textarea)
+                                  (build rest (emit acc (next-index acc) 'field (car (cdr open)) nil (tidy (unescape buf))) nil "" nil skip title form)
+                                  (build rest (emit acc (next-index acc) (car open) (tidy (unescape buf)) nil nil) nil "" nil skip title form))))
+                              (build rest acc open buf outer skip title form)))
+                      (if (= name skip)
+                          (build rest acc open buf outer nil title form)
+                          (build rest acc open buf outer skip title form))))
+                (build rest acc open buf outer skip title form))))))))
+  ; A container's text so far becomes an element when a link interrupts it.
+  (def flush
+    (fn (acc open buf)
+      (if (= open nil) acc (if (= (car open) 'text) (emit acc (next-index acc) 'text (tidy (unescape buf)) nil nil) acc))))
+
+  ; --- the page
+  (def browse-url nil)
+  (def browse-title "")
+  (def browse-elements nil)
+  (def browse-form nil)
+  (def browse-history nil)
+  (def browse-last "opened nothing")
+  (def loader nil)
+  (def browse-use (fn (read) (def loader read)))
+  (def browse-parse
+    (fn (html url)
+      (let ((built (build (tokenize html) nil nil "" nil nil "" nil)))
+        (begin
+          (def browse-url url)
+          (def browse-elements (car built))
+          (def browse-title (car (cdr built)))
+          (def browse-form (car (cdr (cdr built))))
+          (len browse-elements 0)))))
+  (def load
+    (fn (url)
+      (if (= loader nil)
+          (signal 'browse/no-loader "browse-use a loader first" url)
+          (let ((html (with-handler (* problem) nil (loader url))))
+            (if (text? html) html (signal 'browse/not-found "no page at" url))))))
+  (def show-page (fn (url note) (begin (browse-parse (load url) url) (def browse-last note) (len browse-elements 0))))
+  (def open-page
+    (fn (url note)
+      (let ((html (load url)))
+        (begin
+          (if (= browse-url nil) nil (def browse-history (cons browse-url browse-history)))
+          (browse-parse html url)
+          (def browse-last note)
+          (len browse-elements 0)))))
+  (def element
+    (fn (n kind)
+      (let ((found (find-element browse-elements n)))
+        (if (= found nil)
+            (signal 'browse/no-element "no such element" n)
+            (if (= (car (cdr found)) kind) found (signal 'browse/wrong-kind "the element is not of that kind" n))))))
+  (def find-element (fn (elements n) (if (= elements nil) nil (if (= (car (car elements)) n) (car elements) (find-element (cdr elements) n)))))
+  (def browse-open (fn (path) (open-page (resolve (if (= browse-url nil) "/" browse-url) path) (text-concat "open " path))))
+  (def browse-link
+    (fn (n)
+      (let ((link (element n 'link)))
+        (open-page (resolve browse-url (nth link 3)) (text-concat "link " (text-concat (int->text n) (text-concat " -> " (nth link 3))))))))
+  (def fill-at
+    (fn (elements n text)
+      (if (= elements nil) nil
+          (cons (if (= (car (car elements)) n)
+                    (list n 'field (nth (car elements) 2) nil text)
+                    (car elements))
+                (fill-at (cdr elements) n text)))))
+  (def browse-fill
+    (fn (n text)
+      (let ((field (element n 'field)))
+        (begin
+          (def browse-elements (fill-at browse-elements n text))
+          (def browse-last (text-concat "fill " (text-concat (int->text n) (text-concat " " (nth field 2)))))
+          text))))
+  (def query-of
+    (fn (elements acc)
+      (if (= elements nil) acc
+          (query-of (cdr elements)
+                    (if (= (car (cdr (car elements))) 'field)
+                        (text-concat acc (text-concat (if (= acc "") "" "&") (text-concat (nth (car elements) 2) (text-concat "=" (nth (car elements) 4)))))
+                        acc)))))
+  (def browse-submit
+    (fn ()
+      (if (= browse-form nil)
+          (signal 'browse/no-form "the page has no form" browse-url)
+          (let ((target (text-concat (if (= browse-form "") browse-url browse-form) (text-concat "?" (query-of browse-elements "")))))
+            (open-page (resolve browse-url (if (= browse-form "") browse-url browse-form)) (text-concat "submit " target))))))
+  (def browse-back
+    (fn ()
+      (if (= browse-history nil)
+          (signal 'browse/no-history "nothing to go back to" browse-url)
+          (let ((previous (car browse-history)))
+            (begin
+              (def browse-history (cdr browse-history))
+              (show-page previous (text-concat "back to " previous)))))))
+
+  ; --- what the page reads as
+  (def line-of
+    (fn (e)
+      (let ((n (int->text (car e))) (kind (car (cdr e))) (text (nth e 2)))
+        (if (= kind 'link) (text-concat n (text-concat " link " (text-concat text (text-concat " -> " (nth e 3)))))
+        (if (= kind 'field) (text-concat n (text-concat " field " (text-concat text (text-concat " = \"" (text-concat (nth e 4) "\"")))))
+        (if (= kind 'heading) (text-concat n (text-concat " heading " text))
+        (if (= kind 'button) (text-concat n (text-concat " button " text))
+            (text-concat n (text-concat " text " text)))))))))
+  (def lines-of (fn (elements acc) (if (= elements nil) acc (lines-of (cdr elements) (text-concat acc (text-concat "\n" (line-of (car elements))))))))
+  (def browse-tree
+    (fn ()
+      (lines-of browse-elements
+        (text-concat "page: " (text-concat browse-title (text-concat " (" (text-concat (if (= browse-url nil) "" browse-url)
+          (text-concat ")" (if (= browse-form nil) "" (text-concat " form: " (if (= browse-form "") "this page" browse-form)))))))))))
+  (def count-kind (fn (elements kind n) (if (= elements nil) n (count-kind (cdr elements) kind (if (= (car (cdr (car elements))) kind) (+ n 1) n)))))
+  ; The page as data: (URL TITLE ELEMENTS FORM-ACTION HISTORY).
+  (def browse-page (fn () (list browse-url browse-title browse-elements browse-form browse-history)))
+  (def browse-state
+    (fn ()
+      (text-concat "browse: " (text-concat browse-title (text-concat " | " (text-concat (if (= browse-url nil) "" browse-url)
+        (text-concat " | " (text-concat (int->text (len browse-elements 0)) (text-concat " elements, "
+          (text-concat (int->text (count-kind browse-elements 'link 0)) (text-concat " links, "
+            (text-concat (int->text (count-kind browse-elements 'field 0)) (text-concat " fields | last: " browse-last)))))))))))))
+
+  ; --- the agent
+  (def options-of
+    (fn (elements acc)
+      (if (= elements nil) acc
+          (let ((e (car elements)))
+            (options-of (cdr elements)
+              (if (= (car (cdr e)) 'link)
+                  (cons (list (text-concat "link-" (int->text (car e))) (text-concat (nth e 2) (text-concat " -> " (nth e 3)))) acc)
+              (if (= (car (cdr e)) 'field)
+                  (cons (list (text-concat "fill-" (int->text (car e))) (text-concat "fill the field " (nth e 2))) acc)
+                  acc)))))))
+  (def browse-questions
+    (fn (task)
+      (let ((actions (rev (options-of browse-elements nil) nil)))
+        (let ((with-form (if (= browse-form nil) actions (append1 actions (list "submit" "submit the form with its fields as filled"))))
+              (filled (quoted-part task)))
+          (let ((with-back (if (= browse-history nil) with-form (append1 with-form (list "back" "go back to the previous page")))))
+            (judgment-request
+              (list (list "task" task) (list "page" (browse-tree)) (list "fills_with" filled) (list "history" browse-last))
+              (list (cons 'choice (cons "act" (cons "The next action for the task on this page" (append1 with-back (list "done" "the task is complete, or nothing here advances it")))))
+                    (list 'noul "done" "Is the task complete, with what this page shows?" "complete" "not yet"))))))))
+  (def append1 (fn (values item) (if (= values nil) (list item) (cons (car values) (append1 (cdr values) item)))))
+  (def browse-decide
+    (fn (line)
+      (let ((answers (judgment-parse line)))
+        (let ((done (answer answers "done")) (act (answer answers "act")))
+          (if (if (= done nil) #f (< 500 (answer-value done)))
+              "done"
+              (if (= act nil) "done" (if (< (answer-confidence act) 100) "done" (answer-value act))))))))
+  (def browse-act
+    (fn (action task)
+      (if (starts-with? action "link-")
+          (browse-link (read-int (text-slice action 5 (text-bytes action))))
+      (if (starts-with? action "fill-")
+          (browse-fill (read-int (text-slice action 5 (text-bytes action))) (quoted-part task))
+      (if (= action "submit") (browse-submit)
+      (if (= action "back") (browse-back)
+      (if (= action "done") nil
+          (signal 'browse/unknown-action "not an action" action))))))))
+  (def drive-loop
+    (fn (task steps i ask say)
+      (if (< steps i)
+          (begin (say (text-concat "browse: drove " (text-concat (int->text steps) " steps"))) 'drove)
+          (begin
+            (say (browse-tree))
+            (let ((line (ask (browse-questions task))))
+              (let ((action (browse-decide line)))
+                (begin
+                  (say (text-concat "browse: step " (text-concat (int->text i) (text-concat " do " (text-concat action (text-concat " reason " line))))))
+                  (if (= action "done")
+                      (begin (say (text-concat "browse: done after " (text-concat (int->text i) " steps"))) 'done)
+                      (begin
+                        (with-handler (* problem)
+                          (say (text-concat "browse: " (text-concat action (text-concat " failed: " (get problem 'message)))))
+                          (browse-act action task))
+                        (say (browse-state))
+                        (drive-loop task steps (+ i 1) ask say))))))))))
+  (def browse-drive (fn (task steps ask say) (drive-loop task steps 1 ask say))))

@@ -1985,6 +1985,32 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.95
+
+- **The browser reaches only the data region.** Pages are files the
+  operator installed with the image, read through `file-read` under the
+  process's `file/read` capability; there is no socket to open, and a
+  link to a page that is not there is a signal, not a request anywhere.
+  A fetch through the host would be a new channel and is not here.
+- **A page is untrusted text, and the tree is what the judge sees.** The
+  parser turns any bytes into elements without executing anything —
+  scripts and styles are skipped, entities decoded, searches byte-wise —
+  and a page can say what it likes in its headings and link texts; the
+  judge chooses among the page's own links by their texts, so a page can
+  steer a judge as it can steer a reader. The model cannot type: a field
+  takes the task's quoted phrase and nothing the page or the model wrote.
+- **The whole request is the process's.** Through the bridge, a browse
+  request carries the task and the page as the program composed them,
+  and the bridge adds nothing; the answer is typed to the process's
+  console as the operator could type it. The bridge writes the task into
+  the agent's script and installs it: the script is the operator's, in
+  the data region, read-only to the OS.
+- **A page can exhaust the budget.** Parsing is byte by byte in Agel; a
+  large page is a transaction that runs out of steps and fails, not a
+  hang. The example pages are hundreds of bytes.
+- **Not claimed:** any HTML beyond the subset, a window, a network, or
+  success on any site but the example.
+
 ## v0.2.94
 
 - **A recorded episode leaves the machine when judged.** `--judge-dataset`
