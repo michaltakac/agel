@@ -2224,3 +2224,222 @@
                 (button 'agent "Ask Agel"
                   (intent 'agent/converse 'system-agent nil 'model/infer))))
             72))))))
+
+; Typed judgments. A System One model (TypeSafe's Jev is the first) answers
+; typed questions about a state — a choice among named options, a yes/no
+; probability, a position on ordered levels — with probabilities, in one
+; pass, and never writes prose. This module is that contract in Agel: a
+; request is text the host reads as a form, an answer is one line of
+; integers in thousandths, and policy stays in the program that asks. The
+; same line comes from the hosted model (`(model-request 'jev ...)`) as
+; from `judge-locally`, a judge written here in Agel that weighs rules
+; against the state: the interface without the network, and the place a
+; learned model of Agel's own can later stand.
+;
+; Questions are data, names are text:
+;   (choice "act" "Best next move" "forward" ("fire" "shoot"))
+;   (noul "foe" "Is an enemy in view?" "one is" "none is")
+;   (score "risk" "How dangerous?" "safe" "wary" "lethal")
+; An answer line, one group per question in request order:
+;   ID noul YES | ID choice COUNT OPTION CONFIDENCE P... | ID score COUNT SCORE CONFIDENCE P...
+; and parsed, a list of ("id" kind value confidence probabilities):
+;   ("act" choice "fire" 330 (320 15 220 10 440 0))
+;   ("foe" noul 980 nil nil)
+;   ("risk" score 740 600 (270 730 0))
+(module agel/judgment
+  (export judgment-request judgment-parse judge-locally
+          answer answer-kind answer-value answer-confidence answer-probabilities
+          int->text read-int tokens)
+
+  (def rev (fn (values acc) (if (= values nil) acc (rev (cdr values) (cons (car values) acc)))))
+  (def len (fn (values n) (if (= values nil) n (len (cdr values) (+ n 1)))))
+  (def nth (fn (values n) (if (= n 0) (car values) (nth (cdr values) (- n 1)))))
+  (def drop (fn (values n) (if (= n 0) values (drop (cdr values) (- n 1)))))
+  (def take (fn (values n) (if (= n 0) nil (cons (car values) (take (cdr values) (- n 1))))))
+  (def text? (fn (value) (= (type-of value) 'string)))
+
+  ; A nonnegative integer as decimal text.
+  (def digit (fn (d) (text-slice "0123456789" d (+ d 1))))
+  (def int->text
+    (fn (n)
+      (if (< n 0)
+          (text-concat "-" (int->text (- 0 n)))
+          (if (< n 10) (digit n) (text-concat (int->text (/ n 10)) (digit (- n (* 10 (/ n 10)))))))))
+
+  ; An integer from decimal text, an optional leading minus; anything else
+  ; is a syntax signal.
+  (def read-digits
+    (fn (text i n acc)
+      (if (= i n)
+          acc
+          (let ((b (text-byte text i)))
+            (if (if (< 47 b) (< b 58) #f)
+                (read-digits text (+ i 1) n (+ (* acc 10) (- b 48)))
+                (signal 'judgment/syntax "not a number" text))))))
+  (def read-int
+    (fn (text)
+      (if (= (text-bytes text) 0)
+          (signal 'judgment/syntax "not a number" text)
+          (if (= (text-byte text 0) 45)
+              (if (= (text-bytes text) 1)
+                  (signal 'judgment/syntax "not a number" text)
+                  (- 0 (read-digits text 1 (text-bytes text) 0)))
+              (read-digits text 0 (text-bytes text) 0)))))
+
+  ; The space-separated words of a line, in order; runs of spaces separate.
+  (def scan
+    (fn (text i start n acc)
+      (if (= i n)
+          (rev (if (= start i) acc (cons (text-slice text start i) acc)) nil)
+          (if (= (text-byte text i) 32)
+              (scan text (+ i 1) (+ i 1) n (if (= start i) acc (cons (text-slice text start i) acc)))
+              (scan text (+ i 1) start n acc)))))
+  (def tokens (fn (text) (scan text 0 0 (text-bytes text) nil)))
+
+  ; Text quoted as the reader reads it back.
+  (def escape
+    (fn (b)
+      (if (= b 34) "\\\"" (if (= b 92) "\\\\" (if (= b 10) "\\n" (if (= b 13) "\\r" (if (= b 9) "\\t" nil)))))))
+  (def quote-from
+    (fn (text i start n acc)
+      (if (= i n)
+          (text-concat acc (text-slice text start n))
+          (let ((special (escape (text-byte text i))))
+            (if (= special nil)
+                (quote-from text (+ i 1) start n acc)
+                (quote-from text (+ i 1) (+ i 1) n (text-concat (text-concat acc (text-slice text start i)) special)))))))
+  (def quoted (fn (text) (text-concat "\"" (text-concat (quote-from text 0 0 (text-bytes text) "") "\""))))
+
+  (def join-quoted
+    (fn (texts acc)
+      (if (= texts nil) acc (join-quoted (cdr texts) (text-concat acc (text-concat " " (quoted (car texts))))))))
+  (def option-text
+    (fn (option)
+      (if (text? option)
+          (quoted option)
+          (text-concat "(" (text-concat (quoted (car option)) (text-concat " " (text-concat (quoted (car (cdr option))) ")")))))))
+  (def join-options
+    (fn (options acc)
+      (if (= options nil) acc (join-options (cdr options) (text-concat acc (text-concat " " (option-text (car options))))))))
+  (def question-text
+    (fn (question)
+      (let ((kind (car question))
+            (head (text-concat (quoted (car (cdr question))) (text-concat " " (quoted (car (cdr (cdr question)))))))
+            (rest (cdr (cdr (cdr question)))))
+        (if (= kind 'noul) (text-concat "(noul " (text-concat (join-quoted rest head) ")"))
+        (if (= kind 'choice) (text-concat "(choice " (text-concat (join-options rest head) ")"))
+        (if (= kind 'score) (text-concat "(score " (text-concat (join-quoted rest head) ")"))
+        (signal 'judgment/question "a question is noul, choice or score" question)))))))
+  (def join-questions
+    (fn (questions acc)
+      (if (= questions nil) acc (join-questions (cdr questions) (text-concat acc (text-concat " " (question-text (car questions))))))))
+  (def field-text
+    (fn (field) (text-concat "(" (text-concat (quoted (car field)) (text-concat " " (text-concat (quoted (car (cdr field))) ")"))))))
+  (def join-fields
+    (fn (fields acc)
+      (if (= fields nil) acc (join-fields (cdr fields) (text-concat acc (text-concat " " (field-text (car fields))))))))
+  (def state-text
+    (fn (state)
+      (if (= state nil) ""
+      (if (text? state) (text-concat " " (quoted state))
+      (text-concat " (state" (text-concat (join-fields state "") ")"))))))
+
+  ; The request the host reads: `(judge STATE QUESTION...)`; the state is
+  ; text, a list of ("name" "text") fields, or nil when the host adds it.
+  (def judgment-request
+    (fn (state questions)
+      (text-concat "(judge" (text-concat (state-text state) (text-concat (join-questions questions "") ")")))))
+
+  ; An answer line read into groups.
+  (def read-ints (fn (words n) (if (= n 0) nil (cons (read-int (car words)) (read-ints (cdr words) (- n 1))))))
+  (def groups
+    (fn (words acc)
+      (if (= words nil)
+          (rev acc nil)
+          (let ((id (car words)) (kind (car (cdr words))) (rest (cdr (cdr words))))
+            (if (= kind "noul")
+                (groups (cdr rest) (cons (list id 'noul (read-int (car rest)) nil nil) acc))
+            (if (= kind "choice")
+                (let ((n (read-int (car rest))))
+                  (groups (drop rest (+ n 3))
+                          (cons (list id 'choice (nth rest 1) (read-int (nth rest 2)) (read-ints (drop rest 3) n)) acc)))
+            (if (= kind "score")
+                (let ((n (read-int (car rest))))
+                  (groups (drop rest (+ n 3))
+                          (cons (list id 'score (read-int (nth rest 1)) (read-int (nth rest 2)) (read-ints (drop rest 3) n)) acc)))
+                (signal 'judgment/syntax "an answer is noul, choice or score" kind))))))))
+  (def judgment-parse (fn (line) (groups (tokens line) nil)))
+
+  (def answer (fn (answers id) (if (= answers nil) nil (if (= (car (car answers)) id) (car answers) (answer (cdr answers) id)))))
+  (def answer-kind (fn (group) (nth group 1)))
+  (def answer-value (fn (group) (nth group 2)))
+  (def answer-confidence (fn (group) (nth group 3)))
+  (def answer-probabilities (fn (group) (nth group 4)))
+
+  ; The judge written in Agel. A rule is ("id" "option" WEIGHT "needle"):
+  ; when the state contains the needle, the option (a choice option, a
+  ; score level, or "yes"/"no" for a noul) gains the weight. Every option
+  ; starts at one, so a question no rule touches is answered evenly, with
+  ; no confidence; probabilities are the weights normalised to thousandths,
+  ; a confidence is the lead of the first over the second. It is rules,
+  ; not learning: as calibrated as the rules are, and replayable.
+  (def contains-from
+    (fn (text needle i last m)
+      (if (< last i) #f (if (= (text-slice text i (+ i m)) needle) #t (contains-from text needle (+ i 1) last m)))))
+  (def contains? (fn (text needle) (contains-from text needle 0 (- (text-bytes text) (text-bytes needle)) (text-bytes needle))))
+  (def flat-state
+    (fn (state)
+      (if (= state nil) ""
+      (if (text? state) state
+      (join-values state "")))))
+  (def join-values (fn (fields acc) (if (= fields nil) acc (join-values (cdr fields) (text-concat acc (text-concat (car (cdr (car fields))) "\n"))))))
+  (def option-name (fn (option) (if (text? option) option (car option))))
+  (def weight-of
+    (fn (rules text id option acc)
+      (if (= rules nil)
+          acc
+          (let ((rule (car rules)))
+            (weight-of (cdr rules) text id option
+                       (if (if (= (car rule) id) (if (= (nth rule 1) option) (contains? text (nth rule 3)) #f) #f)
+                           (+ acc (nth rule 2))
+                           acc))))))
+  (def weights (fn (rules text id options) (if (= options nil) nil (cons (weight-of rules text id (car options) 1) (weights rules text id (cdr options))))))
+  (def sum (fn (values acc) (if (= values nil) acc (sum (cdr values) (+ acc (car values))))))
+  (def scaled (fn (ws total) (if (= ws nil) nil (cons (/ (* 1000 (car ws)) total) (scaled (cdr ws) total)))))
+  (def best-index (fn (ps i best best-at) (if (= ps nil) best-at (if (< best (car ps)) (best-index (cdr ps) (+ i 1) (car ps) i) (best-index (cdr ps) (+ i 1) best best-at)))))
+  (def second-best (fn (ps skip i best) (if (= ps nil) best (second-best (cdr ps) skip (+ i 1) (if (= i skip) best (if (< best (car ps)) (car ps) best))))))
+  (def expected (fn (ps i acc) (if (= ps nil) acc (expected (cdr ps) (+ i 1) (+ acc (* i (car ps)))))))
+  (def join-ints (fn (values acc) (if (= values nil) acc (join-ints (cdr values) (text-concat acc (text-concat " " (int->text (car values))))))))
+  (def distribution
+    (fn (rules text id options)
+      (let ((ws (weights rules text id options))) (scaled ws (sum ws 0)))))
+  (def confidence-of (fn (ps) (let ((top (best-index ps 0 -1 0))) (- (nth ps top) (second-best ps top 0 0)))))
+  (def judge-question
+    (fn (rules text question)
+      (let ((kind (car question)) (id (car (cdr question))) (rest (cdr (cdr (cdr question)))))
+        (if (= kind 'noul)
+            (let ((ps (distribution rules text id (list "yes" "no"))))
+              (text-concat (quoted-id id) (text-concat " noul " (int->text (car ps)))))
+        (if (= kind 'choice)
+            (let ((names (map-names rest)) (ps (distribution rules text id (map-names rest))))
+              (text-concat (quoted-id id)
+                (text-concat " choice " (text-concat (int->text (len names 0))
+                  (text-concat " " (text-concat (nth names (best-index ps 0 -1 0))
+                    (text-concat " " (text-concat (int->text (confidence-of ps)) (join-ints ps "")))))))))
+        (if (= kind 'score)
+            (let ((ps (distribution rules text id rest)))
+              (text-concat (quoted-id id)
+                (text-concat " score " (text-concat (int->text (len rest 0))
+                  (text-concat " " (text-concat (int->text (expected ps 0 0))
+                    (text-concat " " (text-concat (int->text (confidence-of ps)) (join-ints ps "")))))))))
+        (signal 'judgment/question "a question is noul, choice or score" question)))))))
+  (def quoted-id (fn (id) id))
+  (def map-names (fn (options) (if (= options nil) nil (cons (option-name (car options)) (map-names (cdr options))))))
+  (def judge-all
+    (fn (rules text questions acc)
+      (if (= questions nil)
+          acc
+          (judge-all rules text (cdr questions)
+                     (text-concat acc (text-concat (if (= acc "") "" " ") (judge-question rules text (car questions))))))))
+  (def judge-locally
+    (fn (state questions rules) (judge-all rules (flat-state state) questions ""))))

@@ -2446,6 +2446,12 @@ const PROGRAMS: &[Program] = &[
         source: include_bytes!("../../desktop/doom-agent-model.agel"),
         ready: b"DOOM MODEL AGENT READY - :PLAY STEPS",
     },
+    Program {
+        name: b"doom-agent-judge",
+        prefix: b"dj-",
+        source: include_bytes!("../../desktop/doom-agent-judge.agel"),
+        ready: b"DOOM JUDGE AGENT READY - :PLAY STEPS",
+    },
 ];
 
 /// How long the play loop holds a step's keys, in passes of the run, unless

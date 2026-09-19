@@ -160,6 +160,30 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         reply += until_text(machine, b"PROCESS ENDED", 30) + quiet(machine)
         assert "agel: end of input at revision 3" in reply, reply
         assert "process agel exited with status 0" in reply, reply
+        # A typed judgment from inside the OS: `agel/judgment` prints the
+        # request, `model-request` sends it out on the process's console as
+        # a block and waits for the reply line the desktop gives the program
+        # (here typed by this harness, as the host bridge would); the judge
+        # written in Agel answers on the same line without leaving the
+        # process. Policy — reading the answer — is the program's.
+        check(machine, '(file-write "judge.agel" "(import agel/judgment)\\n(def questions (list (quote (choice \\"act\\" \\"Best next move\\" \\"forward\\" \\"back\\" \\"fire\\")) (quote (noul \\"foe\\" \\"Is an enemy in view?\\"))))\\n")', "\r\n")
+        check(machine, '(file-append "judge.agel" "(def local (judgment-parse (judge-locally \\"an imp ahead\\" questions (list (list \\"act\\" \\"fire\\" 6 \\"imp\\") (list \\"foe\\" \\"yes\\" 8 \\"imp\\")))))\\n(answer-value (answer local \\"act\\"))\\n(answer-value (answer local \\"foe\\"))\\n")', "\r\n")
+        check(machine, '(file-append "judge.agel" "(def reply (model-request (judgment-request \\"an imp ahead\\" questions)))\\n(def answers (judgment-parse reply))\\n")', "\r\n")
+        check(machine, '(file-append "judge.agel" "(answer-value (answer answers \\"act\\"))\\n(answer-confidence (answer answers \\"act\\"))\\n(answer-value (answer answers \\"foe\\"))\\n")', "\r\n")
+        # The file is one transaction: its values print once it commits,
+        # which is after the reply arrives; while the request block is out,
+        # the process is reading its console.
+        reply = check(machine, ":exec agel -- judge.agel", "agel: standard library installed", 600)
+        if "model-request end" not in reply:
+            reply += until_text(machine, b"model-request end", 600)
+        reply += quiet(machine, 1)
+        for wanted in ("model-request 1:", '(judge "an imp ahead" (choice "act" "Best next move" "forward" "back" "fire") (noul "foe" "Is an enemy in view?"))', "PROCESS READING"):
+            assert wanted in reply, (wanted, reply)
+        assert "=>" not in reply, reply
+        reply = check(machine, ":model-reply 1 act choice 3 back 400 200 600 200 foe noul 100", "LINE GIVEN TO THE PROGRAM")
+        reply += until_text(machine, b"exited with status", 120) + quiet(machine)
+        for wanted in ('=> "fire"', "=> 900", '=> "back"', "=> 400", "=> 100", "process agel exited with status 0"):
+            assert wanted in reply, (wanted, reply)
         # A kept world: with --world NAME the world is read from the file at
         # the start, as a delta over the freshly installed library, and
         # written back after every transaction; a second run has what the

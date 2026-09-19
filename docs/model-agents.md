@@ -101,6 +101,15 @@ outbox record, and `:dispatch` remains the irreversible gate. See
 [`agentic-fixed-points.md`](agentic-fixed-points.md) for the full cost and trust
 analysis.
 
+## Typed judgments (v0.2.91)
+
+A third kind of provider answers typed questions instead of writing text:
+`jev`, TypeSafe's System One model, enabled with `--enable-jev` and the
+key in `TYPESAFEAI_API_KEY`. Its prompt is a `(judge ...)` form and its
+result one line of integers in thousandths, read by the `agel/judgment`
+library; the same `model/infer` capability, outbox, `:dispatch` and
+`system/model-result` path carry it. See [`system-one.md`](system-one.md).
+
 ## Replay semantics
 
 Provider execution itself is never replayed. `ReplayInput::ClaimModel` records

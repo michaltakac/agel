@@ -401,6 +401,14 @@ promise.
   dynamic-call tags/arity and numeric operands. Returned closures and
   captures passed through tail calls retain their values; exhaustion exits
   113 and invalid calls/types exit 114. There is no collector yet.
+  `v0.2.91` adds typed judgments: a System One model (TypeSafe's Jev
+  first) as the `jev` provider behind the same `model/infer` boundary,
+  reached through `curl` in the audited process sandbox with the key on
+  its standard input; a request grammar and an answer line in thousandths;
+  the `agel/judgment` library with a rule-weighted judge written in Agel
+  on the same contract; `model-request` for programs on the OS, through
+  their own console; and the `doom-agent-judge` program with `agel-play
+  --policy jev`. No model runs on the OS, and no calibration is claimed.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

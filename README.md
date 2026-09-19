@@ -5,7 +5,7 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.90.** The Agel-written x86-64 backend now gives closures owned captures that survive returns and tail calls, checks closure allocation limits, and validates dynamic calls. Compiled programs retain deterministic IR fuel limits. The language and toolchain run inside the OS, which installs and executes their output. See [`docs/release-v0.2.90.md`](docs/release-v0.2.90.md) and [`docs/doom.md`](docs/doom.md). What is done, partial and open is in
+**Current release: v0.2.91.** Agel programs can now ask a System One model — TypeSafe's Jev first — typed questions and read calibrated answers as integers: a `jev` provider behind the existing `model/infer` boundary, an `agel/judgment` library with a judge written in Agel on the same contract, `model-request` for programs on the OS through their own console, and a DOOM agent whose policy gates on the model's confidence. See [`docs/release-v0.2.91.md`](docs/release-v0.2.91.md), [`docs/system-one.md`](docs/system-one.md) and [`docs/doom.md`](docs/doom.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 

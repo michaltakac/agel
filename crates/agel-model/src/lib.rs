@@ -7,14 +7,25 @@ use std::path::PathBuf;
 pub use agel_effects::ProcessLimits as CommandLimits;
 pub use agel_effects::{AuditOutcome, AuditRecord};
 
+pub mod systemone;
+pub use systemone::{Answer, JevProvider, Judgment, JudgmentRequest, Question, State};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderError {
     Io(String),
     TimedOut,
     OutputLimitExceeded,
-    Failed { code: Option<i32>, stderr: String },
+    Failed {
+        code: Option<i32>,
+        stderr: String,
+    },
     InvalidUtf8,
     UnknownProvider(String),
+    /// The request was not what the provider takes (a judgment provider
+    /// given prose, say); nothing was sent.
+    Rejected(String),
+    /// The provider answered, but not in the shape it promised.
+    Unexpected(String),
 }
 
 impl ProviderError {
@@ -26,6 +37,8 @@ impl ProviderError {
             Self::Failed { .. } => "provider/failed",
             Self::InvalidUtf8 => "provider/invalid-utf8",
             Self::UnknownProvider(_) => "provider/unknown",
+            Self::Rejected(_) => "provider/rejected",
+            Self::Unexpected(_) => "provider/unexpected",
         }
     }
 
@@ -52,6 +65,8 @@ impl fmt::Display for ProviderError {
             }
             Self::InvalidUtf8 => f.write_str("provider returned non-UTF-8 output"),
             Self::UnknownProvider(name) => write!(f, "provider is not enabled: {name}"),
+            Self::Rejected(reason) => write!(f, "provider rejected the request: {reason}"),
+            Self::Unexpected(reason) => write!(f, "provider answered unexpectedly: {reason}"),
         }
     }
 }
@@ -284,7 +299,7 @@ fn run_command(
         .map_err(|_| ProviderError::InvalidUtf8)
 }
 
-fn process_sandbox(
+pub(crate) fn process_sandbox(
     provider: &str,
     executable: &std::path::Path,
     limits: &CommandLimits,
@@ -317,7 +332,7 @@ fn process_sandbox(
     ])
 }
 
-fn provider_effect_error(error: EffectError) -> ProviderError {
+pub(crate) fn provider_effect_error(error: EffectError) -> ProviderError {
     match error {
         EffectError::TimedOut => ProviderError::TimedOut,
         EffectError::OutputLimitExceeded => ProviderError::OutputLimitExceeded,

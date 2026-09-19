@@ -5,7 +5,7 @@ use agel_core::{
 use agel_image::{Image, ImageSession, ImageStore};
 use agel_integrity::{encode_hex, Digest, SigningKey, VerifyingKey};
 use agel_model::{
-    ClaudeCodeProvider, CodexProvider, CommandLimits, ProviderError, ProviderRegistry,
+    ClaudeCodeProvider, CodexProvider, CommandLimits, JevProvider, ProviderError, ProviderRegistry,
 };
 use agel_verify::{Evidence, Proposal, TestCase, Verifier};
 use std::collections::BTreeMap;
@@ -22,6 +22,10 @@ struct CliConfig {
     claude_model: Option<String>,
     codex_model: Option<String>,
     claude_max_budget_usd: Option<String>,
+    jev: bool,
+    jev_model: Option<String>,
+    jev_url: Option<String>,
+    curl_bin: PathBuf,
     workspace: PathBuf,
     timeout: Duration,
     max_output_bytes: usize,
@@ -42,6 +46,10 @@ impl CliConfig {
             claude_model: None,
             codex_model: None,
             claude_max_budget_usd: None,
+            jev: false,
+            jev_model: None,
+            jev_url: None,
+            curl_bin: "curl".into(),
             workspace: std::env::current_dir().map_err(|error| error.to_string())?,
             timeout: Duration::from_secs(300),
             max_output_bytes: 1_048_576,
@@ -57,6 +65,7 @@ impl CliConfig {
                 "--help" | "-h" => return Ok(None),
                 "--enable-claude" => config.claude = true,
                 "--enable-codex" => config.codex = true,
+                "--enable-jev" => config.jev = true,
                 "--no-stdlib" => config.stdlib = false,
                 "--image" => config.image = Some(required_value(&mut arguments, &argument)?.into()),
                 "--signing-key" => {
@@ -83,6 +92,11 @@ impl CliConfig {
                 "--claude-max-budget-usd" => {
                     config.claude_max_budget_usd = Some(required_value(&mut arguments, &argument)?)
                 }
+                "--jev-model" => {
+                    config.jev_model = Some(required_value(&mut arguments, &argument)?)
+                }
+                "--jev-url" => config.jev_url = Some(required_value(&mut arguments, &argument)?),
+                "--curl-bin" => config.curl_bin = required_value(&mut arguments, &argument)?.into(),
                 "--model-workspace" => {
                     config.workspace = required_value(&mut arguments, &argument)?.into()
                 }
@@ -511,13 +525,35 @@ fn main() -> io::Result<()> {
             .map_err(io::Error::other)?;
     }
     if config.codex {
-        let mut provider = CodexProvider::new(&config.codex_bin, limits);
+        let mut provider = CodexProvider::new(&config.codex_bin, limits.clone());
         if let Some(model) = config.codex_model {
             provider = provider.with_model(model);
         }
         providers.register(provider);
         runtime
             .grant("model/infer", "codex")
+            .map_err(io::Error::other)?;
+    }
+    if config.jev {
+        // The key comes from the environment the operator started this
+        // process in, never from an argument, so it is not in the process
+        // list; the provider hands it to curl on standard input.
+        let key = std::env::var(agel_model::systemone::KEY_VARIABLE).map_err(|_| {
+            io::Error::other(format!(
+                "--enable-jev needs {} in the environment",
+                agel_model::systemone::KEY_VARIABLE
+            ))
+        })?;
+        let mut provider = JevProvider::new(&config.curl_bin, key, limits);
+        if let Some(model) = config.jev_model {
+            provider = provider.with_model(model);
+        }
+        if let Some(url) = config.jev_url {
+            provider = provider.with_url(url);
+        }
+        providers.register(provider);
+        runtime
+            .grant("model/infer", "jev")
             .map_err(io::Error::other)?;
     }
     let stdin = io::stdin();
@@ -554,7 +590,9 @@ fn main() -> io::Result<()> {
         );
     }
     if providers.names().next().is_none() {
-        println!("Model providers disabled; opt in with --enable-claude or --enable-codex.");
+        println!(
+            "Model providers disabled; opt in with --enable-claude, --enable-codex or --enable-jev."
+        );
     } else {
         println!(
             "Enabled model providers: {} (invocation still requires :dispatch)",
@@ -909,6 +947,13 @@ fn print_usage() {
     println!("  --keygen FILE                write a fresh signing seed to FILE, print its public key, exit");
     println!("  --enable-claude              enable restricted Claude Code dispatch");
     println!("  --enable-codex               enable read-only Codex dispatch");
+    println!("  --enable-jev                 enable typed judgments from TypeSafe's System One");
+    println!(
+        "                               endpoint (curl; TYPESAFEAI_API_KEY in the environment)"
+    );
+    println!("  --jev-model NAME             System One model (default jev-latest)");
+    println!("  --jev-url URL                a System One endpoint other than TypeSafe's");
+    println!("  --curl-bin PATH              curl executable for the jev provider");
     println!("  --no-stdlib                  start with only the postcard-sized core");
     println!("  --claude-bin PATH            Claude executable (default: claude)");
     println!("  --codex-bin PATH             Codex executable (default: codex)");
@@ -990,6 +1035,7 @@ mod tests {
         let config = CliConfig::from_args(Vec::new()).unwrap().unwrap();
         assert!(!config.claude);
         assert!(!config.codex);
+        assert!(!config.jev);
         assert!(config.image.is_none());
     }
 

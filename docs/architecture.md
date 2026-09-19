@@ -513,6 +513,15 @@ Each rung must be runnable and differentially testable against the rung below:
    Calls check their tag/arity and allocations check the complete record
    against a per-executable arena budget. Captures survive returns and frame
    reuse; the immutable integer subset needs no shared mutable environment.
+85. **Typed judgments (v0.2.91):** a System One model is a provider like
+   the text providers — `jev` behind `model/infer`, `curl` in the audited
+   process sandbox, the key on its standard input — with a request grammar
+   and an answer line of integers in thousandths that a program reads with
+   text words. `agel/judgment` prints requests, reads answers and judges
+   locally by rules on the same contract; `model-request` carries a
+   request through a process's own console on the OS; the DOOM judge
+   program decides in code from the model's confidence. See
+   [`system-one.md`](system-one.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

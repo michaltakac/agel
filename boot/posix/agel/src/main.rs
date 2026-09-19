@@ -281,12 +281,13 @@ fn pulse() {
 
 /// The words the process gives the language: the desktop's vocabulary for
 /// its own evaluator (`file-read`, `file-write`, `file-append`,
-/// `file-list`, `clock`, `console-log`, `exec`), each over the process
-/// protocol and each behind a capability kind the evaluator checks before
-/// the word runs — the evaluation's own set holds every kind, an agent
-/// holds what it was spawned with — and `print-form`, the printed form of
-/// a value as text, pure, so a program can write source the reader reads.
-static HOST: [HostWord; 8] = [
+/// `file-list`, `clock`, `console-log`, `exec`, `model-request`), each over
+/// the process protocol and each behind a capability kind the evaluator
+/// checks before the word runs — the evaluation's own set holds every
+/// kind, an agent holds what it was spawned with — and `print-form`, the
+/// printed form of a value as text, pure, so a program can write source
+/// the reader reads.
+static HOST: [HostWord; 9] = [
     HostWord {
         name: "file-read",
         capability: "file/read",
@@ -323,6 +324,11 @@ static HOST: [HostWord; 8] = [
         call: exec,
     },
     HostWord {
+        name: "model-request",
+        capability: "model/infer",
+        call: model_request,
+    },
+    HostWord {
         name: "print-form",
         capability: "",
         call: print_form,
@@ -332,12 +338,13 @@ static HOST: [HostWord; 8] = [
 /// The capability kinds the words need, issued to the evaluation for
 /// every scope: the namespace `:exec` granted is the bound on what they
 /// can name, and an agent gets only what it is spawned with.
-const CAPABILITY_KINDS: [&str; 5] = [
+const CAPABILITY_KINDS: [&str; 6] = [
     "file/read",
     "file/write",
     "clock/read",
     "console/write",
     "process/run",
+    "model/infer",
 ];
 
 /// The most bytes `file-read` answers.
@@ -520,6 +527,41 @@ fn exec(arguments: &[Value]) -> Result<Value, HostError> {
 
 fn say(descriptor: u64, text: &str) {
     process().write(descriptor, text.as_bytes());
+}
+
+/// Requests made so far, numbering the next.
+static REQUESTS: AtomicUsize = AtomicUsize::new(0);
+
+/// Ask whoever is on the other side of the console — the desktop's
+/// operator, or a bridge on the host that carries the text to a model —
+/// and wait for the answer. The request goes out on the console as a
+/// block, `model-request N:` through `model-request end`; the answer comes
+/// back as the console line `:model-reply N TEXT` given to the program
+/// while it reads, and any other line meanwhile is dropped. End of input
+/// is a `model/unavailable` signal. The Unix shape: the model is a filter
+/// on the process's own console, and the program never learns which one.
+fn model_request(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("model-request", arguments, 1)?;
+    let text = text_argument("model-request", arguments, 0)?;
+    let number = REQUESTS.fetch_add(1, Ordering::Relaxed) + 1;
+    say(
+        1,
+        &format!("model-request {number}:\n{text}\nmodel-request end\n"),
+    );
+    let prefix = format!(":model-reply {number} ");
+    loop {
+        let Some(line) = console_line() else {
+            return Err(fail(
+                "model/unavailable",
+                format!("model-request {number}: the console ended before a reply"),
+            ));
+        };
+        if let Some(reply) = line.strip_prefix(prefix.as_bytes()) {
+            return Ok(Value::String(String::from(
+                String::from_utf8_lossy(reply).trim(),
+            )));
+        }
+    }
 }
 
 extern "C" fn main() -> ! {
@@ -733,6 +775,39 @@ fn namespace_path_bytes(path: &[u8]) -> &[u8] {
 /// The most bytes of one typed line the session keeps.
 const LINE_BYTES: usize = 4096;
 
+/// Bytes read from the console and not yet given out as lines. One
+/// reader at a time: the session between forms, a request while it waits.
+static mut INPUT: Vec<u8> = Vec::new();
+
+/// The next line from the console without its newline, or `None` at end
+/// of input; a line longer than the session keeps is dropped.
+fn console_line() -> Option<Vec<u8>> {
+    let process = process();
+    // Safety: the process is single-threaded and the buffer is used only
+    // through this function.
+    let pending = unsafe { &mut *core::ptr::addr_of_mut!(INPUT) };
+    let mut block = [0_u8; abi::BLOCK_BYTES];
+    loop {
+        if let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = pending.drain(..=end).collect();
+            return Some(line[..end].to_vec());
+        }
+        if pending.len() > LINE_BYTES {
+            say(2, "agel: a line longer than the session keeps\n");
+            pending.clear();
+        }
+        let count = process.read(0, &mut block);
+        if count < 0 {
+            process.report(2, b"agel: console: error ", -count, b"\n");
+            process.exit(1);
+        }
+        if count == 0 {
+            return None;
+        }
+        pending.extend_from_slice(&block[..count as usize]);
+    }
+}
+
 /// A session: lines from the console, each one transaction in the same
 /// world, values printed as they commit, an error leaving the world as it
 /// was; over at the end of input, with the world's revision as the report.
@@ -742,43 +817,28 @@ fn session(world: &mut World, options: &EvaluationOptions, keeper: Option<&Keepe
         1,
         "agel: session; each line is a transaction, :eof ends it\n",
     );
-    let mut pending: Vec<u8> = Vec::new();
-    let mut block = [0_u8; abi::BLOCK_BYTES];
     loop {
-        let count = process.read(0, &mut block);
-        if count < 0 {
-            process.report(2, b"agel: console: error ", -count, b"\n");
-            process.exit(1);
-        }
-        if count == 0 {
+        let Some(line) = console_line() else {
             say(
                 1,
                 &format!("agel: end of input at revision {}\n", world.revision()),
             );
             process.exit(0);
+        };
+        let line = String::from_utf8_lossy(&line).into_owned();
+        if line.trim().is_empty() {
+            continue;
         }
-        pending.extend_from_slice(&block[..count as usize]);
-        while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = pending.drain(..=end).collect();
-            let line = String::from_utf8_lossy(&line[..end]).into_owned();
-            if line.trim().is_empty() {
-                continue;
-            }
-            match world.evaluate_with(&line, options) {
-                Ok(commit) => {
-                    for value in &commit.values {
-                        say(1, &format!("=> {value}\n"));
-                    }
-                    if let Some(keeper) = keeper {
-                        keeper.save(world);
-                    }
+        match world.evaluate_with(&line, options) {
+            Ok(commit) => {
+                for value in &commit.values {
+                    say(1, &format!("=> {value}\n"));
                 }
-                Err(error) => say(2, &format!("agel: error: {error}\n")),
+                if let Some(keeper) = keeper {
+                    keeper.save(world);
+                }
             }
-        }
-        if pending.len() > LINE_BYTES {
-            say(2, "agel: a line longer than the session keeps\n");
-            pending.clear();
+            Err(error) => say(2, &format!("agel: error: {error}\n")),
         }
     }
 }

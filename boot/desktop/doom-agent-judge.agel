@@ -1,0 +1,18 @@
+; The same agent, but a System One model judges and these forms decide.
+; Each step model-request sends typed questions as a (judge ...) form; the
+; desktop carries it, with the state line and the window, to a judge on the
+; host — TypeSafe's Jev through the bridge's jev policy — and delivers one
+; answer line, which model-result reads: for each question in order, its
+; id, kind, and integers in thousandths. The policy is here, in code, not
+; in the model: a confident choice is followed, an unsure one falls back
+; to the scripted reflexes, and a seen enemy adds fire to going forward.
+(def play-pause (fn () 'p))
+(def play-reason "waiting for the judge")
+(def questions "(judge (choice act \"Best next move\" forward back left right fire use) (noul foe \"Is an enemy in view?\") (score risk \"How dangerous is it?\" \"safe\" \"wary\" \"lethal\"))")
+(def ask (fn () (model-request questions)))
+(def field (fn (n default) (if (= (look-field n) nil) default (look-field n))))
+(def reflex (fn () (if (< (field 4 100) 30) '(down) '(up ctrl))))
+(def keys-for (fn (a foe) (if (= a "forward") (if (< 500 foe) '(up ctrl) '(up)) (if (= a "back") '(down) (if (= a "left") '(left) (if (= a "right") '(right) (if (= a "fire") '(ctrl) (if (= a "use") '(space) (reflex)))))))))
+(def number (fn (answer n default) (if (= (text-int (text-field answer n)) nil) default (text-int (text-field answer n)))))
+(def decide (fn (answer) (begin (def play-reason answer) (if (< (number answer 4 0) 250) (reflex) (keys-for (text-field answer 3) (number answer 13 0))))))
+(def play-step (fn () (begin (def answer (model-result)) (if (= answer nil) (begin (ask) '()) (decide answer)))))

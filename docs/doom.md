@@ -305,9 +305,23 @@ what to do with the answer, and acts is the Agel program's. The request
 with its observation and the reply are proven; driving a whole model
 episode is by hand, not yet a tested path.
 
+A System One model judges through the same words since v0.2.91, in
+[`doom-agent-judge.agel`](../boot/desktop/doom-agent-judge.agel): each
+step it sends typed questions as a `(judge ...)` form — the best next
+move among six, whether an enemy is in view, how dangerous it is — and
+`agel-play --policy jev` carries them with the state line and the window
+to TypeSafe's Jev through the `jev` provider, typing back one answer line
+of integers in thousandths. The policy is the program's: an unsure choice
+falls back to the scripted reflexes, a confident forward with an enemy in
+view holds fire too, and the answer line is the step's recorded reason.
+In CI the provider's curl is a stand-in that answers as the endpoint
+does, so the whole typed path is tested without a key; the live model
+is run by hand. See [`system-one.md`](system-one.md).
+
 What this still is not: the model call leaves the machine, because the
 native kernel has no network and no local inference; the shades are
-coarse and a decision takes seconds while the game waits paused, so this
+coarse and a language model's decision takes seconds while the game
+waits paused (a judgment takes a fraction of one), so this
 is judgement, not reflexes; there is no separate run window on the
 desktop drawing the agent's reasoning, and no steering or speech yet. The
 trained policy and the world model of the next rungs are for reflexes and

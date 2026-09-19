@@ -1034,6 +1034,8 @@ enum Builtin {
     TextByte,
     TextSlice,
     TextConcat,
+    TextField,
+    TextInt,
     TextSymbol,
     Spawn,
     Send,
@@ -2356,6 +2358,8 @@ fn builtin_for_name(name: &[u8]) -> Option<Builtin> {
         b"text-byte" => Builtin::TextByte,
         b"text-slice" => Builtin::TextSlice,
         b"text-concat" => Builtin::TextConcat,
+        b"text-field" => Builtin::TextField,
+        b"text-int" => Builtin::TextInt,
         b"text-symbol" => Builtin::TextSymbol,
         b"spawn" => Builtin::Spawn,
         b"send" => Builtin::Send,
@@ -2871,6 +2875,42 @@ fn data_builtin(
             let (start, len) = text_of(text)?;
             Scalar::Symbol { start, len }
         }
+        // `(text-field TEXT N)`: the N-th space-separated word of the text,
+        // counted from zero, or nil past the end — a reply line's word,
+        // found in one step where a program of forty-eight frames cannot
+        // walk a hundred bytes.
+        Builtin::TextField => {
+            let [text, wanted] = arguments else {
+                return Err(Error("text-field expects a string and a field number"));
+            };
+            let (start, len) = text_of(text)?;
+            let wanted = offset_of(wanted)?;
+            let bytes = heap.bytes(start, len);
+            let mut fields = bytes
+                .split(|byte| *byte == b' ')
+                .filter(|field| !field.is_empty());
+            match fields.nth(wanted) {
+                Some(field) => {
+                    let offset = field.as_ptr() as usize - bytes.as_ptr() as usize;
+                    Scalar::Text {
+                        start: start + offset as u16,
+                        len: field.len() as u16,
+                    }
+                }
+                None => Scalar::Nil,
+            }
+        }
+        // `(text-int TEXT)`: the integer the text spells, or nil.
+        Builtin::TextInt => {
+            let [text] = arguments else {
+                return Err(Error("text-int expects one string"));
+            };
+            let (start, len) = text_of(text)?;
+            match parse_integer(heap.bytes(start, len)) {
+                Some(value) => Scalar::Int(value),
+                None => Scalar::Nil,
+            }
+        }
         _ => return Ok(None),
     }))
 }
@@ -3096,6 +3136,13 @@ mod tests {
             ("(text-slice \"Ahoj svet\" 0 4)", "\"Ahoj\""),
             ("(text-concat \"Ag\" \"el\")", "\"Agel\""),
             ("(text-symbol \"agel\")", "agel"),
+            ("(text-field \"act choice 6  fire 330\" 3)", "\"fire\""),
+            ("(text-field \" act \" 0)", "\"act\""),
+            ("(text-field \"act choice\" 2)", ""),
+            ("(text-int (text-field \"act choice 6 fire 330\" 4))", ""),
+            ("(text-int \"-42\")", ""),
+            ("(text-int \"fire\")", ""),
+            ("(text-int \"\")", ""),
             ("(eval '(+ 20 22))", ""),
             ("(eval (list '+ 20 22))", ""),
             ("(eval (cons 'list '(1 2)))", "(1 2)"),
@@ -3172,6 +3219,9 @@ mod tests {
             "(text-slice \"👋\" 0 1)",
             "(text-concat \"a\" 1)",
             "(text-symbol 'agel)",
+            "(text-field \"a b\" -1)",
+            "(text-field 'a 0)",
+            "(text-int 42)",
             "\"unterminated",
             "\"bad \\q escape\"",
             "(def list 1)",

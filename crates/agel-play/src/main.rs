@@ -20,7 +20,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use agel_core::ModelRequest;
-use agel_model::{ClaudeCodeProvider, CodexProvider, CommandLimits, Provider};
+use agel_effects::Principal;
+use agel_model::{
+    ClaudeCodeProvider, CodexProvider, CommandLimits, JevProvider, JudgmentRequest, Provider,
+};
 
 /// The window's content on the screen: where the desktop opens the
 /// game's window (slot 0, 640 by 400).
@@ -41,7 +44,9 @@ struct Options {
     hold: usize,
     claude_bin: PathBuf,
     codex_bin: PathBuf,
+    curl_bin: PathBuf,
     model: Option<String>,
+    program: Option<String>,
 }
 
 fn options() -> Result<Options, String> {
@@ -55,7 +60,9 @@ fn options() -> Result<Options, String> {
         hold: 4000,
         claude_bin: PathBuf::from("claude"),
         codex_bin: PathBuf::from("codex"),
+        curl_bin: PathBuf::from("curl"),
         model: None,
+        program: None,
     };
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
@@ -70,7 +77,9 @@ fn options() -> Result<Options, String> {
             "--hold" => options.hold = value()?.parse().map_err(|_| "--hold wants a number")?,
             "--claude-bin" => options.claude_bin = PathBuf::from(value()?),
             "--codex-bin" => options.codex_bin = PathBuf::from(value()?),
+            "--curl-bin" => options.curl_bin = PathBuf::from(value()?),
             "--model" => options.model = Some(value()?),
+            "--program" => options.program = Some(value()?),
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -350,10 +359,48 @@ trait Policy {
     /// Answer a model request the Agel loop made: the text the desktop
     /// printed between `model-request N:` and `model-request end` (the
     /// program's prompt, the engine's state line, and the window as shades).
-    /// The action word (`forward back left right fire use`) and a reason, or
-    /// `None` for a policy that never asks.
-    fn answer(&mut self, _block: &str) -> Option<(String, String)> {
+    /// The reply line the program reads — for the model program an action
+    /// word (`forward back left right fire use`) and a reason, for the
+    /// judge program an answer line — or `None` for a policy that never
+    /// asks.
+    fn answer(&mut self, _block: &str) -> Option<String> {
         None
+    }
+}
+
+/// What the desktop printed for one request, taken apart: the program's
+/// own text, the engine's state line and the window as shades.
+struct Block {
+    prompt: String,
+    state_line: String,
+    frame: String,
+}
+
+impl Block {
+    fn parse(block: &str) -> Self {
+        let mut prompt = String::new();
+        let mut state_line = String::new();
+        let mut frame = String::new();
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("model-request ") {
+                // `model-request N TEXT`: the number, a space, the program's text.
+                prompt = rest
+                    .trim_start_matches(|character: char| character.is_ascii_digit())
+                    .strip_prefix(' ')
+                    .unwrap_or("")
+                    .to_owned();
+            } else if let Some(rest) = line.strip_prefix("look-line: ") {
+                state_line = rest.to_owned();
+            } else if let Some(rest) = line.strip_prefix("look: ") {
+                frame.push_str(rest);
+                frame.push('\n');
+            }
+        }
+        Self {
+            prompt,
+            state_line,
+            frame,
+        }
     }
 }
 
@@ -386,8 +433,8 @@ impl Policy for Echo {
         "doom-agent-model"
     }
 
-    fn answer(&mut self, _block: &str) -> Option<(String, String)> {
-        Some((self.action.clone(), "echo policy".to_owned()))
+    fn answer(&mut self, _block: &str) -> Option<String> {
+        Some(format!("{} echo policy", self.action))
     }
 }
 
@@ -423,7 +470,7 @@ impl Policy for Model {
         "doom-agent-model"
     }
 
-    fn answer(&mut self, block: &str) -> Option<(String, String)> {
+    fn answer(&mut self, block: &str) -> Option<String> {
         let prompt = Self::prompt(block);
         let prompt_digest = agel_integrity::sha256(prompt.as_bytes());
         let request = ModelRequest {
@@ -478,7 +525,108 @@ impl Policy for Model {
         };
         // A reason on one line, bounded to what the request area holds.
         let reason: String = reason.chars().take(120).collect();
-        Some((word, reason))
+        Some(format!("{word} {reason}"))
+    }
+}
+
+/// A System One model judges, through the `jev` provider: what the OS
+/// printed becomes the state (the engine's state line and the window as
+/// shades, as named fields), and the questions are the program's own when
+/// it sent a `(judge ...)` form — then the reply is the answer line the
+/// judge program reads — or, for the model program's plain prompt, one
+/// choice among the action words, answered as `WORD reason`. Policy stays
+/// in the Agel program; here is only the carrying.
+struct Judge {
+    provider: JevProvider,
+    program: String,
+    next_id: u64,
+}
+
+impl Judge {
+    fn request(block: &Block) -> Result<JudgmentRequest, String> {
+        let mut request = if block.prompt.trim_start().starts_with("(judge") {
+            JudgmentRequest::parse(&block.prompt)?
+        } else {
+            let criteria = WORDS
+                .iter()
+                .map(|word| format!("({word} \"hold {word}\")"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            JudgmentRequest::parse(&format!(
+                "(judge (state (asked {:?})) (choice act \"Which one action should the player take now, given `state_line` and the window `frame`?\" {criteria}))",
+                block.prompt
+            ))?
+        };
+        request.add_fields([
+            ("game".to_owned(), "DOOM shareware E1M1 on the Agel desktop; the game is paused while you decide. frame is the window as 64x25 luminance shades, space dark to @ bright.".to_owned()),
+            ("state_line".to_owned(), block.state_line.clone()),
+            ("frame".to_owned(), block.frame.clone()),
+        ]);
+        Ok(request)
+    }
+}
+
+impl Policy for Judge {
+    fn name(&self) -> &str {
+        "jev"
+    }
+
+    fn program(&self) -> &str {
+        &self.program
+    }
+
+    fn answer(&mut self, block: &str) -> Option<String> {
+        let block = Block::parse(block);
+        let typed = block.prompt.trim_start().starts_with("(judge");
+        let id = self.next_id;
+        self.next_id += 1;
+        let judgment = Judge::request(&block).and_then(|request| {
+            self.provider
+                .judge(
+                    &request,
+                    Principal {
+                        world: 0,
+                        agent: Some(0),
+                    },
+                    &format!("model/infer/jev/request/{id}"),
+                )
+                .map_err(|error| error.to_string())
+        });
+        Some(match judgment {
+            Ok(judgment) if typed => judgment.reply_text(),
+            Ok(judgment) => match &judgment.answers[0].1 {
+                agel_model::Answer::Choice {
+                    choice,
+                    confidence,
+                    probabilities,
+                } => format!(
+                    "{choice} {} chose {choice} at {}% confidence: {}",
+                    judgment.model,
+                    agel_model::systemone::thousandths(*confidence) / 10,
+                    WORDS
+                        .iter()
+                        .zip(probabilities)
+                        .map(|(word, p)| format!(
+                            "{word} {}%",
+                            agel_model::systemone::thousandths(*p) / 10
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+                _ => "forward the judge answered another kind".to_owned(),
+            },
+            // No answer is an answer the program can read: the model
+            // program falls back to its default, the judge program to its
+            // own policy, and the run records why.
+            Err(error) if typed => {
+                let reason: String = error.replace(['\n', '\r'], " ").chars().take(120).collect();
+                format!("error {reason}")
+            }
+            Err(error) => {
+                let reason: String = error.replace(['\n', '\r'], " ").chars().take(120).collect();
+                format!("forward provider error: {reason}")
+            }
+        })
     }
 }
 
@@ -541,7 +689,34 @@ fn main() -> Result<(), String> {
                 next_id: 1,
             })
         }
-        other => return Err(format!("unknown policy {other}; scripted, claude or codex")),
+        "jev" => {
+            let key = std::env::var(agel_model::systemone::KEY_VARIABLE).map_err(|_| {
+                format!(
+                    "--policy jev needs {} in the environment",
+                    agel_model::systemone::KEY_VARIABLE
+                )
+            })?;
+            let mut limits = CommandLimits::new(&options.out);
+            limits.timeout = Duration::from_secs(30);
+            limits.max_output_bytes = 64 * 1024;
+            let mut provider = JevProvider::new(&options.curl_bin, key, limits);
+            if let Some(model) = &options.model {
+                provider = provider.with_model(model);
+            }
+            Box::new(Judge {
+                provider,
+                program: options
+                    .program
+                    .clone()
+                    .unwrap_or_else(|| "doom-agent-judge".to_owned()),
+                next_id: 1,
+            })
+        }
+        other => {
+            return Err(format!(
+                "unknown policy {other}; scripted, echo, claude, codex or jev"
+            ))
+        }
     };
 
     let sockets = options.out.join("sockets");
@@ -696,9 +871,9 @@ fn play(
             }
             if line == "model-request end" {
                 in_block = false;
-                if let Some((word, reason)) = policy.answer(&block) {
-                    serial.write_raw(&format!(":model-reply {request_number} {word} {reason}"))?;
-                    println!("agel-play: model reply {request_number}: {word} ({reason})");
+                if let Some(reply) = policy.answer(&block) {
+                    serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
+                    println!("agel-play: model reply {request_number}: {reply}");
                 } else {
                     serial.write_raw(&format!(":model-reply {request_number} forward none"))?;
                 }

@@ -14,5 +14,8 @@ std = ["agel-core/std"]
 [dependencies]
 agel-core = { path = "../agel-core", default-features = false }
 
+[dev-dependencies]
+agel-model = { path = "../agel-model" }
+
 [lints]
 workspace = true

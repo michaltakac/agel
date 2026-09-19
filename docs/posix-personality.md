@@ -637,7 +637,11 @@ scope, an agent only what it was spawned with. `print-form VALUE`
 toolchain written in Agel — `native-read`, `native-link`,
 `native-compile` from the library — reads, links and compiles a module
 bundle in the OS and writes the linked definition as source for the
-desktop to load.
+desktop to load. `model-request TEXT` (v0.2.91, behind `model/infer`)
+writes the request as a block on the process's console and waits for
+the line `:model-reply N TEXT` the desktop gives the program while it
+reads: a typed judgment, or any answer, from whoever is on the other
+side of the console — see [`system-one.md`](system-one.md).
 
 Since v0.2.82 a process the operator started reads the console at
 descriptor 0: a `read` there answers what was typed, a block at a time,

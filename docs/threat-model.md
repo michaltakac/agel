@@ -1985,6 +1985,29 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.91
+
+- **A model's key is the operator's, not the world's.** `TYPESAFEAI_API_KEY`
+  is read from the host process's environment, handed to `curl` as a
+  configuration line on standard input, and never placed in an argument,
+  in curl's environment or on disk; `.env` is ignored by Git. No Agel
+  program can name or read the key.
+- **A judgment request is data leaving the machine**, like a text
+  prompt: the state the program (and, at the desktop, the bridge) puts in
+  it goes to the endpoint. It is gated by the same `model/infer`
+  capability, audited as a process effect under
+  `model/infer/jev/request/`, and bounded in time and output.
+- **Answers are constrained, not trusted.** The provider refuses a choice
+  that is not one of the options, a distribution that does not fit the
+  levels, or a body that is not JSON; a program still decides what to do
+  with a valid answer, and the confidence is the model's own claim. The
+  policy that acts on it, and its thresholds, are the program's.
+- **The console is a channel.** `model-request` on the OS reads its reply
+  from whatever the desktop gives the program while it waits; the operator
+  or a bridge can answer anything, as they could type anything into a
+  session. A program that trusts a reply trusts its console.
+- **Not claimed:** replay of judgments, calibration, any model on the OS.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

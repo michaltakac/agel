@@ -8,6 +8,7 @@ description = "Agel plays DOOM: a hosted agent that drives the native desktop th
 
 [dependencies]
 agel-core = { path = "../agel-core" }
+agel-effects = { path = "../agel-effects" }
 agel-integrity = { path = "../agel-integrity" }
 agel-model = { path = "../agel-model" }
 serde_json = "1"

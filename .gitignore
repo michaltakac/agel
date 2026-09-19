@@ -9,3 +9,6 @@ __pycache__/
 /.playwright-cli/
 /output/playwright/
 /boot/posix/target/
+
+.env
+.env.local
