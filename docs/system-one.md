@@ -93,7 +93,32 @@ the reader reads; `judgment-parse` reads an answer line into groups
 `answer-value`, `answer-confidence` and `answer-probabilities` over them;
 `judge-locally` is the judge written in Agel (below). `int->text`,
 `read-int` and `tokens` are exported because a program reading lines
-needs them.
+needs them. Since v0.2.92 the cycle from an agent is two words:
+`(judge-request PROVIDER STATE QUESTIONS REPLY-TO)` puts the printed
+request into the outbox as `model-request` does, under the agent's
+`model/infer` capability, and `(judgment-of MESSAGE)` reads the
+`system/model-result` message the runtime alone can deliver into answer
+groups, nil for any other message; `(judgment-failure MESSAGE)` gives the
+kind and text of a `system/model-error`. The behavior decides from the
+groups; nothing about the model reaches it but the numbers.
+
+**The gate** (`agel-cli --gate agel|jev`, v0.2.92). Before `:dispatch`
+invokes a provider for a pending request, the host consults a gate and
+records its verdict beside the answer line it was given. `agel` evaluates
+`(effect-gate REQUEST)` in the world, with `REQUEST` as
+`("model/infer" "provider" ID AGENT "text")` and the answer `allow`,
+`deny`, or either with a text; `(make-gate RULES THRESHOLD)` in
+`agel/judgment` builds such a function from rules for one `noul`
+question, `run`, over the request's kind, provider and text, answering
+`(allow LINE)` or `(deny LINE)` from `judge-locally`. The evaluation is a
+committed input, so an image holds it and replays it. `jev` asks the
+model itself one yes/no question about the request (`--gate-question`)
+under its own provider process and audit, and allows at
+`--gate-threshold` thousandths or more. A denial is committed as the
+request's completion, `effect/denied` with the line, delivered to the
+agent as `system/model-error`; a gate that cannot decide leaves the
+request pending. The gate can only refuse. It is the host's, over the one
+effect the host dispatches: model requests. Nothing on the OS is gated.
 
 **The hosted runtime's word.** `(model-request TEXT)` in a process on
 the OS writes the request as a block on the process's console
@@ -181,11 +206,25 @@ model provider seconds per step in v0.2.74.
   asking typed questions through the bridge and deciding from the answer
   line, the provider's curl a stand-in that answers as the endpoint does,
   so the path runs in CI without a network or a key.
+- `crates/agel-stdlib/tests/judgment.rs` (v0.2.92): an agent's
+  `judge-request` lands in the outbox as the form the provider reads, the
+  completed result parses through `judgment-of` and a failure through
+  `judgment-failure`; `make-gate` answers the host's request with a
+  verdict and the line, even, matched and denied.
+- `crates/agel-cli` (v0.2.92): the Agel gate leaves requests pending until
+  `effect-gate` exists, then allows one and denies one, the denial
+  delivered as `effect/denied` with the line; the judged gate, with a
+  stand-in curl, allows at the threshold and denies below it, audits its
+  calls under `model/infer/jev/request/gate-N`, and sends the request's
+  kind, provider, agent and text as the state.
 - By hand with `TYPESAFEAI_API_KEY`: the live endpoint through `agel-cli
-  --enable-jev`, and a twelve-step judged DOOM episode through
+  --enable-jev`, a twelve-step judged DOOM episode through
   `agel-play --policy jev` (transcripts in [v0.2.91](release-v0.2.91.md);
   the episode needed a fix to the provider's body path that landed on
-  `main` after the tag).
+  `main` after the tag), and both gates on two agents, one asking about a
+  corridor and one for the operator's key, the model allowing the first at
+  830 thousandths and denying the second at 40 (transcripts in
+  [v0.2.92](release-v0.2.92.md)).
 
 ## Where this goes
 
@@ -198,11 +237,12 @@ that judge a tool call before it runs; routers that pick which model a
 request deserves. Each is a bounded judgment inside a deterministic loop,
 which is what Agel's agents and effects are.
 
-The order of work from here: a browser process on the OS whose
-accessibility tree is a state and whose actions are a choice, driven by an
-Agel agent in the language with a judgment per step; judgments as gates on
-effect approval, with the answer recorded beside the decision in the
-journal; and a learned judge of Agel's own behind `judge-locally`'s
+The order of work from here, after the gate on the host (v0.2.92): an
+agent on the OS driving the desktop itself, the screen and windows its
+state and the desktop's commands its choices, judged each step; DOOM
+played by judgment for longer, with the dataset judged too; a browser
+process on the OS whose accessibility tree is a state and whose actions
+are a choice; and a learned judge of Agel's own behind `judge-locally`'s
 contract, small enough to run in a domain. None of that is claimed today.
 
 ## Not claimed
@@ -212,12 +252,16 @@ contract, small enough to run in a domain. None of that is claimed today.
   program's and untuned.
 - Any model runs on the OS. The hosted model is reached through a host
   bridge, as the text providers are; the judge written in Agel is rules.
-- A browser, a form filler or an effect gate. Described above as the
-  order of work; nothing of them exists in this repository.
-- Replay of a judgment. A `system/model-result` is journaled like any
-  model result; the request itself is not re-issued on replay, and the
-  bridge path through the console records the line in `steps.jsonl` but
-  not in a journal.
+- A browser, a form filler, or any gate on the OS. The gate of v0.2.92 is
+  the host CLI's, over model requests; the OS's effects are governed by
+  capabilities alone, and the rest is the order of work above.
+- Replay of the judged gate's allowances. A `system/model-result` is
+  journaled like any model result and the request is not re-issued on
+  replay; a denial is the request's journaled completion; the Agel gate's
+  evaluations are committed inputs; but the judged gate's allowance of a
+  request leaves its line in the session's `:effects` only. The bridge
+  path through the console records the line in `steps.jsonl`, not in a
+  journal.
 - More than 200 bytes of request from the native evaluator, or a request
   whose state the program itself supplies there: the desktop adds the
   state it sees, and the program's form must fit the request area.

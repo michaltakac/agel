@@ -7,11 +7,15 @@ rust-version.workspace = true
 
 [dependencies]
 agel-core = { path = "../agel-core" }
+agel-effects = { path = "../agel-effects" }
 agel-image = { path = "../agel-image" }
 agel-integrity = { path = "../agel-integrity" }
 agel-model = { path = "../agel-model" }
 agel-stdlib = { path = "../agel-stdlib" }
 agel-verify = { path = "../agel-verify" }
+
+[dev-dependencies]
+serde_json = "1"
 
 [lints]
 workspace = true

@@ -16,6 +16,7 @@ agel-core = { path = "../agel-core", default-features = false }
 
 [dev-dependencies]
 agel-model = { path = "../agel-model" }
+serde_json = "1"
 
 [lints]
 workspace = true

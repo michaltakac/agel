@@ -110,6 +110,27 @@ result one line of integers in thousandths, read by the `agel/judgment`
 library; the same `model/infer` capability, outbox, `:dispatch` and
 `system/model-result` path carry it. See [`system-one.md`](system-one.md).
 
+## A judged gate on dispatch (v0.2.92)
+
+`--gate agel|jev` adds a third gate between the outbox and the provider,
+after the capability and before `:dispatch` invokes anything. For each
+pending request the host consults the gate: `agel` evaluates
+`(effect-gate REQUEST)` in the world — `REQUEST` is
+`("model/infer" "provider" ID AGENT "text")`, the answer `allow`, `deny`
+or either with a text, and `make-gate` from `agel/judgment` builds one
+from rules — as an ordinary committed input, so an image holds it; `jev`
+asks the System One model one yes/no question about the request and
+allows at a threshold in thousandths. A denial is committed as the
+request's completion:
+
+```lisp
+(system/model-error request-id provider effect/denied "gate agel: run noul 90")
+```
+
+and replays as any completion does. A gate that cannot decide leaves the
+request pending. `:effects` lists each verdict with the line it was given.
+The gate can only refuse: it grants nothing the capability did not.
+
 ## Replay semantics
 
 Provider execution itself is never replayed. `ReplayInput::ClaimModel` records

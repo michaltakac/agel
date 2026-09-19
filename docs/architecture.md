@@ -522,6 +522,15 @@ Each rung must be runnable and differentially testable against the rung below:
    request through a process's own console on the OS; the DOOM judge
    program decides in code from the model's confidence. See
    [`system-one.md`](system-one.md).
+86. **Judgments in the language, a judged gate (v0.2.92):** an agent asks
+   a judge with `judge-request` and reads the runtime's reply message
+   with `judgment-of`; `make-gate` builds a gate written in Agel over the
+   local judge. The host consults a gate before dispatching any request
+   — `(effect-gate REQUEST)` in the world, or the model itself with one
+   yes/no question and a threshold — records the verdict beside the
+   answer line, and commits a denial as the request's completion. The
+   gate is the host's and covers model requests; the OS's effects are not
+   gated.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

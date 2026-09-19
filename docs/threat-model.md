@@ -1985,6 +1985,29 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.92
+
+- **A gate is a second opinion, not a capability.** `--gate` is consulted
+  only for requests an agent could already make: the capability check in
+  `model-request` and the operator's `:dispatch` stand as before, and a
+  gate can only refuse. Without `--gate` nothing changes.
+- **The gate's judge sees the request.** The judged gate sends each
+  request's provider, agent and text to the endpoint as the state of its
+  question, one more copy of data that was leaving the machine anyway;
+  the gate written in Agel sends nothing. A gate that cannot decide
+  leaves the request pending rather than letting it through.
+- **The gate's question is prompt-shaped.** A request can address the
+  judge (the thief in the release transcript addresses the operator, and
+  is denied at 40 thousandths); a System One model answers a typed
+  question and cannot be talked into writing anything, but its number is
+  its own, and the threshold is the operator's. The gate written in Agel
+  is rules and can be read.
+- **A denial is journaled; an allowance of the judged gate is not.** The
+  denial is the request's completion, `effect/denied`, in the image and
+  replayed; the judged gate's allowance leaves its line in the session's
+  audit only. The Agel gate's evaluations are committed inputs either way.
+- **Not claimed:** any gate on the OS; calibration of either gate.
+
 ## v0.2.91
 
 - **A model's key is the operator's, not the world's.** `TYPESAFEAI_API_KEY`

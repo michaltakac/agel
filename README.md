@@ -5,7 +5,7 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.91.** Agel programs can now ask a System One model — TypeSafe's Jev first — typed questions and read calibrated answers as integers: a `jev` provider behind the existing `model/infer` boundary, an `agel/judgment` library with a judge written in Agel on the same contract, `model-request` for programs on the OS through their own console, and a DOOM agent whose policy gates on the model's confidence. See [`docs/release-v0.2.91.md`](docs/release-v0.2.91.md), [`docs/system-one.md`](docs/system-one.md) and [`docs/doom.md`](docs/doom.md). What is done, partial and open is in
+**Current release: v0.2.92.** Judgments are in the language: an agent asks a System One model with `judge-request` and reads the runtime's reply with `judgment-of`, and the host consults a judge before it dispatches any request — `(effect-gate REQUEST)` written in Agel in the world, or the model itself with one yes/no question and a threshold — recording the verdict beside the answer line, a denial reaching the agent as an error. Live, the model let a scout's question through at 830 thousandths and refused a request for the operator's key at 40. See [`docs/release-v0.2.92.md`](docs/release-v0.2.92.md), [`docs/system-one.md`](docs/system-one.md) and [`docs/release-v0.2.91.md`](docs/release-v0.2.91.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 

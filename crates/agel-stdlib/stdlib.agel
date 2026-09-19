@@ -2246,8 +2246,14 @@
 ;   ("act" choice "fire" 330 (320 15 220 10 440 0))
 ;   ("foe" noul 980 nil nil)
 ;   ("risk" score 740 600 (270 730 0))
+;
+; From an agent, the cycle is `judge-request` (the request into the outbox,
+; as `model-request`) and `judgment-of` on the message the runtime delivers
+; back; `make-gate` builds a gate the host can consult before it dispatches
+; any effect, written in Agel over `judge-locally`.
 (module agel/judgment
   (export judgment-request judgment-parse judge-locally
+          judge-request judgment-of judgment-failure make-gate
           answer answer-kind answer-value answer-confidence answer-probabilities
           int->text read-int tokens)
 
@@ -2442,4 +2448,44 @@
           (judge-all rules text (cdr questions)
                      (text-concat acc (text-concat (if (= acc "") "" " ") (judge-question rules text (car questions))))))))
   (def judge-locally
-    (fn (state questions rules) (judge-all rules (flat-state state) questions ""))))
+    (fn (state questions rules) (judge-all rules (flat-state state) questions "")))
+
+  ; The cycle from an agent. `judge-request` puts the request into the
+  ; outbox under the agent's `model/infer` capability for the provider and
+  ; returns the request id; the answer comes back as a message the runtime
+  ; alone can send. `judgment-of` reads that message into groups (nil for
+  ; any other message); `judgment-failure` gives (KIND "message") when the
+  ; provider failed instead, nil otherwise.
+  (def judge-request
+    (fn (provider state questions reply-to)
+      (model-request provider (judgment-request state questions) reply-to)))
+  (def list? (fn (value) (= (type-of value) 'list)))
+  (def judgment-of
+    (fn (message)
+      (if (list? message)
+          (if (= (car message) 'system/model-result) (judgment-parse (nth message 3)) nil)
+          nil)))
+  (def judgment-failure
+    (fn (message)
+      (if (list? message)
+          (if (= (car message) 'system/model-error) (drop message 3) nil)
+          nil)))
+
+  ; A gate for the host's effect dispatch, written in Agel. The host hands
+  ; a request as ("kind" "provider" ID AGENT "text") and reads back
+  ; (allow LINE) or (deny LINE), the judge's answer line beside the
+  ; verdict. The judge here is `judge-locally` on one noul question, "run",
+  ; over the request's kind, provider and text, with the caller's rules
+  ; (("run" "no" 9 "secret") sends anything mentioning a secret to no); a
+  ; yes below the threshold, in thousandths, is a denial. Rules and
+  ; thresholds are the operator's; the gate only says what it was told.
+  (def gate-state
+    (fn (request)
+      (list (list "kind" (car request)) (list "provider" (nth request 1)) (list "request" (nth request 4)))))
+  (def gate-question (list (list 'noul "run" "Should this request run?")))
+  (def make-gate
+    (fn (rules threshold)
+      (fn (request)
+        (let ((line (judge-locally (gate-state request) gate-question rules)))
+          (list (if (< (answer-value (answer (judgment-parse line) "run")) threshold) 'deny 'allow)
+                line))))))

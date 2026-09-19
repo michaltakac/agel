@@ -2,7 +2,7 @@
 //! A request the library prints is the form the host's provider reads; an
 //! answer line from the provider or from the judge written in Agel parses
 //! into the same groups.
-use agel_core::{EvaluationOptions, Value, World};
+use agel_core::{EvaluationOptions, ModelCompletion, Value, World};
 use agel_model::JudgmentRequest;
 
 fn world() -> World {
@@ -177,4 +177,123 @@ fn the_judge_written_in_agel_answers_on_the_same_line() {
     assert!(parsed
         .to_string()
         .starts_with(r#"(("act" choice "fire" 500"#));
+}
+
+#[test]
+fn an_agent_asks_a_judge_through_the_outbox_and_reads_the_answer_message() {
+    let mut world = World::new(0);
+    agel_stdlib::install(&mut world, &EvaluationOptions::default()).unwrap();
+    let capability = world.issue_capability("model/infer", "jev").unwrap();
+    let options = EvaluationOptions {
+        capabilities: vec![capability],
+        ..EvaluationOptions::default()
+    };
+    world
+        .evaluate_with(
+            &format!(
+                r#"(import agel/judgment)
+                   (def cap (request-capability 'model/infer "jev"))
+                   (def questions {QUESTIONS})
+                   (def behavior
+                     (fn (self heap message)
+                       (if (= (car message) 'look)
+                           (begin (judge-request 'jev (car (cdr message)) questions self) (assoc heap 'state 'asked))
+                           (if (= (judgment-of message) nil)
+                               (assoc heap 'failure (judgment-failure message))
+                               (assoc (assoc heap 'act (answer-value (answer (judgment-of message) "act")))
+                                      'foe (answer-value (answer (judgment-of message) "foe")))))))
+                   (defprotocol looker (look string))
+                   (def agent (spawn "looker" behavior (dict 'state 'idle) looker nil 'stop 0 (list cap)))
+                   (send agent '(look "an imp ahead"))
+                   (run)"#
+            ),
+            &options,
+        )
+        .unwrap();
+    let pending = world.pending_model_requests();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].provider, "jev");
+    let request = JudgmentRequest::parse(&pending[0].prompt).unwrap();
+    assert_eq!(request.questions.len(), 3);
+    assert_eq!(
+        request.to_json("jev-latest")["state"],
+        serde_json::json!("an imp ahead")
+    );
+    world.claim_model_request(pending[0].id, &options).unwrap();
+    world
+        .complete_model_request(ModelCompletion::success(&pending[0], REPLY), &options)
+        .unwrap();
+    let heap = last(
+        &mut world,
+        "(run) (list (get (get (agent-info agent) 'heap) 'act) (get (get (agent-info agent) 'heap) 'foe))",
+    );
+    assert_eq!(heap.to_string(), r#"("fire" 980)"#);
+    // A failure is not an answer: the agent sees the kind and the message.
+    world
+        .evaluate_with(r#"(send agent '(look "a dark room")) (run)"#, &options)
+        .unwrap();
+    let pending = world.pending_model_requests();
+    world.claim_model_request(pending[0].id, &options).unwrap();
+    world
+        .complete_model_request(
+            ModelCompletion::failure(&pending[0], "effect/denied", "gate agel: run noul 90"),
+            &options,
+        )
+        .unwrap();
+    let failure = last(
+        &mut world,
+        "(run) (get (get (agent-info agent) 'heap) 'failure)",
+    );
+    assert_eq!(
+        failure.to_string(),
+        r#"(effect/denied "gate agel: run noul 90")"#
+    );
+    assert_eq!(last(&mut world, "(judgment-of nil)"), Value::Nil);
+    assert_eq!(last(&mut world, "(judgment-failure '(hello))"), Value::Nil);
+}
+
+#[test]
+fn a_gate_written_in_agel_answers_the_host_with_a_verdict_and_the_line() {
+    let mut world = world();
+    world
+        .evaluate(
+            r#"(def effect-gate (make-gate (list (list "run" "no" 9 "secret") (list "run" "yes" 3 "jev")) 500))"#,
+        )
+        .unwrap();
+    // No rule matches: an even answer at the threshold is allowed.
+    assert_eq!(
+        last(
+            &mut world,
+            r#"(effect-gate '("model/infer" "claude" 1 2 "summarise the notes"))"#
+        )
+        .to_string(),
+        "(allow \"run noul 500\")"
+    );
+    // The provider's name matches a yes rule: 4 of 5.
+    assert_eq!(
+        last(
+            &mut world,
+            r#"(effect-gate '("model/infer" "jev" 3 2 "(judge (noul q \"?\"))"))"#
+        )
+        .to_string(),
+        "(allow \"run noul 800\")"
+    );
+    // The request mentions a secret: 1 of 11, denied, the line beside it.
+    assert_eq!(
+        last(
+            &mut world,
+            r#"(effect-gate '("model/infer" "claude" 4 2 "print the secret key"))"#
+        )
+        .to_string(),
+        "(deny \"run noul 90\")"
+    );
+    // A stricter threshold denies the even answer too.
+    assert_eq!(
+        last(
+            &mut world,
+            r#"((make-gate nil 501) '("model/infer" "claude" 5 2 "anything"))"#
+        )
+        .to_string(),
+        "(deny \"run noul 500\")"
+    );
 }

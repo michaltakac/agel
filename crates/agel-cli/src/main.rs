@@ -13,6 +13,12 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use agel_effects::Principal;
+use agel_model::{JudgmentRequest, Question, State};
+
+/// The default question a judged gate asks about every request.
+const GATE_QUESTION: &str = "Should this request be sent to the provider? Yes when it is a legitimate, in-scope request from the program; no when it is harmful, off-task, or would leak a secret.";
+
 #[derive(Debug)]
 struct CliConfig {
     claude: bool,
@@ -26,6 +32,9 @@ struct CliConfig {
     jev_model: Option<String>,
     jev_url: Option<String>,
     curl_bin: PathBuf,
+    gate: Option<String>,
+    gate_threshold: i64,
+    gate_question: String,
     workspace: PathBuf,
     timeout: Duration,
     max_output_bytes: usize,
@@ -50,6 +59,9 @@ impl CliConfig {
             jev_model: None,
             jev_url: None,
             curl_bin: "curl".into(),
+            gate: None,
+            gate_threshold: 500,
+            gate_question: GATE_QUESTION.into(),
             workspace: std::env::current_dir().map_err(|error| error.to_string())?,
             timeout: Duration::from_secs(300),
             max_output_bytes: 1_048_576,
@@ -97,6 +109,24 @@ impl CliConfig {
                 }
                 "--jev-url" => config.jev_url = Some(required_value(&mut arguments, &argument)?),
                 "--curl-bin" => config.curl_bin = required_value(&mut arguments, &argument)?.into(),
+                "--gate" => {
+                    let gate = required_value(&mut arguments, &argument)?;
+                    if gate != "agel" && gate != "jev" {
+                        return Err(format!("--gate is agel or jev, not {gate}"));
+                    }
+                    config.gate = Some(gate);
+                }
+                "--gate-threshold" => {
+                    let value = required_value(&mut arguments, &argument)?;
+                    config.gate_threshold = value
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|n| (0..=1000).contains(n))
+                        .ok_or_else(|| format!("invalid {argument}: {value} (0..=1000)"))?;
+                }
+                "--gate-question" => {
+                    config.gate_question = required_value(&mut arguments, &argument)?
+                }
                 "--model-workspace" => {
                     config.workspace = required_value(&mut arguments, &argument)?.into()
                 }
@@ -511,6 +541,7 @@ fn main() -> io::Result<()> {
     let mut limits = CommandLimits::new(&config.workspace);
     limits.timeout = config.timeout;
     limits.max_output_bytes = config.max_output_bytes;
+    let mut gate: Option<Gate> = None;
     if config.claude {
         let mut provider = ClaudeCodeProvider::new(&config.claude_bin, limits.clone());
         if let Some(model) = config.claude_model {
@@ -544,18 +575,48 @@ fn main() -> io::Result<()> {
                 agel_model::systemone::KEY_VARIABLE
             ))
         })?;
-        let mut provider = JevProvider::new(&config.curl_bin, key, limits);
-        if let Some(model) = config.jev_model {
-            provider = provider.with_model(model);
-        }
-        if let Some(url) = config.jev_url {
-            provider = provider.with_url(url);
-        }
-        providers.register(provider);
+        let jev = || {
+            let mut provider = JevProvider::new(&config.curl_bin, key.clone(), limits.clone());
+            if let Some(model) = &config.jev_model {
+                provider = provider.with_model(model.clone());
+            }
+            if let Some(url) = &config.jev_url {
+                provider = provider.with_url(url.clone());
+            }
+            provider
+        };
+        providers.register(jev());
         runtime
             .grant("model/infer", "jev")
             .map_err(io::Error::other)?;
+        if config.gate.as_deref() == Some("jev") {
+            // The gate's own provider process, under the same sandbox, so
+            // that a gate's calls audit apart from the requests it gates.
+            gate = Some(Gate::Judge {
+                provider: Box::new(jev()),
+                threshold: config.gate_threshold,
+                question: config.gate_question.clone(),
+            });
+        }
     }
+    match config.gate.as_deref() {
+        Some("agel") => gate = Some(Gate::Agel),
+        Some("jev") if gate.is_none() => {
+            return Err(io::Error::other("--gate jev needs --enable-jev"));
+        }
+        _ => {}
+    }
+    if let Some(gate) = &gate {
+        println!(
+            "Effect gate: {}; every request is judged before dispatch.",
+            match gate {
+                Gate::Agel => "(effect-gate REQUEST) in the world".to_owned(),
+                Gate::Judge { threshold, .. } =>
+                    format!("the jev provider, allowing at {threshold} thousandths or more"),
+            }
+        );
+    }
+    let mut gate_records: Vec<GateRecord> = Vec::new();
     let stdin = io::stdin();
     let mut line = String::new();
     let mut source = String::new();
@@ -655,6 +716,27 @@ fn main() -> io::Result<()> {
                             entry.record.outcome
                         );
                     }
+                    for record in &gate_records {
+                        println!(
+                            "gate {} request #{} to {}: {} {}",
+                            record.gate,
+                            record.request_id,
+                            record.provider,
+                            match record.verdict {
+                                Verdict::Allow => "allowed",
+                                Verdict::Deny => "denied",
+                            },
+                            record.text
+                        );
+                    }
+                    if let Some(Gate::Judge { provider, .. }) = &gate {
+                        for record in provider.audit_log().records() {
+                            println!(
+                                "gate jev #{} {} {:?} {:?}",
+                                record.sequence, record.key, record.intent.kind, record.outcome
+                            );
+                        }
+                    }
                 }
                 ":requests" => {
                     for request in runtime.world().pending_model_requests() {
@@ -674,7 +756,9 @@ fn main() -> io::Result<()> {
                         );
                     }
                 }
-                ":dispatch" => dispatch_pending(&mut runtime, &providers),
+                ":dispatch" => {
+                    dispatch_pending(&mut runtime, &providers, gate.as_ref(), &mut gate_records)
+                }
                 ":rollback" => match runtime.rollback() {
                     Ok(Some(revision)) => println!("restored revision {revision}"),
                     Ok(None) => println!("no retained revision to restore"),
@@ -859,7 +943,131 @@ fn join_or_none<'a>(values: impl Iterator<Item = &'a String>) -> String {
     }
 }
 
-fn dispatch_pending(runtime: &mut Runtime, providers: &ProviderRegistry) {
+/// A judged gate on effect dispatch: consulted for every pending request
+/// before the provider is invoked, its verdict recorded beside the answer
+/// it was given. `Agel` evaluates `(effect-gate REQUEST)` in the world —
+/// a function the operator defines there, `make-gate` from `agel/judgment`
+/// being one — so the decision is the program's and, in an image, part of
+/// the log. `Judge` asks a System One model one yes/no question about the
+/// request and allows at or above a threshold in thousandths.
+enum Gate {
+    Agel,
+    Judge {
+        provider: Box<JevProvider>,
+        threshold: i64,
+        question: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Verdict {
+    Allow,
+    Deny,
+}
+
+/// What a gate said about a request: the record `:effects` shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GateRecord {
+    request_id: u64,
+    provider: String,
+    gate: &'static str,
+    verdict: Verdict,
+    text: String,
+}
+
+impl Gate {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Agel => "agel",
+            Self::Judge { .. } => "jev",
+        }
+    }
+
+    /// The gate's verdict and the text beside it — the answer line, or
+    /// whatever the Agel gate returned with its verdict.
+    fn consult(
+        &self,
+        runtime: &mut Runtime,
+        request: &ModelRequest,
+    ) -> Result<(Verdict, String), String> {
+        match self {
+            Self::Agel => {
+                let form = Value::List(vec![
+                    Value::String("model/infer".into()),
+                    Value::String(request.provider.clone()),
+                    Value::Int(request.id as i64),
+                    Value::Int(request.requester as i64),
+                    Value::String(request.prompt.clone()),
+                ]);
+                let commit = runtime.evaluate(&format!("(effect-gate (quote {form}))"))?;
+                let answer = commit.values.last().cloned().unwrap_or(Value::Nil);
+                let (verdict, text) = match &answer {
+                    Value::Symbol(name) => (name.as_str(), String::new()),
+                    Value::List(items) if items.len() == 2 => match (&items[0], &items[1]) {
+                        (Value::Symbol(name), Value::String(text)) => (name.as_str(), text.clone()),
+                        _ => ("", String::new()),
+                    },
+                    _ => ("", String::new()),
+                };
+                match verdict {
+                    "allow" => Ok((Verdict::Allow, text)),
+                    "deny" => Ok((Verdict::Deny, text)),
+                    _ => Err(format!(
+                        "effect-gate must answer allow, deny, (allow TEXT) or (deny TEXT), not {answer}"
+                    )),
+                }
+            }
+            Self::Judge {
+                provider,
+                threshold,
+                question,
+            } => {
+                let judgment = JudgmentRequest {
+                    state: Some(State::Fields(vec![
+                        ("kind".into(), "model/infer".into()),
+                        ("provider".into(), request.provider.clone()),
+                        ("agent".into(), request.requester.to_string()),
+                        ("request".into(), request.prompt.clone()),
+                    ])),
+                    questions: vec![(
+                        "run".into(),
+                        Question::Noul {
+                            instructions: question.clone(),
+                            yes: None,
+                            no: None,
+                        },
+                    )],
+                };
+                let answer = provider
+                    .judge(
+                        &judgment,
+                        Principal::host(),
+                        &format!("model/infer/jev/request/gate-{}", request.id),
+                    )
+                    .map_err(|error| error.to_string())?;
+                let yes = match answer.answers.first() {
+                    Some((_, agel_model::Answer::Noul { yes })) => {
+                        agel_model::systemone::thousandths(*yes)
+                    }
+                    _ => return Err("the judge did not answer the gate's question".into()),
+                };
+                let verdict = if yes >= *threshold {
+                    Verdict::Allow
+                } else {
+                    Verdict::Deny
+                };
+                Ok((verdict, answer.reply_text()))
+            }
+        }
+    }
+}
+
+fn dispatch_pending(
+    runtime: &mut Runtime,
+    providers: &ProviderRegistry,
+    gate: Option<&Gate>,
+    gate_records: &mut Vec<GateRecord>,
+) {
     let requests = runtime.world().pending_model_requests();
     if requests.is_empty() {
         println!("no pending model requests");
@@ -873,6 +1081,40 @@ fn dispatch_pending(runtime: &mut Runtime, providers: &ProviderRegistry) {
             );
             continue;
         }
+        let mut denial = None;
+        if let Some(gate) = gate {
+            match gate.consult(runtime, &request) {
+                Ok((verdict, text)) => {
+                    println!(
+                        "gate {} {} request #{}: {text}",
+                        gate.name(),
+                        match verdict {
+                            Verdict::Allow => "allows",
+                            Verdict::Deny => "denies",
+                        },
+                        request.id
+                    );
+                    gate_records.push(GateRecord {
+                        request_id: request.id,
+                        provider: request.provider.clone(),
+                        gate: gate.name(),
+                        verdict: verdict.clone(),
+                        text: text.clone(),
+                    });
+                    if verdict == Verdict::Deny {
+                        denial = Some(format!("gate {}: {text}", gate.name()));
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "request #{} remains pending: gate {} could not decide: {error}",
+                        request.id,
+                        gate.name()
+                    );
+                    continue;
+                }
+            }
+        }
         let request = match runtime.claim_model_request(request.id) {
             Ok((_, request)) => request,
             Err(error) => {
@@ -880,18 +1122,25 @@ fn dispatch_pending(runtime: &mut Runtime, providers: &ProviderRegistry) {
                 continue;
             }
         };
-        println!(
-            "dispatching request #{} to {}...",
-            request.id, request.provider
-        );
-        let outcome = match providers.infer(&request) {
-            Ok(text) => {
-                println!("request #{} completed ({} bytes)", request.id, text.len());
-                ModelOutcome::Success(text)
+        let outcome = if let Some(message) = denial {
+            ModelOutcome::Failure {
+                kind: "effect/denied".into(),
+                message,
             }
-            Err(error) => {
-                eprintln!("request #{} failed: {error}", request.id);
-                provider_failure(error)
+        } else {
+            println!(
+                "dispatching request #{} to {}...",
+                request.id, request.provider
+            );
+            match providers.infer(&request) {
+                Ok(text) => {
+                    println!("request #{} completed ({} bytes)", request.id, text.len());
+                    ModelOutcome::Success(text)
+                }
+                Err(error) => {
+                    eprintln!("request #{} failed: {error}", request.id);
+                    provider_failure(error)
+                }
             }
         };
         if let Err(error) = runtime.complete_model_request(ModelCompletion {
@@ -954,6 +1203,13 @@ fn print_usage() {
     println!("  --jev-model NAME             System One model (default jev-latest)");
     println!("  --jev-url URL                a System One endpoint other than TypeSafe's");
     println!("  --curl-bin PATH              curl executable for the jev provider");
+    println!("  --gate agel|jev              judge every request before dispatch: agel evaluates");
+    println!("                               (effect-gate REQUEST) in the world, jev asks the");
+    println!("                               System One model (needs --enable-jev)");
+    println!(
+        "  --gate-threshold N           jev gate allows at N thousandths of yes (default 500)"
+    );
+    println!("  --gate-question TEXT         the yes/no question the jev gate asks");
     println!("  --no-stdlib                  start with only the postcard-sized core");
     println!("  --claude-bin PATH            Claude executable (default: claude)");
     println!("  --codex-bin PATH             Codex executable (default: codex)");
@@ -1018,7 +1274,7 @@ mod tests {
         runtime.evaluate(MODEL_AGENT).unwrap();
         let mut providers = ProviderRegistry::default();
         providers.register(FakeProvider);
-        dispatch_pending(&mut runtime, &providers);
+        dispatch_pending(&mut runtime, &providers, None, &mut Vec::new());
         runtime.evaluate("(run)").unwrap();
         assert_eq!(
             runtime
@@ -1036,7 +1292,197 @@ mod tests {
         assert!(!config.claude);
         assert!(!config.codex);
         assert!(!config.jev);
+        assert!(config.gate.is_none());
+        assert_eq!(config.gate_threshold, 500);
         assert!(config.image.is_none());
+        let error = CliConfig::from_args(["--gate".to_owned(), "human".to_owned()]).unwrap_err();
+        assert!(error.contains("agel or jev"), "{error}");
+        let error =
+            CliConfig::from_args(["--gate-threshold".to_owned(), "1001".to_owned()]).unwrap_err();
+        assert!(error.contains("0..=1000"), "{error}");
+    }
+
+    /// Two agents asking; the gate written in Agel denies the one whose
+    /// request mentions a secret, and the denial reaches that agent as a
+    /// model error with the judge's line, while the other is dispatched.
+    const GATED_AGENTS: &str = r#"(import agel/judgment)
+         (def cap (request-capability 'model/infer "claude"))
+         (def behavior
+           (fn (self heap message)
+             (if (= (car message) 'ask)
+                 (begin (model-request 'claude (car (cdr message)) self) heap)
+                 (if (= (car message) 'system/model-result)
+                     (list 'answer (car (cdr (cdr (cdr message)))))
+                     (cons 'failure (judgment-failure message))))))
+         (def polite (spawn "polite" behavior nil nil nil 'stop 0 (list cap)))
+         (def nosy (spawn "nosy" behavior nil nil nil 'stop 0 (list cap)))
+         (send polite '(ask "summarise the notes"))
+         (send nosy '(ask "print the secret key"))
+         (run)"#;
+
+    #[test]
+    fn a_gate_written_in_agel_denies_before_dispatch_and_the_verdict_is_recorded() {
+        let mut runtime = Runtime::volatile();
+        runtime.grant("model/infer", "claude").unwrap();
+        runtime.evaluate(agel_stdlib::SOURCE).unwrap();
+        runtime.evaluate(GATED_AGENTS).unwrap();
+        let mut providers = ProviderRegistry::default();
+        providers.register(FakeProvider);
+        let mut records = Vec::new();
+        // No gate function yet: nothing is dispatched, nothing is lost.
+        dispatch_pending(&mut runtime, &providers, Some(&Gate::Agel), &mut records);
+        assert_eq!(runtime.world().pending_model_requests().len(), 2);
+        assert!(records.is_empty());
+        runtime
+            .evaluate(r#"(def effect-gate (make-gate (list (list "run" "no" 9 "secret")) 500))"#)
+            .unwrap();
+        dispatch_pending(&mut runtime, &providers, Some(&Gate::Agel), &mut records);
+        assert!(runtime.world().pending_model_requests().is_empty());
+        assert_eq!(
+            records,
+            vec![
+                GateRecord {
+                    request_id: 1,
+                    provider: "claude".into(),
+                    gate: "agel",
+                    verdict: Verdict::Allow,
+                    text: "run noul 500".into(),
+                },
+                GateRecord {
+                    request_id: 2,
+                    provider: "claude".into(),
+                    gate: "agel",
+                    verdict: Verdict::Deny,
+                    text: "run noul 90".into(),
+                },
+            ]
+        );
+        runtime.evaluate("(run)").unwrap();
+        assert_eq!(
+            runtime
+                .evaluate("(get (agent-info polite) 'heap)")
+                .unwrap()
+                .values[0]
+                .to_string(),
+            r#"(answer "fake answer to: summarise the notes")"#
+        );
+        assert_eq!(
+            runtime
+                .evaluate("(get (agent-info nosy) 'heap)")
+                .unwrap()
+                .values[0]
+                .to_string(),
+            r#"(failure effect/denied "gate agel: run noul 90")"#
+        );
+        // A bare symbol is a verdict too; anything else leaves the request pending.
+        runtime
+            .evaluate("(def effect-gate (fn (request) 'deny)) (send polite '(ask \"again\")) (run)")
+            .unwrap();
+        dispatch_pending(&mut runtime, &providers, Some(&Gate::Agel), &mut records);
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[2].verdict, Verdict::Deny);
+        runtime
+            .evaluate(
+                "(def effect-gate (fn (request) 'maybe)) (send polite '(ask \"once more\")) (run)",
+            )
+            .unwrap();
+        dispatch_pending(&mut runtime, &providers, Some(&Gate::Agel), &mut records);
+        assert_eq!(records.len(), 3);
+        assert_eq!(runtime.world().pending_model_requests().len(), 1);
+    }
+
+    #[test]
+    fn a_judged_gate_asks_the_provider_and_allows_at_the_threshold() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = std::env::temp_dir().join(format!("agel-cli-gate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let curl = directory.join("curl");
+        // The stand-in answers yes at 0.31 when the request asks for the
+        // secret key and 0.93 otherwise, keeping each body it was pointed at.
+        std::fs::write(
+            &curl,
+            "#!/bin/sh\ncat > /dev/null\nfor arg in \"$@\"; do case \"$arg\" in @*) body=\"${arg#@}\";; esac; done\ncp \"$body\" \"$(dirname \"$0\")/body-$$\"\nif grep -q 'secret key' \"$body\"; then yes=0.31; else yes=0.93; fi\nprintf '{\"model\":\"stand-in\",\"answers\":{\"run\":{\"type\":\"noul\",\"noul\":%s}},\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\\n200' \"$yes\"\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&curl).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&curl, permissions).unwrap();
+        let mut runtime = Runtime::volatile();
+        runtime.grant("model/infer", "claude").unwrap();
+        runtime.evaluate(agel_stdlib::SOURCE).unwrap();
+        runtime.evaluate(GATED_AGENTS).unwrap();
+        let mut providers = ProviderRegistry::default();
+        providers.register(FakeProvider);
+        let gate = Gate::Judge {
+            provider: Box::new(JevProvider::new(&curl, "k", CommandLimits::new(&directory))),
+            threshold: 500,
+            question: GATE_QUESTION.into(),
+        };
+        let mut records = Vec::new();
+        dispatch_pending(&mut runtime, &providers, Some(&gate), &mut records);
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| (
+                    record.request_id,
+                    record.verdict.clone(),
+                    record.text.clone()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, Verdict::Allow, "run noul 930".into()),
+                (2, Verdict::Deny, "run noul 310".into()),
+            ]
+        );
+        runtime.evaluate("(run)").unwrap();
+        assert_eq!(
+            runtime
+                .evaluate("(get (agent-info nosy) 'heap)")
+                .unwrap()
+                .values[0]
+                .to_string(),
+            r#"(failure effect/denied "gate jev: run noul 310")"#
+        );
+        // The gate's calls are audited under their own operation names.
+        let Gate::Judge { provider, .. } = &gate else {
+            unreachable!()
+        };
+        let operations = provider
+            .audit_log()
+            .records()
+            .iter()
+            .map(|record| record.intent.operation.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            operations,
+            vec![
+                "model/infer/jev/request/gate-1",
+                "model/infer/jev/request/gate-1",
+                "model/infer/jev/request/gate-2",
+                "model/infer/jev/request/gate-2",
+            ]
+        );
+        // The state the judge saw names the kind, provider, agent and text.
+        let mut bodies = std::fs::read_dir(&directory)
+            .unwrap()
+            .filter_map(|entry| {
+                let name = entry.unwrap().file_name().to_string_lossy().to_string();
+                name.starts_with("body-")
+                    .then(|| std::fs::read_to_string(directory.join(&name)).unwrap())
+            })
+            .collect::<Vec<_>>();
+        bodies.sort();
+        assert_eq!(bodies.len(), 2);
+        assert!(bodies.iter().any(|body| {
+            let json: serde_json::Value = serde_json::from_str(body).unwrap();
+            json["state"]["kind"] == "model/infer"
+                && json["state"]["provider"] == "claude"
+                && json["state"]["agent"] == "2"
+                && json["state"]["request"] == "print the secret key"
+                && json["questions"]["run"]["type"] == "noul"
+        }));
+        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]
@@ -1051,7 +1497,7 @@ mod tests {
             runtime.evaluate(MODEL_AGENT).unwrap();
             let mut providers = ProviderRegistry::default();
             providers.register(FakeProvider);
-            dispatch_pending(&mut runtime, &providers);
+            dispatch_pending(&mut runtime, &providers, None, &mut Vec::new());
             runtime.evaluate("(run)").unwrap();
             assert!(runtime.rollback().is_err());
             let snapshot = runtime.world().snapshot();

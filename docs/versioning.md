@@ -412,6 +412,13 @@ promise.
   (Fixed on `main` after the tag: the bridge's workspace is relative, and
   the provider handed curl a relative body path that curl, running inside
   the workspace, could not read; the path is absolute now, with a test.)
+  `v0.2.92` puts judgments in the language: `judge-request` and
+  `judgment-of` in `agel/judgment` for the cycle from an agent,
+  `make-gate` for a gate written in Agel, and `agel-cli --gate agel|jev`,
+  which consults `(effect-gate REQUEST)` in the world or the model itself
+  before dispatching any request and records the verdict beside the
+  answer line; a denial is the request's journaled completion. The gate
+  is the host's, over model requests; nothing on the OS is gated.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
