@@ -8,6 +8,9 @@
 use crate::service::{ServiceDomain, ServiceError};
 use crate::user::storage_status;
 
+/// Sixteen cells hold the workbench (nine) and the desktop agent summoned
+/// beside it (six), with one to spare; more would grow every workspace
+/// copy on the kernel's stack past what boot can carry.
 pub const MAX_CELLS: usize = 16;
 pub const MAX_CELL_NAME: usize = 24;
 pub const MAX_CELL_SOURCE: usize = crate::world::PAYLOAD_BYTES;

@@ -30,8 +30,11 @@ is persistent: `:save` publishes source cells replayed on the next boot.
 
 `./scripts/run-graphics.sh` (equivalently `--native`) uses QEMU's direct window and serial
 terminal input. The launcher validates its flags, accepts `--workbench`, `--native`,
-`--web` and `--help` in any order, rejects anything else, and passes arguments
-after `--` to QEMU. This physical PS/2 path uses a US layout, now including all
+`--web`, `--agent` and `--help` in any order, rejects anything else, and passes arguments
+after `--` to QEMU. `--agent` (v0.2.96) keeps the window and moves the serial
+console to a socket the host bridge attaches to, so a sentence typed at the
+prompt summons the desktop agent with a judge answering; it needs
+`TYPESAFEAI_API_KEY` in the environment. This physical PS/2 path uses a US layout, now including all
 ASCII punctuation, uppercase, Caps Lock, independent Shift keys, and Ctrl-U/C
 to clear the line (Ctrl-H backspaces). It does not inherit macOS text layout or
 Option dead-key composition. QEMU's Cocoa frontend controls mouse capture;
@@ -658,6 +661,40 @@ step N do LINE reason R` and then `drive: STATUS`. `wait` types nothing,
 `done` ends the run; `:drive`, `:play` and `:shutdown` are refused. The
 `desktop-agent` program the image carries decides by two typed questions
 a step. See [`computer-use.md`](computer-use.md).
+
+## A desktop for a person (v0.2.96)
+
+What a fresh boot did before: every click on the desktop evaluated
+`(point X Y)`, a form only the workbench defines, so an empty world rolled
+back a transaction on every click and repainted the whole frame; an
+unformatted region answered `:fs-ls` with `error 5`; a word typed at the
+prompt was evaluated and failed as an unbound symbol. Now:
+
+- A click on the desktop with no workbench loaded opens the workbench on
+  an empty world, or says `THE LOADED PROGRAM DOES NOT ANSWER CLICKS`
+  when another program is in; nothing is evaluated. Tab without the
+  workbench says so instead of evaluating `(focus-next)`. With the
+  workbench in, a click evaluates `(point X Y)` as before, echoed on the
+  console now.
+- A blank filesystem region — no magic in its superblock — is formatted
+  at boot, before `/init.agel` is looked for. A formatted region is left
+  alone.
+- A sentence typed at the prompt (it opens with a letter and has a space)
+  is the operator's intent: the desktop agent's six cells join the
+  world's — the workbench's nine are loaded first on an empty world —
+  and `:drive` runs for eight steps with the sentence relayed as a
+  `task:` line in every request block. A lone word that names nothing
+  answers `UNBOUND WORD - A SENTENCE SUMMONS THE AGENT`.
+- The frame is drawn whole only when the scene under the command bar
+  changed since the last whole frame (a digest of its records); a status
+  that changed alone draws the bar.
+- `:help` starts with what to do: click the desktop, or type a sentence.
+
+The cell table stays at sixteen: twenty-four overflowed the kernel's stack
+at boot, so the workbench and the agent merged forms to fit together.
+The agent needs a judge on the other side of the serial console;
+`run-graphics.sh --agent` attaches the host bridge there. Without one the
+run waits for a reply it never gets and says `model-reply: none`.
 
 ## What is next
 

@@ -1985,6 +1985,37 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.96
+
+- **A click evaluates nothing it cannot answer.** On a world with no
+  workbench the desktop's background click loads the workbench or says
+  the loaded program does not answer clicks; it no longer evaluates a
+  form the world may not define, so a fresh desktop never rolls back on a
+  click. What a click evaluates when the workbench is loaded is what it
+  was: `(point X Y)` in the operator's world.
+- **A sentence is authority the operator already had.** Typed at the
+  prompt, it joins the desktop agent to the world and drives for up to
+  eight steps with the judge's answers; the commands the agent can type
+  are its own eight, and `:drive`'s three refusals hold. The sentence
+  leaves the machine with each request, to whoever answers on the serial
+  console — the bridge, or nobody, in which case the desktop waits for a
+  reply and says `model-reply: none`.
+- **Attached, the bridge is a reader and a typist of replies.** `--attach`
+  takes the serial socket; everything the console says is printed on the
+  host and every request is sent to the provider; it types only
+  `:model-reply` lines. The socket has one client: the person at the
+  window keeps the keyboard and the screen, the bridge the console.
+- **A blank region is formatted without asking.** Only when the
+  superblock carries no magic; a formatted region, however old, is left
+  as it is. The operator's `:fs-format` is unchanged.
+- **The cell table did not grow.** Twenty-four cells overflowed the
+  kernel's stack at boot and hung the machine before its first prompt;
+  sixteen hold the workbench and the agent by merging forms. A larger
+  workspace needs a smaller stack footprint first.
+- **Not claimed:** any judgment of the sentence itself (the gate of
+  v0.2.92 is the host CLI's); a repaint that never flickers — only that a
+  frame identical under the bar is not redrawn.
+
 ## v0.2.95
 
 - **The browser reaches only the data region.** Pages are files the

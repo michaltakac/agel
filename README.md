@@ -5,7 +5,7 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.95.** A browser written in Agel, for agents: `agel/browse` in the standard library parses a reader's subset of HTML into a numbered accessibility tree, acts as a reader (link, fill, submit, back), and carries its own agent — the page becomes typed questions to a System One model, the answer line an action, the loop ending on the judge's done. On the OS it is a process of the hosted runtime over pages in the data region, asking on its own console; `agel-play --scene browse --task TEXT` relays. Live, asked for the price of the blue widget, the judge followed the link at 880 thousandths and said done on the price page at 970. No window, no network, no free text from the model. See [`docs/release-v0.2.95.md`](docs/release-v0.2.95.md), [`docs/browser.md`](docs/browser.md) and [`docs/system-one.md`](docs/system-one.md). What is done, partial and open is in
+**Current release: v0.2.96.** The desktop for a person, and an agent for a sentence: a click on an empty world opens the workbench instead of failing a form, a blank filesystem region is formatted at boot, a lone unbound word is told so, and a repaint that would change only the command bar draws the bar alone. A sentence typed at the prompt summons the desktop agent — its cells join the workbench's — and drives the desktop for it, the sentence relayed with every question to a judge on the host; `agel-play --attach` is that judge beside a person's window and `run-graphics.sh --agent` wires both. Live, "show me the help, then finish" typed at the desktop's keyboard showed the help and ended in two judged steps. See [`docs/release-v0.2.96.md`](docs/release-v0.2.96.md), [`docs/computer-use.md`](docs/computer-use.md) and [`docs/browser.md`](docs/browser.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
@@ -114,7 +114,10 @@ C programs need a clang with `lld` (`brew install llvm lld`).
 
 QEMU opens its own window at 1920×1080. The keyboard and mouse are the
 guest's; `--web` adds a host-side console with layout composition and paste.
-Try:
+Click the desktop to open the workbench. A sentence typed at the prompt
+summons the desktop agent, which needs a judge on the host to answer it:
+`--agent` runs the window with the judge attached (`TYPESAFEAI_API_KEY` in
+the environment; `set -a; . ./.env; set +a`). Try:
 
 ```lisp
 (def square (fn (x) (* x x)))

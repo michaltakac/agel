@@ -557,6 +557,17 @@ Each rung must be runnable and differentially testable against the rung below:
    a process of the hosted runtime over pages in the data region, asking
    on its own console; `agel-play --scene browse` relays. No window, no
    network, no free text from the model. See [`browser.md`](browser.md).
+90. **A desktop for a person, an agent for a sentence (v0.2.96):** a
+   click on an empty world opens the workbench instead of failing a form;
+   a blank filesystem region is formatted at boot; a sentence typed at
+   the prompt summons the desktop agent — its six cells join the
+   workbench's nine — and drives for it, the sentence relayed with every
+   request as its `task:` line; a lone unbound word is told so; a
+   repaint that would change only the command bar draws the bar alone.
+   `agel-play --attach` sits beside a person's window answering what the
+   desktop asks, and `run-graphics.sh --agent` wires both. The cell table
+   stays at sixteen: a larger one overflowed the kernel's stack at boot.
+   See [`computer-use.md`](computer-use.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

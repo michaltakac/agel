@@ -41,7 +41,7 @@ const MAX_SCENE_COMMANDS: usize = 224;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":load NAME :play/:drive N | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* look-* model-* | :cell :run :show :delete :cells :save :reload | :exec NAME :close :min/max N | :rollback :shutdown";
+const HELP_POSTCARD: &[u8] = b"click the desktop or :workbench | a sentence summons the agent | :load NAME :play/:drive N | :preview FORM :promote :discard | :cell :run :show :cells :save | :exec NAME :close :min/max N | :fs-ls :fs-format | :rollback :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 26;
 
@@ -2634,7 +2634,7 @@ fn play(
         // A request the step made goes out on the serial console with what
         // the language saw; the answer comes back as `:model-reply N TEXT`
         // and the step is asked again with it.
-        if relay_request(evaluator, serial, &look) == Some(true) {
+        if relay_request(evaluator, serial, &look, b"") == Some(true) {
             if let Some(again) = evaluate!(b"(play-step)") {
                 decision = again;
             }
@@ -2713,6 +2713,7 @@ fn relay_request(
     evaluator: &mut arch::Domain,
     serial: &mut ServiceDomain,
     look: &[u8; LOOK_BYTES],
+    task: &[u8],
 ) -> Option<bool> {
     let request = evaluator_request(evaluator, shared::COMMAND_EVALUATOR_REQUEST, b"").ok()?;
     if request.length == 0 {
@@ -2731,6 +2732,13 @@ fn relay_request(
     shown.push(&look[1..1 + usize::from(look[0])]);
     shown.push(b"\n");
     crate::process::Console::write(serial, shown.get());
+    if !task.is_empty() {
+        // The operator's sentence, for the judge on the other side.
+        let mut wanted = StatusLine::new(b"task: ");
+        wanted.push(task);
+        wanted.push(b"\n");
+        crate::process::Console::write(serial, wanted.get());
+    }
     for row in 0..LOOK_ROWS {
         let mut shades = [b' '; LOOK_COLUMNS + 7];
         shades[..6].copy_from_slice(b"look: ");
@@ -2895,7 +2903,7 @@ fn drive(
         let Some(mut decision) = evaluate!(b"(drive-step)") else {
             return StatusLine::new(b"DRIVE-STEP FAILED - :LOAD DESKTOP-AGENT");
         };
-        if relay_request(evaluator, serial, &look) == Some(true) {
+        if relay_request(evaluator, serial, &look, intent()) == Some(true) {
             if let Some(again) = evaluate!(b"(drive-step)") {
                 decision = again;
             }
@@ -3040,6 +3048,100 @@ fn load_program(
             StatusLine::new(failure.message().as_bytes())
         }
     }
+}
+
+/// A second program joins the world the first is in: its cells are added
+/// under its prefix and the whole workspace replays. The workbench and
+/// the desktop agent share no names, which is what makes the agent
+/// summonable beside the workbench; a program already joined is ready.
+fn join_program(
+    program: &Program,
+    evaluator: &mut arch::Domain,
+    evaluator_revision: &mut u64,
+    workspace: &mut Workspace,
+    dirty: &mut bool,
+) -> StatusLine {
+    let mut first = StatusLine::new(program.prefix);
+    first.push(b"0");
+    if workspace.find(first.get()).is_some() {
+        return StatusLine::new(program.ready);
+    }
+    let mut candidate = *workspace;
+    for (index, source) in program
+        .source
+        .split(|byte| *byte == b'\n')
+        .filter(|line| line.starts_with(b"("))
+        .enumerate()
+    {
+        let mut cell = StatusLine::new(program.prefix);
+        cell.number_u64(index as u64);
+        if let Err(reason) = candidate.upsert(cell.get(), source) {
+            return StatusLine::new(reason.as_bytes());
+        }
+    }
+    match replay_workspace(evaluator, &candidate) {
+        Ok(revision) => {
+            *workspace = candidate;
+            *evaluator_revision = revision;
+            *dirty = true;
+            StatusLine::new(program.ready)
+        }
+        Err(failure) => {
+            let _ = replay_workspace(evaluator, workspace);
+            StatusLine::new(failure.message().as_bytes())
+        }
+    }
+}
+
+/// The operator's intent: a sentence typed at the prompt, kept for the
+/// agent that drives the desktop, and carried out with each request the
+/// drive loop relays as its `task:` line.
+static mut INTENT: [u8; crate::native::EXEC_BYTES] = [0; crate::native::EXEC_BYTES];
+static mut INTENT_LEN: usize = 0;
+
+fn set_intent(line: &[u8]) {
+    let length = line.len().min(crate::native::EXEC_BYTES);
+    // Safety: the desktop loop is the only writer and the only reader.
+    unsafe {
+        let intent = &mut *core::ptr::addr_of_mut!(INTENT);
+        intent[..length].copy_from_slice(&line[..length]);
+        core::ptr::write(core::ptr::addr_of_mut!(INTENT_LEN), length);
+    }
+}
+
+fn intent() -> &'static [u8] {
+    // Safety: as for `set_intent`; the slice is read between writes.
+    unsafe {
+        let length = core::ptr::read(core::ptr::addr_of!(INTENT_LEN));
+        let intent: &[u8; crate::native::EXEC_BYTES] = &*core::ptr::addr_of!(INTENT);
+        &intent[..length]
+    }
+}
+
+/// A line that reads as a sentence — it opens with a letter and has a
+/// space in it — is the operator's intent, not a form or a command.
+fn is_prose(line: &[u8]) -> bool {
+    line.first().is_some_and(u8::is_ascii_alphabetic) && line.contains(&b' ')
+}
+
+/// How many steps a summoned agent drives for one sentence.
+const SUMMON_STEPS: usize = 8;
+
+/// The scene under the command bar, digested, so that a repaint that
+/// would change nothing but the bar is drawn as the bar alone.
+static mut LAST_SCENE: u64 = 0;
+
+fn scene_digest(frame: &Frame) -> u64 {
+    let has_pointer = frame.count > 0 && record_u32(&frame.records[frame.count - 1], 0) == 9;
+    let end = frame.count.saturating_sub(if has_pointer { 4 } else { 3 });
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    for record in &frame.records[..end] {
+        for byte in record {
+            digest ^= u64::from(*byte);
+            digest = digest.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    digest ^ end as u64
 }
 
 fn slot_owner(current: &Scene, slot: usize) -> usize {
@@ -3585,6 +3687,61 @@ fn execute_workshop(
             Err(reason) => StatusLine::new(reason.as_bytes()),
         };
     }
+    // A sentence is the operator's intent: the agent is summoned — the
+    // workbench loaded first when the world is empty, the desktop agent
+    // joined beside whatever is loaded — and drives the desktop for it,
+    // the sentence going out with every question it asks.
+    if is_prose(line) && cell_length.is_none() && load_path.is_none() {
+        set_intent(line);
+        if workspace.find(b"dk-0").is_none() {
+            if workspace.count() == 0 && *evaluator_revision == 0 {
+                let loaded = load_program(
+                    &PROGRAMS[0],
+                    evaluator,
+                    evaluator_revision,
+                    workspace,
+                    dirty,
+                );
+                if !loaded.get().starts_with(b"WORKBENCH READY") {
+                    return loaded;
+                }
+            }
+            let Some(agent) = PROGRAMS
+                .iter()
+                .find(|program| program.name == b"desktop-agent")
+            else {
+                return StatusLine::new(b"NO AGENT IN THE IMAGE");
+            };
+            let joined = join_program(agent, evaluator, evaluator_revision, workspace, dirty);
+            if !joined.get().starts_with(b"DESKTOP AGENT READY") {
+                return joined;
+            }
+        }
+        return drive(
+            machine,
+            compositor,
+            inputs,
+            evaluator,
+            storage,
+            filesystem,
+            serial,
+            clock,
+            recovery,
+            kernel,
+            current,
+            previous,
+            scene_revision,
+            evaluator_revision,
+            workspace,
+            committed_workspace,
+            generation,
+            dirty,
+            running,
+            line,
+            SUMMON_STEPS,
+            PLAY_HOLD_PASSES,
+        );
+    }
     let command = match line {
         _ if cell_length.is_some() || load_path.is_some() => shared::COMMAND_EVALUATE,
         b":promote" => shared::COMMAND_EVALUATOR_PROMOTE,
@@ -3619,6 +3776,15 @@ fn execute_workshop(
             None => evaluate_status(evaluator, evaluator_revision, command, source, &mut host),
         }
     };
+    // A lone word that names nothing is more likely a person than a form.
+    if command == shared::COMMAND_EVALUATE
+        && status.get().starts_with(b"error: unbound")
+        && line.first().is_some_and(u8::is_ascii_alphabetic)
+        && !line.contains(&b' ')
+    {
+        status =
+            StatusLine::new(b"UNBOUND WORD - A SENTENCE SUMMONS THE AGENT, :HELP LISTS COMMANDS");
+    }
     // A program the form asked for starts now that the form has committed,
     // as `:exec` would start it, and both are reported.
     if command == shared::COMMAND_EVALUATE {
@@ -4489,6 +4655,32 @@ fn interactive(
     // with the desktop answering its effects: the desktop's own behaviour
     // extended from its own disk, before the first prompt.
     if filesystem.is_some() {
+        // A blank region is formatted before anything reads it, so a
+        // fresh disk is usable at once; a formatted one is left alone.
+        let blank = {
+            let mut tee = Tee {
+                serial: &mut console_driver,
+                terminal: &mut current.terminal,
+            };
+            let mut probe = EffectHost {
+                storage: &mut storage,
+                filesystem: filesystem.as_mut(),
+                console: &mut tee,
+                clock: None,
+            };
+            probe.open(b"/init.agel", 0) == Err(crate::world::fs::EIO)
+        };
+        if blank {
+            // Reported on the serial console only: the terminal panel
+            // starts empty on every boot, formatted or not.
+            crate::workshop::filesystem_command(
+                Some(&mut storage),
+                filesystem.as_mut(),
+                &mut console_driver,
+                crate::workshop::FilesystemCommand::Format,
+            );
+            kprint!("filesystem: a blank region formatted\n");
+        }
         let mut tee = Tee {
             serial: &mut console_driver,
             terminal: &mut current.terminal,
@@ -4947,14 +5139,47 @@ fn interactive(
                 {
                     // The workshop has the keyboard again.
                     current.focus = None;
-                    let mut command = StatusLine::new(b"(point ");
-                    command.number_u64(pointer.x as u64);
-                    command.push(b" ");
-                    command.number_u64(pointer.y as u64);
-                    command.push(b")");
-                    line[..command.len].copy_from_slice(command.get());
-                    length = command.len;
-                    b'\n'
+                    if workspace.find(b"wb-0").is_some() {
+                        let mut command = StatusLine::new(b"(point ");
+                        command.number_u64(pointer.x as u64);
+                        command.push(b" ");
+                        command.number_u64(pointer.y as u64);
+                        command.push(b")");
+                        console::write_bytes(command.get());
+                        line[..command.len].copy_from_slice(command.get());
+                        length = command.len;
+                        b'\n'
+                    } else {
+                        // Nothing answers clicks: an empty world gets the
+                        // workbench, as a desktop should start with one;
+                        // another program is left to say what it does.
+                        status = if workspace.count() == 0 && evaluator_revision == 0 {
+                            load_program(
+                                &PROGRAMS[0],
+                                &mut evaluator,
+                                &mut evaluator_revision,
+                                &mut workspace,
+                                &mut dirty,
+                            )
+                        } else {
+                            StatusLine::new(b"THE LOADED PROGRAM DOES NOT ANSWER CLICKS - :HELP")
+                        };
+                        if let Err(reason) = synchronize_language_scene(
+                            &mut evaluator,
+                            compositor,
+                            Some(&mut inputs),
+                            &mut current,
+                        ) {
+                            status = StatusLine::new(reason.as_bytes());
+                        }
+                        let frame = materialize(current, Some(&line[..length]), status.get())
+                            .unwrap_or_else(|reason| failed(reason));
+                        render(compositor, Some(&mut inputs), &frame)
+                            .unwrap_or_else(|reason| failed(reason));
+                        console::write_bytes(status.get());
+                        console::write("\nlive-desktop> ");
+                        continue;
+                    }
                 } else {
                     let frame = materialize(current, Some(&line[..length]), status.get())
                         .unwrap_or_else(|reason| failed(reason));
@@ -4989,6 +5214,11 @@ fn interactive(
         };
         let mut prompt_pending = false;
         match byte {
+            b'\t' if workspace.find(b"wb-0").is_none() => {
+                status =
+                    StatusLine::new(b"NOTHING TO FOCUS - CLICK THE DESKTOP TO OPEN THE WORKBENCH");
+                prompt_pending = true;
+            }
             b'\t' => {
                 status = evaluator_status(
                     &mut evaluator,
@@ -5107,8 +5337,16 @@ fn interactive(
         }
         let frame = materialize(current, Some(&line[..length]), status.get())
             .unwrap_or_else(|reason| failed(reason));
-        if prompt_pending || byte == 0x1b || byte == b'\t' {
+        // A whole frame only when the scene under the command bar changed
+        // since the last one drawn: a click that only moved the status
+        // repaints the bar, not the desktop.
+        let digest = scene_digest(&frame);
+        // Safety: the desktop loop is the only reader and writer.
+        let unchanged = unsafe { core::ptr::read(core::ptr::addr_of!(LAST_SCENE)) } == digest;
+        if (prompt_pending || byte == 0x1b || byte == b'\t') && !unchanged {
             render(compositor, Some(&mut inputs), &frame).unwrap_or_else(|reason| failed(reason));
+            // Safety: as above.
+            unsafe { core::ptr::write(core::ptr::addr_of_mut!(LAST_SCENE), digest) };
         } else {
             render_overlay(compositor, Some(&mut inputs), &frame)
                 .unwrap_or_else(|reason| failed(reason));

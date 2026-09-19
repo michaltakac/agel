@@ -86,9 +86,18 @@ def answer(machine, number, option, confidence, done):
 with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
     machine = module.Machine(sys.argv[1], directory)
     try:
+        # A blank region was formatted at boot: the listing answers, no
+        # error number; formatting again is still allowed.
+        listing = machine.submit(":fs-ls /")
+        assert "error" not in listing, listing
         assert "formatted" in machine.submit(":fs-format")
-        # Nothing to drive yet: the loop says so and does nothing.
+        # Nothing to drive yet: the loop says so and does nothing; Tab on
+        # an empty world says what to do instead of failing a form; a lone
+        # word that names nothing is told how to reach the agent.
         assert "NO PROGRAM TO DRIVE" in machine.submit(":drive 2")
+        machine.serial.sendall(b"\t")
+        assert "NOTHING TO FOCUS" in machine.until_prompt().decode(errors="replace")
+        assert "UNBOUND WORD - A SENTENCE SUMMONS THE AGENT" in machine.submit("hello")
         assert "DESKTOP AGENT READY" in machine.submit(":load desktop-agent"), "the agent did not load"
         with machine.serial_lock:
             send_line(machine, ":drive 4 2000")
@@ -138,6 +147,22 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
             tail = until_text(machine, b"DROVE 1 STEPS", 60).decode(errors="replace")
         machine.serial.settimeout(15)
         assert "drive: step 1 do :shutdown" in tail and "drive: REFUSED" in tail, tail[-2000:]
+        settled(machine, tail)
+        # A sentence at the prompt summons the agent: the loaded agent
+        # drives for it, the sentence relayed with every request as its
+        # task line, and the judge's done ends the run.
+        machine.submit('(def command-for (fn (a) ":help"))')
+        with machine.serial_lock:
+            send_line(machine, "show me the help and then finish")
+            number, line, block = request(machine)
+            assert "task: show me the help and then finish" in block, block
+            answer(machine, number, "help", 900, 100)
+            until_text(machine, b"drive: step 1 do :help", 60)
+            number, line, block = request(machine)
+            assert "task: show me the help and then finish" in block, block
+            answer(machine, number, "wait", 0, 900)
+            tail = until_text(machine, b"DRIVE DONE AFTER 2 STEPS", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
         settled(machine, tail)
     finally:
         machine.close()

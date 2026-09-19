@@ -440,6 +440,15 @@ promise.
   in the data region, through the bridge with `agel-play --scene
   browse`. No network, no window, no free text from the model; live, one
   task on the example site completed in two steps.
+  `v0.2.96` is the desktop for a person: a click on an empty world opens
+  the workbench instead of failing a form, a blank filesystem region is
+  formatted at boot, a lone unbound word is told so, a repaint that would
+  change only the command bar draws the bar alone; a sentence typed at
+  the prompt summons the desktop agent beside the workbench and drives
+  for it with the sentence in every request; `agel-play --attach` and
+  `run-graphics.sh --agent` put the judge beside a person's window. The
+  cell table stays at sixteen, a larger one having overflowed the
+  kernel's stack at boot.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

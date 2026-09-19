@@ -59,6 +59,9 @@ struct Options {
     /// runtime that runs the browser written in Agel over them.
     pages: PathBuf,
     agel: PathBuf,
+    /// Instead of booting: attach to a running desktop's serial socket and
+    /// answer the requests it relays, the operator at the window.
+    attach: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -80,6 +83,7 @@ fn options() -> Result<Options, String> {
         judge_dataset: None,
         pages: PathBuf::from("examples/pages"),
         agel: PathBuf::from("boot/posix/target/x86_64-unknown-none/release/agel"),
+        attach: None,
     };
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
@@ -107,6 +111,7 @@ fn options() -> Result<Options, String> {
             "--judge-dataset" => options.judge_dataset = Some(PathBuf::from(value()?)),
             "--pages" => options.pages = PathBuf::from(value()?),
             "--agel" => options.agel = PathBuf::from(value()?),
+            "--attach" => options.attach = Some(PathBuf::from(value()?)),
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -119,14 +124,18 @@ fn options() -> Result<Options, String> {
 struct Serial {
     stream: UnixStream,
     received: Arc<Mutex<Vec<u8>>>,
+    /// The other end went away: the machine stopped, or its console closed.
+    closed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Serial {
     fn connect(path: &Path) -> Result<Self, String> {
         let stream = connect(path)?;
         let received = Arc::new(Mutex::new(Vec::new()));
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut reader = stream.try_clone().map_err(|error| error.to_string())?;
         let sink = Arc::clone(&received);
+        let gone = Arc::clone(&closed);
         thread::spawn(move || {
             let mut chunk = [0_u8; 4096];
             loop {
@@ -138,8 +147,17 @@ impl Serial {
                         .extend_from_slice(&chunk[..count]),
                 }
             }
+            gone.store(true, std::sync::atomic::Ordering::Relaxed);
         });
-        Ok(Self { stream, received })
+        Ok(Self {
+            stream,
+            received,
+            closed,
+        })
+    }
+
+    fn closed(&self) -> bool {
+        self.closed.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Wait until `wanted` appears after `from`, and answer where the
@@ -406,6 +424,9 @@ struct Block {
     /// judge has no memory and the desktop's line shows only the last
     /// answer.
     history: Vec<String>,
+    /// The operator's sentence, when the desktop relays one as `task:`:
+    /// it outranks the task the bridge was started with.
+    task: Option<String>,
 }
 
 impl Block {
@@ -414,10 +435,19 @@ impl Block {
         let mut state_line = String::new();
         let mut frame = String::new();
         let mut history = Vec::new();
+        let mut task = None;
         let mut continued = false;
         for line in block.lines() {
+            if line == "model-request end" {
+                continued = false;
+                continue;
+            }
             if let Some(rest) = line.strip_prefix("history: ") {
                 history.push(rest.to_owned());
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("task: ") {
+                task = Some(rest.to_owned());
                 continue;
             }
             if let Some(rest) = line.strip_prefix("model-request ") {
@@ -447,6 +477,7 @@ impl Block {
             state_line,
             frame,
             history,
+            task,
         }
     }
 }
@@ -600,7 +631,9 @@ impl Judge {
         if browse {
             return JudgmentRequest::parse(&block.prompt);
         }
-        if let Some(task) = task {
+        // The desktop's own sentence, when it relayed one, over the one
+        // the bridge was started with.
+        if let Some(task) = block.task.as_deref().or(task) {
             let mut request = JudgmentRequest::parse(&block.prompt)?;
             let history = if block.history.is_empty() {
                 "nothing yet: this is the first step".to_owned()
@@ -712,6 +745,9 @@ fn main() -> Result<(), String> {
     fs::create_dir_all(&options.out).map_err(|error| error.to_string())?;
     if let Some(dataset) = &options.judge_dataset {
         return judge_dataset(&options, dataset);
+    }
+    if let Some(socket) = &options.attach {
+        return attach(&options, socket);
     }
     let disk = options.out.join("disk.img");
     fs::copy(&options.image, &disk).map_err(|error| format!("copying the image: {error}"))?;
@@ -869,6 +905,148 @@ fn main() -> Result<(), String> {
     let outcome = play(&mut qemu, &qmp, &serial, &options, policy.as_mut());
     qemu.stop();
     outcome
+}
+
+/// The judge beside a person: attach to the serial socket of a desktop
+/// someone is using at the window, print everything the console says,
+/// and answer every request the desktop relays — a sentence typed at its
+/// prompt summons the agent there, and the sentence comes with the
+/// request as its `task:` line. Nothing is booted, loaded or typed but
+/// the answers; the run ends when the socket does.
+fn attach(options: &Options, socket: &Path) -> Result<(), String> {
+    let mut policy: Box<dyn Policy> = match options.policy.as_str() {
+        "jev" => {
+            let key = std::env::var(agel_model::systemone::KEY_VARIABLE).map_err(|_| {
+                format!(
+                    "--policy jev needs {} in the environment",
+                    agel_model::systemone::KEY_VARIABLE
+                )
+            })?;
+            let mut limits = CommandLimits::new(&options.out);
+            limits.timeout = Duration::from_secs(30);
+            limits.max_output_bytes = 64 * 1024;
+            let mut provider = JevProvider::new(&options.curl_bin, key, limits);
+            if let Some(model) = &options.model {
+                provider = provider.with_model(model);
+            }
+            Box::new(Judge {
+                provider,
+                program: "desktop-agent".to_owned(),
+                task: Some(options.task.clone()),
+                browse: options.scene == "browse",
+                next_id: 1,
+            })
+        }
+        other => return Err(format!("--attach answers with the jev policy, not {other}")),
+    };
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut serial = loop {
+        match Serial::connect(socket) {
+            Ok(serial) => break serial,
+            Err(error) if Instant::now() < deadline => {
+                let _ = error;
+                thread::sleep(Duration::from_millis(250));
+            }
+            Err(error) => return Err(format!("{}: {error}", socket.display())),
+        }
+    };
+    let dataset = options.out.join("steps.jsonl");
+    let mut log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&dataset)
+        .map_err(|error| error.to_string())?;
+    println!(
+        "agel-play: attached to {}; the {} policy answers what the desktop asks",
+        socket.display(),
+        policy.name()
+    );
+    let mut cursor = 0;
+    let mut block = String::new();
+    let mut in_block = false;
+    let mut request_number = 0_u64;
+    // What the agent typed since the last sentence, for a judge that
+    // remembers nothing; a new sentence starts a new run.
+    let mut history: Vec<String> = Vec::new();
+    let mut last_task: Option<String> = None;
+    loop {
+        let fresh = serial.take_lines(&mut cursor);
+        if fresh.is_empty() {
+            if serial.closed() {
+                println!("agel-play: the desktop's console closed");
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        for line in fresh.lines() {
+            let line = line.trim_end_matches('\r');
+            println!("{line}");
+            let line = line.trim_start_matches("live-desktop> ");
+            if line == "model-request end" {
+                in_block = false;
+                let task = Block::parse(&block).task;
+                if task != last_task {
+                    history.clear();
+                    last_task = task;
+                }
+                for decided in &history {
+                    block.push_str("history: ");
+                    block.push_str(decided);
+                    block.push('\n');
+                }
+                if let Some(reply) = policy.answer(&block) {
+                    serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
+                    println!("agel-play: model reply {request_number}: {reply}");
+                }
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("model-request ") {
+                request_number = rest
+                    .chars()
+                    .take_while(|character| character.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0);
+                block.clear();
+                block.push_str(line);
+                block.push('\n');
+                in_block = true;
+                continue;
+            }
+            if in_block {
+                block.push_str(line);
+                block.push('\n');
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("drive: step ") {
+                let step = rest
+                    .split(' ')
+                    .next()
+                    .and_then(|digits| digits.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let keys = rest
+                    .split("do ")
+                    .nth(1)
+                    .and_then(|rest| rest.split(" reason ").next())
+                    .unwrap_or("")
+                    .trim()
+                    .to_owned();
+                history.push(format!("step {step}: {keys}"));
+                let record = serde_json::json!({
+                    "step": step,
+                    "policy": policy.name(),
+                    "program": policy.program(),
+                    "keys": keys,
+                    "reason": rest.split(" reason ").nth(1).unwrap_or("").trim().trim_matches('"'),
+                })
+                .to_string()
+                    + "\n";
+                log.write_all(record.as_bytes())
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+    }
 }
 
 /// The model as a labeler: every step of a recorded episode judged after
@@ -1241,11 +1419,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_block_carries_the_desktops_task_and_a_process_form() {
+        let block = Block::parse(
+            "model-request 3 (judge (choice act \"x\" a b))\nlook-line: win 0 focus none | run no | last: READY\ntask: show me the help\nhistory: step 1: :help\nlook: ....\n",
+        );
+        assert_eq!(block.prompt, "(judge (choice act \"x\" a b))");
+        assert_eq!(block.state_line, "win 0 focus none | run no | last: READY");
+        assert_eq!(block.task.as_deref(), Some("show me the help"));
+        assert_eq!(block.history, vec!["step 1: :help"]);
+        assert_eq!(block.frame, "....\n");
+        // A process's block: the text follows on its own lines.
+        let block = Block::parse(
+            "model-request 1:\n(judge (state \"s\")\n (noul q \"?\"))\nmodel-request end\n",
+        );
+        assert_eq!(block.prompt, "(judge (state \"s\")\n (noul q \"?\"))");
+        assert!(block.task.is_none());
+    }
+
+    #[test]
     fn serial_keeps_incomplete_lines_and_split_utf8() {
         let (stream, _peer) = UnixStream::pair().unwrap();
         let serial = Serial {
             stream,
             received: Arc::new(Mutex::new(b"first\n\xc3".to_vec())),
+            closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         let mut cursor = 0;
         assert_eq!(serial.take_lines(&mut cursor), "first\n");

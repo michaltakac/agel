@@ -11,7 +11,19 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
     image = console.prepared_image(sys.argv[1], directory)
     machine = console.Machine(image, directory)
     try:
-        assert "WORKBENCH READY" in machine.submit(":workbench")
+        # A click on the empty desktop opens the workbench: no form is
+        # evaluated on a world with nothing loaded, nothing rolls back.
+        machine.command("input-send-event", {"events": [
+            {"type": "btn", "data": {"down": True, "button": "left"}},
+        ]})
+        opened = machine.until_prompt().decode()
+        assert "WORKBENCH READY" in opened, opened
+        assert "rolled back" not in opened, opened
+        machine.command("input-send-event", {"events": [
+            {"type": "btn", "data": {"down": False, "button": "left"}},
+        ]})
+        time.sleep(0.3)
+        assert "A PROGRAM NEEDS A FRESH EMPTY WORLD" in machine.submit(":workbench")
         original = machine.region(365, 645, 1, 1)
         assert "CANDIDATE VALIDATED" in machine.submit("  :preview (point 360 640)  ")
         assert machine.region(365, 645, 1, 1) != original
@@ -66,6 +78,46 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
         # Persist source, not a raw heap or ephemeral counter value.
         assert "CELL STAGED" in machine.submit(":cell wb-3 (def behavior (fn (self state message) (begin (paint self (+ state (* message 2))) (+ state (* message 2)))))")
         assert "SAVED GENERATION 1" in machine.submit(":save")
+        # A sentence summons the agent beside the workbench: its six cells
+        # join the workbench's nine, the sentence goes out with the
+        # request as its task, and the judge's done ends the run.
+        with machine.serial_lock:
+            for byte in b"show me the help, please":
+                machine.serial.sendall(bytes([byte]))
+                machine.serial.recv(1)
+            machine.serial.sendall(b"\n")
+            buffer = bytearray()
+            machine.serial.settimeout(5)
+            deadline = time.monotonic() + 120
+            while b"model-request end" not in buffer:
+                assert time.monotonic() < deadline, bytes(buffer[-2000:])
+                try:
+                    buffer.extend(machine.serial.recv(4096))
+                except TimeoutError:
+                    continue
+            block = buffer.decode(errors="replace")
+            assert "rolled back" not in block, block
+            assert "task: show me the help, please" in block, block
+            assert "(choice act " in block, block
+            number = int(block.split("model-request ")[1].split(" ")[0])
+            machine.serial.sendall(f":model-reply {number} act choice 8 wait 0 0 0 0 0 0 0 0 0 done noul 950\n".encode())
+            while b"DRIVE DONE AFTER 1 STEPS" not in buffer:
+                assert time.monotonic() < deadline, bytes(buffer[-2000:])
+                try:
+                    buffer.extend(machine.serial.recv(4096))
+                except TimeoutError:
+                    continue
+            while b"live-desktop> " not in buffer[-40:]:
+                try:
+                    buffer.extend(machine.serial.recv(4096))
+                except TimeoutError:
+                    break
+            machine.serial.settimeout(15)
+        cells = machine.submit(":cells")
+        assert "CELLS 15" in cells and "dk-5" in cells and "wb-8" in cells, cells
+        # The workbench still answers its own forms beside the agent; the
+        # join replayed every cell, so the dock's state starts over.
+        machine.expect("(inspect-agent)", 0)
     finally:
         machine.close()
     machine = console.Machine(str(image), directory)

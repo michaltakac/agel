@@ -7,21 +7,25 @@ set -eu
 
 usage() {
   cat <<'USAGE'
-Usage: ./scripts/run-graphics.sh [--workbench] [--native | --web] [-- QEMU-ARGS...]
+Usage: ./scripts/run-graphics.sh [--workbench] [--native | --web | --agent] [-- QEMU-ARGS...]
   --workbench  boot target/boot/agel-workbench.img, a separate persistent demo disk
   --native     QEMU's direct window and serial input (default; US physical layout)
   --web        also open the loopback browser console for host-layout text entry
+  --agent      the window plus the judge on the host: a sentence typed at the
+               prompt summons the agent (TYPESAFEAI_API_KEY in the environment)
   --help       show this message
 USAGE
 }
 
 workbench=false
 web=false
+agent=false
 while test $# -gt 0; do
   case "$1" in
     --workbench) workbench=true ;;
     --native) web=false ;;
     --web) web=true ;;
+    --agent) agent=true ;;
     --help | -h) usage; exit 0 ;;
     --) shift; break ;;
     *) printf 'unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
@@ -49,7 +53,26 @@ if $web; then
   exec python3 ./scripts/graphical_console.py "$image" "$@"
 fi
 printf '%s\n' 'Direct QEMU input uses a US physical layout. Use --web for Slovak/macOS text composition.'
-printf '%s\n' 'On a fresh empty world, type :workbench. Click a dock icon, or Tab then Enter. QEMU owns its mouse-capture/release shortcut.'
+printf '%s\n' 'Click the desktop to open the workbench; a sentence at the prompt summons the agent. QEMU owns its mouse-capture/release shortcut.'
+if $agent; then
+  # The judge beside the person: the console goes to a socket the bridge
+  # attaches to, answering what the desktop asks and printing what it
+  # says; the window stays the person's. Needs TYPESAFEAI_API_KEY.
+  test -n "${TYPESAFEAI_API_KEY:-}" || { printf '%s\n' '--agent needs TYPESAFEAI_API_KEY in the environment (set -a; . ./.env; set +a)' >&2; exit 2; }
+  cargo build --release -q -p agel-play
+  sockets=$(mktemp -d "${TMPDIR:-/tmp}/agel-agent.XXXXXX")
+  trap 'rm -rf "$sockets"' EXIT HUP INT TERM
+  qemu-system-x86_64 \
+    -machine pc,accel=tcg -m 64M -monitor none -no-reboot \
+    -chardev socket,id=serial0,path="$sockets/serial",server=on,wait=off -serial chardev:serial0 \
+    -vga std -boot order=c,strict=on \
+    -drive format=raw,file="$image",if=ide,index=0,media=disk "$@" &
+  qemu=$!
+  ./target/release/agel-play --attach "$sockets/serial" --scene desktop --policy jev --out target/doom-runs/attached || true
+  kill "$qemu" 2>/dev/null || true
+  wait "$qemu" 2>/dev/null || true
+  exit 0
+fi
 exec qemu-system-x86_64 \
   -machine pc,accel=tcg -m 64M -monitor none -serial stdio -no-reboot \
   -vga std -boot order=c,strict=on \

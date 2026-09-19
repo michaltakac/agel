@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix="agel-programs-", dir="/tmp") as directo
         check(machine, '(file-write "bad.agel" "(def ok 1)\\n(/ 1 0)\\n(def never 2)")', "\r\n")
         check(machine, ":load-file /bad.agel", "LOADED 1 FORMS THEN error: division by zero")
         check(machine, "ok", "\r\n1\r\n")
-        check(machine, "never", "unbound native symbol")
+        check(machine, "never", "UNBOUND WORD - A SENTENCE SUMMONS THE AGENT")
         # A program left at /init.agel runs at the next boot, before the
         # first prompt, and can use every effect word.
         check(machine, '(file-write "init.agel" "(def booted 42)\\n(console-log \\"init ran\\")")', "\r\n")

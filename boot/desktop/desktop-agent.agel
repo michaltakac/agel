@@ -8,9 +8,10 @@
 ; the look line and types the answer back. The policy is here: a confident
 ; choice is typed, an unsure one waits, and the judge's yes on "done" ends
 ; the run. The commands are the desktop's own; nothing here can halt it.
-(def drive-reason "waiting for the judge")
+; Six cells, so the agent can join a world the workbench's nine are in:
+; a sentence at the desktop's prompt summons it there.
+(begin (def drive-reason "waiting for the judge") (def ask (fn () (model-request questions))))
 (def questions "(judge (choice act \"Next desktop command for the task\" help files kernel workspace maximize close wait done) (noul done \"Is the task complete?\"))")
-(def ask (fn () (model-request questions)))
 (def command-for (fn (a) (if (= a "help") ":help" (if (= a "files") ":fs-ls /" (if (= a "kernel") ":kernel" (if (= a "workspace") ":workspace" (if (= a "maximize") ":maximize 0" (if (= a "close") ":close 0" (if (= a "done") "done" "wait")))))))))
 (def number (fn (answer n default) (if (= (text-int (text-field answer n)) nil) default (text-int (text-field answer n)))))
 (def decide (fn (answer) (begin (def drive-reason answer) (if (< 500 (number answer 15 0)) "done" (if (< (number answer 4 0) 200) "wait" (command-for (text-field answer 3)))))))

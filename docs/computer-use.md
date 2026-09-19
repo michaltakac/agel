@@ -80,8 +80,36 @@ recorded in `steps.jsonl` with the command the program decided on
 (`keys`), the judge's line (`reason`) and a screenshot, as the DOOM runs
 are.
 
+## Summoned by a sentence (v0.2.96)
+
+The loop above needed the operator to load the agent and type `:drive`.
+Since v0.2.96 a sentence typed at the desktop's prompt does both: the
+desktop keeps it as the operator's intent, loads the workbench first if
+the world is empty, joins the desktop agent's six cells beside whatever
+is loaded (the workbench's nine share no names with them), and drives
+for eight steps, relaying the sentence as a `task:` line with every
+request block. The judge on the other side reads it: the bridge takes
+the block's task over the one it was started with, and the attached
+bridge (`agel-play --attach SOCKET`, `run-graphics.sh --agent`) keeps the
+run's history per sentence, as the booted bridge does per run, because a
+judge remembers nothing. Live, the sentence "show me the help, then
+finish" typed at the desktop's keyboard summoned the agent, which showed
+the help and said done in two judged steps; without the history the
+judge asked for the help eight times, the same finding as v0.2.93's.
+
+The cell table did not grow for this: twenty-four cells overflowed the
+kernel's stack at boot, so the workbench and the agent merged forms to
+fit sixteen together, with one to spare for the operator's own cell.
+
 ## What is proven, and where
 
+- `scripts/test-drive.sh` (v0.2.96 additions): a blank region is
+  formatted at boot so `:fs-ls` answers; Tab and a lone word on an empty
+  world are told what to do; a sentence with the agent loaded drives with
+  the sentence as the request's `task:` line and ends on the judge's
+  done. `scripts/test-native-workbench.py`: a click on the empty desktop
+  opens the workbench without a rollback; a sentence joins the agent
+  beside it (fifteen cells) and the workbench still answers its forms.
 - `scripts/test-drive.sh`: in the OS, with this harness answering as the
   bridge would — `:drive` refuses to run without a program; the program
   sees an empty desktop (`win 0 focus none | run no | last: …`), asks, is
