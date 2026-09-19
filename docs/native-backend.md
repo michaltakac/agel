@@ -10,47 +10,52 @@ domain, in the OS.
 
 ## What it compiles
 
-The IR's integer subset: constants that are integers, `#t`, `#f` or `nil`;
-`+ - * / = <` applied to two arguments; `if` and `begin`; `fn` addressed
-lexically through a static link, so a `let` (which the
-frontend lowers to a nested function called at once) and a closure over an
-enclosing live frame work; calls through closure values include the
-explicit-self convention, so recursion works. Escaping closures still have
-unresolved lifetime hazards. Since v0.2.88 a call in tail
-position through a parameter reuses the frame (the calling convention is
-callee-pops, `ret 8(arity+1)`), and a `let` is slots of the frame it
-appears in, so a loop written as a function calling itself last runs in
-constant stack; a tail call whose callee takes more arguments than the
-frame holds is a plain call.
+The IR's integer subset: integer, boolean and nil constants; two-argument
+`+ - * / = <`; `if`, `begin`, lexical functions and calls. The frontend's
+immediately applied function literals (including `let`) are inlined. Other
+functions become closures with copied environments. Returned closures,
+transitive captures and captured arguments across tail calls are supported.
 
-Not compiled, refused with `native-x86/unsupported`: lists, texts, maps,
-any other builtin, a builtin as a value, a primitive with other than two
-arguments, entry arguments that do not match the top-level function's
-arity, and mismatched arguments to an inlined function literal. Dynamic
-closure calls still need runtime arity/type checks.
+Tail calls through local closures reuse a large-enough frame. Calls needing
+more arguments use an ordinary frame. The callee pops its argument/closure
+block with `ret 8(arity+1)`; encodable arity is 0 through 8190. Invalid lexical
+addresses and unencodable arities are rejected while emitting. Calls check
+closure tags and dynamic arity before dispatch or tail-frame reuse.
 
-## The image
+Lists, texts, maps, other builtins and builtin values are refused. Numeric
+operations require integers; equality compares tagged values, including
+closure identity. A final process result must be integer, boolean or nil.
 
-One code segment holding the whole file — a 64-byte ELF header, two
-program headers, then the code — at the process window's base, and an
-arena segment of fresh pages a megabyte above it, where closure records
-of two words (code address, captured frame) are bumped out and never
-freed. The entry saves the shared page in `r15`, points `r13` at the
-arena, makes the program's closure record, pushes it (twice under the
-self convention), pushes the constant arguments, calls, then prints the
-result as a decimal line through a `write` request and exits with its low
-byte through an `exit` request, both by the process protocol's
-`endpoint.send` (`int 0x80`). A division by zero exits 111; exhausted IR
-fuel exits 112. The entry initializes `r14` with the budget and all emitted
-node checks share it through ordinary and tail calls.
+## The image and closure arena
 
-Values are tagged: an integer n is 2n, `#f` is 1, `#t` is 3, `nil` is 5;
-`if` tests for 1 and 5. A frame is `rbp`; the static link is pushed under
-it; the caller pushes the callee's closure then the arguments in order, so
-argument *s* of an *n*-ary frame is at `rbp + 16 + 8(n − 1 − s)`, and
-the callee pops the argument/closure block on return. Every jump is a
-`rel32` and every address a `movabs`, so the assembler is two passes over a tree of code:
-sizes and labels, then bytes.
+The ELF contains a code segment at the process window's base and a one-MiB
+read/write arena one MiB above it. A closure record has a code address,
+arity and flat copied lexical values: 16 header bytes plus eight per capture.
+Records never contain stack-frame links. A copied closure value refers to
+another arena record; all records live until process exit.
+
+Integers are `2n`, false/true/nil are 1/3/5, and closure pointers have tag 7.
+`rbp` names the current frame, `[rbp-8]` its closure, and `r12` passes that
+closure to a callee. Captured loads use fixed offsets in the record. Inline
+locals remain stack slots and are copied if captured. `r13` is the arena
+bump pointer, `r9` its logical limit, `r14` remaining fuel, and `r15` the
+shared process page.
+
+`(native-x86-emit-bounded IR ARGUMENTS FUEL ARENA-BYTES)` sets both budgets.
+The arena limit is any integer from 0 through 1048576; the existing entry
+points use one MiB. Each complete record must fit before any part is written.
+Exactly fitting succeeds; exhaustion exits 113. This is cumulative allocation,
+without garbage collection, and does not shrink the fixed ELF mapping.
+
+The entry creates the root closure, supplies constant arguments (and the
+root closure itself for the explicit-self convention), then invokes it.
+Integer results print through the process protocol and exit with their low
+byte. False/true/nil exit 0/1/2. Division by zero exits 111, exhausted fuel
+112, arena exhaustion 113, invalid calls/numeric operands or a non-scalar
+final result 114. Successful integers can share these exit codes.
+
+Machine code remains a tree of short byte leaves and symbolic addresses,
+assembled in two passes: sizes/labels, then resolved bytes.
 
 ## Execution fuel
 
@@ -105,13 +110,14 @@ live-desktop> :exec fib
 process fib exited with status 55
 ```
 
-## Not claimed
+## Remaining boundaries
 
-This is not the JIT: `agel-jit`'s Cranelift backend compiles the whole IR
-with a managed heap, lists and texts, on the host, and stays the
-toolchain's full backend. This one compiles integer programs to a
-standalone process and proves that the last Rust piece of the toolchain
-has an Agel counterpart in the guest; growing it toward the JIT's
-coverage is the road, not this rung. Nothing it emits is signed or
-checked beyond the loader's rules for an ELF; it runs in a protection
-domain like any program.
+This integer-subset backend is separate from the managed Cranelift JIT.
+Owned captures and arena checks do not add a collector, lists/texts/maps,
+checked integer-overflow semantics, full adversarial IR validation, or a
+language-level stack quota. Source-evaluator and IR fuel remain distinct.
+
+Emitted images are unsigned and run inside ordinary process protection
+domains. Other ELF programs need not contain these runtime checks. Kernel
+isolation remains the containment boundary. See [v0.2.90](release-v0.2.90.md)
+for the closure contract and regressions.

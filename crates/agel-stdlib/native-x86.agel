@@ -3,18 +3,19 @@
 ; the Agel supervisor, as hex text a file can hold and `:install` reads.
 ;
 ; What it compiles: integers, #t, #f and nil; `+ - * / = <` on two
-; arguments; `if`, `begin`; functions with lexical addressing through a
-; static link, so `let` (a nested function called at once) and closures
-; over enclosing frames work; calls through closure values, the explicit
-; self convention included. Values are tagged: an integer n is 2n, #f is 1,
+; arguments; `if`, `begin`; functions with copied lexical environments,
+; so `let` and closures that outlive their enclosing frames work. Calls
+; through closure values include the explicit-self convention. Values are tagged: an integer n is 2n, #f is 1,
 ; #t is 3, nil is 5. A tail call through a parameter reuses the frame and
 ; a `let` is slots of the frame it appears in, so a loop written as a
 ; function calling itself last runs in constant stack, `let`s and all;
-; a tail call through a `let`-bound value or a function literal is a
-; call. The image runs the compiled function
+; a tail call through a local closure reuses a large-enough frame.
+; A function literal applied immediately stays inlined. The image runs
+; the compiled function
 ; on the constant arguments given, prints the result as a decimal line on
 ; the console and exits with its low byte as the status; a division by
-; zero exits 111; exhausted IR fuel exits 112. Each evaluated IR node
+; zero exits 111; exhausted IR fuel exits 112, arena exhaustion 113,
+; and invalid calls/numeric operands or a closure result 114. Each IR node
 ; costs one unit, including inlined callees; entry arguments and the
 ; external invocation cost nothing. The default budget is 50 million.
 ; Not compiled: lists, texts, maps, other builtins, a
@@ -23,10 +24,10 @@
 ; Code is a tree: a leaf is a short list of bytes, `(label NAME)`,
 ; `(rel32 NAME)` (four bytes, relative to the end of the item) or
 ; `(abs64 NAME)` (eight bytes, an address); a node is `(seq LEFT RIGHT)`.
-; Every pass recurses by the tree's depth, never by its length, so the
-; evaluator's call-depth budget holds for a program of any size.
+; Passes walk the tree instead of recursing over a flat byte list. Source
+; nesting and capture counts still obey the evaluator's compilation budgets.
 (module agel/native-x86
-  (export native-x86-emit native-x86-emit-limited native-x86-source)
+  (export native-x86-emit native-x86-emit-limited native-x86-emit-bounded native-x86-source)
 
   (def image-base 550024249344)          ; 0x8010000000, the process window
   (def arena-offset 1048576)             ; closure records, 1 MiB above the code
@@ -90,8 +91,8 @@
           (hex (cdr bytes) (text-concat out (text-concat (hex-digit (/ b 16)) (hex-digit (- b (* (/ b 16) 16))))))))))
 
   ; Instructions, as byte lists. rax holds a value; rbx the other operand;
-  ; rbp the frame; [rbp-8] the static link; r12 the link passed to a
-  ; callee; r13 the arena's bump pointer; r14 remaining IR fuel;
+  ; rbp the frame; [rbp-8] the current closure; r12 the closure passed
+  ; to a callee; r9 the arena limit; r13 its bump pointer; r14 IR fuel;
   ; r15 the shared page. Printing may reuse r14 only after evaluation.
   (def mov-rax-imm (fn (n) (append (list 72 184) (le8 n))))
   (def mov-rbx-abs (fn (name) (seq (list 72 187) (list 'abs64 name))))
@@ -99,18 +100,28 @@
   (def pop-rax (list 88))
   (def mov-rbx-rax (list 72 137 195))
   (def mov-rax-rbp (list 72 137 232))
-  (def mov-rax-link (list 72 139 64 248))                  ; mov rax, [rax-8]
   (def mov-rax-frame (fn (disp) (append (list 72 139 128) (le4 disp))))   ; mov rax, [rax+disp]
   (def mov-rax-stack (fn (disp) (append (list 72 139 132 36) (le4 disp)))) ; mov rax, [rsp+disp]
   (def add-rsp (fn (n) (append (list 72 129 196) (le4 n))))
   (def prologue (list 85 72 137 229 65 84))                ; push rbp; mov rbp,rsp; push r12
   (def epilogue (fn (arity)                                ; mov rsp,rbp; pop rbp; ret 8(arity+1)
     (append (list 72 137 236 93 194) (le (* 8 (+ arity 1)) 2))))
-  (def call-closure                                         ; r11 = rax; rax = [r11]; r12 = [r11+8]; call rax
-    (list 73 137 195 73 139 3 77 139 99 8 255 208))
+  ; A closure is an arena pointer tagged with 7. Integers are even and
+  ; #f/#t/nil are 1/3/5. Check the tag and arity before touching the stack.
+  (def check-closure (fn (arity)
+    (check-arity arity)
+    (cat (list (list 73 137 195 73 131 227 7 73 131 251 7) ; r11 = rax & 7
+               (jne 'type-fault)
+               (list 73 137 195 73 131 227 248)           ; r11 = rax & -8
+               (append (list 73 129 123 8) (le4 arity))   ; cmp [r11+8], arity
+               (jne 'type-fault)))))
+  (def call-closure (fn (arity)
+    (cat (list (check-closure arity)
+               (list 73 139 3 77 137 220 255 208)))))     ; rax=[r11]; r12=r11; call rax
   (def jmp (fn (name) (seq (list 233) (list 'rel32 name))))
   (def je (fn (name) (seq (list 15 132) (list 'rel32 name))))
   (def jne (fn (name) (seq (list 15 133) (list 'rel32 name))))
+  (def ja (fn (name) (seq (list 15 135) (list 'rel32 name))))
   (def jl (fn (name) (seq (list 15 140) (list 'rel32 name))))
   (def jns (fn (name) (seq (list 15 137) (list 'rel32 name))))
   (def label (fn (name) (list 'label name)))
@@ -124,11 +135,34 @@
   (def charge
     (cat (list (list 77 133 246) (je 'fuel-exhausted) ; test r14,r14
                (list 73 255 206))))                 ; dec r14
-  (def record-closure (fn (name)                            ; rax = new record {code, rbp}
-    (cat (list (list 76 137 232)                            ; mov rax, r13
-               (mov-rbx-abs name) (list 73 137 93 0)        ; mov rbx, code; mov [r13], rbx
-               (list 72 137 235 73 137 93 8)                ; mov rbx, rbp; mov [r13+8], rbx
-               (list 73 131 197 16)))))                     ; add r13, 16
+  ; Records own copied lexical values, never pointers into the stack.
+  ; r9 is the arena limit; r13 is the next byte. Check the entire record
+  ; before writing even its header. The maximum arena is one MiB.
+  (def record-closure (fn (name arity scopes)
+    (let ((bytes (+ 16 (* 8 (capture-count scopes)))))
+      (cat (list (append (list 77 141 149) (le4 bytes))     ; lea r10,[r13+bytes]
+                 (list 77 57 202) (ja 'arena-exhausted)   ; cmp r10,r9
+                 (list 77 137 235)                       ; mov r11,r13
+                 (mov-rbx-abs name) (list 73 137 27)      ; [r11]=code
+                 (append (list 73 199 67 8) (le4 arity))  ; [r11+8]=arity
+                 (capture-values scopes scopes 0 0)
+                 (list 77 137 213 76 137 216 72 131 200 7)))))) ; r13=r10; rax=r11|7
+  (def capture-count (fn (scopes)
+    (if (= scopes nil) 0 (+ (entry-arity (car scopes)) (capture-count (cdr scopes))))))
+  (def capture-values (fn (remaining scopes depth first)
+    (if (= remaining nil) nil
+        (seq (capture-slots (entry-arity (car remaining)) scopes depth 0 first)
+             (capture-values (cdr remaining) scopes (+ depth 1)
+                             (+ first (entry-arity (car remaining))))))))
+  (def capture-slots (fn (count scopes depth slot first)
+    (if (= slot count) nil
+        (seq (cat (list (car (gen-local depth slot scopes))
+                        (append (list 73 137 131) (le4 (+ 16 (* 8 (+ first slot)))))))
+             (capture-slots count scopes depth (+ slot 1) first)))))
+  (def captured-scopes (fn (scopes first)
+    (if (= scopes nil) nil
+        (cons (list 'capture (entry-arity (car scopes)) first)
+              (captured-scopes (cdr scopes) (+ first (entry-arity (car scopes))))))))
 
   ; Labels from the path to a node, unique by construction.
   (def at (fn (path n) (text-concat path (text-concat "." (digits n)))))
@@ -142,16 +176,14 @@
         (if (= v #t) 3 (if (= v #f) 1 (if (= v nil) 5 (fail "a constant that is not an integer, a boolean or nil")))))))
 
   ; A scope is one entry per IR frame, the innermost first: `(frame N)`
-  ; for a function's own frame of N parameters, reached through the
-  ; static link, or `(inline K FIRST)` for a function literal applied at
-  ; once (a `let`), whose K values live in the enclosing physical frame
-  ; at word FIRST below the link. `stack` counts the words pushed below
-  ; the link so far, so an inlined value's slot is fixed at compile time.
+  ; for a function's own frame of N parameters, `(capture K FIRST)` for
+  ; K copied values in its closure, or `(inline K FIRST)` for a literal
+  ; applied at once (a `let`), whose K values live in the enclosing physical frame
+  ; at word FIRST below the closure slot. `stack` counts the words pushed below
+  ; the closure slot so far, so an inlined value's slot is fixed at compile time.
   (def frame? (fn (entry) (= (car entry) 'frame)))
   (def entry-arity (fn (entry) (car (cdr entry))))
   (def entry-first (fn (entry) (car (cdr (cdr entry)))))
-  (def hops (fn (scopes depth)                              ; static links to follow
-    (if (= depth 0) 0 (+ (if (frame? (car scopes)) 1 0) (hops (cdr scopes) (- depth 1))))))
   (def slot-offset (fn (entry slot)
     (if (frame? entry)
         (+ 16 (* 8 (- (- (entry-arity entry) 1) slot)))
@@ -182,16 +214,23 @@
       (fail "an IR node this backend does not know"))))))))))))
 
   (def gen-local (fn (depth slot scopes)
-    (let ((entry (nth scopes depth)))
-      (list (cat (list mov-rax-rbp (links (hops scopes depth)) (mov-rax-frame (slot-offset entry slot)))) nil))))
-  (def links (fn (count) (if (= count 0) nil (seq mov-rax-link (links (- count 1))))))
+    (if (not (= (type-of depth) 'int)) (fail "invalid lexical depth")
+    (if (if (< depth 0) #t (not (< depth (length scopes)))) (fail "invalid lexical depth")
+    (if (not (= (type-of slot) 'int)) (fail "invalid lexical slot")
+      (let ((entry (nth scopes depth)))
+        (if (if (< slot 0) #t (not (< slot (entry-arity entry)))) (fail "invalid lexical slot")
+          (list (if (= (car entry) 'capture)
+                    (cat (list (list 72 139 69 248) ; mov rax,[rbp-8], the closure
+                               (mov-rax-frame (+ 16 (* 8 (+ (entry-first entry) slot))))))
+                    (seq mov-rax-rbp (mov-rax-frame (slot-offset entry slot)))) nil))))))))
 
   ; A function literal as a value: a record, and its code after the entry.
   ; The callee pops its own block of arguments and closure on return.
   (def gen-fn (fn (arity body scopes path)
     (let ((code-name (name path "f")))
-      (let ((inner (gen body (cons (list 'frame arity) scopes) 0 (at path 0) #t)))
-        (list (record-closure code-name)
+      (check-arity arity)
+      (let ((inner (gen body (cons (list 'frame arity) (captured-scopes scopes 0)) 0 (at path 0) #t)))
+        (list (record-closure code-name arity scopes)
               (cat (list (label code-name) prologue (car inner) (epilogue arity) (car (cdr inner)))))))))
 
   (def gen-if (fn (parts scopes stack path tail?)
@@ -213,32 +252,30 @@
   ; A call. A builtin is inlined. A function literal applied at once is
   ; a `let`: its values become slots of this frame and its body runs
   ; here, so a tail call inside it can reuse this frame. A tail call
-  ; through a parameter (the self convention, a function passed in)
-  ; reuses the frame: the parameter's value came from the caller and
-  ; cannot capture this frame. Anything else is a call: the callee's
+  ; through a local closure reuses a large-enough frame: every captured
+  ; value, including one passed as an argument, lives in the arena.
+  ; Anything else is a call: the callee's
   ; closure then its arguments pushed, the closure read back from the
-  ; stack, its code called with its environment in r12.
+  ; stack, its tag and arity checked, its code called with the record in r12.
   (def gen-call (fn (callee arguments scopes stack path tail?)
     (if (= (car callee) 'builtin)
         (charge-callee (gen-primitive (car (cdr callee)) arguments scopes stack path))
     (if (= (car callee) 'fn)
         (charge-callee (gen-let (car (cdr callee)) (car (cdr (cdr callee))) arguments scopes stack path tail?))
-    (if (if tail? (if (= (car callee) 'local) (reusable? callee arguments scopes) #f) #f)
+    (if (if tail? (if (= (car callee) 'local) (reusable? arguments scopes) #f) #f)
         (gen-tail callee arguments scopes stack path)
         (let ((target (gen callee scopes stack (at path 0) #f))
               (pushed (gen-arguments arguments scopes (+ stack 1) path 1))
               (count (length arguments)))
           (list (cat (list (car target) push-rax (car pushed)
-                           (mov-rax-stack (* 8 count)) call-closure))
+                           (mov-rax-stack (* 8 count)) (call-closure count)))
                 (seq (car (cdr target)) (car (cdr pushed))))))))))
   ; Inlining removes callee code, not its semantic evaluation cost.
   (def charge-callee (fn (generated)
     (list (seq charge (car generated)) (car (cdr generated)))))
-  (def reusable? (fn (callee arguments scopes)
+  (def reusable? (fn (arguments scopes)
     (let ((n (frame-arity scopes)))
-      (if (= n nil) #f
-          (if (< n (length arguments)) #f
-              (frame? (nth scopes (car (cdr callee)))))))))
+      (if (= n nil) #f (not (< n (length arguments)))))))
   (def gen-arguments (fn (arguments scopes stack path index)
     (if (= arguments nil) (list nil nil)
         (let ((first (gen (car arguments) scopes stack (at path index) #f))
@@ -249,6 +286,7 @@
   ; with them in scope, the slots dropped after (dead code after a tail
   ; call that reused the frame, harmless).
   (def gen-let (fn (count body arguments scopes stack path tail?)
+    (check-arity count)
     (if (not (= (length arguments) count)) (fail "a let whose values do not match its names")
         (let ((pushed (gen-arguments arguments scopes stack path 1))
               (inner (gen body (cons (list 'inline count stack) scopes) (+ stack count) (at path 0) tail?)))
@@ -268,6 +306,7 @@
           (m (length arguments))
           (n (frame-arity scopes)))
       (list (cat (list (car target) push-rax (car pushed)
+                       (mov-rax-stack (* 8 m)) (check-closure m)
                        (list 72 139 77 8)                           ; mov rcx, [rbp+8]
                        (list 72 139 69 0)                           ; mov rax, [rbp]
                        (copy-block m (+ 16 (* 8 (- n m))))
@@ -275,8 +314,7 @@
                        (list 72 137 197)                            ; mov rbp, rax
                        (append (list 72 141 162) (le4 (+ 8 (* 8 (- n m)))))  ; lea rsp, [rdx+8+8(n-m)]
                        (list 72 137 12 36)                          ; mov [rsp], rcx
-                       (append (list 76 139 156 36) (le4 (+ 8 (* 8 m))))     ; mov r11, [rsp+8+8m]
-                       (list 77 139 99 8)                           ; mov r12, [r11+8]
+                       (list 77 137 220)                            ; mov r12,r11
                        (list 65 255 35)))                           ; jmp [r11]
             (seq (car (cdr target)) (car (cdr pushed)))))))
   (def copy-block (fn (k base)                                    ; words k..0, top first
@@ -292,6 +330,11 @@
           (list (cat (list (car left) push-rax (car right) mov-rbx-rax pop-rax (primitive op path)))
                 (seq (car (cdr left)) (car (cdr right))))))))
   (def primitive (fn (op path)
+    (seq (if (= op '=) nil
+             (cat (list (list 72 169 1 0 0 0) (jne 'type-fault) ; test rax,1
+                        (list 72 247 195 1 0 0 0) (jne 'type-fault)))) ; test rbx,1
+         (primitive-op op path))))
+  (def primitive-op (fn (op path)
     (if (= op '+) (list 72 1 216)
     (if (= op '-) (list 72 41 216)
     (if (= op '*) (list 72 209 248 72 209 251 72 15 175 195 72 209 224)      ; sar, sar, imul, shl
@@ -342,7 +385,14 @@
                (list 76 137 240 72 209 248)                  ; mov rax, r14; sar rax, 1
                (jmp 'exit)
                (label 'odd)                                  ; #f 1 -> 0, #t 3 -> 1, nil 5 -> 2
+               cmp-rax-5 (ja 'type-fault)                    ; closures are not printable scalar results
                (list 72 209 248)                             ; sar rax, 1
+               (jmp 'exit)
+               (label 'arena-exhausted)
+               (list 72 199 192 113 0 0 0)
+               (jmp 'exit)
+               (label 'type-fault)
+               (list 72 199 192 114 0 0 0)
                (jmp 'exit)
                (label 'fuel-exhausted)
                (list 72 199 192 112 0 0 0)                   ; mov rax, 112
@@ -359,8 +409,9 @@
   ; The entry: the shared page in rdi, the arena, the program's closure,
   ; the arguments (the closure first under the self convention), the call,
   ; the result printed and returned as the status.
-  (def entry (fn (fuel)
+  (def entry (fn (fuel arena-bytes)
     (cat (list (list 73 137 255)                             ; mov r15, rdi
+               (append (list 73 185) (le8 (+ (+ image-base arena-offset) arena-bytes))) ; r9 = limit
                (append (list 73 190) (le8 fuel))              ; mov r14, fuel
                (append (list 73 189) (le8 (+ image-base arena-offset))) ; mov r13, arena
                (list 72 137 229)))))                         ; mov rbp, rsp
@@ -371,12 +422,12 @@
     (let ((self? (= arity (+ (length arguments) 1))))
       (if (not (if self? #t (= arity (length arguments)))) (fail "the arguments do not match the function's arity")
           (cat (list push-rax (if self? push-rax nil) (push-arguments arguments)
-                     (mov-rax-stack (* 8 arity)) call-closure
+                     (mov-rax-stack (* 8 arity)) (call-closure arity)
                      print-and-exit))))))
 
   ; The ELF: a header, a code segment holding the file, and an arena
-  ; segment of fresh pages a megabyte above it, one closure record each 16
-  ; bytes. The entry follows the headers.
+  ; segment of fresh pages a megabyte above it. Each closure uses 16 bytes
+  ; for code/arity plus eight per captured value. The entry follows the headers.
   (def elf-header (fn (size)
     (cat (list
       (list 127 69 76 70 2 1 1 0 0 0 0 0 0 0 0 0)             ; magic, 64-bit, little-endian, version, System V
@@ -393,17 +444,27 @@
     (native-x86-emit-limited ir arguments 50000000)))
 
   (def native-x86-emit-limited (fn (ir arguments fuel)
+    (native-x86-emit-bounded ir arguments fuel arena-offset)))
+
+  (def check-arity (fn (arity)
+    (if (not (= (type-of arity) 'int)) (fail "invalid function arity")
+        (if (if (< arity 0) #t (< 8190 arity)) (fail "invalid function arity") #t))))
+
+  (def native-x86-emit-bounded (fn (ir arguments fuel arena-bytes)
     (if (not (= (type-of fuel) 'int)) (fail "fuel must be a nonnegative integer")
         (if (< fuel 0) (fail "fuel must be a nonnegative integer")
-            (emit-budgeted ir arguments fuel)))))
+            (if (not (= (type-of arena-bytes) 'int)) (fail "arena bytes must be an integer from 0 to 1048576")
+            (if (if (< arena-bytes 0) #t (< arena-offset arena-bytes))
+                (fail "arena bytes must be an integer from 0 to 1048576")
+                (emit-budgeted ir arguments fuel arena-bytes)))))))
 
-  (def emit-budgeted (fn (ir arguments fuel)
+  (def emit-budgeted (fn (ir arguments fuel arena-bytes)
     (if (not (= (car ir) 'agel/native-v2)) (fail "not agel/native-v2 IR")
         (let ((function (car (cdr ir))))
           (if (not (= (car function) 'fn)) (fail "the IR is not a function")
               (let ((arity (car (cdr function))))
                 (let ((main (gen function nil 0 "L" #f)))
-                  (let ((code (cat (list (entry fuel) (car main) (finish arity arguments) (car (cdr main))))))
+                  (let ((code (cat (list (entry fuel arena-bytes) (car main) (finish arity arguments) (car (cdr main))))))
                     (let ((measured (measure code 0 (dict))))
                       (text-concat (render (elf-header (+ header-bytes (car measured))) 0 (dict))
                                    (render code 0 (car (cdr measured)))))))))))))

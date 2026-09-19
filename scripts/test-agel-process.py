@@ -12,6 +12,7 @@ import tempfile
 import time
 import graphical_console as module
 import native_ir_fuel as fuel_reference
+import native_ir_closures as closure_reference
 
 
 def check(machine, form, wanted, seconds=30):
@@ -218,8 +219,10 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
                 assert f"\r\n{wanted}\r\n" in reply, (name, reply)
         # Independent IR interpretation supplies exact budgets. Every case
         # must succeed at N and exhaust at N-1 on the actual guest CPU.
-        def metered(ir, arguments, fuel, status, value=None):
-            source = "(import agel/native-x86)\n(file-write \"meter.hex\" (native-x86-emit-limited '" + fuel_reference.form(ir) + " '" + fuel_reference.form(arguments) + f" {fuel}))\n"
+        def metered(ir, arguments, fuel, status, value=None, arena=None):
+            emitter = "native-x86-emit-limited" if arena is None else "native-x86-emit-bounded"
+            limits = str(fuel) if arena is None else f"{fuel} {arena}"
+            source = "(import agel/native-x86)\n(file-write \"meter.hex\" (" + emitter + " '" + fuel_reference.form(ir) + " '" + fuel_reference.form(arguments) + f" {limits}))\n"
             for offset in range(0, len(source), 100):
                 chunk = source[offset:offset + 100]
                 escaped = chunk.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
@@ -233,7 +236,7 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
             if value is not None:
                 assert f"\r\n{value}\r\n" in reply, reply
 
-        for name, ir, arguments in fuel_reference.cases():
+        for name, ir, arguments in fuel_reference.cases() + closure_reference.cases():
             reference = fuel_reference.Interpreter(10000)
             value = reference.run(ir, arguments)
             needed = 10000 - reference.remaining
@@ -255,6 +258,9 @@ with tempfile.TemporaryDirectory(prefix="agel-language-", dir="/tmp") as directo
         divide = ['agel/native-v2', ['fn', 0, fuel_reference.call('/', fuel_reference.const(1), fuel_reference.const(0))]]
         metered(divide, [], 4, 112)
         metered(divide, [], 5, 111)
+        for ir, arguments, arena, status, value in closure_reference.limits():
+            metered(ir, arguments, 1000, status, value, arena=arena)
+        print(f"Closure arena boundaries and invalid call/type checks: {len(closure_reference.limits())} executions [ok]")
         # A failing form: the transaction rolls back, the error is reported,
         # the status is 1.
         check(machine, '(file-write "bad.agel" "(def ok 1)\\n(/ 1 0)\\n")', "\r\n")

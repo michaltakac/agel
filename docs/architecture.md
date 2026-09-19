@@ -508,6 +508,11 @@ Each rung must be runnable and differentially testable against the rung below:
    including inlined callees. Tail calls keep the counter while reusing the
    frame. Exhaustion exits 112; an independent interpreter checks exact
    boundaries in the guest. Source-level budget parity is separate work.
+84. **Owned closures and bounded allocation (v0.2.90):** records contain
+   code, arity and copied lexical values, with tagged closure pointers.
+   Calls check their tag/arity and allocations check the complete record
+   against a per-executable arena budget. Captures survive returns and frame
+   reuse; the immutable integer subset needs no shared mutable environment.
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

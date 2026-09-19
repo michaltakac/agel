@@ -140,3 +140,36 @@ fn fuel_limits_must_be_nonnegative_integers() {
         assert!(matches!(commit.values.last(), Some(Value::String(_))));
     }
 }
+
+#[test]
+fn arena_and_lexical_addresses_are_checked_before_emission() {
+    let (mut world, options) = world();
+    for budget in ["-1", "1048577", "#f", "nil"] {
+        let error = world
+            .evaluate_with(
+                &format!("(native-x86-emit-bounded (native-compile '(fn () 42)) nil 100 {budget})"),
+                &options,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("arena bytes must be an integer"), "{error}");
+    }
+    for ir in [
+        "(fn -1 (const 42))",
+        "(fn 8191 (const 42))",
+        "(fn 0 (local 0 0))",
+        "(fn 1 (local -1 0))",
+        "(fn 1 (local 1 0))",
+        "(fn 1 (local 0 -1))",
+        "(fn 1 (local 0 1))",
+    ] {
+        let error = world
+            .evaluate_with(
+                &format!("(native-x86-emit '(agel/native-v2 {ir}) '(42))"),
+                &options,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("native-x86/unsupported"), "{ir}: {error}");
+    }
+}

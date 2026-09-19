@@ -1968,6 +1968,23 @@ produced or run there.
   an independent IR interpreter on the checked corpus. Source evaluator and
   managed JIT budgets have different cost models.
 
+## v0.2.90
+
+- **Closures own their captured values:** no closure record points into a
+  returned or reused stack frame. Other closures are arena values with the
+  same process lifetime. The backend's immutable subset has no mutable
+  captured cells.
+- **Allocation is checked before writing:** the complete header/capture size
+  must fit the configured arena. Failure exits 113; there is no collector,
+  and even discarded records consume the cumulative quota.
+- **Dynamic calls check tag and arity before dispatch or frame reuse.**
+  Numeric operations reject closure/boolean/nil operands. Lexical addresses
+  and encodable arities are checked during emission. Invalid runtime calls
+  and types exit 114, rather than interpreting ordinary scalar bits as code.
+- **Limits remain explicit:** this is not full adversarial IR validation,
+  source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
+  programs can omit all these checks; kernel isolation remains mandatory.
+
 ## v0.2.73
 
 - **A toolchain can miscompile a process, never the kernel's guard:** the

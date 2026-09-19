@@ -396,6 +396,11 @@ promise.
   a finite default budget and an explicit-limit entry point. Exhaustion
   exits 112; exact limits are checked against an independent IR interpreter
   in the guest. Source-evaluator fuel parity remains separate work.
+  `v0.2.90` replaces the Agel-written backend's stack-linked closures with
+  owned flat captures, adds explicit checked arena budgets, and checks
+  dynamic-call tags/arity and numeric operands. Returned closures and
+  captures passed through tail calls retain their values; exhaustion exits
+  113 and invalid calls/types exit 114. There is no collector yet.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
