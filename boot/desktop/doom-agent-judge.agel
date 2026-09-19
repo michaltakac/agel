@@ -5,14 +5,22 @@
 ; answer line, which model-result reads: for each question in order, its
 ; id, kind, and integers in thousandths. The policy is here, in code, not
 ; in the model: a confident choice is followed, an unsure one falls back
-; to the scripted reflexes, and a seen enemy adds fire to going forward.
+; to the scripted reflexes, a seen enemy adds fire to going forward, a
+; lethal risk while hurt backs off, and a forward that did not move turns.
+; Fields of the answer line: act choice 6 OPTION CONF P*6 (0-10), foe noul
+; P (11-13), risk score 3 SCORE CONF P*3 (14-21): the score is field 17.
 (def play-pause (fn () 'p))
 (def play-reason "waiting for the judge")
 (def questions "(judge (choice act \"Best next move\" forward back left right fire use) (noul foe \"Is an enemy in view?\") (score risk \"How dangerous is it?\" \"safe\" \"wary\" \"lethal\"))")
 (def ask (fn () (model-request questions)))
+(begin (def last-x 0) (def last-y 0) (def went-forward #f))
 (def field (fn (n default) (if (= (look-field n) nil) default (look-field n))))
-(def reflex (fn () (if (< (field 4 100) 30) '(down) '(up ctrl))))
-(def keys-for (fn (a foe) (if (= a "forward") (if (< 500 foe) '(up ctrl) '(up)) (if (= a "back") '(down) (if (= a "left") '(left) (if (= a "right") '(right) (if (= a "fire") '(ctrl) (if (= a "use") '(space) (reflex)))))))))
+(def stuck (fn () (if went-forward (if (= (field 1 0) last-x) (= (field 2 0) last-y) #f) #f)))
+(def remember (fn (choice) (begin (def last-x (field 1 0)) (def last-y (field 2 0)) (def went-forward (= (car choice) 'up)))))
+(def turn (fn () (if (< (look-mean 0 6 20 10) (look-mean 44 6 20 10)) '(left) '(right))))
+(def reflex (fn () (if (< (field 4 100) 30) '(down) (if (stuck) (turn) '(up ctrl)))))
+(def keys-for (fn (a foe) (if (= a "forward") (if (stuck) (turn) (if (< 500 foe) '(up ctrl) '(up))) (if (= a "back") '(down) (if (= a "left") '(left) (if (= a "right") '(right) (if (= a "fire") '(ctrl) (if (= a "use") '(space) (reflex)))))))))
 (def number (fn (answer n default) (if (= (text-int (text-field answer n)) nil) default (text-int (text-field answer n)))))
-(def decide (fn (answer) (begin (def play-reason answer) (if (< (number answer 4 0) 250) (reflex) (keys-for (text-field answer 3) (number answer 13 0))))))
-(def play-step (fn () (begin (def answer (model-result)) (if (= answer nil) (begin (ask) '()) (decide answer)))))
+(def retreat? (fn (answer) (if (< 1500 (number answer 17 0)) (< (field 4 100) 50) #f)))
+(def decide (fn (answer) (begin (def play-reason answer) (if (retreat?  answer) '(down) (if (< (number answer 4 0) 250) (reflex) (keys-for (text-field answer 3) (number answer 13 0)))))))
+(def play-step (fn () (begin (def answer (model-result)) (if (= answer nil) (begin (ask) '()) (begin (def choice (decide answer)) (remember choice) choice)))))

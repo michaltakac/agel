@@ -1985,6 +1985,27 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.94
+
+- **A recorded episode leaves the machine when judged.** `--judge-dataset`
+  sends every step's state line, keys, reason and ASCII frame to the
+  endpoint, one call a step, under the same `model/infer/jev/request/`
+  audit; the labels that come back are the model's opinion of the
+  program's moves, written beside the dataset and not fed back to the
+  program by anything here.
+- **The judge sees the run's history now, for the game too.** The last
+  eight steps' keys and state lines go with each request. It is more of
+  the same data that was leaving already, and it is what the model says
+  the position is, not what the engine says: a program that trusts the
+  judge's reading of the history trusts the judge.
+- **A score is a position, not a probability.** The provider clamped
+  scores to one level (`thousandths`), so a `score` question with three
+  levels could never report the third; `level_thousandths` reads the
+  documented value. A program comparing scores against 1000 was reading a
+  bound that was not the contract's; the local judge never had it.
+- **Not claimed:** any improvement in play from the changes to the judge
+  program beyond the one run reported; any use of the judged dataset.
+
 ## v0.2.93
 
 - **A driving program is the operator's hands, not a new principal.**

@@ -308,6 +308,15 @@ impl JudgmentRequest {
 }
 
 /// A probability as an integer in thousandths.
+/// A score in thousandths of a level: a position among ordered levels,
+/// from 0 to one less than their count, so it is not clamped to one.
+pub fn level_thousandths(score: f64) -> i64 {
+    if score.is_nan() {
+        return 0;
+    }
+    ((score * 1000.0).round() as i64).max(0)
+}
+
 pub fn thousandths(probability: f64) -> i64 {
     if probability.is_nan() {
         return 0;
@@ -406,7 +415,7 @@ impl Judgment {
                 } => {
                     tokens.push("score".to_owned());
                     tokens.push(probabilities.len().to_string());
-                    tokens.push(thousandths(*score).to_string());
+                    tokens.push(level_thousandths(*score).to_string());
                     tokens.push(thousandths(*confidence).to_string());
                     tokens.extend(probabilities.iter().map(|p| thousandths(*p).to_string()));
                 }
@@ -718,6 +727,10 @@ mod tests {
         assert_eq!(thousandths(f64::NAN), 0);
         assert_eq!(thousandths(1.7), 1000);
         assert_eq!(thousandths(-0.2), 0);
+        // A score is a position among levels, past one when there are three.
+        assert_eq!(level_thousandths(1.443), 1443);
+        assert_eq!(level_thousandths(-0.2), 0);
+        assert_eq!(level_thousandths(f64::NAN), 0);
         assert_eq!(thousandths(0.0005), 1);
     }
 

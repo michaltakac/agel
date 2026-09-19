@@ -52,6 +52,9 @@ struct Options {
     scene: String,
     /// The task the desktop-driving program is judged against.
     task: String,
+    /// Instead of an episode: judge every step of this recorded dataset
+    /// with the provider, writing `judged.jsonl` beside it.
+    judge_dataset: Option<PathBuf>,
 }
 
 fn options() -> Result<Options, String> {
@@ -70,6 +73,7 @@ fn options() -> Result<Options, String> {
         program: None,
         scene: "doom".to_owned(),
         task: "list the files in the region, then finish".to_owned(),
+        judge_dataset: None,
     };
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
@@ -94,6 +98,7 @@ fn options() -> Result<Options, String> {
                 }
             }
             "--task" => options.task = value()?,
+            "--judge-dataset" => options.judge_dataset = Some(PathBuf::from(value()?)),
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -603,6 +608,11 @@ impl Judge {
         request.add_fields([
             ("game".to_owned(), "DOOM shareware E1M1 on the Agel desktop; the game is paused while you decide. frame is the window as 64x25 luminance shades, space dark to @ bright.".to_owned()),
             ("state_line".to_owned(), block.state_line.clone()),
+            ("history".to_owned(), if block.history.is_empty() {
+                "the first step".to_owned()
+            } else {
+                format!("the last steps, oldest first, each the keys held and the state line before them. A position (x, y) that does not change while forward is held means a wall ahead: turn once. An angle that has already changed since then means the turn is done: go forward again rather than keep turning. {}", block.history.join("; "))
+            }),
             ("frame".to_owned(), block.frame.clone()),
         ]);
         Ok(request)
@@ -676,6 +686,9 @@ impl Policy for Judge {
 fn main() -> Result<(), String> {
     let options = options()?;
     fs::create_dir_all(&options.out).map_err(|error| error.to_string())?;
+    if let Some(dataset) = &options.judge_dataset {
+        return judge_dataset(&options, dataset);
+    }
     let disk = options.out.join("disk.img");
     fs::copy(&options.image, &disk).map_err(|error| format!("copying the image: {error}"))?;
     {
@@ -779,6 +792,101 @@ fn main() -> Result<(), String> {
     let outcome = play(&mut qemu, &qmp, &serial, &options, policy.as_mut());
     qemu.stop();
     outcome
+}
+
+/// The model as a labeler: every step of a recorded episode judged after
+/// the fact — was holding those keys a good move in that state, and how
+/// was the player faring — with the same provider, into `judged.jsonl`
+/// beside the dataset, and a summary on the console. Nothing is booted.
+fn judge_dataset(options: &Options, dataset: &Path) -> Result<(), String> {
+    if options.policy != "jev" {
+        return Err("--judge-dataset needs --policy jev".to_owned());
+    }
+    let key = std::env::var(agel_model::systemone::KEY_VARIABLE).map_err(|_| {
+        format!(
+            "--policy jev needs {} in the environment",
+            agel_model::systemone::KEY_VARIABLE
+        )
+    })?;
+    let mut limits = CommandLimits::new(&options.out);
+    limits.timeout = Duration::from_secs(30);
+    limits.max_output_bytes = 64 * 1024;
+    let mut provider = JevProvider::new(&options.curl_bin, key, limits);
+    if let Some(model) = &options.model {
+        provider = provider.with_model(model);
+    }
+    let text =
+        fs::read_to_string(dataset).map_err(|error| format!("{}: {error}", dataset.display()))?;
+    let judged_path = dataset.with_file_name("judged.jsonl");
+    let mut judged = fs::File::create(&judged_path).map_err(|error| error.to_string())?;
+    let (mut count, mut good_total, mut faring_total) = (0_i64, 0_i64, 0_i64);
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let record: serde_json::Value = serde_json::from_str(line)
+            .map_err(|error| format!("{}: {error}", dataset.display()))?;
+        let step = record["step"].as_u64().unwrap_or(0);
+        let keys = record["keys"].as_str().unwrap_or("").to_owned();
+        let mut request = JudgmentRequest::parse(
+            "(judge (noul good \"Was holding these keys a good move for the player in this state?\" \"a good move: it advances, fights or escapes sensibly\" \"a poor move: it wastes the step, walks into a wall or into danger\") (score faring \"How is the player faring at this step?\" \"losing\" \"even\" \"winning\"))",
+        )?;
+        request.add_fields([
+            ("game".to_owned(), "DOOM shareware E1M1 on the Agel desktop, a recorded episode judged after the fact; frame is the window as 80x25 luminance shades, space dark to @ bright.".to_owned()),
+            ("state_line".to_owned(), record["state"].as_str().unwrap_or("").to_owned()),
+            ("keys_held".to_owned(), keys.clone()),
+            ("reason_given".to_owned(), record["reason"].as_str().unwrap_or("").to_owned()),
+            ("frame".to_owned(), record["ascii"].as_str().unwrap_or("").to_owned()),
+        ]);
+        let judgment = provider
+            .judge(
+                &request,
+                Principal {
+                    world: 0,
+                    agent: Some(0),
+                },
+                &format!("model/infer/jev/request/judged-{step}"),
+            )
+            .map_err(|error| format!("step {step}: {error}"))?;
+        let mut good = 0;
+        let mut faring = 0;
+        for (id, answer) in &judgment.answers {
+            match (id.as_str(), answer) {
+                ("good", agel_model::Answer::Noul { yes }) => {
+                    good = agel_model::systemone::thousandths(*yes)
+                }
+                ("faring", agel_model::Answer::Score { score, .. }) => {
+                    faring = agel_model::systemone::level_thousandths(*score)
+                }
+                _ => {}
+            }
+        }
+        count += 1;
+        good_total += good;
+        faring_total += faring;
+        let line = judgment.reply_text();
+        println!("agel-play: judged step {step}: {keys} good {good} faring {faring}");
+        let out = serde_json::json!({
+            "step": step,
+            "keys": keys,
+            "good": good,
+            "faring": faring,
+            "judgment": line,
+            "model": judgment.model,
+        })
+        .to_string()
+            + "\n";
+        judged
+            .write_all(out.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    if count == 0 {
+        return Err(format!("{} holds no steps", dataset.display()));
+    }
+    println!(
+        "agel-play: judged {count} steps: mean good {} thousandths, mean faring {} thousandths of a level; the judgments are in {}",
+        good_total / count,
+        faring_total / count,
+        judged_path.display()
+    );
+    Ok(())
 }
 
 fn run_script(arguments: &[&str]) -> Result<(), String> {
@@ -926,14 +1034,18 @@ fn play(
             }
             if line == "model-request end" {
                 in_block = false;
-                if desktop {
-                    // A judge has no memory: what this run has done so far
-                    // goes in with the block, oldest first.
-                    for decided in &history {
-                        block.push_str("history: ");
-                        block.push_str(decided);
-                        block.push('\n');
-                    }
+                // A judge has no memory: what this run has done so far goes
+                // in with the block, oldest first — all of it for the
+                // desktop, the last eight steps for the game.
+                let recent = if desktop {
+                    0
+                } else {
+                    history.len().saturating_sub(8)
+                };
+                for decided in &history[recent..] {
+                    block.push_str("history: ");
+                    block.push_str(decided);
+                    block.push('\n');
                 }
                 if let Some(reply) = policy.answer(&block) {
                     serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
@@ -987,9 +1099,11 @@ fn play(
                     .unwrap_or("")
                     .trim()
                     .to_owned();
-                if desktop {
-                    history.push(format!("step {index}: {keys}"));
-                }
+                history.push(if desktop {
+                    format!("step {index}: {keys}")
+                } else {
+                    format!("step {index}: held {keys} at {state_line}")
+                });
                 let frame_path = options.out.join(format!("step-{index:04}.ppm"));
                 let ascii = match monitor
                     .screendump(&frame_path)

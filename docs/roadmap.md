@@ -139,7 +139,8 @@ trained on it.
 | Judgments as gates on effect approval, recorded beside the decision | done | `crates/agel-cli`: `--gate agel` evaluates `(effect-gate REQUEST)` in the world before dispatch (a committed input, in the image's log), `--gate jev` asks the model one yes/no question under its own audit; a denial is the request's journaled completion `effect/denied` with the judge's line, `:effects` lists every verdict; the judged gate's allowances are audited in the session only, and no effect on the OS is gated |
 | A learned judge of Agel's own behind `judge-locally`'s contract | open | the judge written in Agel is rules |
 | A run window on the desktop drawing the agent's state, frame time and hardware use | open | the engine's state lines in the terminal are what the desktop shows of the run today |
-| A trained policy from the dataset; a world model for predictions | open | training is orchestrated through a provider, never performed by the OS |
+| A recorded episode judged after the fact by a System One model, and scored | done | `scripts/test-play-bridge.sh`: `agel-play --judge-dataset steps.jsonl` asks the provider, per step, whether the move was good and how the player fared, into `judged.jsonl` (a stand-in in CI); `scripts/doom-score.py` reads distance, stillness, kills, health and ammo off a dataset; one scripted and one judged 40-step run scored by hand in [`doom.md`](doom.md) |
+| A trained policy from the dataset; a world model for predictions | open | training is orchestrated through a provider, never performed by the OS; the judged dataset is not used by anything yet |
 | Speech and steering of the run | open | |
 
 ## Not started

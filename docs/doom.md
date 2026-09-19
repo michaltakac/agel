@@ -373,6 +373,47 @@ proved there: C programs now compile with data reached directly
 becomes an immediate on any lld. The same run showed the engine's last
 line printing `%f`, so the library's `printf` now formats floating point.
 
+## Judged for longer, and judged after (v0.2.94)
+
+The experiment: the same forty steps of E1M1 by the scripted agent and by
+the judged one, scored by what the engine's state lines say, and then
+every step of both runs handed back to the model to label. Three things
+changed for it. `doom-agent-judge` now uses the model's risk score (a
+lethal risk while hurt backs off) and turns when a forward step did not
+move the player, as the scripted agent does, the turn counting only after
+a forward. The bridge gives the judge the last eight steps as history,
+keys and state line each, with the reading that a position unchanged
+under forward means a wall and an angle already changed means the turn
+is done. And `agel-play --judge-dataset steps.jsonl` asks the model,
+per recorded step, whether holding those keys was a good move and how the
+player was faring, into `judged.jsonl`; `scripts/doom-score.py` reads
+distance, stillness, kills, health, ammo and the keys held off a dataset.
+
+One run each, by hand, the judged run 56 s wall clock with the boot:
+
+| forty steps | scripted | judged (`jev-1.13.0`) |
+|---|---|---|
+| distance, map units | 202 | 783 |
+| steps without moving | 33 | 5 |
+| kills | 0 | 0 |
+| health | 100 → 100 | 100 → 100 |
+| ammo | 50 → 46 | 50 → 50 |
+| keys held | left ×15, up+fire ×13, right ×12 | up ×37, left ×2, right ×1 |
+| the model's "good move", mean | 372 | 607 |
+| the model's "faring", mean, in thousandths of a level | 1112 | 1558 |
+
+What the numbers say, and no more: the judged run walked the corridor
+and turned three times when the program's reflex saw it stuck, the model
+answering `forward` all forty times and never seeing an enemy (`foe`
+under 500 throughout); the scripted run spent most of its steps turning
+against a wall and fired thirteen times at nothing. Neither killed
+anything in forty steps. The model rates its own run's moves higher than
+the scripted run's, which is the same model grading both and is not
+evidence of anything but its preference. Before the history carried the
+angle, an earlier judged run turned right nineteen times in a row at the
+same wall, the model choosing `right` each time because the history said
+the position had not changed; that run is in the git history, not here.
+
 ## What this is not
 
 Sound is out of scope: the engine is built without it. RISC-V has no

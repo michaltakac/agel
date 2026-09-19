@@ -540,6 +540,15 @@ Each rung must be runnable and differentially testable against the rung below:
    task and the run's history, to the model. Perception is the status
    line and the focused window's shades; actions are command lines. See
    [`computer-use.md`](computer-use.md).
+88. **DOOM by judgment, measured and labeled (v0.2.94):** the judge
+   program uses the model's risk score and a stuck-turn beside its
+   choice; the bridge gives the judge the last eight steps as history;
+   `agel-play --judge-dataset` has the model label every step of a
+   recorded episode after the fact (`judged.jsonl`), and
+   `scripts/doom-score.py` reads distance, kills, health and stillness
+   off a dataset. The provider's score is a position among levels, no
+   longer clamped to one. One run of each policy is reported, not a
+   result. See [`doom.md`](doom.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

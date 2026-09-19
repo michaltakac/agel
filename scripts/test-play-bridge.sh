@@ -78,3 +78,29 @@ if [ "$replies" -lt 3 ] || [ "$listed" -lt 3 ] || [ "$steps" -ne 3 ]; then
   exit 1
 fi
 echo "The desktop driven through the bridge: 3 steps, each a judged choice of the desktop's own commands, typed by the program [ok]"
+
+# The model as a labeler: the echo episode's dataset judged step by step
+# after the fact, the stand-in answering as the endpoint does; nothing is
+# booted. Four steps in, four judgments out, and the summary.
+out=target/doom-runs/judged
+rm -rf "$out"
+mkdir -p "$out"
+cat > "$out/curl" <<'FAKE'
+#!/bin/sh
+cat > /dev/null
+for arg in "$@"; do case "$arg" in @*) cp "${arg#@}" "$(dirname "$0")/body-$$";; esac; done
+printf '%s\n200' '{"model":"stand-in","answers":{"good":{"type":"noul","noul":0.8},"faring":{"type":"score","score":1.2,"confidence":0.5,"legend":{"0":"losing","1":"even","2":"winning"},"probabilities":{"0":0.1,"1":0.6,"2":0.3}}},"usage":{"input_tokens":1,"output_tokens":1}}'
+FAKE
+chmod +x "$out/curl"
+TYPESAFEAI_API_KEY=stand-in cargo run -q --release -p agel-play -- --out "$out" --policy jev \
+  --curl-bin "$(pwd)/$out/curl" --judge-dataset target/doom-runs/echo/steps.jsonl | tee "$out/console.log"
+judged=$(wc -l < target/doom-runs/echo/judged.jsonl | tr -d ' ')
+grep -q "agel-play: judged 4 steps: mean good 800 thousandths, mean faring 1200" "$out/console.log"
+grep -q '"keys_held":"(up)"' "$out"/body-*
+grep -q '"good":800' target/doom-runs/echo/judged.jsonl
+if [ "$judged" -ne 4 ]; then
+  printf 'expected 4 judged steps, got %s\n' "$judged" >&2
+  exit 1
+fi
+python3 scripts/doom-score.py target/doom-runs/echo/steps.jsonl | grep -q "4 steps"
+echo "A recorded episode judged after the fact: 4 steps, each a typed judgment of the move and the state [ok]"
