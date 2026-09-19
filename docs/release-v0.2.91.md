@@ -95,6 +95,42 @@ agel-play: model reply 2: act choice 6 fire 330 320 10 220 10 440 0 foe noul 980
 agel-play: step 2: (ctrl) [doom: state map 1 x 1056 y -3616 angle 64 health 100 armor 0 ammo 50 kills 0]
 ```
 
+The same loop against the live endpoint, by hand with the key in the
+environment: twelve judged steps in 24 s wall clock, the desktop's boot
+included, each answer the model's own numbers. This ran only after a fix
+that landed on `main` after the tag (below); at the tag, the bridge's
+provider hands curl a body path curl cannot read, and every step falls
+back to the program's reflexes with the error as its reason.
+
+```text
+agel-play: 12 steps by the jev Agel program (doom-agent-judge) into target/doom-runs/jev-live
+agel-play: model reply 1: act choice 6 forward 530 610 10 60 140 110 70 foe noul 280 risk score 3 240 640 790 170 40
+agel-play: step 1: (up) []
+agel-play: model reply 2: act choice 6 forward 580 640 30 40 90 100 100 foe noul 220 risk score 3 110 830 910 70 20
+agel-play: step 2: (up) [doom: state map 1 x 1055 y -3610 angle 64 health 100 armor 0 ammo 50 kills 0]
+agel-play: model reply 3: act choice 6 forward 590 650 20 50 90 100 90 foe noul 220 risk score 3 140 790 890 80 30
+agel-play: step 3: (up) [doom: state map 1 x 1055 y -3589 angle 64 health 100 armor 0 ammo 50 kills 0]
+...
+agel-play: model reply 12: act choice 6 forward 690 750 20 40 60 80 50 foe noul 220 risk score 3 130 810 890 90 20
+agel-play: step 12: (up) [doom: state map 1 x 1055 y -3216 angle 64 health 100 armor 0 ammo 50 kills 0]
+agel-play: done; the dataset is target/doom-runs/jev-live/steps.jsonl
+```
+
+The model chose `forward` every step at 530–690 thousandths of
+confidence, saw no enemy (`foe` 210–290), and placed the risk near
+`wary`; the program went forward without firing, as its policy says for
+a confident `forward` with no enemy in view.
+
+## Fixed on `main` after the tag
+
+The bridge's workspace is its `--out` directory, usually relative
+(`target/doom-runs/...`), and curl runs inside it; the provider named the
+request body relative to the host, so curl resolved it twice and exited
+26. The body path is absolute now, with a test that uses a relative
+workspace (`a_workspace_named_relative_to_the_host_still_hands_curl_the_body`).
+The CLI, whose workspace is absolute, and the stand-in episode, whose curl
+reads no file, were not affected, which is why the tag's checks passed.
+
 ## Validation
 
 - `cargo test --workspace`: the provider's grammar, JSON, answer order,
@@ -117,6 +153,7 @@ agel-play: step 2: (ctrl) [doom: state map 1 x 1056 y -3616 angle 64 health 100 
 - A browser, a form filler, an effect gate, or replay of judgments —
   the order of work in `system-one.md`, none of it here.
 - A live DOOM episode as a tested path: the judged episode in CI uses
-  the stand-in; the endpoint needs a key and is run by hand.
+  the stand-in; the endpoint needs a key and is run by hand (once, above,
+  after the fix). Nothing about how well the model plays.
 - Requests from the native evaluator larger than its 200-byte request
   area, or with a state of the program's own; the desktop adds the state.

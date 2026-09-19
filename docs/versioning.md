@@ -409,6 +409,9 @@ promise.
   on the same contract; `model-request` for programs on the OS, through
   their own console; and the `doom-agent-judge` program with `agel-play
   --policy jev`. No model runs on the OS, and no calibration is claimed.
+  (Fixed on `main` after the tag: the bridge's workspace is relative, and
+  the provider handed curl a relative body path that curl, running inside
+  the workspace, could not read; the path is absolute now, with a test.)
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

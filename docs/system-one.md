@@ -155,8 +155,11 @@ holds the model's distribution beside what the program did with it.
 Measured on the host, one typed request through `agel-cli` with three
 questions, the provider process included: 0.8 s wall clock of which the
 model's answer was 86 bytes; TypeSafe's endpoint answered a comparable
-request in 0.9 s from this machine, `jev-1.13.0`. The same three
-questions cost a language model provider seconds per step in v0.2.74.
+request in 0.9 s from this machine, `jev-1.13.0`. Through the bridge,
+twelve judged DOOM steps against the live endpoint took 24 s wall clock
+with the desktop's boot included (transcript in
+[v0.2.91](release-v0.2.91.md)). The same three questions cost a language
+model provider seconds per step in v0.2.74.
 
 ## What is proven, and where
 
@@ -179,7 +182,10 @@ questions cost a language model provider seconds per step in v0.2.74.
   line, the provider's curl a stand-in that answers as the endpoint does,
   so the path runs in CI without a network or a key.
 - By hand with `TYPESAFEAI_API_KEY`: the live endpoint through `agel-cli
-  --enable-jev` (transcript in [v0.2.91](release-v0.2.91.md)).
+  --enable-jev`, and a twelve-step judged DOOM episode through
+  `agel-play --policy jev` (transcripts in [v0.2.91](release-v0.2.91.md);
+  the episode needed a fix to the provider's body path that landed on
+  `main` after the tag).
 
 ## Where this goes
 

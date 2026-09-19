@@ -480,6 +480,16 @@ impl JevProvider {
             operation.rsplit('/').next().unwrap_or("0")
         ));
         fs::write(&file, body.as_bytes()).map_err(|error| ProviderError::Io(error.to_string()))?;
+        // curl runs with the workspace as its directory, so a workspace
+        // named relative to this process (`--out target/...`) would be
+        // resolved twice: the path curl gets is absolute.
+        let file = if file.is_absolute() {
+            file
+        } else {
+            std::env::current_dir()
+                .map(|directory| directory.join(&file))
+                .unwrap_or(file)
+        };
         let outcome = self.post(&file, principal, operation);
         let _ = fs::remove_file(&file);
         let (status, text) = outcome?;
@@ -756,6 +766,36 @@ mod tests {
             .intent
             .operation
             .starts_with("model/infer/jev/request/7"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_workspace_named_relative_to_the_host_still_hands_curl_the_body() {
+        // The bridge's workspace is its `--out` directory, usually relative
+        // (`target/doom-runs/...`); curl runs inside it, so a relative body
+        // path would be resolved twice and curl would fail to read it.
+        let (directory, curl) =
+            fake_curl(&format!("printf '%s\\n200' '{}'", ANSWER.replace('\n', "")));
+        let workspace = PathBuf::from(format!(
+            "../../target/agel-jev-relative-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&workspace).unwrap();
+        let provider = JevProvider::new(&curl, "k", CommandLimits::new(&workspace));
+        let reply = provider.infer(&model_request(DOOM)).unwrap();
+        assert!(reply.starts_with("act choice 6 fire 330"), "{reply}");
+        let args = fs::read_to_string(directory.join("args")).unwrap();
+        assert!(args.contains("<@/"), "the body path is absolute: {args}");
+        let body: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(directory.join("body")).unwrap()).unwrap();
+        assert_eq!(body["questions"]["act"]["type"], "choice");
+        assert!(fs::read_dir(&workspace).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("jev-request")));
+        fs::remove_dir_all(workspace).unwrap();
         fs::remove_dir_all(directory).unwrap();
     }
 
