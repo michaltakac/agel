@@ -41,7 +41,7 @@ const MAX_SCENE_COMMANDS: usize = 224;
 const INPUT_BYTES: usize = PAYLOAD_BYTES;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
-const HELP_POSTCARD: &[u8] = b":load NAME|FILE :play STEPS | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* look-* model-* | :cell :run :show :delete :cells :save :reload | :exec NAME :close :min/max N | :rollback :shutdown";
+const HELP_POSTCARD: &[u8] = b":load NAME :play/:drive N | :preview FORM :promote :discard :source ID | quote if begin let def fn | spawn send step run | scene-* look-* model-* | :cell :run :show :delete :cells :save :reload | :exec NAME :close :min/max N | :rollback :shutdown";
 const _: () = assert!(HELP_POSTCARD.len() <= PAYLOAD_BYTES);
 const DISPLAY_LINE_BYTES: usize = 26;
 
@@ -2452,6 +2452,12 @@ const PROGRAMS: &[Program] = &[
         source: include_bytes!("../../desktop/doom-agent-judge.agel"),
         ready: b"DOOM JUDGE AGENT READY - :PLAY STEPS",
     },
+    Program {
+        name: b"desktop-agent",
+        prefix: b"dk-",
+        source: include_bytes!("../../desktop/desktop-agent.agel"),
+        ready: b"DESKTOP AGENT READY - :DRIVE STEPS",
+    },
 ];
 
 /// How long the play loop holds a step's keys, in passes of the run, unless
@@ -2628,60 +2634,9 @@ fn play(
         // A request the step made goes out on the serial console with what
         // the language saw; the answer comes back as `:model-reply N TEXT`
         // and the step is asked again with it.
-        if let Ok(request) = evaluator_request(evaluator, shared::COMMAND_EVALUATOR_REQUEST, b"") {
-            if request.length > 0 {
-                let request = &request.bytes[..request.length];
-                let number = request
-                    .iter()
-                    .take_while(|byte| byte.is_ascii_digit())
-                    .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
-                let mut text = StatusLine::new(b"model-request ");
-                text.push(request);
-                text.push(b"\n");
-                crate::process::Console::write(serial, text.get());
-                let mut shown = StatusLine::new(b"look-line: ");
-                shown.push(&look[1..1 + usize::from(look[0])]);
-                shown.push(b"\n");
-                crate::process::Console::write(serial, shown.get());
-                for row in 0..LOOK_ROWS {
-                    let mut shades = [b' '; LOOK_COLUMNS + 7];
-                    shades[..6].copy_from_slice(b"look: ");
-                    for (column, cell) in shades[6..6 + LOOK_COLUMNS].iter_mut().enumerate() {
-                        let shade = look[LOOK_SHADES_OFFSET + row * LOOK_COLUMNS + column];
-                        *cell = b" .:-=+*#%@"[usize::from(shade) * 10 / 256];
-                    }
-                    shades[LOOK_COLUMNS + 6] = b'\n';
-                    crate::process::Console::write(serial, &shades);
-                }
-                crate::process::Console::write(serial, b"model-request end\n");
-                let mut answer = [0_u8; PAYLOAD_BYTES];
-                let mut delivered = false;
-                while let Some(length) = serial_line(serial, &mut answer) {
-                    let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
-                        continue;
-                    };
-                    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
-                    let given = rest[..digits]
-                        .iter()
-                        .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
-                    if digits == 0 || given != number {
-                        continue;
-                    }
-                    let text = trim(&rest[digits..]);
-                    let text = &text[..text.len().min(crate::native::REQUEST_BYTES)];
-                    evaluator.core().write_shared(shared::ARGUMENTS + 1, number);
-                    delivered =
-                        evaluator_request(evaluator, shared::COMMAND_EVALUATOR_MODEL_RESULT, text)
-                            .is_ok();
-                    break;
-                }
-                if delivered {
-                    if let Some(again) = evaluate!(b"(play-step)") {
-                        decision = again;
-                    }
-                } else {
-                    crate::process::Console::write(serial, b"model-reply: none\n");
-                }
+        if relay_request(evaluator, serial, &look) == Some(true) {
+            if let Some(again) = evaluate!(b"(play-step)") {
+                decision = again;
             }
         }
         let mut keys = [0; PLAY_KEYS_HELD];
@@ -2745,6 +2700,303 @@ fn play(
     }
     let mut status = StatusLine::new(b"PLAYED ");
     status.number_u64(played as u64);
+    status.push(b" STEPS");
+    status
+}
+
+/// A request the step made goes out on the serial console with what the
+/// language saw — `model-request N TEXT`, the look line, the shades, and
+/// `model-request end` — and the answer is read back as `:model-reply N
+/// TEXT` and delivered. None when the step made no request; otherwise
+/// whether an answer was delivered, `model-reply: none` said when not.
+fn relay_request(
+    evaluator: &mut arch::Domain,
+    serial: &mut ServiceDomain,
+    look: &[u8; LOOK_BYTES],
+) -> Option<bool> {
+    let request = evaluator_request(evaluator, shared::COMMAND_EVALUATOR_REQUEST, b"").ok()?;
+    if request.length == 0 {
+        return None;
+    }
+    let request = &request.bytes[..request.length];
+    let number = request
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
+    let mut text = StatusLine::new(b"model-request ");
+    text.push(request);
+    text.push(b"\n");
+    crate::process::Console::write(serial, text.get());
+    let mut shown = StatusLine::new(b"look-line: ");
+    shown.push(&look[1..1 + usize::from(look[0])]);
+    shown.push(b"\n");
+    crate::process::Console::write(serial, shown.get());
+    for row in 0..LOOK_ROWS {
+        let mut shades = [b' '; LOOK_COLUMNS + 7];
+        shades[..6].copy_from_slice(b"look: ");
+        for (column, cell) in shades[6..6 + LOOK_COLUMNS].iter_mut().enumerate() {
+            let shade = look[LOOK_SHADES_OFFSET + row * LOOK_COLUMNS + column];
+            *cell = b" .:-=+*#%@"[usize::from(shade) * 10 / 256];
+        }
+        shades[LOOK_COLUMNS + 6] = b'\n';
+        crate::process::Console::write(serial, &shades);
+    }
+    crate::process::Console::write(serial, b"model-request end\n");
+    let mut answer = [0_u8; PAYLOAD_BYTES];
+    let mut delivered = false;
+    while let Some(length) = serial_line(serial, &mut answer) {
+        let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
+            continue;
+        };
+        let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+        let given = rest[..digits]
+            .iter()
+            .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
+        if digits == 0 || given != number {
+            continue;
+        }
+        let text = trim(&rest[digits..]);
+        let text = &text[..text.len().min(crate::native::REQUEST_BYTES)];
+        evaluator.core().write_shared(shared::ARGUMENTS + 1, number);
+        delivered =
+            evaluator_request(evaluator, shared::COMMAND_EVALUATOR_MODEL_RESULT, text).is_ok();
+        break;
+    }
+    if !delivered {
+        crate::process::Console::write(serial, b"model-reply: none\n");
+    }
+    Some(delivered)
+}
+
+/// The desktop as a program driving it sees it: the look line names the
+/// windows (slot, title, hidden, maximized, ended), the focus, whether a
+/// process runs, and the last line the terminal finished; the shades are
+/// the focused window's canvas when there is one, dark otherwise.
+fn observe_desktop(current: &Scene, running: bool, out: &mut [u8; LOOK_BYTES]) {
+    out.fill(0);
+    if let Some(window) = current
+        .focus
+        .and_then(|slot| current.windows[usize::from(slot)].as_ref())
+    {
+        observe(window, &current.terminal, out);
+    }
+    let mut line = StatusLine::new(b"win ");
+    line.number_u64(
+        current
+            .windows
+            .iter()
+            .filter(|window| window.is_some())
+            .count() as u64,
+    );
+    line.push(b" focus ");
+    match current.focus {
+        Some(slot) => line.number_u64(u64::from(slot)),
+        None => line.push(b"none"),
+    }
+    for (slot, window) in current.windows.iter().enumerate() {
+        let Some(window) = window else {
+            continue;
+        };
+        line.push(b" | ");
+        line.number_u64(slot as u64);
+        line.push(b" ");
+        line.push(window.title());
+        if window.hidden {
+            line.push(b" hidden");
+        }
+        if window.restore.is_some() {
+            line.push(b" max");
+        }
+        if window.owner.is_none() {
+            line.push(b" ended");
+        }
+    }
+    line.push(if running {
+        b" | run yes | last: "
+    } else {
+        b" | run no | last: "
+    });
+    line.push(&current.terminal.last[..usize::from(current.terminal.last_length)]);
+    let text = line.get();
+    let length = text.len().min(LOOK_LINE_BYTES - 1);
+    out[0] = length as u8;
+    out[1..1 + length].copy_from_slice(&text[..length]);
+}
+
+/// The commands a driving program may not type: the loops that would nest
+/// this one, and the one that halts the machine.
+fn drive_refuses(line: &[u8]) -> bool {
+    [&b":drive"[..], b":play", b":shutdown"]
+        .iter()
+        .any(|word| line.starts_with(word))
+}
+
+/// `:drive STEPS [HOLD]`: the loaded program drives the desktop. Each step
+/// the desktop shows the program its own state through the look words,
+/// asks `(drive-step)` for one command line, relays a request the step
+/// made to the serial console and asks again with the answer, then types
+/// the line as the operator would — `wait` types nothing, `done` ends the
+/// run — and lets a running process go on for `hold` passes. The program
+/// needs no window: it is the desktop, not a window, that it drives.
+#[allow(clippy::too_many_arguments)]
+fn drive(
+    machine: &mut arch::Machine,
+    compositor: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
+    evaluator: &mut arch::Domain,
+    storage: &mut ServiceDomain,
+    mut filesystem: Option<&mut ServiceDomain>,
+    serial: &mut ServiceDomain,
+    mut clock: Option<&mut ServiceDomain>,
+    recovery: &mut Option<LiveRecovery>,
+    kernel: &mut Option<KernelRecovery>,
+    current: &mut Scene,
+    previous: &mut Scene,
+    scene_revision: &mut u8,
+    evaluator_revision: &mut u64,
+    workspace: &mut Workspace,
+    committed_workspace: &mut Workspace,
+    generation: &mut u64,
+    dirty: &mut bool,
+    running: &mut Option<&'static mut crate::process::Run>,
+    line: &[u8],
+    steps: usize,
+    hold: usize,
+) -> StatusLine {
+    macro_rules! evaluate {
+        ($form:expr) => {{
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            let mut host = EffectHost {
+                storage: &mut *storage,
+                filesystem: filesystem.as_deref_mut(),
+                console: &mut tee,
+                clock: clock.as_deref_mut(),
+            };
+            evaluate_form(evaluator, evaluator_revision, $form, &mut host)
+        }};
+    }
+    if evaluate!(b"drive-step").is_none_or(|value| value.get() == b"nil") {
+        return StatusLine::new(b"NO PROGRAM TO DRIVE - :LOAD DESKTOP-AGENT");
+    }
+    let mut driven = 0;
+    let mut finished = false;
+    for step in 1..=steps {
+        let mut look = [0_u8; LOOK_BYTES];
+        observe_desktop(current, running.is_some(), &mut look);
+        for (offset, byte) in look.iter().enumerate() {
+            evaluator.core().write_observation(offset, *byte);
+        }
+        if evaluator_request(evaluator, shared::COMMAND_EVALUATOR_OBSERVE, b"").is_err() {
+            return StatusLine::new(b"THE EVALUATOR COULD NOT LOOK");
+        }
+        let Some(mut decision) = evaluate!(b"(drive-step)") else {
+            return StatusLine::new(b"DRIVE-STEP FAILED - :LOAD DESKTOP-AGENT");
+        };
+        if relay_request(evaluator, serial, &look) == Some(true) {
+            if let Some(again) = evaluate!(b"(drive-step)") {
+                decision = again;
+            }
+        }
+        // The decision is text: a command line, or `wait`, or `done`.
+        let text = decision.get();
+        let text = text
+            .strip_prefix(b"\"")
+            .and_then(|rest| rest.strip_suffix(b"\""))
+            .unwrap_or(text);
+        let mut command = StatusLine::new(trim(text));
+        let mut report = StatusLine::new(b"drive: step ");
+        report.number_u64(step as u64);
+        report.push(b" do ");
+        report.push(command.get());
+        if let Some(reason) = evaluate!(b"drive-reason").filter(|r| r.get() != b"nil") {
+            report.push(b" reason ");
+            report.push(reason.get());
+        }
+        report.push(b"\n");
+        {
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            crate::process::Console::write(&mut tee, report.get());
+        }
+        driven = step;
+        let typed = command.get();
+        if typed == b"done" {
+            finished = true;
+            break;
+        }
+        if typed.is_empty() || typed == b"wait" || typed == b"nil" {
+            command = StatusLine::new(b"WAITED");
+        } else if drive_refuses(typed) {
+            command = StatusLine::new(b"REFUSED");
+        } else {
+            let status = execute_workshop(
+                machine,
+                compositor,
+                inputs.as_deref_mut(),
+                evaluator,
+                storage,
+                filesystem.as_deref_mut(),
+                serial,
+                clock.as_deref_mut(),
+                recovery,
+                kernel,
+                current,
+                previous,
+                scene_revision,
+                evaluator_revision,
+                workspace,
+                committed_workspace,
+                generation,
+                dirty,
+                running,
+                typed,
+            );
+            command = status;
+        }
+        // What the command said is the last line the program sees next.
+        let mut said = StatusLine::new(b"drive: ");
+        said.push(command.get());
+        said.push(b"\n");
+        {
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            crate::process::Console::write(&mut tee, said.get());
+        }
+        if let Some(run) = running.as_deref_mut() {
+            if play_passes(
+                machine,
+                compositor,
+                inputs.as_deref_mut(),
+                storage,
+                filesystem.as_deref_mut(),
+                serial,
+                current,
+                run,
+                hold,
+                false,
+            ) {
+                *running = None;
+            }
+        }
+        current.terminal.dirty = false;
+        let frame =
+            materialize(*current, Some(line), b"DRIVING").unwrap_or_else(|reason| failed(reason));
+        render_region(compositor, inputs.as_deref_mut(), &frame, TERMINAL_REGION)
+            .unwrap_or_else(|reason| failed(reason));
+    }
+    let mut status = StatusLine::new(if finished {
+        b"DRIVE DONE AFTER "
+    } else {
+        b"DROVE "
+    });
+    status.number_u64(driven as u64);
     status.push(b" STEPS");
     status
 }
@@ -2870,6 +3122,41 @@ fn execute_workshop(
             clock,
             current,
             evaluator_revision,
+            running,
+            line,
+            steps,
+            hold,
+        );
+    }
+    if let Some(rest) = command_argument(line, b":drive ") {
+        let mut words = rest
+            .split(|byte| *byte == b' ')
+            .filter(|word| !word.is_empty());
+        let number = |word: Option<&[u8]>, default: usize| {
+            word.and_then(|word| core::str::from_utf8(word).ok()?.parse::<usize>().ok())
+                .unwrap_or(default)
+        };
+        let steps = number(words.next(), 1).clamp(1, 999);
+        let hold = number(words.next(), PLAY_HOLD_PASSES).clamp(1, 100_000);
+        return drive(
+            machine,
+            compositor,
+            inputs,
+            evaluator,
+            storage,
+            filesystem,
+            serial,
+            clock,
+            recovery,
+            kernel,
+            current,
+            previous,
+            scene_revision,
+            evaluator_revision,
+            workspace,
+            committed_workspace,
+            generation,
+            dirty,
             running,
             line,
             steps,

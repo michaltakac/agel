@@ -531,6 +531,15 @@ Each rung must be runnable and differentially testable against the rung below:
    answer line, and commits a denial as the request's completion. The
    gate is the host's and covers model requests; the OS's effects are not
    gated.
+87. **The desktop driven from inside (v0.2.93):** `:drive` steps a loaded
+   program with the desktop's own state in the look line — windows,
+   focus, a running process, the terminal's last line — and types the
+   command line it decides on through the desktop's dispatcher, refusing
+   only the loops and the halt. `desktop-agent` decides by two typed
+   questions a step; `agel-play --scene desktop` carries them, with the
+   task and the run's history, to the model. Perception is the status
+   line and the focused window's shades; actions are command lines. See
+   [`computer-use.md`](computer-use.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

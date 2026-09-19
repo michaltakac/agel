@@ -419,6 +419,13 @@ promise.
   before dispatching any request and records the verdict beside the
   answer line; a denial is the request's journaled completion. The gate
   is the host's, over model requests; nothing on the OS is gated.
+  `v0.2.93` drives the desktop from inside the OS: `:drive STEPS` steps a
+  loaded program with the desktop's own state in the look line and types
+  the command line it decides on, refusing the loops and the halt;
+  `desktop-agent` decides by two typed questions a step; `agel-play
+  --scene desktop --task TEXT` carries them, with the task and the run's
+  history, to the model. Perception is the status line, actions are
+  command lines; live, one three-part task completed in four steps.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

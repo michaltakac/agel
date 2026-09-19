@@ -50,3 +50,31 @@ if [ "$replies" -lt 4 ] || [ "$steps" -ne 4 ] || [ "$fired" -lt 4 ]; then
   exit 1
 fi
 echo "A judged episode through the bridge: 4 steps, each a typed (judge ...) request answered on one line and decided by the program [ok]"
+
+# The desktop driven through the bridge: no game, no window. The program
+# asks which of the desktop's commands comes next for the task and whether
+# the task is done; the stand-in answers "list the files" each step, with
+# the task not yet done, so the run goes its whole length.
+out=target/doom-runs/desktop
+rm -rf "$out"
+mkdir -p "$out"
+cat > "$out/curl" <<'FAKE'
+#!/bin/sh
+cat > /dev/null
+for arg in "$@"; do case "$arg" in @*) cp "${arg#@}" "$(dirname "$0")/body-$$";; esac; done
+printf '%s\n200' '{"model":"stand-in","answers":{"act":{"type":"choice","choice":"files","confidence":0.7,"probabilities":{"help":0.05,"files":0.7,"kernel":0.05,"workspace":0.05,"maximize":0.05,"close":0.05,"wait":0.03,"done":0.02}},"done":{"type":"noul","noul":0.1}},"usage":{"input_tokens":1,"output_tokens":1}}'
+FAKE
+chmod +x "$out/curl"
+TYPESAFEAI_API_KEY=stand-in cargo run -q --release -p agel-play -- --image "$image" --scene desktop \
+  --task "list the files in the region" --out "$out" --policy jev --curl-bin "$(pwd)/$out/curl" --steps 3 | tee "$out/console.log"
+replies=$(grep -c "agel-play: model reply .*: act choice 8 files 700 50 700 50 50 50 50 30 20 done noul 100" "$out/console.log")
+listed=$(grep -c "agel-play: step .*: :fs-ls /" "$out/console.log")
+steps=$(wc -l < "$out/steps.jsonl" | tr -d ' ')
+grep -q "agel-play: done" "$out/console.log"
+grep -q '"task":"list the files in the region"' "$out"/body-* 
+grep -q '"desktop":"The Agel desktop' "$out"/body-*
+if [ "$replies" -lt 3 ] || [ "$listed" -lt 3 ] || [ "$steps" -ne 3 ]; then
+  printf 'expected 3 typed replies, 3 listings and 3 recorded steps, got %s, %s and %s\n' "$replies" "$listed" "$steps" >&2
+  exit 1
+fi
+echo "The desktop driven through the bridge: 3 steps, each a judged choice of the desktop's own commands, typed by the program [ok]"

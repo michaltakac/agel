@@ -1,0 +1,145 @@
+"""An Agel program drives the desktop from inside the OS.
+
+The desktop loads `desktop-agent` into its native evaluator and `:drive`
+steps it: each step the kernel shows the program the desktop's own state
+through the look line — windows, focus, whether a process runs, the last
+line the terminal finished — asks it for one command line, relays the
+typed questions it asks on the serial console, and types the line the
+program decided on as the operator would. This harness answers as the
+host bridge would, with typed judgments, and checks that what the program
+decided was done and that the program saw what it did."""
+import re
+import socket
+import sys
+import tempfile
+import time
+import graphical_console as module
+
+
+def until_text(machine, wanted, timeout):
+    result = bytearray()
+    deadline = time.monotonic() + timeout
+    machine.serial.settimeout(5)
+    try:
+        while wanted not in result:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"Agel did not write {wanted!r}: {bytes(result[-3000:])!r}")
+            try:
+                chunk = machine.serial.recv(4096)
+            except socket.timeout:
+                continue
+            if not chunk:
+                raise RuntimeError("Agel stopped")
+            result.extend(chunk)
+    finally:
+        machine.serial.settimeout(15)
+    return bytes(result)
+
+
+def send_line(machine, line):
+    """Type one line without waiting for the prompt: `:drive` speaks as it
+    goes and waits for `:model-reply` lines while it does."""
+    for byte in line.encode():
+        machine.serial.sendall(bytes([byte]))
+        machine.serial.recv(1)
+    machine.serial.sendall(b"\n")
+
+
+def request(machine, timeout=120):
+    """The next request block the desktop relays: its number and its
+    look line."""
+    block = until_text(machine, b"model-request end", timeout).decode(errors="replace")
+    number = int(re.search(r"model-request (\d+) ", block).group(1))
+    line = re.search(r"look-line: (.*)\r?\n", block).group(1)
+    assert "(judge (choice act " in block, block
+    assert "(noul done " in block, block
+    return number, line, block
+
+
+def settled(machine, text):
+    """Back at the prompt: it follows the loop's last status at once, so
+    it is usually inside `text` already, or split between `text` and what
+    is still to come."""
+    buffer = bytearray(text[-20:].encode(errors="replace"))
+    deadline = time.monotonic() + 30
+    machine.serial.settimeout(5)
+    try:
+        while b"live-desktop> " not in buffer:
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"no prompt after the loop: {bytes(buffer)!r}")
+            try:
+                buffer.extend(machine.serial.recv(4096))
+            except socket.timeout:
+                continue
+    finally:
+        machine.serial.settimeout(15)
+
+
+def answer(machine, number, option, confidence, done):
+    """The reply line, sent whole: the desktop reads it without echoing
+    while it waits, as the bridge sends it."""
+    probabilities = " ".join("0" for _ in range(8))
+    line = f":model-reply {number} act choice 8 {option} {confidence} {probabilities} done noul {done}\n"
+    machine.serial.sendall(line.encode())
+
+
+with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
+    machine = module.Machine(sys.argv[1], directory)
+    try:
+        assert "formatted" in machine.submit(":fs-format")
+        # Nothing to drive yet: the loop says so and does nothing.
+        assert "NO PROGRAM TO DRIVE" in machine.submit(":drive 2")
+        assert "DESKTOP AGENT READY" in machine.submit(":load desktop-agent"), "the agent did not load"
+        with machine.serial_lock:
+            send_line(machine, ":drive 4 2000")
+            # Step 1: the program sees an empty desktop and asks; the judge
+            # says list the files, confidently, and the task is not done.
+            number, line, _ = request(machine)
+            assert line.startswith("win 0 focus none | run no | last: "), line
+            answer(machine, number, "files", 700, 100)
+            report = until_text(machine, b"drive: step 1 do ", 60).decode(errors="replace")
+            report += until_text(machine, b"drive: ", 60).decode(errors="replace")
+            # Step 2: the listing was typed; the program sees the desktop's
+            # answer to it as the last line. An unsure judge means waiting.
+            number, line, _ = request(machine)
+            assert "last: drive: " in line, line
+            answer(machine, number, "help", 150, 100)
+            until_text(machine, b"drive: step 2 do wait", 60)
+            # Step 3: a command the program may not type is refused.
+            number, line, _ = request(machine)
+            answer(machine, number, "kernel", 900, 100)
+            until_text(machine, b"drive: step 3 do :kernel", 60)
+            # Step 4: the judge says the task is complete.
+            number, line, _ = request(machine)
+            assert "last: drive: " in line, line
+            answer(machine, number, "wait", 0, 950)
+            tail = until_text(machine, b"DRIVE DONE AFTER 4 STEPS", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
+        assert "drive: step 1 do :fs-ls /" in report, report[-2000:]
+        assert "drive: step 4 do done" in tail, tail[-2000:]
+        assert re.search(r'reason "act choice 8 wait 0 (0 ){8}done noul 950"', tail), tail[-2000:]
+        settled(machine, tail)
+        # The loop ended and the desktop answers again; a whole run of
+        # steps without a completing judge is reported as driven.
+        with machine.serial_lock:
+            send_line(machine, ":drive 1")
+            number, line, _ = request(machine)
+            answer(machine, number, "workspace", 800, 200)
+            tail = until_text(machine, b"DROVE 1 STEPS", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
+        assert "drive: step 1 do :workspace" in tail, tail[-2000:]
+        settled(machine, tail)
+        # The refused commands: the loops that would nest, and the halt.
+        machine.submit('(def command-for (fn (a) ":shutdown"))')
+        with machine.serial_lock:
+            send_line(machine, ":drive 1")
+            number, line, _ = request(machine)
+            answer(machine, number, "help", 900, 0)
+            tail = until_text(machine, b"DROVE 1 STEPS", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
+        assert "drive: step 1 do :shutdown" in tail and "drive: REFUSED" in tail, tail[-2000:]
+        settled(machine, tail)
+    finally:
+        machine.close()
+print("An Agel program drives the desktop from inside the OS: the desktop's state read "
+      "through the look line, the judged command typed, the judge's yes ending the run [ok]")

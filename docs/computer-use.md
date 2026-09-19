@@ -1,0 +1,120 @@
+# Computer use: an Agel program drives the desktop from inside the OS
+
+Since v0.2.93 a program in the OS can drive the desktop the way an
+operator does: it reads the desktop's own state, decides one command line
+a step, and the desktop types it. The decision comes from a typed
+judgment — which of the desktop's commands comes next for a task, and
+whether the task is done — carried out to a System One model through the
+same host bridge the DOOM agents use, or answered by whoever sits at the
+serial console. It is the second rung of the order of work in
+[`system-one.md`](system-one.md), after judgments in the language and
+before the game and the browser, and it is small on purpose: what exists
+is the loop, the perception and the lever, on the desktop that exists.
+
+## The loop: `:drive STEPS [HOLD]`
+
+`:drive` is to the desktop what `:play` is to a window. It needs a loaded
+program with a `drive-step` and no window at all. Each step:
+
+1. The desktop writes what it is into the look area the program reads
+   with the `look` words. The look line is the desktop's status:
+   `win N focus F | SLOT TITLE [hidden] [max] [ended]... | run yes|no |
+   last: LINE` — every window by slot with its title and state, which one
+   has the focus, whether a process runs, and the last line the terminal
+   finished. The shades are the focused window's canvas, dark when there
+   is none.
+2. `(drive-step)` is evaluated. If the step made a `model-request`, the
+   desktop relays the block on the serial console exactly as the play loop
+   does (`model-request N TEXT`, `look-line: …`, the shades,
+   `model-request end`), waits for `:model-reply N TEXT`, delivers it and
+   asks again.
+3. The value is text: a command line, `wait`, or `done`. The desktop
+   reports `drive: step N do LINE reason R` on the console and in the
+   terminal, then types the line as the operator would have — `:fs-ls /`,
+   `:help`, `:maximize 0`, a form — through the same dispatcher, and
+   reports what the command answered as `drive: STATUS`, which is the last
+   line the program sees next. `wait` types nothing; `done` ends the run
+   (`DRIVE DONE AFTER N STEPS`); the run otherwise ends after its steps
+   (`DROVE N STEPS`).
+4. If a process runs, it runs for `HOLD` passes, as in `:play`.
+
+Three lines are refused whatever the program says: `:drive` and `:play`,
+which would nest this loop, and `:shutdown`. The refusal is reported as
+`drive: REFUSED` and the run goes on. Everything else the desktop accepts
+from the keyboard it accepts from the program; there is no separate
+permission, because the program is the operator's, loaded by the
+operator, and runs only while the operator's `:drive` does.
+
+## The program: `desktop-agent`
+
+[`boot/desktop/desktop-agent.agel`](../boot/desktop/desktop-agent.agel)
+(`:load desktop-agent`) asks two questions a step:
+
+```lisp
+(judge (choice act "Next desktop command for the task" help files kernel workspace maximize close wait done)
+       (noul done "Is the task complete?"))
+```
+
+and reads the answer line with `text-field` and `text-int`. Its policy is
+in code: `done` above 500 thousandths ends the run; a choice under 200
+thousandths of confidence waits; otherwise the chosen name becomes the
+desktop's command (`files` is `:fs-ls /`, `close` is `:close 0`, and so
+on). The task itself is not in the program: the host names it when it
+answers, so one program serves any task the menu can reach. The menu is
+the program's and is deliberately narrow; a program with a wider one is a
+matter of more lines, not of the kernel.
+
+## The bridge: `agel-play --scene desktop --task TEXT`
+
+`agel-play` boots the desktop without the game, loads the program
+(`desktop-agent`, or `--program`), sends `:drive STEPS HOLD`, and answers
+each relayed block. With `--policy jev` the judge is TypeSafe's System One
+model: the program's `(judge …)` form gains the fields `task` (the
+operator's text), `desktop` (the look line, introduced as what it is),
+`history` (the commands typed so far in this run, oldest first, because a
+System One model remembers nothing between calls and the desktop's line
+shows only the last answer; without it the live run asked for the help
+eight times) and `frame` (the shades), and the answer line goes back
+typed. Every step is
+recorded in `steps.jsonl` with the command the program decided on
+(`keys`), the judge's line (`reason`) and a screenshot, as the DOOM runs
+are.
+
+## What is proven, and where
+
+- `scripts/test-drive.sh`: in the OS, with this harness answering as the
+  bridge would — `:drive` refuses to run without a program; the program
+  sees an empty desktop (`win 0 focus none | run no | last: …`), asks, is
+  told `files` with confidence and types `:fs-ls /`; the next look line
+  carries the desktop's answer to it as `last: drive: …`; an unsure
+  answer waits; `:kernel` is typed; the judge's yes on `done` ends the run
+  after four steps with the judge's line as the reason; a further run ends
+  as driven; and a program that decides on `:shutdown` is refused.
+- `scripts/test-play-bridge.sh`: the desktop driven through the bridge
+  with the provider's curl a stand-in — three steps, each a typed reply
+  read into `:fs-ls /`, three records, and the request bodies carrying
+  `task` and `desktop` as fields.
+- By hand with `TYPESAFEAI_API_KEY`: the live endpoint driving the
+  desktop through a three-part task — the help, the listing, the kernel
+  report — in four judged steps, the fourth the judge's `done` at 780
+  thousandths, 8 s with the boot (transcript in
+  [v0.2.93](release-v0.2.93.md)).
+
+## Not claimed
+
+- Perception beyond the status line. The program sees window slots,
+  titles and states, the focus, whether something runs, and one line of
+  the terminal; it does not read the terminal's history, a window's text,
+  or the panel, and the shades are luminance, not characters. A richer
+  observation is the obvious next step and is not here.
+- Any action beyond the desktop's own command lines. No keys are sent to
+  windows from `:drive` (that is `:play`'s), no pointer moves, no text is
+  typed into a process's console.
+- Any judgment of the commands themselves. The desktop refuses three
+  lines and types the rest; the gate of v0.2.92 is the host CLI's over
+  model requests and does not sit here.
+- Calibration: the thresholds in `desktop-agent` are untuned, and the
+  stand-in in CI answers the same line every step. Whether a model
+  completes a task on this desktop is measured only by hand.
+- A task the program itself holds, a task carried over several `:drive`
+  runs, or any memory between runs beyond the world the program is.

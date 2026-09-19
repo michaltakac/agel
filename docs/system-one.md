@@ -237,13 +237,14 @@ that judge a tool call before it runs; routers that pick which model a
 request deserves. Each is a bounded judgment inside a deterministic loop,
 which is what Agel's agents and effects are.
 
-The order of work from here, after the gate on the host (v0.2.92): an
-agent on the OS driving the desktop itself, the screen and windows its
-state and the desktop's commands its choices, judged each step; DOOM
-played by judgment for longer, with the dataset judged too; a browser
-process on the OS whose accessibility tree is a state and whose actions
-are a choice; and a learned judge of Agel's own behind `judge-locally`'s
-contract, small enough to run in a domain. None of that is claimed today.
+The order of work from here, after the gate on the host (v0.2.92) and
+the desktop driven from inside by judgment (v0.2.93,
+[`computer-use.md`](computer-use.md)): DOOM played by judgment for
+longer, with the dataset judged too; a browser process on the OS whose
+accessibility tree is a state and whose actions are a choice; richer
+perception for the driving program than the status line; and a learned
+judge of Agel's own behind `judge-locally`'s contract, small enough to
+run in a domain. None of that is claimed today.
 
 ## Not claimed
 

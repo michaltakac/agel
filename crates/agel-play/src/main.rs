@@ -47,6 +47,11 @@ struct Options {
     curl_bin: PathBuf,
     model: Option<String>,
     program: Option<String>,
+    /// `doom`: the game in a window, `:play`; `desktop`: the desktop
+    /// itself, `:drive`, no game installed.
+    scene: String,
+    /// The task the desktop-driving program is judged against.
+    task: String,
 }
 
 fn options() -> Result<Options, String> {
@@ -63,6 +68,8 @@ fn options() -> Result<Options, String> {
         curl_bin: PathBuf::from("curl"),
         model: None,
         program: None,
+        scene: "doom".to_owned(),
+        task: "list the files in the region, then finish".to_owned(),
     };
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
@@ -80,6 +87,13 @@ fn options() -> Result<Options, String> {
             "--curl-bin" => options.curl_bin = PathBuf::from(value()?),
             "--model" => options.model = Some(value()?),
             "--program" => options.program = Some(value()?),
+            "--scene" => {
+                options.scene = value()?;
+                if options.scene != "doom" && options.scene != "desktop" {
+                    return Err("--scene is doom or desktop".to_owned());
+                }
+            }
+            "--task" => options.task = value()?,
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -374,6 +388,11 @@ struct Block {
     prompt: String,
     state_line: String,
     frame: String,
+    /// What the program decided on earlier in this run, oldest first: the
+    /// bridge appends `history: LINE` lines to a desktop block, since a
+    /// judge has no memory and the desktop's line shows only the last
+    /// answer.
+    history: Vec<String>,
 }
 
 impl Block {
@@ -381,7 +400,12 @@ impl Block {
         let mut prompt = String::new();
         let mut state_line = String::new();
         let mut frame = String::new();
+        let mut history = Vec::new();
         for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("history: ") {
+                history.push(rest.to_owned());
+                continue;
+            }
             if let Some(rest) = line.strip_prefix("model-request ") {
                 // `model-request N TEXT`: the number, a space, the program's text.
                 prompt = rest
@@ -400,6 +424,7 @@ impl Block {
             prompt,
             state_line,
             frame,
+            history,
         }
     }
 }
@@ -539,11 +564,29 @@ impl Policy for Model {
 struct Judge {
     provider: JevProvider,
     program: String,
+    /// The task, when the program drives the desktop rather than the game:
+    /// the judge sees it beside the desktop's own line and the shades.
+    task: Option<String>,
     next_id: u64,
 }
 
 impl Judge {
-    fn request(block: &Block) -> Result<JudgmentRequest, String> {
+    fn request(block: &Block, task: Option<&str>) -> Result<JudgmentRequest, String> {
+        if let Some(task) = task {
+            let mut request = JudgmentRequest::parse(&block.prompt)?;
+            let history = if block.history.is_empty() {
+                "nothing yet: this is the first step".to_owned()
+            } else {
+                block.history.join("; ")
+            };
+            request.add_fields([
+                ("task".to_owned(), task.to_owned()),
+                ("desktop".to_owned(), format!("The Agel desktop, as its own status line: the windows by slot with their titles, the focus, whether a process runs, and the last line its terminal finished. {}", block.state_line)),
+                ("history".to_owned(), format!("The commands already typed in this run, oldest first; each shows what it showed when typed, so a command in the history need not be typed again: {history}")),
+                ("frame".to_owned(), block.frame.clone()),
+            ]);
+            return Ok(request);
+        }
         let mut request = if block.prompt.trim_start().starts_with("(judge") {
             JudgmentRequest::parse(&block.prompt)?
         } else {
@@ -580,7 +623,7 @@ impl Policy for Judge {
         let typed = block.prompt.trim_start().starts_with("(judge");
         let id = self.next_id;
         self.next_id += 1;
-        let judgment = Judge::request(&block).and_then(|request| {
+        let judgment = Judge::request(&block, self.task.as_deref()).and_then(|request| {
             self.provider
                 .judge(
                     &request,
@@ -647,20 +690,22 @@ fn main() -> Result<(), String> {
         file.write_all(&vec![0_u8; 1024 * 512])
             .map_err(|error| error.to_string())?;
     }
-    run_script(&[
-        "scripts/install-program.py",
-        disk.to_str().unwrap_or(""),
-        "c-doom",
-        options.doom.to_str().unwrap_or(""),
-    ])?;
-    run_script(&[
-        "scripts/install-program.py",
-        "--region",
-        "data",
-        disk.to_str().unwrap_or(""),
-        "doom1.wad",
-        options.wad.to_str().unwrap_or(""),
-    ])?;
+    if options.scene == "doom" {
+        run_script(&[
+            "scripts/install-program.py",
+            disk.to_str().unwrap_or(""),
+            "c-doom",
+            options.doom.to_str().unwrap_or(""),
+        ])?;
+        run_script(&[
+            "scripts/install-program.py",
+            "--region",
+            "data",
+            disk.to_str().unwrap_or(""),
+            "doom1.wad",
+            options.wad.to_str().unwrap_or(""),
+        ])?;
+    }
 
     let mut policy: Box<dyn Policy> = match options.policy.as_str() {
         "scripted" => Box::new(Scripted),
@@ -703,12 +748,17 @@ fn main() -> Result<(), String> {
             if let Some(model) = &options.model {
                 provider = provider.with_model(model);
             }
+            let desktop = options.scene == "desktop";
             Box::new(Judge {
                 provider,
-                program: options
-                    .program
-                    .clone()
-                    .unwrap_or_else(|| "doom-agent-judge".to_owned()),
+                program: options.program.clone().unwrap_or_else(|| {
+                    if desktop {
+                        "desktop-agent".to_owned()
+                    } else {
+                        "doom-agent-judge".to_owned()
+                    }
+                }),
+                task: desktop.then(|| options.task.clone()),
                 next_id: 1,
             })
         }
@@ -821,15 +871,18 @@ fn play(
     if !loaded.contains("READY") {
         return Err(format!("the agent did not load: {loaded}"));
     }
-    let started = serial.submit(
-        ":exec c-doom -- -iwad /data/doom1.wad -mb 8 -warp 1 -skill 2",
-        Duration::from_secs(120),
-    )?;
-    if !started.contains("PROCESS RUNNING") {
-        return Err(format!("the game did not start: {started}"));
+    let desktop = options.scene == "desktop";
+    if !desktop {
+        let started = serial.submit(
+            ":exec c-doom -- -iwad /data/doom1.wad -mb 8 -warp 1 -skill 2",
+            Duration::from_secs(120),
+        )?;
+        if !started.contains("PROCESS RUNNING") {
+            return Err(format!("the game did not start: {started}"));
+        }
+        serial.wait_for(0, b"doom: frame 0 ", Duration::from_secs(300))?;
+        thread::sleep(Duration::from_secs(3));
     }
-    serial.wait_for(0, b"doom: frame 0 ", Duration::from_secs(300))?;
-    thread::sleep(Duration::from_secs(3));
 
     let dataset = options.out.join("steps.jsonl");
     let mut log = fs::OpenOptions::new()
@@ -847,12 +900,14 @@ fn play(
 
     // Start the in-OS loop; it runs for the whole game, speaking as it goes.
     let mut cursor = serial.len();
-    serial.send_line(&format!(":play {} {}", options.steps, options.hold))?;
+    let loop_word = if desktop { ":drive" } else { ":play" };
+    serial.send_line(&format!("{loop_word} {} {}", options.steps, options.hold))?;
 
     let mut block = String::new();
     let mut in_block = false;
     let mut request_number = 0_u64;
     let mut state_line = String::new();
+    let mut history: Vec<String> = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(1800);
     loop {
         if Instant::now() > deadline {
@@ -871,6 +926,15 @@ fn play(
             }
             if line == "model-request end" {
                 in_block = false;
+                if desktop {
+                    // A judge has no memory: what this run has done so far
+                    // goes in with the block, oldest first.
+                    for decided in &history {
+                        block.push_str("history: ");
+                        block.push_str(decided);
+                        block.push('\n');
+                    }
+                }
                 if let Some(reply) = policy.answer(&block) {
                     serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
                     println!("agel-play: model reply {request_number}: {reply}");
@@ -897,14 +961,21 @@ fn play(
                 block.push('\n');
                 continue;
             }
-            if let Some(rest) = line.strip_prefix("play: step ") {
+            // `play: step N keys FORM reason R` from the game's loop, or
+            // `drive: step N do LINE reason R` from the desktop's: the
+            // decision is recorded either way.
+            let stepped = line
+                .strip_prefix("play: step ")
+                .map(|rest| (rest, "keys "))
+                .or_else(|| line.strip_prefix("drive: step ").map(|rest| (rest, "do ")));
+            if let Some((rest, decided)) = stepped {
                 let index: usize = rest
                     .split(' ')
                     .next()
                     .and_then(|digits| digits.parse().ok())
                     .unwrap_or(0);
                 let keys = rest
-                    .split("keys ")
+                    .split(decided)
                     .nth(1)
                     .and_then(|rest| rest.split(" reason ").next())
                     .unwrap_or("")
@@ -916,6 +987,9 @@ fn play(
                     .unwrap_or("")
                     .trim()
                     .to_owned();
+                if desktop {
+                    history.push(format!("step {index}: {keys}"));
+                }
                 let frame_path = options.out.join(format!("step-{index:04}.ppm"));
                 let ascii = match monitor
                     .screendump(&frame_path)
@@ -940,7 +1014,11 @@ fn play(
                     .map_err(|error| error.to_string())?;
                 println!("agel-play: step {index}: {keys} [{state_line}]");
             }
-            if line.contains("PLAYED") || line.contains("PROCESS ENDED") {
+            if line.contains("PLAYED")
+                || line.contains("PROCESS ENDED")
+                || line.starts_with("DROVE ")
+                || line.starts_with("DRIVE DONE")
+            {
                 done = true;
             }
         }

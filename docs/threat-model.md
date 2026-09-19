@@ -1985,6 +1985,29 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.93
+
+- **A driving program is the operator's hands, not a new principal.**
+  `:drive` types what the loaded program decides through the same
+  dispatcher the keyboard reaches, with the operator's authority, for as
+  long as the operator's `:drive` runs. It refuses `:drive` and `:play`
+  (nesting) and `:shutdown` (the halt) and nothing else: a program that
+  decides on `:fs-format` formats the region. The program is loaded by
+  the operator from the image or a file, and its menu is its own.
+- **The judge's answer is typed by the desktop.** Through the bridge, a
+  model's choice becomes a command line via the program's table, so the
+  model can only pick from the program's menu; the answer line itself is
+  read with `text-field`/`text-int` and a line that does not fit falls to
+  `wait`. The task and the run's history go to the endpoint with the
+  desktop's status line and the shades; nothing else does.
+- **The status line is not the screen.** What the program perceives is
+  what `observe_desktop` writes: titles a process chose, the focus, a
+  running flag, the terminal's last line. A process can name its window
+  anything, and the last line is whatever was printed last; a program
+  that trusts the line trusts every process on the desktop.
+- **Not claimed:** any gate on typed commands, any perception of window
+  contents as text, any success rate.
+
 ## v0.2.92
 
 - **A gate is a second opinion, not a capability.** `--gate` is consulted

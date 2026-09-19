@@ -645,6 +645,20 @@ A later accelerated service can consume the same language-owned contract
 without moving UI hierarchy, actions, customization policy, or agent authority
 into the driver.
 
+## The desktop driven from inside (v0.2.93)
+
+`:drive STEPS [HOLD]` is `:play` for the desktop itself: no window is
+needed. Each step the desktop writes its own state into the look line —
+`win N focus F | SLOT TITLE [hidden] [max] [ended]… | run yes|no | last:
+LINE` — with the focused window's shades when there is one, asks the
+loaded program's `(drive-step)` for a command line, relays a
+`model-request` the step made on the serial console exactly as the play
+loop does, and types the line through the dispatcher, reporting `drive:
+step N do LINE reason R` and then `drive: STATUS`. `wait` types nothing,
+`done` ends the run; `:drive`, `:play` and `:shutdown` are refused. The
+`desktop-agent` program the image carries decides by two typed questions
+a step. See [`computer-use.md`](computer-use.md).
+
 ## What is next
 
 The next step is a language-owned graphical editor: multiline source cells,

@@ -1,0 +1,17 @@
+; An agent that drives the desktop. `:drive STEPS` steps it: each step the
+; desktop shows the program its own state as the look line — windows,
+; focus, whether a process runs, the last line the terminal finished —
+; and asks drive-step for one command line to type, or "wait", or "done".
+; The program asks a judge on the host which of its commands comes next
+; for the task the host names, and whether the task is complete, as typed
+; questions through model-request; the desktop carries the block out with
+; the look line and types the answer back. The policy is here: a confident
+; choice is typed, an unsure one waits, and the judge's yes on "done" ends
+; the run. The commands are the desktop's own; nothing here can halt it.
+(def drive-reason "waiting for the judge")
+(def questions "(judge (choice act \"Next desktop command for the task\" help files kernel workspace maximize close wait done) (noul done \"Is the task complete?\"))")
+(def ask (fn () (model-request questions)))
+(def command-for (fn (a) (if (= a "help") ":help" (if (= a "files") ":fs-ls /" (if (= a "kernel") ":kernel" (if (= a "workspace") ":workspace" (if (= a "maximize") ":maximize 0" (if (= a "close") ":close 0" (if (= a "done") "done" "wait")))))))))
+(def number (fn (answer n default) (if (= (text-int (text-field answer n)) nil) default (text-int (text-field answer n)))))
+(def decide (fn (answer) (begin (def drive-reason answer) (if (< 500 (number answer 15 0)) "done" (if (< (number answer 4 0) 200) "wait" (command-for (text-field answer 3)))))))
+(def drive-step (fn () (begin (def answer (model-result)) (if (= answer nil) (begin (ask) "wait") (decide answer)))))

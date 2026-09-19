@@ -88,6 +88,7 @@ jobs:
       - run: python3 scripts/test-native-modules.py target/boot/agel-v1.img
       - run: ./scripts/test-doom.sh
       - run: ./scripts/test-play.sh
+      - run: ./scripts/test-drive.sh
       - run: ./scripts/test-programs.sh
       - run: ./scripts/test-agel-process.sh
       - run: ./scripts/test-stale.sh
