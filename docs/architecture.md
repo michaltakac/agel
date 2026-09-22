@@ -579,6 +579,14 @@ Each rung must be runnable and differentially testable against the rung below:
    installed; the programs' sources live in the data region, not the
    kernel image. See [`native-graphics.md`](native-graphics.md) and
    [`computer-use.md`](computer-use.md).
+92. **A goal for the game (v0.2.98):** the engine walks its own map over a
+   grid learned with its own line traversal and reports the next waypoint
+   on a route to the exit, its heading and distance, the route's length
+   and the seen share of the map on every state line;
+   `doom-agent-judge` steers by arithmetic on the path and three rays,
+   asks the judge what the picture holds, follows walls when blocked,
+   uses doors, checks the automap on Tab when stalled, and appends its metrics to a file on the OS. The plan it opens
+   is [`parallel-agents.md`](parallel-agents.md). See [`doom.md`](doom.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

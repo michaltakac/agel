@@ -1985,6 +1985,31 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.98
+
+- **The engine reports more of itself, to the same console.** The next
+  waypoint on a route to the exit, its heading and distance, the route's
+  remaining length, the seen share of the map and three rays are
+  computed inside the process from the engine's own tables with its own
+  line traversal (a grid of at most 256×256 cells in static arrays,
+  each cell's joins tested once, no allocation) and printed on its
+  console line, which grew the look line from 128 to 192 bytes, which the desktop shows and the play loop's look line
+  carries. No new capability: the process could always print what it
+  knows, and the OS reads its console as text.
+- **Tab reaches the game.** The play loop can hold `tab` now, as it holds
+  arrows and control; the key goes to the focused window only, as every
+  injected key does.
+- **A short answer does not stop a loop.** A judge's reply with fewer
+  fields than the program reads is waited on, not failed, and the bridge
+  ends on a loop's failure statuses instead of waiting forever. A judge
+  can still steer the agent wherever its answers go, which is the
+  premise; it cannot make the loop hang by answering badly.
+- **The metrics file is the agent's own**, in the filesystem region under
+  the program's `file-append`, the effect the v0.2.75 log used; nothing
+  reads it yet.
+- **Not claimed:** any bound on what the judge's answers make the player
+  do in the game, beyond the program's own reflexes.
+
 ## v0.2.97
 
 - **The backdoor is a hypervisor's, reached by one driver.** The input

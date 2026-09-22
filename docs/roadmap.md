@@ -148,11 +148,13 @@ trained on it.
 | A recorded episode judged after the fact by a System One model, and scored | done | `scripts/test-play-bridge.sh`: `agel-play --judge-dataset steps.jsonl` asks the provider, per step, whether the move was good and how the player fared, into `judged.jsonl` (a stand-in in CI); `scripts/doom-score.py` reads distance, stillness, kills, health and ammo off a dataset; one scripted and one judged 40-step run scored by hand in [`doom.md`](doom.md) |
 | A trained policy from the dataset; a world model for predictions | open | training is orchestrated through a provider, never performed by the OS; the judged dataset is not used by anything yet |
 | Speech and steering of the run | open | |
-| A goal for the game: the engine reports the exit's heading and distance and the seen map; the judged agent steers, checks the automap on Tab, keeps metrics on the OS | open | the agent at v0.2.97 walks forward into a wall and along it; the plan is [`parallel-agents.md`](parallel-agents.md) |
+| A goal for the game: the engine walks its map and reports the next waypoint on a route to the exit, the route's length and the seen map; the judged agent steers, checks the automap on Tab, keeps metrics on the OS | done | `scripts/test-play-bridge.sh`: every state line carries `goal`, `dist`, `path`, `seen`, `free` and `door`, and the judged agent goes forward firing at what the judge reports; one live run of 120 judged steps halved the route to the exit (4416 → 2304 map units), opening the first door on the way ([`parallel-agents.md`](parallel-agents.md)) |
 | Agents side by side on the desktop, each declaring what it needs, a second sentence heard while the first plays | open | `:play` and `:drive` run to their end; nothing else steps meanwhile ([`parallel-agents.md`](parallel-agents.md)) |
 | A tool the agent builds for itself: a metrics window painted from its own file | open | ([`parallel-agents.md`](parallel-agents.md)) |
 | A lookup through the host and a plan of typed steps from a page, through a model once; a tool written by a model through the judged gate | open | the OS has no network; the model is used for free text only ([`parallel-agents.md`](parallel-agents.md)) |
-| The drive loop asks again after a judge's error reply | open | seen at v0.2.97 with a stand-in that named options the program no longer has: the loop waited after its first step |
+| The drive loop asks again after a judge's error reply | done | `scripts/test-drive.sh`: an error reply is waited on and the next step asks again; the programs' `number` checks a field exists before reading it |
+| The agent reads its own metrics and changes its own cells by typed questions, nobody at the keyboard | open | v0.2.98's changes were made by hand from the same metrics ([`parallel-agents.md`](parallel-agents.md)) |
+| Changing the OS from inside: a program installed through a gated effect, a domain replaced by a gated proposal, the kernel image last | open | the program region is written only by host scripts; the change protocol is a description ([`parallel-agents.md`](parallel-agents.md)) |
 
 ## Not started
 

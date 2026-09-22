@@ -459,6 +459,14 @@ promise.
   sources moved from the kernel image to the data region; the supervisor
   stack moved to a megabyte below 2 MiB; and a live video of Agel and Jev
   using the desktop and playing DOOM, recorded by `scripts/record-demo.py`.
+  `v0.2.98` gives the game a goal: the engine walks its own map and
+  reports the next waypoint toward the exit, the route's length and the
+  seen map, the judged agent steers by arithmetic
+  on the path and the engine's rays, asks the judge only what the
+  picture holds, checks the automap on Tab when stalled, and
+  keeps its metrics in a file on the OS; a judge's short answer no
+  longer stops a loop. Labelled honestly as a sensor and a hand-tuned
+  policy; `parallel-agents.md` puts the agent's own adaptation next.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

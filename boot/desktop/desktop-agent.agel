@@ -17,6 +17,6 @@
 (def questions "(judge (choice act \"Next desktop command for the task\" help files start-doom play-doom maximize close wait done) (noul done \"Is the task complete?\"))")
 (def commands (list (list "help" ":help") (list "files" ":fs-ls /") (list "start-doom" doom-line) (list "play-doom" ":handover doom-agent-judge 60") (list "maximize" ":maximize 0") (list "close" ":close 0") (list "done" "done")))
 (begin (def find-command (fn (t a) (if (= t nil) "wait" (if (= (car (car t)) a) (car (cdr (car t))) (find-command (cdr t) a))))) (def command-for (fn (a) (find-command commands (if (= a "play-doom") (if (= (look-field 0) 0) "start-doom" a) a)))))
-(def number (fn (answer n default) (if (= (text-int (text-field answer n)) nil) default (text-int (text-field answer n)))))
+(def number (fn (a n d) (if (= (text-field a n) nil) d (if (= (text-int (text-field a n)) nil) d (text-int (text-field a n))))))
 (def decide (fn (answer) (begin (def drive-reason answer) (if (< 500 (number answer 15 0)) "done" (if (< (number answer 4 0) 200) "wait" (command-for (text-field answer 3)))))))
 (def drive-step (fn () (begin (def answer (model-result)) (if (= answer nil) (begin (ask) "wait") (decide answer)))))

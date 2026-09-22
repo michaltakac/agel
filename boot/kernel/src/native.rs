@@ -40,7 +40,7 @@ const NONE: u16 = u16::MAX;
 /// `LOOK_SHADES_OFFSET` one byte per cell, rows first, 0 dark to 255 light.
 pub const LOOK_COLUMNS: usize = 64;
 pub const LOOK_ROWS: usize = 25;
-pub const LOOK_LINE_BYTES: usize = 128;
+pub const LOOK_LINE_BYTES: usize = 192;
 pub const LOOK_SHADES_OFFSET: usize = 256;
 pub const LOOK_BYTES: usize = LOOK_SHADES_OFFSET + LOOK_COLUMNS * LOOK_ROWS;
 /// The longest text a program may ask a model, and the longest answer.

@@ -1421,6 +1421,13 @@ fn play(
                 || line.starts_with("DROVE ")
                 || line.starts_with("DRIVE DONE")
                 || line.starts_with("process agel exited")
+                // The loop refused to start or stopped: no program, no
+                // window, or a step that failed to evaluate. Waiting on
+                // would wait forever.
+                || line.contains("DRIVE-STEP FAILED")
+                || line.contains("PLAY-STEP FAILED")
+                || line.contains("NO PROGRAM TO")
+                || line.contains("NO WINDOW TO")
             {
                 done = true;
             }

@@ -882,6 +882,7 @@ const PLAY_KEYS: &[(&[u8], u8, bool, Option<u8>)] = &[
     (b"period", 0x34, false, Some(b'.')),
     (b"enter", 0x1c, false, Some(b'\n')),
     (b"escape", 0x01, false, Some(27)),
+    (b"tab", 0x0f, false, Some(b'\t')),
     (b"p", 0x19, false, Some(b'p')),
     (b"y", 0x15, false, Some(b'y')),
     (b"n", 0x31, false, Some(b'n')),
@@ -3109,7 +3110,7 @@ fn drive(
 /// each form a cell, the status it names when in.
 /// The longest source a program the desktop carries may have: a few
 /// kilobytes, on the stack of a loop that is already deep.
-const PROGRAM_SOURCE_BYTES: usize = 4096;
+const PROGRAM_SOURCE_BYTES: usize = 8192;
 
 /// A program's source, read from its file in the data region.
 fn program_source(
@@ -3118,6 +3119,11 @@ fn program_source(
     source: &mut [u8; PROGRAM_SOURCE_BYTES],
 ) -> Result<usize, &'static [u8]> {
     match host.read_file(program.file, source) {
+        // A file that fills the buffer may go on past it, and a program
+        // cut mid-cell would load as something else: refuse it whole.
+        Ok(length) if length >= PROGRAM_SOURCE_BYTES => {
+            Err(b"THE PROGRAM IS TOO LONG FOR THE LOADER")
+        }
         Ok(length) => Ok(length),
         Err(2) => Err(b"THE PROGRAM IS NOT IN THE IMAGE - REBUILD IT"),
         Err(38) => Err(b"NO FILESYSTEM SERVICE"),

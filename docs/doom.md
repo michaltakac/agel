@@ -423,6 +423,70 @@ live recording of it, made by `scripts/record-demo.py`. In it the agent
 went forward 54 of 60 steps and turned at walls six times; Jev saw no
 enemy. One run, E1M1, no claim about play.
 
+## A goal for the game (v0.2.98)
+
+The v0.2.97 run had no goal: the questions were "best next move", "an
+enemy in view?", "how dangerous?", and forward was the confident answer
+to a question with no better one. Now the engine walks its own map
+for every state line, `goal H dist D path P seen S free A L R door K`:
+the level laid over a grid of 32-unit cells, neighbouring cells joined
+when a walk between their centres crosses no line a player cannot (a
+closed door counts, a ledge more than 24 units up or a gap under 56
+does not), tested with the engine's line traversal and kept once
+tested, so the map is learned as it is walked; a breadth-first search
+from the player's cell to the cell in front of the first exit line
+(special 11, 51, 52 or 124) is the route. `goal` is the heading to the
+furthest cell of the route a straight walk reaches, in the player's own
+256ths of a turn, `dist` its distance in map units, `path` the route's
+remaining length, `seen` the share of the level's lines the automap has
+drawn, `free` how far three rays reach before an uncrossable line
+(ahead, a quarter turn left, a quarter turn right, at most 512), `door`
+whether a closed door stops the ray ahead. Three earlier cuts (the exit
+as the crow flies, a path over sectors, a path over rooms) are in
+[`release-v0.2.98.md`](release-v0.2.98.md) with what each got wrong.
+`doom-agent-judge` steers by arithmetic (within 12/256 of a turn of the
+waypoint it goes forward, otherwise it turns the shorter way) and asks
+the judge what the picture holds and the rays cannot: `foe`, `risk`,
+and on the automap `way`. On the heading, a forward step that did not
+move or a wall within forty units starts an eight-step follow, four
+turning toward the freer side and four walking; a closed door within
+eighty units is used while walking; an enemy in view is fired at while
+walking. Three forwards in a row that did not move press Tab; the judge
+names the unexplored quadrant of the automap, the heading for six
+steps, and Tab closes the map. Each step is
+appended to `metrics` in the filesystem region: the state line and the
+answer that decided it. The plan this belongs to, and what comes after
+it, is [`parallel-agents.md`](parallel-agents.md).
+
+One live run of 120 judged steps, E1M1, against the endpoint
+(`agel-play --policy jev --steps 120`), reported as it went:
+
+| 120 steps, `doom-agent-judge` | start | end |
+|---|---|---|
+| route remaining, map units | 4416 | 2304 |
+| position | 1056, −3616 (the start) | 2479, −2662 (the corridor east of the first door) |
+| health | 100 | 82 |
+| ammo | 50 | 42 |
+| seen, share of the level's lines | 6 % | 22 % |
+| level | 1 | 1 |
+
+Keys held: forward 57, right 29, left 18, forward-and-fire 15, use 1.
+Forward steps that did not move: 2. The one `use` opened the level's
+first door at step 58; the fifteen shots were at what the judge called
+an enemy in view (`foe` above 500 fifteen times); nothing was killed.
+The map check was not needed (no three stalled forwards). Half the
+route in 120 steps, with the exit's door still ahead; one run, no claim
+of a rate.
+
+The earlier cuts of the same milestone, each one run: the exit as the
+crow flies did not leave the start room (route unknown; distance to the
+exit 2432 → 2363); the sector path reached the second room and stuck at
+a wall for thirty steps (rooms to cross 20 → 18); the path over rooms,
+with the judge's "wall" as the block signal, turned away from the open
+route (route unchanged); the grid route reached the first door and spent
+seventy steps against it (route 4416 → 3264) until "door" was checked
+before "blocked".
+
 ## What this is not
 
 Sound is out of scope: the engine is built without it. RISC-V has no

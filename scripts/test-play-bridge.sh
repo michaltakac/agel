@@ -36,20 +36,23 @@ cat > "$out/curl" <<'FAKE'
 #!/bin/sh
 # Reads the configuration on stdin as curl would, then answers one judgment.
 cat > /dev/null
-printf '%s\n200' '{"model":"stand-in","answers":{"act":{"type":"choice","choice":"fire","confidence":0.33,"probabilities":{"forward":0.32,"back":0.01,"left":0.22,"right":0.01,"fire":0.44,"use":0.0}},"foe":{"type":"noul","noul":0.98},"risk":{"type":"score","score":0.74,"confidence":0.6,"legend":{"0":"safe","1":"wary","2":"lethal"},"probabilities":{"0":0.27,"1":0.73,"2":0.0}}},"usage":{"input_tokens":1,"output_tokens":1}}'
+printf '%s\n200' '{"model":"stand-in","answers":{"foe":{"type":"noul","noul":0.98},"risk":{"type":"score","score":0.74,"confidence":0.6,"legend":{"0":"safe","1":"wary","2":"lethal"},"probabilities":{"0":0.27,"1":0.73,"2":0.0}}},"usage":{"input_tokens":1,"output_tokens":1}}'
 FAKE
 chmod +x "$out/curl"
 TYPESAFEAI_API_KEY=stand-in cargo run -q --release -p agel-play -- --image "$image" --doom "$doom" --wad "$wad" \
   --out "$out" --policy jev --curl-bin "$(pwd)/$out/curl" --steps 4 | tee "$out/console.log"
-replies=$(grep -c "agel-play: model reply .*: act choice 6 fire 330 320 10 220 10 440 0 foe noul 980 risk score 3 740 600 270 730 0" "$out/console.log")
+replies=$(grep -c "agel-play: model reply .*: foe noul 980 risk score 3 740 600 270 730 0" "$out/console.log")
 steps=$(wc -l < "$out/steps.jsonl" | tr -d ' ')
-fired=$(grep -c "agel-play: step .*: (ctrl)" "$out/console.log")
+# An enemy in view: the program goes forward firing; the engine's state
+# line carries the way to the exit, the seen share of the map and the rays.
+fired=$(grep -c "agel-play: step .*: (up ctrl)" "$out/console.log")
+goals=$(grep -c "agel-play: step .*: (up ctrl) \[doom: state map 1 .* goal [0-9]* dist [0-9]* path [0-9]* seen [0-9]* free [0-9]* [0-9]* [0-9]* door [01]" "$out/console.log")
 grep -q "agel-play: done" "$out/console.log"
-if [ "$replies" -lt 4 ] || [ "$steps" -ne 4 ] || [ "$fired" -lt 4 ]; then
-  printf 'expected 4 typed replies, 4 recorded steps and 4 fire decisions, got %s, %s and %s\n' "$replies" "$steps" "$fired" >&2
+if [ "$replies" -lt 4 ] || [ "$steps" -ne 4 ] || [ "$fired" -lt 4 ] || [ "$goals" -lt 4 ]; then
+  printf 'expected 4 typed replies, 4 recorded steps, 4 forward-firing decisions and 4 goal reports, got %s, %s, %s and %s\n' "$replies" "$steps" "$fired" "$goals" >&2
   exit 1
 fi
-echo "A judged episode through the bridge: 4 steps, each a typed (judge ...) request answered on one line and decided by the program [ok]"
+echo "A judged episode through the bridge: 4 steps, each a typed (judge ...) request answered on one line and decided by the program toward the exit [ok]"
 
 # The desktop driven through the bridge: no game, no window. The program
 # asks which of the desktop's commands comes next for the task and whether

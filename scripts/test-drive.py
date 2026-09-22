@@ -138,6 +138,24 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
         machine.serial.settimeout(15)
         assert "drive: step 1 do :fs-ls /" in tail, tail[-2000:]
         settled(machine, tail)
+        # A judge that answers an error instead of a judgment: the program
+        # reads no confidence in it, waits, and asks again the next step
+        # (the answer has fewer fields than a judgment, and reading a
+        # missing one must not fail the form, or the loop stops).
+        with machine.serial_lock:
+            send_line(machine, ":drive 2")
+            number, line, _ = request(machine)
+            machine.serial.sendall(
+                f":model-reply {number} error provider answered unexpectedly: a probability is not a number: null\n".encode()
+            )
+            until_text(machine, b"drive: step 1 do wait", 60)
+            again, line, _ = request(machine)
+            assert again == number + 1, (number, again)
+            answer(machine, again, "files", 800, 200)
+            tail = until_text(machine, b"DROVE 2 STEPS", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
+        assert "drive: step 2 do :fs-ls /" in tail, tail[-2000:]
+        settled(machine, tail)
         # The refused commands: the loops that would nest, and the halt.
         machine.submit('(def command-for (fn (a) ":shutdown"))')
         with machine.serial_lock:
