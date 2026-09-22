@@ -83,13 +83,14 @@ def write_table(image: str, rows: list[dict]) -> None:
         disk.flush()
 
 
-def install(image: str, name: str, elf: bytes) -> dict:
+def install(image: str, name: str, elf: bytes | None) -> dict | None:
     """Add or replace NAME, repacking the region so replaced entries leave
     no holes: every other entry is read back and laid out again from the
-    first sector after the table, in table order, then the new one."""
+    first sector after the table, in table order, then the new one. With
+    no bytes, NAME is removed instead, and the rest repacked the same way."""
     if not valid_name(name):
         raise ValueError("a program name is 1 to 16 printable ASCII bytes")
-    if not elf:
+    if elf is not None and not elf:
         raise ValueError("an entry must hold at least one byte")
     kept = [row for row in read_table(image) if row["name"] != name]
     if len(kept) >= MAX_ROWS:
@@ -102,7 +103,8 @@ def install(image: str, name: str, elf: bytes) -> dict:
             if len(data) != row["length"] or (zlib.crc32(data) & 0xFFFFFFFF) != row["crc"]:
                 raise ValueError(f"entry {row['name']} on the disk does not match its table row")
             contents.append((row["name"], data))
-    contents.append((name, elf))
+    if elf is not None:
+        contents.append((name, elf))
     # Repacking moves live entries. Validate the entire layout before the
     # first write, so a full region cannot corrupt the still-current table.
     if sum(-(-len(data) // SECTOR) for _, data in contents) > LAST - TABLE:
@@ -118,7 +120,7 @@ def install(image: str, name: str, elf: bytes) -> dict:
             next_free += sectors
         disk.flush()
     write_table(image, rows)
-    return rows[-1]
+    return rows[-1] if elf is not None else None
 
 
 def main() -> int:
@@ -133,6 +135,13 @@ def main() -> int:
     if len(sys.argv) == 3 and sys.argv[2] == "--list":
         for row in read_table(sys.argv[1]):
             print(f"{row['name']:16} sectors {row['start']}.. {row['length']} bytes crc {row['crc']:08x}")
+        return 0
+    if len(sys.argv) == 4 and sys.argv[2] == "--remove":
+        image, name = sys.argv[1], sys.argv[3]
+        present = any(row["name"] == name for row in read_table(image))
+        if present:
+            install(image, name, None)
+        print(f"removed {name}" if present else f"{name} was not installed")
         return 0
     if len(sys.argv) != 4:
         print(__doc__, file=sys.stderr)

@@ -805,21 +805,51 @@ pub unsafe extern "C" fn agel_input_main(shared_page: u64) -> ! {
     loop {
         let command = unsafe { page.add(shared::COMMAND).read_volatile() };
         if command == shared::COMMAND_READ_INPUT {
+            let absolute = unsafe { page.add(shared::POINTER_ABSOLUTE).read_volatile() } != 0;
+            // An absolute pointer first: one event of the backdoor's is
+            // x, y in 65536ths of the screen and the buttons.
+            if absolute {
+                if let Some((buttons, x, y)) = unsafe { vmmouse_event() } {
+                    unsafe {
+                        page.add(shared::STATUS).write_volatile(1);
+                        page.add(shared::VALUES).write_volatile(u64::from(x));
+                        page.add(shared::VALUES + 1).write_volatile(2);
+                        page.add(shared::VALUES + 2).write_volatile(u64::from(y));
+                        page.add(shared::VALUES + 3)
+                            .write_volatile(u64::from(buttons));
+                    }
+                    unsafe { yield_to_supervisor() };
+                    continue;
+                }
+            }
             let status = unsafe { port_in8(0x64) };
             if status & 1 == 0 {
                 unsafe { page.add(shared::STATUS).write_volatile(0) };
             } else {
                 let byte = unsafe { port_in8(0x60) };
-                unsafe {
-                    page.add(shared::STATUS).write_volatile(1);
-                    page.add(shared::VALUES).write_volatile(u64::from(byte));
-                    page.add(shared::VALUES + 1)
-                        .write_volatile(u64::from(status & 0x20 != 0));
+                let auxiliary = status & 0x20 != 0;
+                if auxiliary && absolute {
+                    // The controller's pointer bytes are the backdoor's
+                    // wake-up, not positions: read and dropped.
+                    unsafe { page.add(shared::STATUS).write_volatile(0) };
+                } else {
+                    unsafe {
+                        page.add(shared::STATUS).write_volatile(1);
+                        page.add(shared::VALUES).write_volatile(u64::from(byte));
+                        page.add(shared::VALUES + 1)
+                            .write_volatile(u64::from(auxiliary));
+                    }
                 }
             }
         } else if command == shared::COMMAND_ENABLE_POINTER {
             let enabled = unsafe { enable_pointer() };
-            unsafe { page.add(shared::STATUS).write_volatile(u64::from(enabled)) };
+            let absolute = enabled && unsafe { vmmouse_enable() };
+            unsafe {
+                page.add(shared::POINTER_ABSOLUTE)
+                    .write_volatile(u64::from(absolute));
+                page.add(shared::STATUS)
+                    .write_volatile(u64::from(enabled) + u64::from(absolute));
+            }
         } else if command == shared::COMMAND_FAULT_WRITE {
             unsafe { (crate::arch::KERNEL_PROBE_ADDRESS as *mut u64).write_volatile(0xdead) };
         } else {
@@ -963,6 +993,71 @@ unsafe fn enable_pointer() -> bool {
         step += 1;
     }
     true
+}
+
+/// The VMware backdoor: `in eax, dx` on port 0x5658 with the magic in
+/// `eax`, a command in `ecx` and an argument in `ebx`, answered in all
+/// four registers. QEMU serves it for its `vmmouse` device, whose pointer
+/// is absolute — where the host's own pointer is over the window — so the
+/// host stops capturing the mouse. `rbx` is saved around the call since
+/// the compiler keeps it for itself.
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[inline(always)]
+unsafe fn backdoor(command: u32, argument: u32) -> (u32, u32, u32, u32) {
+    let (eax, ebx, ecx, edx): (u32, u32, u32, u32);
+    unsafe {
+        asm!(
+            "push rbx",
+            "mov ebx, {argument:e}",
+            "in eax, dx",
+            "mov {result:e}, ebx",
+            "pop rbx",
+            argument = in(reg) argument,
+            result = out(reg) ebx,
+            inout("eax") 0x564d_5868_u32 => eax,
+            inout("ecx") command => ecx,
+            inout("edx") 0x5658_u32 => edx,
+            options(nomem),
+        )
+    };
+    (eax, ebx, ecx, edx)
+}
+
+/// Ask the backdoor for an absolute pointer: a hypervisor that answers
+/// the version command, a `vmmouse` that enables and reports its version,
+/// and absolute mode requested. `false` leaves the PS/2 pointer as it is.
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[inline(always)]
+unsafe fn vmmouse_enable() -> bool {
+    let (_, magic, _, _) = unsafe { backdoor(10, 0) };
+    if magic != 0x564d_5868 {
+        return false;
+    }
+    unsafe { backdoor(41, 0x4541_4552) };
+    let (status, _, _, _) = unsafe { backdoor(40, 0) };
+    if status & 0xffff == 0 {
+        return false;
+    }
+    let (version, _, _, _) = unsafe { backdoor(39, 1) };
+    if version != 0x3442_554a {
+        return false;
+    }
+    unsafe { backdoor(41, 0x5342_4152) };
+    true
+}
+
+/// One event of the absolute pointer, when the backdoor holds one: the
+/// buttons (left 0x20, right 0x10, middle 0x08) and x, y in 65536ths of
+/// the screen.
+#[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+#[inline(always)]
+unsafe fn vmmouse_event() -> Option<(u8, u16, u16)> {
+    let (status, _, _, _) = unsafe { backdoor(40, 0) };
+    if status == 0xffff_0000 || status & 0xffff < 4 {
+        return None;
+    }
+    let (buttons, x, y, _) = unsafe { backdoor(39, 4) };
+    Some(((buttons & 0x38) as u8, x as u16, y as u16))
 }
 
 /// One byte in from a port. Faults unless this domain was granted the port.

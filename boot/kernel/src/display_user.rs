@@ -13,7 +13,10 @@ const STATUS_REJECTED: u64 = 1;
 
 #[derive(Clone, Copy)]
 struct Surface {
+    /// Where records draw: the back buffer when there is one.
     address: usize,
+    /// The device: what is shown, presented to from the back buffer.
+    front: usize,
     width: u32,
     height: u32,
     pitch: u32,
@@ -56,8 +59,11 @@ impl Surface {
                     .min(height - y),
             }
         };
+        let front = unsafe { page.add(shared::DISPLAY_ADDRESS).read_volatile() } as usize;
+        let back = unsafe { page.add(shared::DISPLAY_BACK).read_volatile() } as usize;
         let surface = Self {
-            address: unsafe { page.add(shared::DISPLAY_ADDRESS).read_volatile() } as usize,
+            address: if back != 0 { back } else { front },
+            front,
             width,
             height,
             pitch: unsafe { page.add(shared::DISPLAY_PITCH).read_volatile() } as u32,
@@ -755,6 +761,10 @@ unsafe fn draw(surface: Surface, page: *mut u64, record: *const u8, bytes: usize
         return false;
     }
     let operation = unsafe { record_word(record, 0) };
+    if operation == 12 {
+        unsafe { present(surface) };
+        return true;
+    }
     if operation == 1 {
         let start = unsafe { record_word(record, 1) };
         let end = unsafe { record_word(record, 2) };
@@ -1013,6 +1023,30 @@ unsafe fn blit(
     }
 }
 
+/// The clip of the back buffer copied to the device, word by word: no
+/// compiler memory routine, since that could live in text this domain
+/// cannot execute. Nothing to do when records draw to the device itself.
+#[inline(always)]
+unsafe fn present(surface: Surface) {
+    if surface.address == surface.front {
+        return;
+    }
+    let (top, bottom) = surface.rows(0, surface.height);
+    let (left, right) = surface.columns(0, surface.width);
+    let mut y = top;
+    while y < bottom {
+        let row = y as usize * surface.pitch as usize;
+        let mut x = left;
+        while x < right {
+            let offset = row + x as usize * 4;
+            let color = unsafe { ((surface.address + offset) as *const u32).read_volatile() };
+            unsafe { ((surface.front + offset) as *mut u32).write_volatile(color) };
+            x += 1;
+        }
+        y += 1;
+    }
+}
+
 #[inline(always)]
 unsafe fn checksum(surface: Surface) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
@@ -1022,7 +1056,7 @@ unsafe fn checksum(surface: Surface) -> u64 {
         while x < surface.width {
             let offset = (y as usize) * (surface.pitch as usize) + (x as usize) * 4;
             let value =
-                unsafe { (surface.address.wrapping_add(offset) as *const u32).read_volatile() };
+                unsafe { (surface.front.wrapping_add(offset) as *const u32).read_volatile() };
             hash ^= u64::from(value);
             hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
             x += 1;

@@ -35,6 +35,35 @@ done
 
 image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
 test -n "$image" && test -f "$image"
+# The desktop's own persistent disk: the seed's boot sectors and assets
+# refreshed on every run, the source workspace kept, and the programs a
+# person wants at hand installed — the game, its data, the hosted runtime
+# with the browser's site — so the agent can start them when asked.
+desktop_image="$(dirname "$image")/agel-desktop.img"
+test ! -L "$desktop_image"
+if test ! -e "$desktop_image"; then
+  cp "$image" "$desktop_image"
+fi
+dd if="$image" of="$desktop_image" bs=512 count=512 conv=notrunc 2>/dev/null
+dd if="$image" of="$desktop_image" bs=512 skip=10240 seek=10240 count=3072 conv=notrunc 2>/dev/null
+for program in workbench:wb doom-agent:da doom-agent-model:dm doom-agent-judge:dj desktop-agent:dk; do
+  python3 ./scripts/install-program.py --region data "$desktop_image" "${program##*:}.agel" "boot/desktop/${program%%:*}.agel" >/dev/null
+done
+if doom=$(./scripts/build-c-program.sh doom x86_64 2>/dev/null | tail -n 1) && test -f "$doom" \
+   && wad=$(./scripts/fetch-doom-wad.sh 2>/dev/null) && test -f "$wad"; then
+  python3 ./scripts/install-program.py "$desktop_image" c-doom "$doom" >/dev/null
+  python3 ./scripts/install-program.py --region data "$desktop_image" doom1.wad "$wad" >/dev/null
+else
+  printf '%s\n' 'DOOM is not installed: build it with scripts/build-c-program.sh doom and fetch the WAD with scripts/fetch-doom-wad.sh' >&2
+fi
+if agel=$(./scripts/build-program.sh agel x86_64 2>/dev/null | tail -n 1) && test -f "$agel"; then
+  python3 ./scripts/install-program.py "$desktop_image" agel "$agel" >/dev/null
+  for page in examples/pages/*.html; do
+    python3 ./scripts/install-program.py --region data "$desktop_image" "$(basename "$page")" "$page" >/dev/null
+  done
+  python3 ./scripts/install-program.py --region data "$desktop_image" browse.agel examples/browse-agent.agel >/dev/null
+fi
+image="$desktop_image"
 if $workbench; then
   # Keep the user's existing workshop disk and this demo's source cells separate.
   workbench_image="$(dirname "$image")/agel-workbench.img"
@@ -53,7 +82,7 @@ if $web; then
   exec python3 ./scripts/graphical_console.py "$image" "$@"
 fi
 printf '%s\n' 'Direct QEMU input uses a US physical layout. Use --web for Slovak/macOS text composition.'
-printf '%s\n' 'Click the desktop to open the workbench; a sentence at the prompt summons the agent. QEMU owns its mouse-capture/release shortcut.'
+printf '%s\n' 'Click the desktop to open the workbench; a sentence at the prompt summons the agent. The pointer is the host'"'"'s own: nothing is captured.'
 if $agent; then
   # The judge beside the person: the console goes to a socket the bridge
   # attaches to, answering what the desktop asks and printing what it

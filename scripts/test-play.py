@@ -72,10 +72,9 @@ with tempfile.TemporaryDirectory(prefix="agel-play-", dir="/tmp") as directory:
         def pointer(events):
             machine.command("input-send-event", {"events": events})
             time.sleep(0.3)
-        pointer([{"type": "rel", "data": {"axis": "x", "value": -4000}},
-                 {"type": "rel", "data": {"axis": "y", "value": -4000}}])
-        pointer([{"type": "rel", "data": {"axis": "x", "value": 300}},
-                 {"type": "rel", "data": {"axis": "y", "value": 700}}])
+        # The pointer is absolute: straight to the workshop at (300, 700).
+        pointer([{"type": "abs", "data": {"axis": "x", "value": 5123}},
+                 {"type": "abs", "data": {"axis": "y", "value": 21258}}])
         pointer([{"type": "btn", "data": {"down": True, "button": "left"}}])
         pointer([{"type": "btn", "data": {"down": False, "button": "left"}}])
         machine.until_prompt()

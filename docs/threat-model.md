@@ -1985,6 +1985,40 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.97
+
+- **The backdoor is a hypervisor's, reached by one driver.** The input
+  driver domain alone is granted port 0x5658, the VMware backdoor QEMU
+  serves for its `vmmouse`; it asks for the version, enables, checks the
+  device's version and requests absolute mode, and reads events from it.
+  Nothing else in the OS can reach the port, and a machine without the
+  backdoor answers nothing the driver believes. The I/O bitmap grew to
+  reach the port and is filled before every ring-3 entry, as before.
+- **A program the agent summons can replace a world of programs.** `:load`
+  and `:handover` replace a world that holds only cells with a program's
+  prefix; a world with one cell of the operator's own is kept. The
+  agent's `play-doom` hands the desktop to the judged game agent for sixty
+  steps; the handover runs from the console loop, never inside the drive
+  loop, so no loop nests. The game must already be running in a window
+  (the agent's `start-doom`), or `:play` says there is no window.
+- **A program's source is read from the disk now.** The kernel carries a
+  program's name, prefix and file; the source comes from the data region
+  through the filesystem service, read-only to the OS, installed by the
+  build. An image built without them says `THE PROGRAM IS NOT IN THE
+  IMAGE - REBUILD IT` and loads nothing.
+- **The back buffer is the compositor's memory.** Two thousand pages of
+  the pool, mapped into the compositor's domain like a window's canvas;
+  a replacement compositor after a fault gets its own, and the faulted
+  one's are not reclaimed. The device shows only what a present copied.
+- **The supervisor stack is a megabyte now**, from 2 MiB down, between the
+  kernel image and the frame pool, where nothing else lives; at 0x90000 it
+  had about 200 KiB, and the game's exec from inside the drive loop
+  overflowed it and stopped the machine. Overflow is still unguarded: no
+  unmapped page sits beneath the supervisor stack.
+- **Not claimed:** a build smaller than the budget by more than a few
+  kilobytes (3267 bytes of headroom); a size-optimised build, which
+  outlines routines the ring-3 domains cannot execute.
+
 ## v0.2.96
 
 - **A click evaluates nothing it cannot answer.** On a world with no

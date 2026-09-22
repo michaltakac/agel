@@ -159,7 +159,11 @@ long_mode:
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %ss
-    movq $0x90000, %rsp
+    # The supervisor stack: a megabyte, from 2 MiB down to 1 MiB, between the
+    # kernel image below 640 KiB and the frame pool at 2 MiB; nothing else
+    # lives there. It was 0x90000 in low memory, some 200 KiB, and one
+    # command started from inside another overflowed it.
+    movq $0x200000, %rsp
     xorq %rbp, %rbp
     movq $0x10000, %rax
     call *%rax

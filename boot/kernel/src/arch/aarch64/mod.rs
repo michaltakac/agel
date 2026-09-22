@@ -20,7 +20,7 @@ mod paged;
 
 pub use paged::Domain;
 #[cfg(feature = "native-graphics")]
-pub use paged::{ASSET_BASE, ASSET_SLOT_BYTES, CANVAS_BASE};
+pub use paged::{ASSET_BASE, ASSET_SLOT_BYTES, BACK_BASE, CANVAS_BASE};
 #[cfg(feature = "process")]
 pub use paged::{PROCESS_BASE, PROCESS_BYTES};
 /// The ELF `e_machine` of programs built for this machine.

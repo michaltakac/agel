@@ -72,4 +72,23 @@ for asset in fira-sans.agf fira-sans-medium.agf fira-mono.agf sprites.agi; do
   python3 "$project_dir/scripts/install-asset.py" "$disk_image" "${asset%.*}" "$assets_dir/$asset" >/dev/null
 done
 
+# The desktop's programs (sectors 13312+, the data region): the kernel
+# carries their names and reads their source from here when one is loaded,
+# so the sources are not in the kernel image. Installed fresh every build
+# of a desktop (`--features native-graphics`) and removed by a build of
+# anything else, so the persistent image's data region holds what its
+# kernel reads and nothing a test of the workshop would list unasked.
+for program in workbench:wb doom-agent:da doom-agent-model:dm doom-agent-judge:dj desktop-agent:dk; do
+  case " $* " in
+    *native-graphics*)
+      source="$project_dir/boot/desktop/${program%%:*}.agel"
+      test -f "$source" || { printf '%s\n' "missing $source" >&2; exit 1; }
+      python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" "${program##*:}.agel" "$source" >/dev/null
+      ;;
+    *)
+      python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" --remove "${program##*:}.agel" >/dev/null
+      ;;
+  esac
+done
+
 printf '%s\n' "$disk_image"

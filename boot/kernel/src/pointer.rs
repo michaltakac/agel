@@ -29,6 +29,17 @@ impl Pointer {
         self.down
     }
 
+    /// An absolute position, `x` and `y` in 65536ths of the screen, and
+    /// whether the button is held; answers whether this is a press edge.
+    pub fn absolute(&mut self, x: u16, y: u16, down: bool) -> bool {
+        // To the nearest pixel: the host's own pointer sits on one.
+        self.x = ((i64::from(x) * i64::from(self.right) + 32767) / 65535) as i32;
+        self.y = ((i64::from(y) * i64::from(self.bottom) + 32767) / 65535) as i32;
+        let pressed = down && !self.down;
+        self.down = down;
+        pressed
+    }
+
     pub fn feed(&mut self, byte: u8) -> Option<bool> {
         if self.length == 0 && byte & 8 == 0 {
             return None;
@@ -76,5 +87,20 @@ mod tests {
         p.feed(255);
         assert_eq!(p.feed(255), None);
         assert_eq!((p.x, p.y), (511, 385));
+    }
+
+    #[test]
+    fn absolute_positions_map_to_the_nearest_pixel_with_press_edges() {
+        let mut p = Pointer::new(1920, 1080);
+        assert!(!p.absolute(0, 0, false));
+        assert_eq!((p.x, p.y), (0, 0));
+        assert!(p.absolute(65535, 65535, true));
+        assert_eq!((p.x, p.y), (1919, 1079));
+        // Held, not pressed again; released; pressed again.
+        assert!(!p.absolute(32768, 32768, true));
+        assert_eq!((p.x, p.y), (960, 540));
+        assert!(!p.absolute(32768, 32768, false));
+        assert!(p.absolute(25954, 8190, true));
+        assert_eq!((p.x, p.y), (760, 135));
     }
 }

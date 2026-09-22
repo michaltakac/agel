@@ -929,10 +929,13 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
             if let Some(model) = &options.model {
                 provider = provider.with_model(model);
             }
+            // No task of the bridge's own: a desktop request carries the
+            // operator's sentence as its `task:` line, and a request with
+            // none is the game's, judged with the game's fields.
             Box::new(Judge {
                 provider,
                 program: "desktop-agent".to_owned(),
-                task: Some(options.task.clone()),
+                task: None,
                 browse: options.scene == "browse",
                 next_id: 1,
             })
@@ -990,7 +993,14 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
                     history.clear();
                     last_task = task;
                 }
-                for decided in &history {
+                // All of it for a sentence, the last eight steps for the
+                // game, as the booted bridge does.
+                let recent = if last_task.is_some() {
+                    0
+                } else {
+                    history.len().saturating_sub(8)
+                };
+                for decided in &history[recent..] {
                     block.push_str("history: ");
                     block.push_str(decided);
                     block.push('\n');
@@ -1019,20 +1029,29 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
                 block.push('\n');
                 continue;
             }
-            if let Some(rest) = line.strip_prefix("drive: step ") {
+            // The desktop's steps and the game's: recorded and remembered.
+            let stepped = line
+                .strip_prefix("drive: step ")
+                .map(|rest| (rest, "do "))
+                .or_else(|| line.strip_prefix("play: step ").map(|rest| (rest, "keys ")));
+            if let Some((rest, decided)) = stepped {
                 let step = rest
                     .split(' ')
                     .next()
                     .and_then(|digits| digits.parse::<usize>().ok())
                     .unwrap_or(0);
                 let keys = rest
-                    .split("do ")
+                    .split(decided)
                     .nth(1)
                     .and_then(|rest| rest.split(" reason ").next())
                     .unwrap_or("")
                     .trim()
                     .to_owned();
-                history.push(format!("step {step}: {keys}"));
+                history.push(if decided == "do " {
+                    format!("step {step}: {keys}")
+                } else {
+                    format!("step {step}: held {keys}")
+                });
                 let record = serde_json::json!({
                     "step": step,
                     "policy": policy.name(),

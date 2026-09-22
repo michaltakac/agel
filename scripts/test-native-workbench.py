@@ -23,7 +23,10 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
             {"type": "btn", "data": {"down": False, "button": "left"}},
         ]})
         time.sleep(0.3)
-        assert "A PROGRAM NEEDS A FRESH EMPTY WORLD" in machine.submit(":workbench")
+        # A world of nothing but programs is replaced on a load: the
+        # workbench reloads over itself. The operator's own cells would
+        # keep it from doing so.
+        assert "WORKBENCH READY" in machine.submit(":workbench")
         original = machine.region(365, 645, 1, 1)
         assert "CANDIDATE VALIDATED" in machine.submit("  :preview (point 360 640)  ")
         assert machine.region(365, 645, 1, 1) != original
@@ -41,9 +44,10 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
         machine.expect("(agent-faulted? dock)", "#f")
         # Real PS/2 packets via QEMU, not the serial command path.
         machine.command("input-send-event", {"events": [
-            # From the screen's centre (960, 540) to the widget at (360, 640).
-            {"type": "rel", "data": {"axis": "x", "value": -600}},
-            {"type": "rel", "data": {"axis": "y", "value": 100}},
+            # The pointer is absolute (QEMU's vmmouse): to the widget at
+            # (360, 640), in 32768ths of the screen.
+            {"type": "abs", "data": {"axis": "x", "value": 6147}},
+            {"type": "abs", "data": {"axis": "y", "value": 19435}},
         ]})
         time.sleep(0.3)
         machine.command("input-send-event", {"events": [
@@ -114,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
                     break
             machine.serial.settimeout(15)
         cells = machine.submit(":cells")
-        assert "CELLS 15" in cells and "dk-5" in cells and "wb-8" in cells, cells
+        assert "CELLS 15" in cells and "dk-6" in cells and "wb-7" in cells, cells
         # The workbench still answers its own forms beside the agent; the
         # join replayed every cell, so the dock's state starts over.
         machine.expect("(inspect-agent)", 0)

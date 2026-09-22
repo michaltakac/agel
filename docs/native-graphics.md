@@ -696,6 +696,50 @@ The agent needs a judge on the other side of the serial console;
 `run-graphics.sh --agent` attaches the host bridge there. Without one the
 run waits for a reply it never gets and says `model-reply: none`.
 
+## The pointer is the host's own, and a frame is never seen half-drawn (v0.2.97)
+
+Two things a person notices at the window, from a second report of using
+it: QEMU captured the mouse and the whole screen flashed on every click
+that opened something.
+
+**The mouse.** The guest had only a PS/2 pointer, which is relative, so
+QEMU had to capture the host's pointer and the guest drew its own arrow
+wherever the packets had taken it. QEMU's `pc` machine also carries a
+`vmmouse`, an absolute pointer spoken through the VMware backdoor — one
+`in eax, dx` on port 0x5658 with a magic in `eax` — and when a guest
+enables it, QEMU stops capturing: the host's own pointer is the position,
+one to one over the window. The input driver domain now asks the backdoor
+for it at boot (`pointer: absolute, the host's own over the window` on the
+serial console), reads events from it — x and y in 65536ths of the screen
+and the buttons — and drops the PS/2 pointer bytes, which the backdoor
+sends only to wake a guest. The supervisor maps the position to the
+nearest pixel and the press edge as before. The I/O bitmap grew to reach
+the port; it is zero at rest now, so the segment lives in uninitialised
+memory and costs the kernel image nothing. Without a `vmmouse` (another
+machine, or `vmport=off`) the PS/2 pointer works as it did. The harness's
+tests send absolute events now, in 32768ths of the screen.
+
+**The flash.** The compositor drew every record straight into the
+device's framebuffer, an uncached mapping written a pixel at a time, and
+every whole frame began with the wallpaper gradient over the clip: a
+whole-frame draw erased the screen and rebuilt it in view. It now draws
+into a back buffer — pool frames mapped into its domain at `BACK_BASE`,
+one page per page of the device — and a record of kind 12 presents the
+clip of it (all of it when no clip is set) to the device, copied word by
+word since a compiler memory routine may live in text the domain cannot
+execute. Every render path presents what it drew: the whole frame, the
+region, or the command bar and the pointer's box on their own. The
+checksum the boot self-test compares is the device's. Without the memory
+for a back buffer the compositor draws to the device as before and says
+so on the console.
+
+**The kernel's size.** The five programs' sources left the kernel image
+for the data region (`/data/wb.agel` … `/data/dk.agel`, installed by
+`scripts/build-boot.sh` and refreshed by `run-graphics.sh`); the desktop
+reads a program through the filesystem service when it loads or joins
+one. A size-optimised build was tried and rejected: it outlined memory
+routines the ring-3 evaluator then faulted on.
+
 ## What is next
 
 The next step is a language-owned graphical editor: multiline source cells,

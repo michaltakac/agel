@@ -203,6 +203,15 @@ pub mod shared {
     pub const CLIP_WIDTH: usize = 64;
     #[cfg(feature = "native-graphics")]
     pub const CLIP_HEIGHT: usize = 65;
+    /// The compositor's back buffer, a virtual address in its own space, or
+    /// zero to draw straight to the device. Record kind 12 presents the
+    /// clip of it (all of it when no clip is set) to the device.
+    #[cfg(feature = "native-graphics")]
+    pub const DISPLAY_BACK: usize = 75;
+    /// Set by the input driver when the pointer is absolute (the VMware
+    /// backdoor answered): PS/2 pointer bytes are then noise and dropped.
+    #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
+    pub const POINTER_ABSOLUTE: usize = 71;
     /// Divide by zero. Only x86-64 traps on this; RISC-V defines a result and
     /// AArch64 has no integer divide exception at all, so the command exists
     /// only where a machine can actually be provoked by it.

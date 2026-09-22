@@ -449,6 +449,16 @@ promise.
   `run-graphics.sh --agent` put the judge beside a person's window. The
   cell table stays at sixteen, a larger one having overflowed the
   kernel's stack at boot.
+  `v0.2.97` makes the window feel like the host's: the pointer is the
+  host's own through QEMU's `vmmouse` (the input driver reads the VMware
+  backdoor), nothing captured; the compositor draws into a back buffer
+  and presents the clip, so a frame is never seen half-drawn; the
+  summoned agent can start the game and hand the desktop to the judged
+  player with `:handover`; `run-graphics.sh` boots a persistent desktop
+  disk with the game, the runtime and the site installed; the programs'
+  sources moved from the kernel image to the data region; the supervisor
+  stack moved to a megabyte below 2 MiB; and a live video of Agel and Jev
+  using the desktop and playing DOOM, recorded by `scripts/record-demo.py`.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

@@ -106,6 +106,25 @@ impl ServiceError {
     }
 }
 
+/// What the input driver produced: a byte of the 8042's (a key, or a PS/2
+/// pointer packet byte), or one event of an absolute pointer.
+#[cfg(feature = "native-graphics")]
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputEvent {
+    Byte {
+        auxiliary: bool,
+        byte: u8,
+    },
+    /// Position in 65536ths of the screen; buttons left 0x20, right 0x10,
+    /// middle 0x08.
+    Absolute {
+        x: u16,
+        y: u16,
+        buttons: u8,
+    },
+}
+
 /// An unprivileged driver domain the supervisor can lose and replace.
 pub struct ServiceDomain {
     domain: arch::Domain,
@@ -170,7 +189,7 @@ impl ServiceDomain {
     pub fn read_input(
         &mut self,
         handle: ServiceHandle,
-    ) -> Result<Option<(bool, u8)>, ServiceError> {
+    ) -> Result<Option<InputEvent>, ServiceError> {
         self.check(handle)?;
         match self.domain.provoke(shared::COMMAND_READ_INPUT) {
             Stop::Replied => {}
@@ -179,21 +198,33 @@ impl ServiceDomain {
         if self.domain.core().read_shared(shared::STATUS) == 0 {
             return Ok(None);
         }
-        let byte = self.domain.core().read_shared(shared::VALUES) as u8;
-        let auxiliary = self.domain.core().read_shared(shared::VALUES + 1) != 0;
-        Ok(Some((auxiliary, byte)))
+        let first = self.domain.core().read_shared(shared::VALUES);
+        let kind = self.domain.core().read_shared(shared::VALUES + 1);
+        if kind == 2 {
+            return Ok(Some(InputEvent::Absolute {
+                x: first as u16,
+                y: self.domain.core().read_shared(shared::VALUES + 2) as u16,
+                buttons: self.domain.core().read_shared(shared::VALUES + 3) as u8,
+            }));
+        }
+        Ok(Some(InputEvent::Byte {
+            auxiliary: kind != 0,
+            byte: first as u8,
+        }))
     }
 
     /// Ask the input driver to enable the pointer; `false` when no pointer
     /// acknowledged, which leaves the keyboard usable.
     #[cfg(all(target_arch = "x86_64", feature = "native-graphics"))]
-    pub fn enable_pointer(&mut self, handle: ServiceHandle) -> Result<bool, ServiceError> {
+    /// Answers 0 for no pointer, 1 for the PS/2 pointer, 2 when the pointer
+    /// is absolute as well (the VMware backdoor answered).
+    pub fn enable_pointer(&mut self, handle: ServiceHandle) -> Result<u8, ServiceError> {
         self.check(handle)?;
         match self.domain.provoke(shared::COMMAND_ENABLE_POINTER) {
             Stop::Replied => {}
             _ => return Err(ServiceError::Faulted),
         }
-        Ok(self.domain.core().read_shared(shared::STATUS) != 0)
+        Ok(self.domain.core().read_shared(shared::STATUS) as u8)
     }
 
     /// Ask the storage driver to read sector `lba` into `sector`.

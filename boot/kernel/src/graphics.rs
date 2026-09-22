@@ -11,6 +11,7 @@ use crate::native_session::{replay as replay_workspace, request as evaluator_req
 #[cfg(target_arch = "x86_64")]
 use crate::recovery::{slot_name, Admission, KernelRecovery};
 use crate::recovery::{BootPlan, LiveRecovery};
+use crate::service::InputEvent;
 
 /// Kernel slots need the BIOS stage: a board has none, and the selector's
 /// place in the workshop stays empty.
@@ -2189,10 +2190,47 @@ fn checksum(domain: &mut arch::Domain) -> Result<u64, &'static str> {
 
 fn render(
     domain: &mut arch::Domain,
-    inputs: Option<&mut Inputs<'_>>,
+    mut inputs: Option<&mut Inputs<'_>>,
     frame: &Frame,
 ) -> Result<(), &'static str> {
-    emit_records(domain, inputs, &frame.records[..frame.count])
+    emit_records(domain, inputs.as_deref_mut(), &frame.records[..frame.count])?;
+    present(domain, inputs)
+}
+
+/// The compositor copies the clip of its back buffer — all of it when no
+/// clip is set — to the device: one record, kind 12.
+fn present(domain: &mut arch::Domain, inputs: Option<&mut Inputs<'_>>) -> Result<(), &'static str> {
+    let mut record = [0_u8; RECORD_BYTES];
+    record[..4].copy_from_slice(&12_u32.to_le_bytes());
+    emit_records(domain, inputs, &[record])
+}
+
+/// A back buffer for the compositor: pool frames mapped into it at
+/// `BACK_BASE`, drawn into by every record and presented to the device a
+/// clip at a time, so a frame is never seen half-drawn. Without the
+/// memory the compositor draws straight to the device, as before.
+fn attach_back_buffer(
+    machine: &mut arch::Machine,
+    compositor: &mut arch::Domain,
+    framebuffer: Framebuffer,
+) {
+    let pages = framebuffer.bytes.div_ceil(PAGE);
+    for page in 0..pages {
+        if machine
+            .map_process_page(
+                compositor,
+                arch::BACK_BASE + page * PAGE,
+                crate::memory::Access::UserData,
+            )
+            .is_err()
+        {
+            kprint!("compositor: no memory for a back buffer; drawing to the device\n");
+            return;
+        }
+    }
+    compositor
+        .core()
+        .write_shared(shared::DISPLAY_BACK, arch::BACK_BASE);
 }
 
 /// Hand the compositor each record in turn, draining the input queue
@@ -2239,13 +2277,57 @@ fn render_region(
 
 fn render_overlay(
     domain: &mut arch::Domain,
-    inputs: Option<&mut Inputs<'_>>,
+    mut inputs: Option<&mut Inputs<'_>>,
     frame: &Frame,
 ) -> Result<(), &'static str> {
-    // A pointer, when visible, follows the three command-bar records.
+    // A pointer, when visible, follows the three command-bar records. The
+    // bar and the pointer's own box are drawn and presented on their own,
+    // never the screen between them.
     let has_pointer = frame.count > 0 && record_u32(&frame.records[frame.count - 1], 0) == 9;
     let start = frame.count.saturating_sub(if has_pointer { 4 } else { 3 });
-    emit_records(domain, inputs, &frame.records[start..frame.count])
+    let records = &frame.records[start..frame.count];
+    let bar_top = crate::world::SCENE_DRAWABLE_HEIGHT;
+    render_records_in(
+        domain,
+        inputs.as_deref_mut(),
+        records,
+        (
+            0,
+            bar_top,
+            crate::world::SCENE_WIDTH,
+            crate::world::SCENE_HEIGHT - bar_top,
+        ),
+    )?;
+    if has_pointer {
+        let pointer = &frame.records[frame.count - 1];
+        let (x, y) = (record_u32(pointer, 1), record_u32(pointer, 2));
+        render_records_in(
+            domain,
+            inputs,
+            records,
+            (x.saturating_sub(2), y.saturating_sub(2), 40, 44),
+        )?;
+    }
+    Ok(())
+}
+
+/// Some records drawn and presented inside one clip.
+fn render_records_in(
+    domain: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
+    records: &[[u8; RECORD_BYTES]],
+    region: (u32, u32, u32, u32),
+) -> Result<(), &'static str> {
+    let (x, y, width, height) = region;
+    let core = domain.core();
+    core.write_shared(shared::CLIP_X, u64::from(x));
+    core.write_shared(shared::CLIP_Y, u64::from(y));
+    core.write_shared(shared::CLIP_WIDTH, u64::from(width.max(1)));
+    core.write_shared(shared::CLIP_HEIGHT, u64::from(height.max(1)));
+    let outcome =
+        emit_records(domain, inputs.as_deref_mut(), records).and_then(|_| present(domain, inputs));
+    domain.core().write_shared(shared::CLIP_WIDTH, 0);
+    outcome
 }
 
 #[derive(Clone, Copy)]
@@ -2420,10 +2502,14 @@ fn scene_command(line: &[u8]) -> bool {
 /// An Agel program the desktop carries, by the name `:load` takes: the
 /// source, each form a cell named by the prefix, and the status shown when
 /// it is in.
+/// A program the desktop carries: its source lives in the image's data
+/// region (installed by `scripts/build-boot.sh` from `boot/desktop/`), read
+/// through the filesystem service when loaded, so the kernel image holds
+/// only its name, its cell prefix, its file and its ready status.
 struct Program {
     name: &'static [u8],
     prefix: &'static [u8],
-    source: &'static [u8],
+    file: &'static [u8],
     ready: &'static [u8],
 }
 
@@ -2431,31 +2517,31 @@ const PROGRAMS: &[Program] = &[
     Program {
         name: b"workbench",
         prefix: b"wb-",
-        source: include_bytes!("../../desktop/workbench.agel"),
+        file: b"/data/wb.agel",
         ready: b"WORKBENCH READY - CLICK OR TAB",
     },
     Program {
         name: b"doom-agent",
         prefix: b"da-",
-        source: include_bytes!("../../desktop/doom-agent.agel"),
+        file: b"/data/da.agel",
         ready: b"DOOM AGENT READY - :PLAY STEPS",
     },
     Program {
         name: b"doom-agent-model",
         prefix: b"dm-",
-        source: include_bytes!("../../desktop/doom-agent-model.agel"),
+        file: b"/data/dm.agel",
         ready: b"DOOM MODEL AGENT READY - :PLAY STEPS",
     },
     Program {
         name: b"doom-agent-judge",
         prefix: b"dj-",
-        source: include_bytes!("../../desktop/doom-agent-judge.agel"),
+        file: b"/data/dj.agel",
         ready: b"DOOM JUDGE AGENT READY - :PLAY STEPS",
     },
     Program {
         name: b"desktop-agent",
         prefix: b"dk-",
-        source: include_bytes!("../../desktop/desktop-agent.agel"),
+        file: b"/data/dk.agel",
         ready: b"DESKTOP AGENT READY - :DRIVE STEPS",
     },
 ];
@@ -2937,6 +3023,14 @@ fn drive(
             finished = true;
             break;
         }
+        // A handover ends this loop: the desktop loads the named program
+        // and plays it after the drive returns, since one loop cannot run
+        // inside another.
+        if let Some(rest) = command_argument(typed, b":handover ") {
+            let mut status = StatusLine::new(b"HANDOVER ");
+            status.push(rest);
+            return status;
+        }
         if typed.is_empty() || typed == b"wait" || typed == b"nil" {
             command = StatusLine::new(b"WAITED");
         } else if drive_refuses(typed) {
@@ -3013,19 +3107,46 @@ fn drive(
 /// whose owner went away reads as ended.
 /// Load one of the programs the desktop carries into a fresh empty world,
 /// each form a cell, the status it names when in.
+/// The longest source a program the desktop carries may have: a few
+/// kilobytes, on the stack of a loop that is already deep.
+const PROGRAM_SOURCE_BYTES: usize = 4096;
+
+/// A program's source, read from its file in the data region.
+fn program_source(
+    program: &Program,
+    host: &mut EffectHost<'_>,
+    source: &mut [u8; PROGRAM_SOURCE_BYTES],
+) -> Result<usize, &'static [u8]> {
+    match host.read_file(program.file, source) {
+        Ok(length) => Ok(length),
+        Err(2) => Err(b"THE PROGRAM IS NOT IN THE IMAGE - REBUILD IT"),
+        Err(38) => Err(b"NO FILESYSTEM SERVICE"),
+        Err(_) => Err(b"THE PROGRAM COULD NOT BE READ"),
+    }
+}
+
 fn load_program(
     program: &Program,
     evaluator: &mut arch::Domain,
     evaluator_revision: &mut u64,
     workspace: &mut Workspace,
     dirty: &mut bool,
+    host: &mut EffectHost<'_>,
 ) -> StatusLine {
-    if workspace.count() != 0 || *evaluator_revision != 0 {
+    // A fresh empty world, or a world holding nothing but programs the
+    // desktop carries: those are replaced, since nothing of the operator's
+    // is in them; a world with the operator's own cells is kept.
+    let fresh = workspace.count() == 0 && *evaluator_revision == 0;
+    if !fresh && !program_cells_only(workspace) {
         return StatusLine::new(b"A PROGRAM NEEDS A FRESH EMPTY WORLD");
     }
-    let mut candidate = *workspace;
-    for (index, source) in program
-        .source
+    let mut source = [0_u8; PROGRAM_SOURCE_BYTES];
+    let length = match program_source(program, host, &mut source) {
+        Ok(length) => length,
+        Err(message) => return StatusLine::new(message),
+    };
+    let mut candidate = Workspace::new();
+    for (index, source) in source[..length]
         .split(|byte| *byte == b'\n')
         .filter(|line| line.starts_with(b"("))
         .enumerate()
@@ -3050,6 +3171,18 @@ fn load_program(
     }
 }
 
+/// Whether every cell in the workspace came from a program the desktop
+/// carries, by its prefix: such a world holds nothing of the operator's.
+fn program_cells_only(workspace: &Workspace) -> bool {
+    (0..workspace.count()).all(|ordinal| {
+        workspace.cell(ordinal).is_some_and(|cell| {
+            PROGRAMS
+                .iter()
+                .any(|program| cell.name().starts_with(program.prefix))
+        })
+    })
+}
+
 /// A second program joins the world the first is in: its cells are added
 /// under its prefix and the whole workspace replays. The workbench and
 /// the desktop agent share no names, which is what makes the agent
@@ -3060,15 +3193,20 @@ fn join_program(
     evaluator_revision: &mut u64,
     workspace: &mut Workspace,
     dirty: &mut bool,
+    host: &mut EffectHost<'_>,
 ) -> StatusLine {
     let mut first = StatusLine::new(program.prefix);
     first.push(b"0");
     if workspace.find(first.get()).is_some() {
         return StatusLine::new(program.ready);
     }
+    let mut source = [0_u8; PROGRAM_SOURCE_BYTES];
+    let length = match program_source(program, host, &mut source) {
+        Ok(length) => length,
+        Err(message) => return StatusLine::new(message),
+    };
     let mut candidate = *workspace;
-    for (index, source) in program
-        .source
+    for (index, source) in source[..length]
         .split(|byte| *byte == b'\n')
         .filter(|line| line.starts_with(b"("))
         .enumerate()
@@ -3196,7 +3334,24 @@ fn execute_workshop(
         command_argument(line, b":load-file ").map(StatusLine::new);
     if let Some(name) = program {
         if let Some(program) = PROGRAMS.iter().find(|program| program.name == name) {
-            return load_program(program, evaluator, evaluator_revision, workspace, dirty);
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            let mut host = EffectHost {
+                storage: &mut *storage,
+                filesystem: filesystem.as_deref_mut(),
+                console: &mut tee,
+                clock: clock.as_deref_mut(),
+            };
+            return load_program(
+                program,
+                evaluator,
+                evaluator_revision,
+                workspace,
+                dirty,
+                &mut host,
+            );
         }
         let mut path = StatusLine::new(b"/");
         path.push(name);
@@ -3229,6 +3384,14 @@ fn execute_workshop(
             steps,
             hold,
         );
+    }
+    // `:handover NAME STEPS`: load NAME over a world of programs and play
+    // it for STEPS. The desktop's console loop performs it after this
+    // command returns, so a driving program can ask for it too.
+    if let Some(rest) = command_argument(line, b":handover ") {
+        let mut status = StatusLine::new(b"HANDOVER ");
+        status.push(rest);
+        return status;
     }
     if let Some(rest) = command_argument(line, b":drive ") {
         let mut words = rest
@@ -3694,6 +3857,16 @@ fn execute_workshop(
     if is_prose(line) && cell_length.is_none() && load_path.is_none() {
         set_intent(line);
         if workspace.find(b"dk-0").is_none() {
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            let mut host = EffectHost {
+                storage: &mut *storage,
+                filesystem: filesystem.as_deref_mut(),
+                console: &mut tee,
+                clock: clock.as_deref_mut(),
+            };
             if workspace.count() == 0 && *evaluator_revision == 0 {
                 let loaded = load_program(
                     &PROGRAMS[0],
@@ -3701,6 +3874,7 @@ fn execute_workshop(
                     evaluator_revision,
                     workspace,
                     dirty,
+                    &mut host,
                 );
                 if !loaded.get().starts_with(b"WORKBENCH READY") {
                     return loaded;
@@ -3712,7 +3886,14 @@ fn execute_workshop(
             else {
                 return StatusLine::new(b"NO AGENT IN THE IMAGE");
             };
-            let joined = join_program(agent, evaluator, evaluator_revision, workspace, dirty);
+            let joined = join_program(
+                agent,
+                evaluator,
+                evaluator_revision,
+                workspace,
+                dirty,
+                &mut host,
+            );
             if !joined.get().starts_with(b"DESKTOP AGENT READY") {
                 return joined;
             }
@@ -4378,7 +4559,7 @@ const INPUT_QUEUE: usize = 256;
 struct Inputs<'a> {
     /// The 8042 driver domain; a board without one has an empty queue.
     driver: Option<&'a mut ServiceDomain>,
-    queue: [(bool, u8); INPUT_QUEUE],
+    queue: [InputEvent; INPUT_QUEUE],
     head: usize,
     length: usize,
 }
@@ -4387,7 +4568,10 @@ impl<'a> Inputs<'a> {
     fn new(driver: Option<&'a mut ServiceDomain>) -> Self {
         Self {
             driver,
-            queue: [(false, 0); INPUT_QUEUE],
+            queue: [InputEvent::Byte {
+                auxiliary: false,
+                byte: 0,
+            }; INPUT_QUEUE],
             head: 0,
             length: 0,
         }
@@ -4417,15 +4601,15 @@ impl<'a> Inputs<'a> {
         }
     }
 
-    /// The next queued byte, without taking it.
-    fn peek(&mut self) -> Option<(bool, u8)> {
+    /// The next queued event, without taking it.
+    fn peek(&mut self) -> Option<InputEvent> {
         if self.length == 0 {
             self.drain();
         }
         (self.length > 0).then(|| self.queue[self.head])
     }
 
-    fn pop(&mut self) -> Option<(bool, u8)> {
+    fn pop(&mut self) -> Option<InputEvent> {
         if self.length == 0 {
             return None;
         }
@@ -4448,11 +4632,15 @@ fn next_input(
     if inputs.length == 0 {
         inputs.drain();
     }
-    let (auxiliary, byte) = inputs.pop()?;
-    if auxiliary {
-        pointer.feed(byte).map(Input::Pointer)
-    } else {
-        keyboard.decode(byte).map(Input::Key)
+    match inputs.pop()? {
+        InputEvent::Byte {
+            auxiliary: true,
+            byte,
+        } => pointer.feed(byte).map(Input::Pointer),
+        InputEvent::Byte { byte, .. } => keyboard.decode(byte).map(Input::Key),
+        InputEvent::Absolute { x, y, buttons } => {
+            Some(Input::Pointer(pointer.absolute(x, y, buttons & 0x20 != 0)))
+        }
     }
 }
 
@@ -4599,8 +4787,9 @@ fn interactive(
         .unwrap_or_else(|reason| failed(reason));
     #[cfg(target_arch = "x86_64")]
     match input_driver.enable_pointer(input_driver.handle()) {
-        Ok(true) => {}
-        Ok(false) => console::write("pointer unavailable; keyboard remains active\n"),
+        Ok(2) => console::write("pointer: absolute, the host's own over the window\n"),
+        Ok(1) => {}
+        Ok(_) => console::write("pointer unavailable; keyboard remains active\n"),
         Err(_) => failed("the input driver domain stopped during pointer enable"),
     }
     // The filesystem service, as the serial workshop has it: an unprivileged
@@ -4885,11 +5074,18 @@ fn interactive(
                 let mut pressed = pressed;
                 while !pressed {
                     match inputs.peek() {
-                        Some((true, byte)) => {
+                        Some(InputEvent::Byte {
+                            auxiliary: true,
+                            byte,
+                        }) => {
                             inputs.pop();
                             if let Some(press) = pointer.feed(byte) {
                                 pressed = press;
                             }
+                        }
+                        Some(InputEvent::Absolute { x, y, buttons }) => {
+                            inputs.pop();
+                            pressed = pointer.absolute(x, y, buttons & 0x20 != 0);
                         }
                         _ => break,
                     }
@@ -5154,12 +5350,23 @@ fn interactive(
                         // workbench, as a desktop should start with one;
                         // another program is left to say what it does.
                         status = if workspace.count() == 0 && evaluator_revision == 0 {
+                            let mut tee = Tee {
+                                serial: &mut console_driver,
+                                terminal: &mut current.terminal,
+                            };
+                            let mut host = EffectHost {
+                                storage: &mut storage,
+                                filesystem: filesystem.as_mut(),
+                                console: &mut tee,
+                                clock: None,
+                            };
                             load_program(
                                 &PROGRAMS[0],
                                 &mut evaluator,
                                 &mut evaluator_revision,
                                 &mut workspace,
                                 &mut dirty,
+                                &mut host,
                             )
                         } else {
                             StatusLine::new(b"THE LOADED PROGRAM DOES NOT ANSWER CLICKS - :HELP")
@@ -5292,6 +5499,112 @@ fn interactive(
                         &line[..length],
                     );
                 }
+                // A handover: the program named is loaded over the world of
+                // programs, the game it plays is given time to draw its
+                // first frame, and it is played for the steps asked.
+                if let Some(rest) = command_argument(status.get(), b"HANDOVER ") {
+                    let mut words = rest
+                        .split(|byte| *byte == b' ')
+                        .filter(|word| !word.is_empty());
+                    let mut load = StatusLine::new(b":load ");
+                    load.push(words.next().unwrap_or(b""));
+                    let mut play_line = StatusLine::new(b":play ");
+                    play_line.push(words.next().unwrap_or(b"1"));
+                    #[cfg(target_arch = "x86_64")]
+                    let clock = clock_driver.as_mut();
+                    #[cfg(not(target_arch = "x86_64"))]
+                    let clock: Option<&mut ServiceDomain> = None;
+                    status = execute_workshop(
+                        machine,
+                        compositor,
+                        Some(&mut inputs),
+                        &mut evaluator,
+                        &mut storage,
+                        filesystem.as_mut(),
+                        &mut console_driver,
+                        clock,
+                        &mut recovery,
+                        &mut kernel,
+                        &mut current,
+                        &mut previous,
+                        &mut scene_revision,
+                        &mut evaluator_revision,
+                        &mut workspace,
+                        &mut committed_workspace,
+                        &mut generation,
+                        &mut dirty,
+                        &mut running,
+                        load.get(),
+                    );
+                    if status.get().ends_with(b"READY - :PLAY STEPS") {
+                        // The game prints its first frame when it is ready
+                        // to be played; up to a bounded wait for that line.
+                        if let Some(run) = running.as_deref_mut() {
+                            let mut waited = 0;
+                            while waited < 200
+                                && !current.terminal.last
+                                    [..usize::from(current.terminal.last_length)]
+                                    .starts_with(b"doom:")
+                            {
+                                if play_passes(
+                                    machine,
+                                    compositor,
+                                    Some(&mut inputs),
+                                    &mut storage,
+                                    filesystem.as_mut(),
+                                    &mut console_driver,
+                                    &mut current,
+                                    run,
+                                    PLAY_PAUSE_PASSES,
+                                    true,
+                                ) {
+                                    break;
+                                }
+                                waited += 1;
+                            }
+                        }
+                        // The game is played in its window: the front-most one a
+                        // live process owns takes the keyboard, whatever had it.
+                        let listening = |slot: &u8| {
+                            current.windows[usize::from(*slot)]
+                                .is_some_and(|window| window.listens())
+                        };
+                        if !current.focus.as_ref().is_some_and(listening) {
+                            current.focus = current
+                                .order
+                                .iter()
+                                .rev()
+                                .copied()
+                                .find(|slot| listening(slot));
+                        }
+                        #[cfg(target_arch = "x86_64")]
+                        let clock = clock_driver.as_mut();
+                        #[cfg(not(target_arch = "x86_64"))]
+                        let clock: Option<&mut ServiceDomain> = None;
+                        status = execute_workshop(
+                            machine,
+                            compositor,
+                            Some(&mut inputs),
+                            &mut evaluator,
+                            &mut storage,
+                            filesystem.as_mut(),
+                            &mut console_driver,
+                            clock,
+                            &mut recovery,
+                            &mut kernel,
+                            &mut current,
+                            &mut previous,
+                            &mut scene_revision,
+                            &mut evaluator_revision,
+                            &mut workspace,
+                            &mut committed_workspace,
+                            &mut generation,
+                            &mut dirty,
+                            &mut running,
+                            play_line.get(),
+                        );
+                    }
+                }
                 current.terminal.dirty = false;
                 current.previewing = trim(&line[..length]).starts_with(b":preview ")
                     && status.get().starts_with(b"CANDIDATE VALIDATED");
@@ -5403,6 +5716,7 @@ pub fn run() -> ! {
         logical_width,
         logical_height,
     );
+    attach_back_buffer(&mut machine, &mut compositor, framebuffer);
     load_assets(&mut machine, &mut storage, &mut compositor);
     let initial = Scene::initial();
     let frame = materialize(initial, None, b"").unwrap_or_else(|reason| failed(reason));
@@ -5495,6 +5809,7 @@ pub fn run() -> ! {
         logical_width,
         logical_height,
     );
+    attach_back_buffer(&mut machine, &mut replacement, framebuffer);
     load_assets(&mut machine, &mut storage, &mut replacement);
     if checksum(&mut replacement).unwrap_or_else(|reason| failed(reason)) != stable {
         failed("replacement compositor did not inherit the last good frame");

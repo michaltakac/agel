@@ -5,11 +5,13 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.96.** The desktop for a person, and an agent for a sentence: a click on an empty world opens the workbench instead of failing a form, a blank filesystem region is formatted at boot, a lone unbound word is told so, and a repaint that would change only the command bar draws the bar alone. A sentence typed at the prompt summons the desktop agent — its cells join the workbench's — and drives the desktop for it, the sentence relayed with every question to a judge on the host; `agel-play --attach` is that judge beside a person's window and `run-graphics.sh --agent` wires both. Live, "show me the help, then finish" typed at the desktop's keyboard showed the help and ended in two judged steps. See [`docs/release-v0.2.96.md`](docs/release-v0.2.96.md), [`docs/computer-use.md`](docs/computer-use.md) and [`docs/browser.md`](docs/browser.md). What is done, partial and open is in
+**Current release: v0.2.97.** Agel and Jev, TypeSafe's System One model, using the OS and playing DOOM — live, recorded by [`scripts/record-demo.py`](scripts/record-demo.py) from the desktop's own mouse and keyboard, with nothing staged: a click opens the workbench; "list the files on the disk, then finish" summons the desktop agent, which lists them and stops; "hi Jev, can you play DOOM for a minute?" has it start the game, and once the game runs it hands the desktop to its DOOM-playing agent, which takes sixty steps with Jev judging each one. The window now feels like the host's: the pointer is your own (nothing is captured) and frames are drawn off-screen and presented whole. See [`docs/release-v0.2.97.md`](docs/release-v0.2.97.md), [`docs/computer-use.md`](docs/computer-use.md) and [`docs/system-one.md`](docs/system-one.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
-![The native desktop at v0.2.74: DOOM in its window while an Agel program in the OS plays it, the loop's steps and reasons in the terminal](docs/images/native-desktop-v0.2.74.png)
+[![Agel and Jev using the desktop and playing DOOM: a sentence typed at the prompt summons the agent, Jev judges each step, the DOOM agent plays. Click for the full video.](docs/media/agel-jev-demo.gif)](docs/media/agel-jev-demo.mp4)
+
+*The full video, 2½ minutes with Jev's live judgments under every step: [`docs/media/agel-jev-demo.mp4`](docs/media/agel-jev-demo.mp4).*
 
 ## What exists
 
@@ -112,12 +114,14 @@ C programs need a clang with `lld` (`brew install llvm lld`).
 ./scripts/run-graphics.sh
 ```
 
-QEMU opens its own window at 1920×1080. The keyboard and mouse are the
-guest's; `--web` adds a host-side console with layout composition and paste.
-Click the desktop to open the workbench. A sentence typed at the prompt
-summons the desktop agent, which needs a judge on the host to answer it:
-`--agent` runs the window with the judge attached (`TYPESAFEAI_API_KEY` in
-the environment; `set -a; . ./.env; set +a`). Try:
+QEMU opens its own window at 1920×1080 on a persistent desktop disk with the
+game, the hosted runtime and the browser's site installed. The pointer is
+your own, nothing is captured; `--web` adds a host-side console with layout
+composition and paste. Click the desktop to open the workbench. A sentence
+typed at the prompt summons the desktop agent, which needs a judge on the
+host to answer it: `--agent` runs the window with the judge attached
+(`TYPESAFEAI_API_KEY` in the environment; `set -a; . ./.env; set +a`).
+`python3 scripts/record-demo.py OUT.mp4` records the video above, live. Try:
 
 ```lisp
 (def square (fn (x) (* x x)))

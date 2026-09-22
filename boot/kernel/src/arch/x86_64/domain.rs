@@ -18,6 +18,11 @@ const SHARED_BASE: u64 = DOMAIN_BASE + 0x0010_0000;
 /// Virtual address at which a display domain sees its framebuffer grant.
 #[cfg(feature = "native-graphics")]
 pub const DISPLAY_BASE: u64 = DOMAIN_BASE + 0x0020_0000;
+/// The compositor's back buffer: pool frames mapped here, drawn into and
+/// presented to the device a clip at a time, so a frame is never seen
+/// half-drawn. Thirty-two megabytes past the display window's start.
+#[cfg(feature = "native-graphics")]
+pub const BACK_BASE: u64 = DISPLAY_BASE + 0x0200_0000;
 
 /// Virtual address of the frame window: `CONFORMANCE_FRAME_WINDOW` pages a
 /// world maps its frames into through the contract's memory group.

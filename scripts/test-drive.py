@@ -116,8 +116,8 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
             until_text(machine, b"drive: step 2 do wait", 60)
             # Step 3: a command the program may not type is refused.
             number, line, _ = request(machine)
-            answer(machine, number, "kernel", 900, 100)
-            until_text(machine, b"drive: step 3 do :kernel", 60)
+            answer(machine, number, "maximize", 900, 100)
+            until_text(machine, b"drive: step 3 do :maximize 0", 60)
             # Step 4: the judge says the task is complete.
             number, line, _ = request(machine)
             assert "last: drive: " in line, line
@@ -133,10 +133,10 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
         with machine.serial_lock:
             send_line(machine, ":drive 1")
             number, line, _ = request(machine)
-            answer(machine, number, "workspace", 800, 200)
+            answer(machine, number, "files", 800, 200)
             tail = until_text(machine, b"DROVE 1 STEPS", 60).decode(errors="replace")
         machine.serial.settimeout(15)
-        assert "drive: step 1 do :workspace" in tail, tail[-2000:]
+        assert "drive: step 1 do :fs-ls /" in tail, tail[-2000:]
         settled(machine, tail)
         # The refused commands: the loops that would nest, and the halt.
         machine.submit('(def command-for (fn (a) ":shutdown"))')

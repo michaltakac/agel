@@ -414,6 +414,15 @@ angle, an earlier judged run turned right nineteen times in a row at the
 same wall, the model choosing `right` each time because the history said
 the position had not changed; that run is in the git history, not here.
 
+## Asked for, on video (v0.2.97)
+
+"hi Jev, can you play DOOM for a minute?" typed at the desktop's prompt
+now starts the game and hands the desktop to `doom-agent-judge` for sixty
+judged steps; [`media/agel-jev-demo.mp4`](media/agel-jev-demo.mp4) is a
+live recording of it, made by `scripts/record-demo.py`. In it the agent
+went forward 54 of 60 steps and turned at walls six times; Jev saw no
+enemy. One run, E1M1, no claim about play.
+
 ## What this is not
 
 Sound is out of scope: the engine is built without it. RISC-V has no

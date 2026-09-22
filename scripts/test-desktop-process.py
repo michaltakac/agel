@@ -50,19 +50,12 @@ with tempfile.TemporaryDirectory(prefix="agel-desktop-process-", dir="/tmp") as 
         # The desktop responds to the pointer: Applications opens the
         # launcher, an entry runs the program, a dock tile lists the root.
         def move_to(x, y):
-            # A PS/2 packet carries at most 127 pixels per axis and the
-            # controller's queue holds a few packets, so a long move is sent
-            # as steps the guest can drain, as a real mouse would.
-            move_to.at = getattr(move_to, "at", (960, 540))
-            while move_to.at != (x, y):
-                dx = max(-120, min(120, x - move_to.at[0]))
-                dy = max(-120, min(120, y - move_to.at[1]))
-                machine.command("input-send-event", {"events": [
-                    {"type": "rel", "data": {"axis": "x", "value": dx}},
-                    {"type": "rel", "data": {"axis": "y", "value": dy}},
-                ]})
-                move_to.at = (move_to.at[0] + dx, move_to.at[1] + dy)
-                time.sleep(0.25)
+            # The pointer is absolute (QEMU's vmmouse, which the pc machine
+            # carries): one event names the place, in 32768ths of the screen.
+            machine.command("input-send-event", {"events": [
+                {"type": "abs", "data": {"axis": "x", "value": round(x * 32767 / 1919)}},
+                {"type": "abs", "data": {"axis": "y", "value": round(y * 32767 / 1079)}},
+            ]})
             time.sleep(0.6)
         def press():
             machine.command("input-send-event", {"events": [{"type": "btn", "data": {"down": True, "button": "left"}}]})

@@ -103,10 +103,14 @@ impl TrapFrame {
 
 /// Bytes of I/O permission bitmap carried in the TSS.
 ///
-/// A byte covers eight ports, so this describes ports 0 through 0x3ff, which is
-/// enough to reach COM1 at 0x3f8. The extra byte is the terminator the
-/// processor may read one past the end of the map.
-const IO_BITMAP_BYTES: usize = 0x400 / 8 + 1;
+/// A byte covers eight ports, so this describes ports 0 through 0x565f: the
+/// devices below 0x400, COM1 at 0x3f8 among them, and the VMware backdoor
+/// at 0x5658, through which the input driver reads an absolute pointer.
+/// The extra byte is the terminator the processor may read one past the
+/// end of the map. The map is all zeros at rest, so the segment lives in
+/// uninitialised memory and costs the kernel image nothing; it is filled
+/// before every ring-3 entry.
+const IO_BITMAP_BYTES: usize = 0x5660 / 8 + 1;
 
 /// Offset of the bitmap within the TSS, which is what `iomap_base` names when
 /// a domain is allowed to reach a device.
@@ -138,7 +142,7 @@ impl TaskStateSegment {
         // Past the end of the segment: with no reachable bitmap, every port
         // instruction from ring 3 faults rather than reaching a device.
         iomap_base: (core::mem::size_of::<Self>() + 1) as u16,
-        io_bitmap: [0xff; IO_BITMAP_BYTES],
+        io_bitmap: [0; IO_BITMAP_BYTES],
     };
 }
 
@@ -183,6 +187,9 @@ pub unsafe fn grant_ports(grant: PortGrant) {
             PortGrant::Input => {
                 (*tss).io_bitmap[0x60 / 8] &= !(1 << (0x60 % 8));
                 (*tss).io_bitmap[0x64 / 8] &= !(1 << (0x64 % 8));
+                // The VMware backdoor, four bytes wide at 0x5658, for the
+                // absolute pointer QEMU offers as `vmmouse`.
+                (*tss).io_bitmap[0x5658 / 8] &= !0x0f;
             }
             #[cfg(feature = "native-graphics")]
             PortGrant::Clock => {

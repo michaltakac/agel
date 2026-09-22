@@ -568,6 +568,17 @@ Each rung must be runnable and differentially testable against the rung below:
    desktop asks, and `run-graphics.sh --agent` wires both. The cell table
    stays at sixteen: a larger one overflowed the kernel's stack at boot.
    See [`computer-use.md`](computer-use.md).
+91. **The pointer is the host's, a frame is never half-drawn, and the
+   agent can start the game (v0.2.97):** the input driver reads an
+   absolute pointer from the VMware backdoor QEMU's `pc` machine carries,
+   so nothing is captured; the compositor draws into a back buffer and
+   presents the clip; `:handover NAME STEPS` loads a program over a world
+   of programs and plays it, from the console loop after a drive ends;
+   the agent's menu has `start-doom` and `play-doom`; `run-graphics.sh` boots a
+   persistent desktop disk with the game, the runtime and the site
+   installed; the programs' sources live in the data region, not the
+   kernel image. See [`native-graphics.md`](native-graphics.md) and
+   [`computer-use.md`](computer-use.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

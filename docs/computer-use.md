@@ -101,6 +101,43 @@ The cell table did not grow for this: twenty-four cells overflowed the
 kernel's stack at boot, so the workbench and the agent merged forms to
 fit sixteen together, with one to spare for the operator's own cell.
 
+## Starting the game, and handing over to its agent (v0.2.97)
+
+"Can you play DOOM for a minute?" typed at the prompt did nothing in
+v0.2.96: the agent's menu had no way to start or play the game, and the
+desktop's own disk had no game installed. Now:
+
+- `run-graphics.sh` boots its own persistent disk, `agel-desktop.img`,
+  refreshed from the seed's boot sectors and assets every run, with the
+  game and its data, the hosted runtime and the browser's site installed
+  when they are built (the script says what is missing otherwise).
+- The agent's menu is `help files start-doom play-doom maximize close wait done`:
+  `start-doom` is `:exec c-doom -- -iwad /data/doom1.wad -mb 8 -warp 1 -skill 2`,
+  and `play-doom` is `:handover doom-agent-judge 60`. Named `doom` and
+  `play` at first, the judge started the game and then chose `wait` eight
+  times: the names say what they do now.
+- `:handover NAME STEPS` is a desktop command: the program named is
+  loaded over the world — a load replaces a world that holds nothing but
+  programs the desktop carries, and keeps one with the operator's own
+  cells — the game is given up to a bounded number of passes to print its
+  first frame, and `:play STEPS` runs. A driving program cannot run a loop
+  inside its own, so when the agent decides on a handover the drive loop
+  ends with `HANDOVER NAME STEPS` as its status and the desktop's console
+  loop performs it after; the same status is what a typed `:handover`
+  returns.
+- `:handover` gives the keyboard to the front-most window a live process
+  owns before it plays, since a person may have clicked elsewhere; and
+  `play-doom` with no window open starts the game first — the look line's
+  first number is the window count, and that check is the program's.
+- The attached bridge answers the game's requests as the booted one does:
+  a request without a `task:` line is the game's, judged with the game's
+  fields and the last eight steps as history; a request with one is the
+  desktop's.
+
+The whole path is on video, recorded live by `scripts/record-demo.py`:
+[`media/agel-jev-demo.mp4`](media/agel-jev-demo.mp4), with the console's
+transcript in [v0.2.97](release-v0.2.97.md).
+
 ## What is proven, and where
 
 - `scripts/test-drive.sh` (v0.2.96 additions): a blank region is
