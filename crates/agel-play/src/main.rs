@@ -959,6 +959,18 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
             Err(error) => return Err(format!("{}: {error}", socket.display())),
         }
     };
+    // Lines on the bridge's standard input go to the serial line: the
+    // operator's other keyboard, for a sentence said while agents run.
+    if let Ok(mut out) = serial.stream.try_clone() {
+        std::thread::spawn(move || {
+            use std::io::{BufRead, Write};
+            for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+                if out.write_all(format!("{line}\n").as_bytes()).is_err() {
+                    break;
+                }
+            }
+        });
+    }
     let dataset = options.out.join("steps.jsonl");
     let mut log = fs::OpenOptions::new()
         .create(true)

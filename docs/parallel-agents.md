@@ -184,6 +184,8 @@ through the judged gate as a proposal, never straight to a domain.
 | --- | --- | --- |
 | The engine reports the next waypoint toward the exit, the route's length, the seen fraction and three rays | done | v0.2.98: `scripts/test-play-bridge.sh` reads `goal`, `dist`, `path`, `seen`, `free` and `door` off every state line |
 | The judged agent steers to the exit on the engine's route and rays; Jev answers what the picture holds | done | v0.2.98: `doom-agent-judge`, the bridge test; one live run of 120 steps halved the route to the exit and opened its first door |
+| A sentence heard mid-run is a fact (`task`) any agent reads; the player asks the judge what it asks for and acts | done | v0.3.0: `scripts/test-drive.sh`, the film |
+| The reviewer says its notes and re-applies the last change on the next run | done | v0.3.0: `review`, the film |
 | The map is checked on Tab and Jev names the unexplored quadrant | done | v0.2.98: after three stalled forwards; not needed in the measured run, seen in earlier cuts |
 | Metrics appended per step on the OS | done | v0.2.98: `metrics` in the filesystem region, the state line and the answer per step |
 | The agent reads its own metrics and changes its cells when they say it is failing, by typed questions, nobody at the keyboard | done | v0.2.99: `review` reads the player's `summary`, asks Jev whether it stalled and what to change, redefines `follow-steps` or `facing-tolerance`, notes it; one live run: six reviews, two questions, `nothing` chosen twice, no cell changed; the apply path tested |

@@ -479,6 +479,11 @@ promise.
   unreal mode, and the evaluator's limits raised (kilobyte bodies,
   896-byte cells, 1000-byte requests, 64 KiB of text, 64 cells, an 8 MiB
   evaluator stack).
+  `v0.3.0` makes a sentence a fact: said while agents run it is the
+  file `task` and every request's task line; the DOOM agent asks the
+  judge what it asks for and acts on it; `review-doom` hands the desktop
+  to the player and the reviewer side by side; the reviewer says its
+  notes and learns from them across runs; filmed.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

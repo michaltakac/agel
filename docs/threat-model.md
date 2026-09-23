@@ -1985,6 +1985,24 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.3.0
+
+- **A sentence writes a file.** A line heard between steps of `:agents`
+  is written to `task` in the filesystem region through the same effect
+  host a program's `file-write` uses; it is the operator's, typed at the
+  prompt or said on the serial console, and an agent that reads it reads
+  the operator's words, which is the point. The bridge forwards its
+  standard input to the serial line only when attached; whoever holds the
+  bridge's input holds the OS's second keyboard, as before.
+- **An instruction reaches the judge as a question, never as code.** The
+  DOOM agent embeds the sentence in one typed question and acts on the
+  answer with reflexes it already had; a sentence cannot name a reflex
+  the program does not have.
+- **The reviewer replays only its own notes**, a word per line from a
+  fixed menu; an unknown word changes nothing.
+- **Not claimed:** any bound on what an instruction makes the player do
+  within its four reflexes.
+
 ## v0.2.100
 
 - **The BIOS stage copies through unreal mode.** It enters protected

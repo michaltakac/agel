@@ -601,6 +601,13 @@ Each rung must be runnable and differentially testable against the rung below:
    bodies, 896-byte cells, 1000-byte requests, 64 KiB of text, an 8 MiB
    evaluator stack). See [`native-boot.md`](native-boot.md) and
    [`release-v0.2.100.md`](release-v0.2.100.md).
+95. **A sentence is a fact (v0.3.0):** a sentence heard while agents run
+   is the file `task` and the task line of every request; the DOOM agent
+   asks the judge what an instruction asks for and acts on it with its
+   reflexes; the desktop hands a task to the player and the reviewer side
+   by side; the reviewer says its notes and re-applies the last one on
+   the next run; the bridge forwards its input to the serial line. See
+   [`computer-use.md`](computer-use.md) and [`release-v0.3.0.md`](release-v0.3.0.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

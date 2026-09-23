@@ -78,8 +78,8 @@ def settled(machine, text):
 def answer(machine, number, option, confidence, done):
     """The reply line, sent whole: the desktop reads it without echoing
     while it waits, as the bridge sends it."""
-    probabilities = " ".join("0" for _ in range(8))
-    line = f":model-reply {number} act choice 8 {option} {confidence} {probabilities} done noul {done}\n"
+    probabilities = " ".join("0" for _ in range(9))
+    line = f":model-reply {number} act choice 9 {option} {confidence} {probabilities} done noul {done}\n"
     machine.serial.sendall(line.encode())
 
 
@@ -126,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
         machine.serial.settimeout(15)
         assert "drive: step 1 do :fs-ls /" in report, report[-2000:]
         assert "drive: step 4 do done" in tail, tail[-2000:]
-        assert re.search(r'reason "act choice 8 wait 0 (0 ){8}done noul 950"', tail), tail[-2000:]
+        assert re.search(r'reason "act choice 9 wait 0 (0 ){9}done noul 950"', tail), tail[-2000:]
         settled(machine, tail)
         # The loop ended and the desktop answers again; a whole run of
         # steps without a completing judge is reported as driven.
@@ -199,18 +199,24 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
             assert "task: show me the help and then finish" in block, block
             answer(machine, number, "files", 900, 100)
             until_text(machine, b"agents: step 1 dk do :fs-ls /", 60)
-            number, line, _ = request(machine)
+            # A sentence said while agents run is heard between steps: it
+            # becomes the task the next request carries and the file `task`.
+            send_line(machine, "now count the files instead")
+            number, line, block = request(machine)
+            assert "agents: heard now count the files instead" in block, block
+            assert "task: now count the files instead" in block, block
             answer(machine, number, "wait", 0, 900)
             tail = until_text(machine, b"AGENTS DONE AFTER 2 STEPS", 60).decode(errors="replace")
         machine.serial.settimeout(15)
         assert "agents: step 2 dk do done" in tail, tail[-2000:]
         settled(machine, tail)
+        assert machine.submit('(file-read "task")').strip().startswith('"now count the files instead"')
         # The reviewer beside the player: it joins the player's world, its
         # needs are the player's summary file, and what it decides to change
         # is a def on the player's tunable cells in the shared world.
         assert "DOOM JUDGE AGENT READY" in machine.submit(":load doom-agent-judge")
         assert "REVIEW AGENT READY" in machine.submit(":join review")
-        assert "CELLS 35" in machine.submit(":cells")
+        assert "CELLS 19" in machine.submit(":cells")
         assert machine.submit("follow-steps").strip().startswith("8")
         machine.submit('(rv-apply "follow-longer")')
         assert machine.submit("follow-steps").strip().startswith("12")

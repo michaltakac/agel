@@ -104,7 +104,7 @@ with tempfile.TemporaryDirectory(prefix="agel-workbench-", dir="/tmp") as direct
             assert "task: show me the help, please" in block, block
             assert "(choice act " in block, block
             number = int(block.split("model-request ")[1].split(" ")[0])
-            machine.serial.sendall(f":model-reply {number} act choice 8 wait 0 0 0 0 0 0 0 0 0 done noul 950\n".encode())
+            machine.serial.sendall(f":model-reply {number} act choice 9 wait 0 0 0 0 0 0 0 0 0 0 done noul 950\n".encode())
             while b"DRIVE DONE AFTER 1 STEPS" not in buffer:
                 assert time.monotonic() < deadline, bytes(buffer[-2000:])
                 try:

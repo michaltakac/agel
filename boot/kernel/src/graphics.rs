@@ -2708,6 +2708,12 @@ fn relay_request(
     let mut delivered = false;
     while let Some(length) = serial_line(serial, &mut answer) {
         let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
+            // A sentence said while the reply was awaited is kept for the
+            // loop to hear once the step is done, not dropped.
+            let line = trim(&answer[..length]);
+            if is_prose(line) {
+                set_heard(line);
+            }
             continue;
         };
         let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
@@ -2937,6 +2943,34 @@ fn join_program(
 /// drive loop relays as its `task:` line.
 static mut INTENT: [u8; crate::native::EXEC_BYTES] = [0; crate::native::EXEC_BYTES];
 static mut INTENT_LEN: usize = 0;
+
+/// A sentence that arrived while a reply was awaited, kept until the loop
+/// is between steps.
+static mut HEARD: [u8; crate::native::EXEC_BYTES] = [0; crate::native::EXEC_BYTES];
+static mut HEARD_LEN: usize = 0;
+
+fn set_heard(line: &[u8]) {
+    let length = line.len().min(crate::native::EXEC_BYTES);
+    // Safety: the desktop loop is the only writer and the only reader.
+    unsafe {
+        let heard = &mut *core::ptr::addr_of_mut!(HEARD);
+        heard[..length].copy_from_slice(&line[..length]);
+        core::ptr::write(core::ptr::addr_of_mut!(HEARD_LEN), length);
+    }
+}
+
+/// The kept sentence, once; empty when none.
+#[inline(never)]
+fn take_heard(out: &mut [u8; PAYLOAD_BYTES]) -> usize {
+    // Safety: as for `set_heard`.
+    unsafe {
+        let length = core::ptr::read(core::ptr::addr_of!(HEARD_LEN));
+        let heard: &[u8; crate::native::EXEC_BYTES] = &*core::ptr::addr_of!(HEARD);
+        out[..length].copy_from_slice(&heard[..length]);
+        core::ptr::write(core::ptr::addr_of_mut!(HEARD_LEN), 0);
+        length
+    }
+}
 
 #[inline(never)]
 fn set_intent(line: &[u8]) {
@@ -4205,8 +4239,12 @@ fn perform_handover(
         .filter(|word| !word.is_empty());
     let mut load = StatusLine::new(b":load ");
     load.push(words.next().unwrap_or(b""));
-    let mut play_line = StatusLine::new(b":play ");
-    play_line.push(words.next().unwrap_or(b"1"));
+    let steps = words.next().unwrap_or(b"1");
+    // `:handover NAME STEPS agents`: the reviewer joins and the two run
+    // as agents instead of the one playing alone.
+    let with_agents = words.next() == Some(b"agents");
+    let mut play_line = StatusLine::new(if with_agents { b":agents " } else { b":play " });
+    play_line.push(steps);
     let status = execute_workshop(
         machine,
         compositor,
@@ -4266,6 +4304,33 @@ fn perform_handover(
             .rev()
             .copied()
             .find(|slot| listening(slot));
+    }
+    if with_agents {
+        let joined = execute_workshop(
+            machine,
+            compositor,
+            inputs.as_deref_mut(),
+            evaluator,
+            storage,
+            filesystem.as_deref_mut(),
+            serial,
+            clock.as_deref_mut(),
+            recovery,
+            kernel,
+            current,
+            previous,
+            scene_revision,
+            evaluator_revision,
+            workspace,
+            committed_workspace,
+            generation,
+            dirty,
+            running,
+            b":join review",
+        );
+        if !joined.get().starts_with(b"REVIEW AGENT READY") {
+            return joined;
+        }
     }
     execute_workshop(
         machine,
@@ -4418,16 +4483,39 @@ fn agents(
     let mut ran = 0;
     let mut all_done = false;
     for step in 1..=steps {
-        // A line at the prompt between steps, when agents run beside it.
+        // A line at the prompt between steps, when agents run beside it: one
+        // kept from a reply's wait, or one waiting now.
         let mut heard = [0_u8; PAYLOAD_BYTES];
+        let kept = take_heard(&mut heard);
+        let waiting = if kept > 0 {
+            Some(kept)
+        } else if mode == LoopMode::Agents {
+            serial_peek_line(serial, &mut heard)
+        } else {
+            None
+        };
         if mode == LoopMode::Agents
-            && serial_peek_line(serial, &mut heard).is_some_and(|length| {
+            && waiting.is_some_and(|length| {
                 let heard = trim(&heard[..length]);
                 if heard == b":stop" {
                     true
                 } else {
                     if is_prose(heard) {
+                        // A sentence is a fact: the task the requests carry,
+                        // and the file `task` any agent's needs can wait on
+                        // and any step can read.
                         set_intent(heard);
+                        let mut tee = Tee {
+                            serial: &mut *serial,
+                            terminal: &mut current.terminal,
+                        };
+                        let mut host = EffectHost {
+                            storage: &mut *storage,
+                            filesystem: filesystem.as_deref_mut(),
+                            console: &mut tee,
+                            clock: clock.as_deref_mut(),
+                        };
+                        let _ = host.file_write(b"task", heard, false);
                         let mut said = StatusLine::new(b"agents: heard ");
                         said.push(heard);
                         said.push(b"\n");
@@ -4570,7 +4658,9 @@ fn agents(
             // second question that depends on the first) is served within
             // the same step, up to a bound, since the world holds one
             // pending request and another agent's step would overwrite it.
-            let task = if window_step { &b""[..] } else { intent() };
+            // The operator's sentence goes with every request, a window's
+            // too: the judge reads it beside the picture.
+            let task = intent();
             for _ in 0..4 {
                 if relay_request(evaluator, serial, &look, task) != Some(true) {
                     break;

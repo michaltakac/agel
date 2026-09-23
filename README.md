@@ -5,13 +5,13 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.2.100.** Room. A person asked why the cells and the kernel image were so small; neither limit was a principle. The disk layout is v3 with 2 MiB kernel slots past the data region, the BIOS stage loads the kernel above the real-mode megabyte through unreal mode, and the native evaluator's limits are what a program needs: kilobyte bodies, 896-byte cells, 1000-byte judge requests, 64 KiB of text, sixty-four cells, an 8 MiB evaluator stack. v0.2.99 before it put agents side by side under `:agents`, each stepping when its declared needs hold, with `review` reading the DOOM player's own summary and asking Jev, TypeSafe's System One model, whether to change the player's cells. The video below (v0.2.97) is Agel and Jev using the OS and playing DOOM. See [`docs/release-v0.2.100.md`](docs/release-v0.2.100.md), [`docs/real-work.md`](docs/real-work.md) and [`docs/parallel-agents.md`](docs/parallel-agents.md). What is done, partial and open is in
+**Current release: v0.3.0.** A sentence is a fact. Said while agents run, it becomes the file `task` every agent can wait on and read, and the task line every judge request carries. In the film below, recorded live from the desktop's own mouse and keyboard, a click opens the workbench, "list the files on the disk, then finish" and "hi Jev, play DOOM and review yourself as you go" summon the desktop agent, which lists, starts the game and hands the desktop to the DOOM player and its reviewer side by side; "check the map and be careful", said mid-run, is read by Jev, TypeSafe's System One model, as a look at the map, and the player checks it; the reviewer notes what it sees and would change. DOOM is the instrument; the loop, the needs, the sentence and the reviewer are general, per [`docs/real-work.md`](docs/real-work.md). See [`docs/release-v0.3.0.md`](docs/release-v0.3.0.md), [`docs/computer-use.md`](docs/computer-use.md) and [`docs/parallel-agents.md`](docs/parallel-agents.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
-[![Agel and Jev using the desktop and playing DOOM: a sentence typed at the prompt summons the agent, Jev judges each step, the DOOM agent plays. Click for the full video.](docs/media/agel-jev-demo.gif)](docs/media/agel-jev-demo.mp4)
+[![Agel and Jev on the desktop: a click, three sentences, the game started by the desktop agent, played by the judged DOOM agent beside its reviewer, and an instruction said mid-run, read by Jev and obeyed](docs/media/agel-agents-demo.gif)](docs/media/agel-agents-demo.mp4)
 
-*The full video, 2½ minutes with Jev's live judgments under every step: [`docs/media/agel-jev-demo.mp4`](docs/media/agel-jev-demo.mp4).*
+*The full video, 2½ minutes with Jev's live judgments under every step and the reviewer's notes: [`docs/media/agel-agents-demo.mp4`](docs/media/agel-agents-demo.mp4); the v0.2.97 film, the player alone, is [`docs/media/agel-jev-demo.mp4`](docs/media/agel-jev-demo.mp4).*
 
 ## What exists
 

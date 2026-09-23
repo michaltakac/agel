@@ -65,12 +65,12 @@ cat > "$out/curl" <<'FAKE'
 #!/bin/sh
 cat > /dev/null
 for arg in "$@"; do case "$arg" in @*) cp "${arg#@}" "$(dirname "$0")/body-$$";; esac; done
-printf '%s\n200' '{"model":"stand-in","answers":{"act":{"type":"choice","choice":"files","confidence":0.7,"probabilities":{"help":0.05,"files":0.7,"start-doom":0.05,"play-doom":0.05,"maximize":0.05,"close":0.05,"wait":0.03,"done":0.02}},"done":{"type":"noul","noul":0.1}},"usage":{"input_tokens":1,"output_tokens":1}}'
+printf '%s\n200' '{"model":"stand-in","answers":{"act":{"type":"choice","choice":"files","confidence":0.7,"probabilities":{"help":0.05,"files":0.7,"start-doom":0.05,"play-doom":0.05,"review-doom":0.05,"maximize":0.05,"close":0.05,"wait":0.03,"done":0.02}},"done":{"type":"noul","noul":0.1}},"usage":{"input_tokens":1,"output_tokens":1}}'
 FAKE
 chmod +x "$out/curl"
 TYPESAFEAI_API_KEY=stand-in cargo run -q --release -p agel-play -- --image "$image" --scene desktop \
   --task "list the files in the region" --out "$out" --policy jev --curl-bin "$(pwd)/$out/curl" --steps 3 | tee "$out/console.log"
-replies=$(grep -c "agel-play: model reply .*: act choice 8 files 700 50 700 50 50 50 50 30 20 done noul 100" "$out/console.log")
+replies=$(grep -c "agel-play: model reply .*: act choice 9 files 700 50 700 50 50 50 50 50 30 20 done noul 100" "$out/console.log")
 listed=$(grep -c "agel-play: step .*: :fs-ls /" "$out/console.log")
 steps=$(wc -l < "$out/steps.jsonl" | tr -d ' ')
 grep -q "agel-play: done" "$out/console.log"

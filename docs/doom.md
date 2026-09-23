@@ -499,6 +499,16 @@ cells to change (`follow-steps`, `facing-tolerance`), redefines it in
 the shared world and notes why. Nobody is at the keyboard for the
 change. In the measured run of 120 steps the reviewer reviewed six times, found progress by arithmetic four times, asked Jev twice, and Jev chose `nothing` both times (590 and 490 thousandths); no cell changed, and the run is in [`release-v0.2.99.md`](release-v0.2.99.md).
 
+## With instructions, on film (v0.3.0)
+
+[`media/agel-agents-demo.mp4`](media/agel-agents-demo.mp4): the desktop
+agent starts the game and hands it to the player and the reviewer side
+by side; "check the map and be careful", said while the game holds the
+keyboard, is the file `task`, a question to Jev, and four Tab steps on
+the automap; the reviewer notes progress four times and no change twice.
+The route 4416 → 2272 in 120 steps. The run and the numbers are in
+[`release-v0.3.0.md`](release-v0.3.0.md).
+
 ## What this is not
 
 Sound is out of scope: the engine is built without it. RISC-V has no

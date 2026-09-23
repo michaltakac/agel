@@ -1,44 +1,38 @@
 ; The same agent, but a System One model judges and these forms decide,
-; toward a goal. The engine's state line carries the heading of the next
-; waypoint on the route to the exit in 256ths of a turn (field 8), its
-; distance (9), the route's remaining length (10), how much of the level
-; the automap has seen (11), how far three rays reach before a wall,
-; ahead and a quarter turn to either side (12-14), and whether a closed
-; door stops the ray ahead (15). The program steers by arithmetic and
-; asks the judge only what the picture holds: whether an enemy is in
-; view, how dangerous it is. Off the heading it turns the shorter way;
-; on it, a closed door within eighty units ahead is used while walking
-; before anything else, since a door is not a wall to go round; a forward
-; that did not move or a wall within forty units starts a follow of
-; `follow-steps` steps, half turning toward the freer side and half
-; walking; an enemy in view is fired at while walking; a lethal risk while
-; hurt backs off. Three forwards in a row that did not move press Tab;
-; the judge names the unexplored quadrant of the automap, which is the
-; heading for six steps, and Tab closes it. Each step is appended to the
-; file `metrics` in the filesystem region (the state line and the answer
-; that decided it) and the state line alone is written to `summary`, the
-; one line a reviewer reads. `follow-steps` and `facing-tolerance` are the
-; cells a reviewer may redefine. `dj-needs` and `dj-step` make the program
-; an agent for `:agents`: it steps when a listening window is focused and
-; a process runs. Answer fields: foe noul P (0-2), risk score 3 SCORE CONF
-; P*3 (3-9): the score is field 6. Twenty cells of at most 256 bytes.
-(begin (def play-pause (fn () 'p)) (def play-reason "waiting for the judge"))
-(def questions "(judge (noul foe \"Is an enemy in view?\") (score risk \"How dangerous is it?\" \"safe\" \"wary\" \"lethal\"))")
-(def map-questions "(judge (choice way \"Which quadrant of the automap is unexplored?\" north east south west))")
-(begin (def ask (fn () (model-request (if mapping map-questions questions)))) (def last-x 0) (def last-y 0) (def went-forward #f) (def steps 0) (def follow 0) (def follow-turn '(left)))
-(begin (def detour 0) (def detour-left 0) (def mapping #f) (def stalls 0) (def follow-steps 8) (def facing-tolerance 12))
-(begin (def field (fn (n default) (if (= (look-field n) nil) default (look-field n)))) (def number (fn (a n d) (if (= (text-field a n) nil) d (if (= (text-int (text-field a n)) nil) d (text-int (text-field a n)))))))
-(def stuck (fn () (if went-forward (if (= (field 1 0) last-x) (= (field 2 0) last-y) #f) #f)))
-(def remember (fn (keys) (begin (def stalls (if (stuck) (+ stalls 1) (if went-forward 0 stalls))) (def last-x (field 1 0)) (def last-y (field 2 0)) (def went-forward (= (car keys) 'up)))))
-(begin (def wrap (fn (d) (if (< 128 d) (- d 256) (if (< d -128) (+ d 256) d)))) (def target (fn () (if (< 0 detour-left) detour (field 8 0)))) (def diff (fn () (wrap (- (target) (field 3 0))))))
-(def facing (fn () (if (< (- 0 facing-tolerance) (diff)) (< (diff) facing-tolerance) #f)))
-(begin (def turn (fn () (if (< (field 14 0) (field 13 0)) '(left) '(right)))) (def door? (fn () (if (= (field 15 0) 1) (< (field 12 512) 80) #f))))
-(def steer (fn () (if (< (diff) (- 0 facing-tolerance)) '(right) (if (< facing-tolerance (diff)) '(left) '(up)))))
-(begin (def blocked (fn () (if (stuck) #t (< (field 12 512) 40)))) (def following (fn () (begin (def follow (- follow 1)) (if (< (/ follow-steps 2) follow) follow-turn (if (stuck) follow-turn '(up)))))))
-(def move (fn () (if (door?) '(space up) (if (< 0 follow) (following) (if (facing) (if (blocked) (begin (def follow follow-steps) (def follow-turn (turn)) follow-turn) '(up)) (steer))))))
-(def decide (fn (a) (begin (def play-reason a) (if (retreat? a) '(down) (if (< 500 (number a 2 0)) (if (stuck) (turn) '(up ctrl)) (move))))))
+; toward a goal, under instructions. The engine's state line carries the
+; heading of the next waypoint on the route to the exit in 256ths of a
+; turn (field 8), its distance (9), the route's remaining length (10),
+; how much of the level the automap has seen (11), how far three rays
+; reach before a wall, ahead and a quarter turn to either side (12-14),
+; and whether a closed door stops the ray ahead (15). The program steers
+; by arithmetic and asks the judge only what the picture holds: whether
+; an enemy is in view, how dangerous it is, and, when the file `task`
+; holds a sentence the operator typed while agents ran, what that
+; sentence asks for (a look at the map, care, a fight, nothing), which
+; the program then does with its own reflexes: the map is checked on
+; Tab, care lowers the risk it backs off at and stops the firing, a
+; fight fires at anything in view. Off the heading it turns the shorter
+; way; on it, a closed door within eighty units ahead is used while
+; walking before anything else; a forward that did not move or a wall
+; within forty units starts a follow of `follow-steps` steps, half
+; turning toward the freer side and half walking; three forwards in a
+; row that did not move press Tab for the automap and the judge names
+; the unexplored quadrant, the heading for six steps. Each step is
+; appended to `metrics` (the state line and the answer) and the state
+; line alone is written to `summary` for a reviewer; `follow-steps` and
+; `facing-tolerance` are the cells a reviewer may redefine; `dj-needs`
+; and `dj-step` make the program an agent for `:agents`. Answer fields:
+; foe noul P (0-2), risk score 3 SCORE CONF P*3 (3-9), and with an
+; instruction, ask choice 4 OPT CONF P*4 (11-18): the option is field 14.
+; Eleven cells.
+(begin (def play-pause (fn () 'p)) (def play-reason "waiting for the judge") (def ask (fn () (model-request (if mapping map-questions (questions))))) (def last-x 0) (def last-y 0) (def went-forward #f) (def steps 0) (def follow 0) (def follow-turn '(left)) (def detour 0) (def detour-left 0) (def mapping #f) (def stalls 0) (def follow-steps 8) (def facing-tolerance 12) (def careful #f) (def fight #f) (def instruction ""))
+(begin (def base-questions "(judge (noul foe \"Is an enemy in view?\") (score risk \"How dangerous is it?\" \"safe\" \"wary\" \"lethal\")") (def map-questions "(judge (choice way \"Which quadrant of the automap is unexplored?\" north east south west))") (def questions (fn () (text-concat base-questions (if (< 0 (text-bytes instruction)) (text-concat " (choice ask \"The operator says: " (text-concat instruction ". What is asked for?\" map careful fight nothing))")) ")")))))
+(begin (def field (fn (n default) (if (= (look-field n) nil) default (look-field n)))) (def number (fn (a n d) (if (= (text-field a n) nil) d (if (= (text-int (text-field a n)) nil) d (text-int (text-field a n)))))) (def stuck (fn () (if went-forward (if (= (field 1 0) last-x) (= (field 2 0) last-y) #f) #f))) (def remember (fn (keys) (begin (def stalls (if (stuck) (+ stalls 1) (if went-forward 0 stalls))) (def last-x (field 1 0)) (def last-y (field 2 0)) (def went-forward (= (car keys) 'up))))))
+(begin (def wrap (fn (d) (if (< 128 d) (- d 256) (if (< d -128) (+ d 256) d)))) (def target (fn () (if (< 0 detour-left) detour (field 8 0)))) (def diff (fn () (wrap (- (target) (field 3 0))))) (def facing (fn () (if (< (- 0 facing-tolerance) (diff)) (< (diff) facing-tolerance) #f))) (def turn (fn () (if (< (field 14 0) (field 13 0)) '(left) '(right)))) (def door? (fn () (if (= (field 15 0) 1) (< (field 12 512) 80) #f))) (def steer (fn () (if (< (diff) (- 0 facing-tolerance)) '(right) (if (< facing-tolerance (diff)) '(left) '(up))))))
+(begin (def blocked (fn () (if (stuck) #t (< (field 12 512) 40)))) (def following (fn () (begin (def follow (- follow 1)) (if (< (/ follow-steps 2) follow) follow-turn (if (stuck) follow-turn '(up)))))) (def move (fn () (if (door?) '(space up) (if (< 0 follow) (following) (if (facing) (if (blocked) (begin (def follow follow-steps) (def follow-turn (turn)) follow-turn) '(up)) (steer)))))))
+(begin (def retreat? (fn (a) (if (< (if careful 900 1500) (number a 6 0)) (< (field 4 100) (if careful 80 50)) #f))) (def foe? (fn (a) (if careful #f (< (if fight 300 500) (number a 2 0))))) (def decide (fn (a) (begin (def play-reason a) (if (retreat? a) '(down) (if (foe? a) (if (stuck) (turn) '(up ctrl)) (move)))))))
 (begin (def quadrant (fn (q) (if (= q "north") 64 (if (= q "west") 128 (if (= q "south") 192 0))))) (def map-step (fn (a) (begin (def mapping #f) (def play-reason a) (def detour (quadrant (text-field a 3))) (def detour-left 6) '(tab)))))
-(begin (def retreat? (fn (a) (if (< 1500 (number a 6 0)) (< (field 4 100) 50) #f))) (def note (fn () (begin (file-append "metrics" (text-concat (look-line) (text-concat " | " (text-concat play-reason "\n")))) (file-write "summary" (look-line))))))
-(def advance (fn (a) (begin (def steps (+ steps 1)) (def detour-left (if (< 0 detour-left) (- detour-left 1) 0)) (def chosen (if mapping (map-step a) (decide a))) (remember chosen) (note) chosen)))
-(def play-step (fn () (begin (def a (model-result)) (if (= a nil) (begin (ask) '()) (begin (def chosen (advance a)) (if (< 2 stalls) (begin (def mapping #t) (def stalls 0) '(tab)) chosen))))))
+(begin (def note (fn () (begin (file-append "metrics" (text-concat (look-line) (text-concat " | " (text-concat play-reason "\n")))) (file-write "summary" (look-line))))) (def has-file (fn (names name) (if (= names nil) #f (if (= (car names) name) #t (has-file (cdr names) name))))) (def read-task (fn () (begin (def instruction (if (has-file (file-list) "task") (file-read "task") "")) instruction))))
+(begin (def obey (fn (a) (begin (def what (text-field a 14)) (if (= what "map") (def stalls 3) nil) (if (= what "careful") (def careful #t) nil) (if (= what "fight") (def fight #t) nil) (console-log (text-concat "doom: instruction " (text-concat what (text-concat " for: " instruction)))) (file-write "task" "") (def instruction "")))) (def advance (fn (a) (begin (def steps (+ steps 1)) (def detour-left (if (< 0 detour-left) (- detour-left 1) 0)) (if (= (text-field a 11) "ask") (obey a) nil) (def chosen (if mapping (map-step a) (decide a))) (remember chosen) (note) chosen))))
+(def play-step (fn () (begin (def a (model-result)) (if (= a nil) (begin (read-task) (ask) '()) (begin (def chosen (advance a)) (if (< 2 stalls) (begin (def mapping #t) (def stalls 0) '(tab)) chosen))))))
 (begin (def dj-needs (fn () '((window) (process)))) (def dj-step (fn () (play-step))) (def dj-reason play-reason))

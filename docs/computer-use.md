@@ -160,8 +160,13 @@ and `:stop` ends the run. `:join NAME` puts a program the desktop
 carries beside what is in the world, as a sentence joins the desktop
 agent; forty cells hold the workbench, a player and a reviewer.
 
-A watch is an agent whose need is its trigger; a scheduled job is one
-whose need is `(after SECONDS)`. A fact only the judge can settle is
+A sentence heard between steps is also written to the file `task`
+(v0.3.0), so `(needs (file "task"))` is a watch on the operator and any
+step can read what was said; the DOOM agent reads it and asks the judge
+what it asks for. `:handover NAME STEPS agents` loads NAME, joins the
+reviewer and runs `:agents` instead of `:play`; the desktop agent's
+`review-doom` command is that handover. A watch is an agent whose need
+is its trigger; a scheduled job is one whose need is `(after SECONDS)`. A fact only the judge can settle is
 asked by the agent in its own step and defined as a need, so the loop
 never waits on a reply. The first agent that changes another is
 `review` (`rv-`), described in [`doom.md`](doom.md) and
