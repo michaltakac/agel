@@ -15,7 +15,7 @@ const MAX_PARAMS: usize = 8;
 const MAX_LOCALS: usize = 16;
 const MAX_BODY: usize = 1024;
 const MAX_ARGUMENTS: usize = 16;
-const MAX_DEPTH: u8 = 48;
+const MAX_DEPTH: u8 = 96;
 const INITIAL_FUEL: u16 = 40_000;
 const MAX_AGENTS: usize = 32;
 const MAX_MAILBOX: usize = 16;
@@ -2887,7 +2887,7 @@ fn data_builtin(
             let wanted = offset_of(wanted)?;
             let bytes = heap.bytes(start, len);
             let mut fields = bytes
-                .split(|byte| *byte == b' ')
+                .split(|byte| matches!(*byte, b' ' | b'\n' | b'\r' | b'\t'))
                 .filter(|field| !field.is_empty());
             match fields.nth(wanted) {
                 Some(field) => {

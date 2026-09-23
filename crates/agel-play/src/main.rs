@@ -550,6 +550,78 @@ impl Lookup {
             }
             return Ok(Some(format!("fetched {name} {sent} {bytes}")));
         }
+        if prompt.starts_with("(write ") {
+            let (Some(name), Some(spec)) = (quoted(prompt, 0), quoted(prompt, 1)) else {
+                return Ok(Some("error write expects a name and a spec".to_owned()));
+            };
+            let name: String = name
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                .take(16)
+                .collect();
+            let Some(planner) = &self.planner else {
+                return Ok(Some(format!("written {name} 0 no model")));
+            };
+            let prompt = format!(
+                "Write a program for Agel's native evaluator, a small Lisp: {spec}. Rules: output only the \
+                 program, one top-level form per line, each line a complete balanced form under 800 \
+                 characters, no comments, no blank lines, no markdown; several definitions may share \
+                 one line inside (begin ...). Available: def fn if begin quote list cons car cdr count + - * / = < \
+                 text-field text-int text-concat text-bytes file-read file-write file-append file-list \
+                 look-field scene-clear scene-rect console-log; integers only, no floats, no strings \
+                 with double quotes inside strings, no loops except recursion, at most 16 bindings in a \
+                 let. (scene-rect x y width height radius rgb) draws a rectangle with integer arguments, \
+                 x from 0 to 1919, y from 0 to 999, radius at most half the width and height; at most 12 \
+                 rectangles are kept, so call (scene-clear) first. file-read returns the file's text; \
+                 text-field returns the n-th whitespace-separated field or nil; text-int parses an integer \
+                 or nil. The program's cells must be named by a prefix: every definition it makes must \
+                 start with `{name}-`, and it must define `{name}-needs` (a function returning a quoted list \
+                 of needs such as ((file \"summary\"))) and `{name}-step` (a function of no arguments that \
+                 does one step of work and returns the string \"wait\")."
+            );
+            let prompt_digest = agel_integrity::sha256(prompt.as_bytes());
+            let request = ModelRequest {
+                id: number,
+                world_id: 0,
+                requester: 0,
+                reply_to: 0,
+                provider: planner.name().to_owned(),
+                prompt,
+                prompt_digest,
+                effect_key: agel_integrity::sha256(
+                    format!("agel-play:write:{number}:{}", prompt_digest.to_hex()).as_bytes(),
+                ),
+            };
+            let answer = planner.infer(&request).map_err(|error| error.to_string());
+            let _ = fs::write(
+                self.out.join(format!("written-{name}.txt")),
+                answer.clone().unwrap_or_else(|e| e.clone()),
+            );
+            let cells: Vec<String> = match &answer {
+                Ok(text) => text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| line.starts_with('('))
+                    .map(|line| line.chars().take(880).collect())
+                    .take(16)
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+            for cell in &cells {
+                serial.write_raw(&format!(":page {name} {cell}"))?;
+            }
+            return Ok(Some(match answer {
+                Ok(_) => format!("written {name} {}", cells.len()),
+                Err(error) => format!(
+                    "written {name} 0 {}",
+                    error
+                        .replace(['\n', '\r'], " ")
+                        .chars()
+                        .take(80)
+                        .collect::<String>()
+                ),
+            }));
+        }
         if prompt.starts_with("(plan ") {
             let (Some(name), Some(goal)) = (quoted(prompt, 0), quoted(prompt, 1)) else {
                 return Ok(Some("error plan expects a page name and a goal".to_owned()));
@@ -585,12 +657,26 @@ impl Lookup {
                 self.out.join("plan-answer.txt"),
                 answer.clone().unwrap_or_else(|e| e.clone()),
             );
+            // Each step exactly eight fields (padded with `-`, cut past
+            // eight), so a program reads step K by field arithmetic
+            // rather than by scanning the file: fields 8(K-1)+1 is its
+            // direction, 8(K-1)+3.. its words.
             let steps: Vec<String> = match &answer {
                 Ok(text) => text
                     .lines()
                     .map(str::trim)
                     .filter(|line| line.chars().next().is_some_and(|c| c.is_ascii_digit()))
-                    .map(|line| line.chars().take(Self::PLAN_LINE_BYTES).collect())
+                    .map(|line| {
+                        let mut fields: Vec<String> = line
+                            .split_whitespace()
+                            .take(8)
+                            .map(|f| f.chars().take(Self::PLAN_LINE_BYTES / 4).collect())
+                            .collect();
+                        while fields.len() < 8 {
+                            fields.push("-".to_owned());
+                        }
+                        fields.join(" ")
+                    })
                     .take(Self::PLAN_STEPS)
                     .collect(),
                 Err(_) => Vec::new(),
@@ -1733,6 +1819,7 @@ fn play(
                 // would wait forever.
                 || line.contains("DRIVE-STEP FAILED")
                 || line.contains("PLAY-STEP FAILED")
+                || line.contains("STEP FAILED - ")
                 || line.contains("NO PROGRAM TO")
                 || line.contains("NO WINDOW TO")
             {

@@ -1,0 +1,5 @@
+(begin (def chart-history '()) (def chart-reason "charting") (def chart-needs (fn () '((file "summary")))))
+(def chart-field (fn (t n) (if (= (text-field t n) nil) 0 (if (= (text-int (text-field t n)) nil) 0 (text-int (text-field t n))))))
+(def chart-take (fn (items n) (if (= items nil) '() (if (= n 0) '() (cons (car items) (chart-take (cdr items) (- n 1)))))))
+(def chart-bars (fn (items x) (if (= items nil) 0 (begin (scene-rect x (- 980 (/ (car items) 8)) 24 (+ 2 (/ (car items) 8)) 4 2264022) (chart-bars (cdr items) (+ x 30))))))
+(def chart-step (fn () (begin (def line (file-read "summary")) (def chart-history (chart-take (cons (chart-field line 23) chart-history) 10)) (scene-clear) (chart-bars chart-history 1600) (scene-rect 1600 985 300 4 2 8421504) (scene-rect 1600 (- 985 (/ (chart-field line 11) 1)) 8 (/ (chart-field line 11) 1) 2 3423048) "wait")))

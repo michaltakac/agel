@@ -151,13 +151,15 @@ OS through `:page` lines; the `lookup` agent asks for them; the player
 embeds the plan in a typed question and takes a heading from the answer.
 [`release-v0.3.1.md`](release-v0.3.1.md).
 
-### v0.3.2 — a plan followed step by step, and a tool it wrote
+### v0.3.2 — a plan followed step by step, and a tool it wrote (done)
 
-The plan's steps followed one at a time, "is this step done" a typed
-question each step, the current step in the metrics; and a sentence
-that asks for a tool ("build yourself a chart of your play") reaching
-the model through the bridge, the program it returns loaded through the
-judged gate, into cells, as any typed program is.
+The plan's steps followed one at a time, "is this step done" and "where
+for this step" typed questions every fifteen steps; and the builder
+asking the model for a chart, the desktop admitting it through the
+judged gate cell by cell, the chart an agent painting from the file
+`summary`. [`release-v0.3.2.md`](release-v0.3.2.md). What remains of
+the row: a retry with the rejection in hand, and the sentence at the
+prompt that asks for a tool by name.
 
 ### Changing the OS itself, in stages
 
@@ -194,10 +196,10 @@ through the judged gate as a proposal, never straight to a domain.
 | The agent reads its own metrics and changes its cells when they say it is failing, by typed questions, nobody at the keyboard | done | v0.2.99: `review` reads the player's `summary`, asks Jev whether it stalled and what to change, redefines `follow-steps` or `facing-tolerance`, notes it; one live run: six reviews, two questions, `nothing` chosen twice, no cell changed; the apply path tested |
 | The route as an Agel program over facts the engine writes, not C | open | the route is in `doom.c` |
 | `:agents`, needs, and a second sentence beside a running agent | done | v0.2.99: `scripts/test-drive.sh`; a line at the prompt between steps becomes the task, `:stop` ends the run |
-| A metrics window painted by an Agel program from the file | open | |
+| A metrics window painted by an Agel program from the file | done | v0.3.2: the chart paints the last ten route lengths as rectangles from `summary`, the scene pulled after every agents step |
 | A fetch through the bridge into a file on the OS | done | v0.3.1: `(fetch URL NAME)` served by the bridge, `:page` lines written by the kernel; `scripts/test-play-bridge.sh`, `test-drive.sh` |
 | A plan of typed steps from a page, through a model, once | done | v0.3.1: `(plan NAME GOAL)` with `--plan claude|codex`, the file `plan`, the player's `next` question; one live run: the page was a bot-check interstitial, the planner said so and planned from memory, the judge chose `east` |
-| A tool written by a model, gated, loaded, run | open | |
+| A tool written by a model, gated, loaded, run | done | v0.3.2: `(write NAME SPEC)`, the builder, `:join-file` through the judged gate, the chart stepping beside the player; `scripts/test-play-bridge.sh`, `test-drive.sh`; live: nine cells written by Claude, nine admitted by Jev, the chart painting beside the player |
 | A program installed into the program region from inside, through a gated effect | open | the region is written only by host scripts |
 | A domain replaced from inside by a gated proposal | open | the kernel replaces only a faulted compositor, with its own image |
 | The kernel image replaced from inside | open | the change protocol is a description |

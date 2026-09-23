@@ -613,6 +613,12 @@ Each rung must be runnable and differentially testable against the rung below:
    model's typed steps landing in files on the OS through `:page` lines;
    the `lookup` agent asks for them, and the player asks the judge where
    the plan says to head. See [`release-v0.3.1.md`](release-v0.3.1.md).
+97. **A tool the agent built, through the gate (v0.3.2):** any program
+   with a step is an agent; `:join-file` admits a file's forms cell by
+   cell on the judge's yes; `(write NAME SPEC)` asks the bridge's model
+   for a program; the builder asks for a chart and joins it, and the
+   chart paints the player's route beside it; the player follows a plan
+   step by step by typed questions. See [`release-v0.3.2.md`](release-v0.3.2.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

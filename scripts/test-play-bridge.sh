@@ -79,7 +79,7 @@ for arg in "$@"; do case "$arg" in @*) body="${arg#@}";; esac; done
 if [ -z "$body" ]; then cat "$(dirname "$0")/page.html"; exit 0; fi
 cat > /dev/null
 if grep -q '"next"' "$body"; then
-  printf '%s\n200' '{"model":"stand-in","answers":{"foe":{"type":"noul","noul":0.2},"risk":{"type":"score","score":0.1,"confidence":0.8,"legend":{"0":"safe","1":"wary","2":"lethal"},"probabilities":{"0":0.9,"1":0.1,"2":0.0}},"next":{"type":"choice","choice":"north","confidence":0.7,"probabilities":{"north":0.7,"east":0.1,"south":0.1,"west":0.05,"keep":0.05}}},"usage":{"input_tokens":1,"output_tokens":1}}'
+  printf '%s\n200' '{"model":"stand-in","answers":{"foe":{"type":"noul","noul":0.2},"risk":{"type":"score","score":0.1,"confidence":0.8,"legend":{"0":"safe","1":"wary","2":"lethal"},"probabilities":{"0":0.9,"1":0.1,"2":0.0}},"done":{"type":"noul","noul":0.3},"next":{"type":"choice","choice":"north","confidence":0.7,"probabilities":{"north":0.7,"east":0.1,"south":0.1,"west":0.05,"keep":0.05}}},"usage":{"input_tokens":1,"output_tokens":1}}'
 else
   printf '%s\n200' '{"model":"stand-in","answers":{"foe":{"type":"noul","noul":0.2},"risk":{"type":"score","score":0.1,"confidence":0.8,"legend":{"0":"safe","1":"wary","2":"lethal"},"probabilities":{"0":0.9,"1":0.1,"2":0.0}}},"usage":{"input_tokens":1,"output_tokens":1}}'
 fi
@@ -95,9 +95,43 @@ TYPESAFEAI_API_KEY=stand-in cargo run -q --release -p agel-play -- --image "$ima
   --agents --join lookup --plan claude --steps 6 | tee "$out/console.log"
 grep -q "agel-play: lookup .*: fetched e1m1 3 " "$out/console.log"
 grep -q "agel-play: lookup .*: planned plan 3" "$out/console.log"
-grep -q "agel-play: model reply .*: foe noul 200 risk score 3 100 800 900 100 0 next choice 5 north 700 700 100 100 50 50" "$out/console.log"
+grep -q "agel-play: model reply .*: foe noul 200 risk score 3 100 800 900 100 0 done noul 300 next choice 5 north 700 700 100 100 50 50" "$out/console.log"
 grep -q "1. north - go through the opening at the top" "$out/plan-answer.txt"
 echo "A lookup through the host: the page and the plan written to files on the OS, the player asking the judge where to head from the plan [ok]"
+
+# A tool built by a model through the gate: the `builder` agent asks the
+# host's model for a chart program (the stand-in prints the fixture), the
+# desktop writes the cells to a file, the builder types `:join-file chart`,
+# the judge (the stand-in) admits every cell, and the chart is an agent
+# that paints from the player's summary.
+out=target/doom-runs/builder
+rm -rf "$out"
+mkdir -p "$out"
+cat > "$out/curl" <<'FAKE'
+#!/bin/sh
+body=""
+for arg in "$@"; do case "$arg" in @*) body="${arg#@}";; esac; done
+cat > /dev/null
+if grep -q '"fact"' "$body"; then
+  printf '%s\n200' '{"model":"stand-in","answers":{"fact":{"type":"noul","noul":0.9}},"usage":{"input_tokens":1,"output_tokens":1}}'
+else
+  printf '%s\n200' '{"model":"stand-in","answers":{"foe":{"type":"noul","noul":0.2},"risk":{"type":"score","score":0.1,"confidence":0.8,"legend":{"0":"safe","1":"wary","2":"lethal"},"probabilities":{"0":0.9,"1":0.1,"2":0.0}}},"usage":{"input_tokens":1,"output_tokens":1}}'
+fi
+FAKE
+cat > "$out/claude" <<FAKE
+#!/bin/sh
+cat > /dev/null
+cat "$(pwd)/scripts/fixtures/chart.agel"
+FAKE
+chmod +x "$out/curl" "$out/claude"
+TYPESAFEAI_API_KEY=stand-in cargo run -q --release -p agel-play -- --image "$image" --doom "$doom" --wad "$wad" \
+  --out "$out" --policy jev --curl-bin "$(pwd)/$out/curl" --claude-bin "$(pwd)/$out/claude" \
+  --agents --join builder --plan claude --steps 6 | tee "$out/console.log"
+grep -q "agel-play: lookup .*: written chart 5" "$out/console.log"
+grep -q "agel-play: step .*: :join-file chart" "$out/console.log"
+grep -q '"keys":":join-file chart"' "$out/steps.jsonl"
+grep -q "agel-play: step [3-6]: wait" "$out/console.log"
+echo "A tool built by a model through the gate: five cells written, admitted by the judge one by one, joined, and stepping as an agent [ok]"
 
 # The desktop driven through the bridge: no game, no window. The program
 # asks which of the desktop's commands comes next for the task and whether

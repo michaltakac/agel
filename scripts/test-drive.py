@@ -225,12 +225,41 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
         assert "page: notes 35 bytes" in tail, tail[-2000:]
         settled(machine, tail)
         assert machine.submit('(file-read "notes")').strip().startswith('"first line of the page\\nsecond line\\n"')
+        # A program from a file joins through the judged gate: the desktop
+        # asks the judge, per form, whether it may run here; one no refuses
+        # the file; a joined program that defines NAME-step is an agent.
+        machine.submit('(file-write "tool" "(begin (def tool-needs (fn () (quote ()))) (def tool-reason \\"tooling\\"))\\n(def tool-step (fn () \\"wait\\"))\\n")')
+        machine.submit('(file-write "bad" "(def bad-step (fn () \\"wait\\"))\\n")')
+        machine.submit('(def dk-needs (fn () \'((file "nothere"))))')
+        with machine.serial_lock:
+            send_line(machine, ":join-file tool")
+            block = until_text(machine, b"model-request end", 60).decode(errors="replace")
+            assert "model-request 900001 (judge (noul fact \"May this Agel cell run on the desktop" in block, block
+            assert "(def tool-needs" in block, block
+            machine.serial.sendall(b":model-reply 900001 fact noul 900\n")
+            until_text(machine, b"model-request 900002 ", 60)
+            until_text(machine, b"model-request end", 60)
+            machine.serial.sendall(b":model-reply 900002 fact noul 800\n")
+            tail = until_text(machine, b"tool JOINED 2 CELLS THROUGH THE GATE", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
+        settled(machine, tail)
+        with machine.serial_lock:
+            send_line(machine, ":join-file bad")
+            until_text(machine, b"model-request end", 60)
+            machine.serial.sendall(b":model-reply 900003 fact noul 100\n")
+            tail = until_text(machine, b"GATE REFUSED FORM 1 OF bad", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
+        settled(machine, tail)
+        # A join replays nothing: the desktop agent's prompt-defined step
+        # survives it and waits on its need, beside the joined tool.
+        ran = machine.submit(":agents 1")
+        assert "agents: step 1 tool do wait" in ran and "dk waits file nothere" in ran, ran[-2000:]
         # The reviewer beside the player: it joins the player's world, its
         # needs are the player's summary file, and what it decides to change
         # is a def on the player's tunable cells in the shared world.
         assert "DOOM JUDGE AGENT READY" in machine.submit(":load doom-agent-judge")
         assert "REVIEW AGENT READY" in machine.submit(":join review")
-        assert "CELLS 20" in machine.submit(":cells")
+        assert "CELLS 21" in machine.submit(":cells")
         assert machine.submit("follow-steps").strip().startswith("8")
         machine.submit('(rv-apply "follow-longer")')
         assert machine.submit("follow-steps").strip().startswith("12")

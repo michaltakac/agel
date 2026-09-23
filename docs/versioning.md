@@ -488,6 +488,11 @@ promise.
   served by the bridge, the page and the model's typed steps written to
   files on the OS, the `lookup` agent, and the player asking the judge
   where the plan says to head.
+  `v0.3.2` follows the plan step by step by typed questions and lets an
+  agent build a tool: `(write NAME SPEC)` asks a model for a program,
+  `:join-file NAME` admits it cell by cell through the judged gate, and
+  any program with a step is an agent; the builder's chart paints the
+  player's route beside it.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

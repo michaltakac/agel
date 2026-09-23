@@ -2577,6 +2577,12 @@ const PROGRAMS: &[Program] = &[
         file: b"/data/lk.agel",
         ready: b"LOOKUP AGENT READY - :AGENTS STEPS",
     },
+    Program {
+        name: b"builder",
+        prefix: b"bd-",
+        file: b"/data/bd.agel",
+        ready: b"BUILDER AGENT READY - :AGENTS STEPS",
+    },
 ];
 
 /// How long the play loop holds a step's keys, in passes of the run, unless
@@ -2897,11 +2903,19 @@ fn load_program(
 /// carries, by its prefix: such a world holds nothing of the operator's.
 #[inline(never)]
 fn program_cells_only(workspace: &Workspace) -> bool {
+    // A program's cell is named `NAME-N`: a carried program's, or one
+    // joined from a file; the operator's cells are named otherwise.
     (0..workspace.count()).all(|ordinal| {
         workspace.cell(ordinal).is_some_and(|cell| {
-            PROGRAMS
-                .iter()
-                .any(|program| cell.name().starts_with(program.prefix))
+            let name = cell.name();
+            match name.iter().rposition(|byte| *byte == b'-') {
+                Some(dash) => {
+                    dash > 0
+                        && name[dash + 1..].iter().all(u8::is_ascii_digit)
+                        && name.len() > dash + 1
+                }
+                None => false,
+            }
         })
     })
 }
@@ -2929,7 +2943,8 @@ fn join_program(
         Ok(length) => length,
         Err(message) => return StatusLine::new(message),
     };
-    let mut candidate = *workspace;
+    // Each form evaluated into the live world and appended as a cell: a
+    // join replays nothing, so agents already running keep their state.
     for (index, source) in source[..length]
         .split(|byte| *byte == b'\n')
         .filter(|line| line.starts_with(b"("))
@@ -2937,22 +2952,27 @@ fn join_program(
     {
         let mut cell = StatusLine::new(program.prefix);
         cell.number_u64(index as u64);
-        if let Err(reason) = candidate.upsert(cell.get(), source) {
+        let before = *evaluator_revision;
+        let reply = evaluate_status(
+            evaluator,
+            evaluator_revision,
+            shared::COMMAND_EVALUATE,
+            source,
+            host,
+        );
+        if *evaluator_revision == before {
+            let mut report = StatusLine::new(b"JOIN FAILED AT CELL ");
+            report.number_u64(index as u64);
+            report.push(b": ");
+            report.push(reply.get());
+            return report;
+        }
+        if let Err(reason) = workspace.upsert(cell.get(), source) {
             return StatusLine::new(reason.as_bytes());
         }
+        *dirty = true;
     }
-    match replay_workspace(evaluator, &candidate) {
-        Ok(revision) => {
-            *workspace = candidate;
-            *evaluator_revision = revision;
-            *dirty = true;
-            StatusLine::new(program.ready)
-        }
-        Err(failure) => {
-            let _ = replay_workspace(evaluator, workspace);
-            StatusLine::new(failure.message().as_bytes())
-        }
-    }
+    StatusLine::new(program.ready)
 }
 
 /// The operator's intent: a sentence typed at the prompt, kept for the
@@ -2960,6 +2980,54 @@ fn join_program(
 /// drive loop relays as its `task:` line.
 static mut INTENT: [u8; crate::native::EXEC_BYTES] = [0; crate::native::EXEC_BYTES];
 static mut INTENT_LEN: usize = 0;
+
+/// A question the desktop itself asks the judge, as a program would: the
+/// request goes out numbered past any program's, and the yes/no answer
+/// comes back on the line the bridge answers programs on. None when no
+/// answer came.
+#[inline(never)]
+fn judge_fact(serial: &mut ServiceDomain, number: u64, question: &[u8]) -> Option<bool> {
+    let mut text = StatusLine::new(b"model-request ");
+    text.number_u64(number);
+    text.push(b" (judge (noul fact \"");
+    for byte in question {
+        text.push(match *byte {
+            b'"' => b"'",
+            b'\n' | b'\r' => b" ",
+            _ => core::slice::from_ref(byte),
+        });
+    }
+    text.push(b"\"))\nlook-line: desktop\nmodel-request end\n");
+    crate::process::Console::write(serial, text.get());
+    let mut answer = [0_u8; PAYLOAD_BYTES];
+    while let Some(length) = serial_line(serial, &mut answer) {
+        let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
+            continue;
+        };
+        let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+        let given = rest[..digits]
+            .iter()
+            .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
+        if digits == 0 || given != number {
+            continue;
+        }
+        let mut words = trim(&rest[digits..]).split(|byte| *byte == b' ');
+        let (Some(b"fact"), Some(b"noul"), Some(probability)) =
+            (words.next(), words.next(), words.next())
+        else {
+            return None;
+        };
+        let probability = probability
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit())
+            .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
+        return Some(probability > 500);
+    }
+    None
+}
+
+/// The number the desktop's own questions start at, past any program's.
+static mut GATE_NUMBER: u64 = 900_000;
 
 /// A page the bridge delivered ahead of a reply (`:page NAME TEXT` lines),
 /// kept until the loop can write it to the file NAME in the filesystem
@@ -3197,6 +3265,115 @@ fn execute_workshop(
             dirty,
             &mut host,
         );
+    }
+    // `:join-file NAME`: the forms of the file NAME join the world as cells
+    // `NAME-N`, each having passed the judged gate first: the desktop asks
+    // the judge, per form, whether it may run here, and one no refuses
+    // the whole file. A program a model wrote lands this way, and if it
+    // defines `NAME-step` it is an agent like any other.
+    if let Some(name) = command_argument(line, b":join-file ") {
+        let name = &name[..name.len().min(AGENT_NAME_BYTES)];
+        let path = StatusLine::new(name);
+        let mut source = [0_u8; PROGRAM_FILE_BYTES];
+        let length = {
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            let mut host = EffectHost {
+                storage: &mut *storage,
+                filesystem: filesystem.as_deref_mut(),
+                console: &mut tee,
+                clock: clock.as_deref_mut(),
+            };
+            match host.read_file(path.get(), &mut source) {
+                Ok(length) => length,
+                Err(2) => return StatusLine::new(b"NO SUCH FILE"),
+                Err(_) => return StatusLine::new(b"THE FILE COULD NOT BE READ"),
+            }
+        };
+        // The gate first, over every form; then the forms are evaluated
+        // into the live world one by one and appended as cells, so the
+        // agents already running keep their state: a join replays nothing.
+        let mut from = 0;
+        let mut count = 0_u64;
+        while let Some((start, end)) = next_form(&source[..length], from) {
+            from = end;
+            let form = &source[start..end];
+            if form.len() > crate::workspace::MAX_CELL_SOURCE {
+                let mut report = StatusLine::new(b"FORM ");
+                report.number_u64(count + 1);
+                report.push(b" EXCEEDS A CELL");
+                return report;
+            }
+            // Safety: the desktop loop is the only user of the counter.
+            let number = unsafe {
+                let next = core::ptr::read(core::ptr::addr_of!(GATE_NUMBER)) + 1;
+                core::ptr::write(core::ptr::addr_of_mut!(GATE_NUMBER), next);
+                next
+            };
+            let mut question = StatusLine::new(
+                b"May this Agel cell run on the desktop, where a program can read and write files and paint rectangles, and nothing else? ",
+            );
+            question.push(&form[..form.len().min(700)]);
+            if judge_fact(serial, number, question.get()) != Some(true) {
+                let mut report = StatusLine::new(b"GATE REFUSED FORM ");
+                report.number_u64(count + 1);
+                report.push(b" OF ");
+                report.push(name);
+                return report;
+            }
+            count += 1;
+        }
+        let mut from = 0;
+        let mut joined = 0_u64;
+        while let Some((start, end)) = next_form(&source[..length], from) {
+            from = end;
+            let form = &source[start..end];
+            let mut cell = StatusLine::new(name);
+            cell.push(b"-");
+            cell.number_u64(joined);
+            let before = *evaluator_revision;
+            let reply = {
+                let mut tee = Tee {
+                    serial: &mut *serial,
+                    terminal: &mut current.terminal,
+                };
+                let mut host = EffectHost {
+                    storage: &mut *storage,
+                    filesystem: filesystem.as_deref_mut(),
+                    console: &mut tee,
+                    clock: clock.as_deref_mut(),
+                };
+                evaluate_status(
+                    evaluator,
+                    evaluator_revision,
+                    shared::COMMAND_EVALUATE,
+                    form,
+                    &mut host,
+                )
+            };
+            if *evaluator_revision == before {
+                let mut report = StatusLine::new(name);
+                report.push(b" JOINED ");
+                report.number_u64(joined);
+                report.push(b" CELLS THEN FORM ");
+                report.number_u64(joined + 1);
+                report.push(b" FAILED: ");
+                report.push(reply.get());
+                return report;
+            }
+            if let Err(reason) = workspace.upsert(cell.get(), form) {
+                return StatusLine::new(reason.as_bytes());
+            }
+            *dirty = true;
+            joined += 1;
+        }
+        let mut report = StatusLine::new(name);
+        report.push(b" JOINED ");
+        report.number_u64(joined);
+        report.push(b" CELLS THROUGH THE GATE");
+        return report;
     }
     // A program to load from a file: `:load-file PATH`, or `:load NAME` for a
     // name the desktop does not carry, read as `/NAME.agel`.
@@ -4200,9 +4377,10 @@ impl EffectHost<'_> {
     }
 }
 
-/// The most agents the world can hold at once: one per program the desktop
-/// carries.
+/// The most agents the world can hold at once, and the longest name (a
+/// cell prefix without its dash).
 const MAX_AGENTS: usize = 8;
+const AGENT_NAME_BYTES: usize = 24;
 /// Spins to wait for a line at the prompt between steps: a sentence typed
 /// while agents run is heard, and `:stop` ends the run.
 const AGENTS_PROMPT_POLLS: usize = 20_000;
@@ -4528,15 +4706,24 @@ fn agents(
     // The agents: for `:agents`, the programs whose first cell is in the
     // world and whose step function is bound; for `:drive` and `:play`,
     // the one program named by its step function.
-    let mut names: [&'static [u8]; MAX_AGENTS] = [b""; MAX_AGENTS];
+    let mut names = [[0_u8; AGENT_NAME_BYTES]; MAX_AGENTS];
+    let mut lengths = [0_usize; MAX_AGENTS];
     let mut count = 0;
+    let mut add = |name: &[u8],
+                   names: &mut [[u8; AGENT_NAME_BYTES]; MAX_AGENTS],
+                   lengths: &mut [usize; MAX_AGENTS]| {
+        if count < MAX_AGENTS && name.len() <= AGENT_NAME_BYTES {
+            names[count][..name.len()].copy_from_slice(name);
+            lengths[count] = name.len();
+            count += 1;
+        }
+    };
     match mode {
         LoopMode::Drive => {
             if evaluate!(b"drive-step").is_none_or(|value| value.get() == b"nil") {
                 return StatusLine::new(b"NO PROGRAM TO DRIVE - :LOAD DESKTOP-AGENT");
             }
-            names[0] = b"drive";
-            count = 1;
+            add(b"drive", &mut names, &mut lengths);
         }
         LoopMode::Play => {
             if running.is_none() {
@@ -4547,24 +4734,24 @@ fn agents(
             }) {
                 return StatusLine::new(b"NO WINDOW TO PLAY - CLICK ONE");
             }
-            names[0] = b"play";
-            count = 1;
+            add(b"play", &mut names, &mut lengths);
         }
         LoopMode::Agents => {
-            for program in PROGRAMS {
-                let mut first = StatusLine::new(program.prefix);
-                first.push(b"0");
-                if workspace.find(first.get()).is_none() || count == MAX_AGENTS {
+            // Every program in the world, carried or joined from a file: a
+            // cell `NAME-0` names it, and `NAME-step` bound makes it an agent.
+            for ordinal in 0..workspace.count() {
+                let Some(cell) = workspace.cell(ordinal) else {
                     continue;
-                }
-                let name = &program.prefix[..program.prefix.len() - 1];
+                };
+                let Some(name) = cell.name().strip_suffix(b"-0") else {
+                    continue;
+                };
                 let mut step_name = StatusLine::new(name);
                 step_name.push(b"-step");
                 if evaluate!(step_name.get()).is_none_or(|value| value.get() == b"nil") {
                     continue;
                 }
-                names[count] = name;
-                count += 1;
+                add(name, &mut names, &mut lengths);
             }
             if count == 0 {
                 return StatusLine::new(b"NO AGENTS - :LOAD OR :JOIN A PROGRAM WITH NAME-STEP");
@@ -4638,7 +4825,7 @@ fn agents(
             if done[index] {
                 continue;
             }
-            let name = names[index];
+            let name = &names[index][..lengths[index]];
             // The needs, and whether each is met.
             let mut needs_name = StatusLine::new(b"(");
             needs_name.push(name);
@@ -4669,7 +4856,8 @@ fn agents(
                         })
                     }
                     b"process" => running.is_some(),
-                    b"done" => (0..count).any(|other| names[other] == argument && done[other]),
+                    b"done" => (0..count)
+                        .any(|other| &names[other][..lengths[other]] == argument && done[other]),
                     b"after" => {
                         let seconds = argument
                             .iter()
@@ -4919,6 +5107,14 @@ fn agents(
             }
         }
         current.terminal.dirty = false;
+        // What the programs painted this step: the world's scene, pulled
+        // and shown whole when it changed, so a tool an agent runs is seen
+        // as it runs.
+        let painted = current.rectangles;
+        if mode == LoopMode::Agents {
+            let _ =
+                synchronize_language_scene(evaluator, compositor, inputs.as_deref_mut(), current);
+        }
         let frame = materialize(
             *current,
             Some(line),
@@ -4929,8 +5125,13 @@ fn agents(
             },
         )
         .unwrap_or_else(|reason| failed(reason));
-        render_region(compositor, inputs.as_deref_mut(), &frame, TERMINAL_REGION)
-            .unwrap_or_else(|reason| failed(reason));
+        if painted != current.rectangles {
+            render(compositor, inputs.as_deref_mut(), &frame)
+                .unwrap_or_else(|reason| failed(reason));
+        } else {
+            render_region(compositor, inputs.as_deref_mut(), &frame, TERMINAL_REGION)
+                .unwrap_or_else(|reason| failed(reason));
+        }
         if ended || handover.is_some() {
             break;
         }

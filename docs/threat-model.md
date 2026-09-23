@@ -1985,6 +1985,26 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.3.2
+
+- **The judged gate on a file.** `:join-file` asks the judge, per form,
+  whether the cell may run on the desktop, with the cell's text in the
+  question, and one no refuses the file. The gate is a typed judgment on
+  what a cell says it does; the bound on what a joined cell can do is
+  the effect set a program has on the desktop (files in the region, the
+  scene overlay, requests to the bridge, the console), the same as any
+  program's. A cell can lie to the judge within that bound; it cannot
+  reach past it. The desktop's own questions are numbered past any
+  program's so no program can answer one.
+- **A model writes cells; the OS never runs its prose.** Only lines that
+  are forms are delivered, at most sixteen, each under a cell; the answer
+  is kept beside the run on the host.
+- **The scene is pulled after every agents step**, through the same
+  validated envelope as after a command; a tool that paints is bounded
+  by twelve rectangles inside the drawing region, as before.
+- **Not claimed:** that the gate would catch a cell written to deceive
+  it; the effect bound is the claim.
+
 ## v0.3.1
 
 - **A fetch is the host's.** The OS asks for a page through the request

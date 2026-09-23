@@ -1,0 +1,13 @@
+; A builder beside a task: an agent that asks the host's model, once, to
+; write an Agel program for a tool the task could use (`(write "NAME"
+; "SPEC")`: the bridge asks the model for cells and delivers them as
+; `:page NAME` lines, which the desktop writes to `/NAME.agel`), then
+; types `:join-file NAME`, the desktop's gated join: the judge is asked,
+; per cell, whether it may run here, and one no refuses the file. A tool
+; that defines `NAME-step` is an agent from then on. This builder asks for
+; a chart of the player's route and health, painted as rectangles from
+; the file `summary`. The model writes; the judge admits; the desktop
+; runs. Three cells.
+(begin (def bd-phase 0) (def bd-reason "building") (def bd-needs (fn () '())) (def bd-spec "a program named chart: cells (begin (def chart-history (quote ())) (def chart-needs (fn () (quote ((file \"summary\"))))) and nothing else in its needs, never a file the program itself writes) and (def chart-step (fn () ...)) where chart-step reads (file-read \"summary\"), takes the 24th whitespace field (index 23) as the route length and the 12th (index 11) as the seen percent with text-field and text-int, keeps the last ten route lengths in chart-history, calls (scene-clear), then draws one (scene-rect x y width height radius rgb) bar per kept value near x 1600 y 980 (the bar height the value divided by 8) and one bar for the seen percent, and returns the string wait"))
+(def bd-step (fn () (begin (def a (model-result)) (if (= a nil) (if (= bd-phase 0) (begin (model-request (text-concat "(write \"chart\" \"" (text-concat bd-spec "\")"))) "wait") (if (= bd-phase 1) (begin (def bd-phase 2) ":join-file chart") "done")) (begin (def bd-reason a) (def bd-phase 1) (console-log (text-concat "builder: " a)) "wait")))))
+(def bd-after (fn () "done"))

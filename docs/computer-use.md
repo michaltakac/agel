@@ -171,7 +171,16 @@ rather than the judge, and the page's text lands in the file NAME through
 `:page NAME LINE` lines the kernel keeps and writes once the step is done
 (`page: NAME BYTES` on the console); `(plan "NAME" "GOAL")` asks a
 planner on the bridge (`--plan claude|codex`) for at most eight typed
-steps into the file `plan`. A watch is an agent whose need
+steps into the file `plan`. `:join-file NAME` (v0.3.2) joins the forms of the
+file NAME as cells `NAME-N`, each having passed the judged gate: the
+desktop asks the judge, per form, whether this Agel cell may run on the
+desktop, where a program can read and write files and paint rectangles
+and nothing else, and one no refuses the file; the desktop's own
+questions are numbered from 900001. `(model-request "(write \"NAME\"
+\"SPEC\")")` asks the bridge's planner for such a program, delivered as
+`:page NAME` lines; the `builder` agent asks for a chart and types the
+join. Agents are found by their cells now: any `NAME-0` with `NAME-step`
+bound, joined from a file or carried. A watch is an agent whose need
 is its trigger; a scheduled job is one whose need is `(after SECONDS)`. A fact only the judge can settle is
 asked by the agent in its own step and defined as a need, so the loop
 never waits on a reply. The first agent that changes another is
