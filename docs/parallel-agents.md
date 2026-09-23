@@ -127,7 +127,7 @@ played by the judged agent beside the reviewer, an instruction typed
 mid-run and followed, the reviewer's notes as captions, everything the
 agents did, tried and changed, from the serial trail alone.
 
-### v0.3.1 — agents side by side, and what blocks what (done at v0.2.99)
+### Agents side by side, and what blocks what (done at v0.2.99)
 
 `:agents` replaces the one-loop-at-a-time desktop. Each program in the
 world that defines `NAME-step` and `NAME-needs` is an agent; the desktop
@@ -143,18 +143,21 @@ cooperative concurrency in one supervisor thread: an agent's step is
 bounded, and a step that blocks the machine is the same bug it was
 before.
 
-### v0.3.2 — a lookup through the host, a plan from it, a tool it wrote
+### v0.3.1 — a lookup through the host, and a plan from it (done)
 
-A program asks `(fetch URL)` through the same request the judge answers;
-the bridge on the host fetches, reduces the page to text, and delivers
-at most a bounded number of lines, which the desktop writes to a file in
-the data region. With a model provider configured, the bridge asks the
-model once for a plan of typed steps from the page and delivers it as
-lines the program reads; without one, the walkthrough stays a page and
-the agent keeps the engine's route. A sentence that asks for a tool
-("build yourself a chart of your play") reaches the model through the
-bridge, and the program it returns is loaded through the judged gate,
-into cells, as any typed program is.
+`(fetch "URL" "NAME")` and `(plan "NAME" "GOAL")` are served by the
+bridge; the page's text and the model's typed steps land in files on the
+OS through `:page` lines; the `lookup` agent asks for them; the player
+embeds the plan in a typed question and takes a heading from the answer.
+[`release-v0.3.1.md`](release-v0.3.1.md).
+
+### v0.3.2 — a plan followed step by step, and a tool it wrote
+
+The plan's steps followed one at a time, "is this step done" a typed
+question each step, the current step in the metrics; and a sentence
+that asks for a tool ("build yourself a chart of your play") reaching
+the model through the bridge, the program it returns loaded through the
+judged gate, into cells, as any typed program is.
 
 ### Changing the OS itself, in stages
 
@@ -192,8 +195,8 @@ through the judged gate as a proposal, never straight to a domain.
 | The route as an Agel program over facts the engine writes, not C | open | the route is in `doom.c` |
 | `:agents`, needs, and a second sentence beside a running agent | done | v0.2.99: `scripts/test-drive.sh`; a line at the prompt between steps becomes the task, `:stop` ends the run |
 | A metrics window painted by an Agel program from the file | open | |
-| A fetch through the bridge into the data region | open | |
-| A plan of typed steps from a page, through a model, once | open | |
+| A fetch through the bridge into a file on the OS | done | v0.3.1: `(fetch URL NAME)` served by the bridge, `:page` lines written by the kernel; `scripts/test-play-bridge.sh`, `test-drive.sh` |
+| A plan of typed steps from a page, through a model, once | done | v0.3.1: `(plan NAME GOAL)` with `--plan claude|codex`, the file `plan`, the player's `next` question; one live run: the page was a bot-check interstitial, the planner said so and planned from memory, the judge chose `east` |
 | A tool written by a model, gated, loaded, run | open | |
 | A program installed into the program region from inside, through a gated effect | open | the region is written only by host scripts |
 | A domain replaced from inside by a gated proposal | open | the kernel replaces only a faulted compositor, with its own image |

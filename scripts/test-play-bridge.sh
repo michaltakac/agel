@@ -54,6 +54,51 @@ if [ "$replies" -lt 4 ] || [ "$steps" -ne 4 ] || [ "$fired" -lt 4 ] || [ "$goals
 fi
 echo "A judged episode through the bridge: 4 steps, each a typed (judge ...) request answered on one line and decided by the program toward the exit [ok]"
 
+# A lookup through the host: the `lookup` agent beside the player asks
+# for a page and a plan; the stand-in curl serves a page from a file (the
+# same stand-in answers the judge), the stand-in planner prints three
+# steps, the desktop writes both to files, and the player, seeing `plan`,
+# asks the judge where to head and heeds the answer.
+out=target/doom-runs/lookup
+rm -rf "$out"
+mkdir -p "$out"
+cat > "$out/page.html" <<'PAGE'
+<html><head><title>E1M1</title><style>p{}</style></head><body>
+<h1>E1M1: Hangar</h1><script>var x = 1;</script>
+<p>From the start, go north through the opening at the top of the room.</p>
+<p>Turn east and follow the corridor to the first door; open it.</p>
+<p>The exit switch is in the last room to the south-east, past the nukage.</p>
+</body></html>
+PAGE
+cat > "$out/curl" <<'FAKE'
+#!/bin/sh
+# A page for a fetch (no @body argument); otherwise the judge's answer,
+# with `next` answered when the request asks it.
+body=""
+for arg in "$@"; do case "$arg" in @*) body="${arg#@}";; esac; done
+if [ -z "$body" ]; then cat "$(dirname "$0")/page.html"; exit 0; fi
+cat > /dev/null
+if grep -q '"next"' "$body"; then
+  printf '%s\n200' '{"model":"stand-in","answers":{"foe":{"type":"noul","noul":0.2},"risk":{"type":"score","score":0.1,"confidence":0.8,"legend":{"0":"safe","1":"wary","2":"lethal"},"probabilities":{"0":0.9,"1":0.1,"2":0.0}},"next":{"type":"choice","choice":"north","confidence":0.7,"probabilities":{"north":0.7,"east":0.1,"south":0.1,"west":0.05,"keep":0.05}}},"usage":{"input_tokens":1,"output_tokens":1}}'
+else
+  printf '%s\n200' '{"model":"stand-in","answers":{"foe":{"type":"noul","noul":0.2},"risk":{"type":"score","score":0.1,"confidence":0.8,"legend":{"0":"safe","1":"wary","2":"lethal"},"probabilities":{"0":0.9,"1":0.1,"2":0.0}}},"usage":{"input_tokens":1,"output_tokens":1}}'
+fi
+FAKE
+cat > "$out/claude" <<'FAKE'
+#!/bin/sh
+cat > /dev/null
+printf '%s\n' "1. north - go through the opening at the top" "2. east - follow the corridor to the door" "3. south - the exit switch past the nukage"
+FAKE
+chmod +x "$out/curl" "$out/claude"
+TYPESAFEAI_API_KEY=stand-in cargo run -q --release -p agel-play -- --image "$image" --doom "$doom" --wad "$wad" \
+  --out "$out" --policy jev --curl-bin "$(pwd)/$out/curl" --claude-bin "$(pwd)/$out/claude" \
+  --agents --join lookup --plan claude --steps 6 | tee "$out/console.log"
+grep -q "agel-play: lookup .*: fetched e1m1 3 " "$out/console.log"
+grep -q "agel-play: lookup .*: planned plan 3" "$out/console.log"
+grep -q "agel-play: model reply .*: foe noul 200 risk score 3 100 800 900 100 0 next choice 5 north 700 700 100 100 50 50" "$out/console.log"
+grep -q "1. north - go through the opening at the top" "$out/plan-answer.txt"
+echo "A lookup through the host: the page and the plan written to files on the OS, the player asking the judge where to head from the plan [ok]"
+
 # The desktop driven through the bridge: no game, no window. The program
 # asks which of the desktop's commands comes next for the task and whether
 # the task is done; the stand-in answers "list the files" each step, with

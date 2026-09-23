@@ -211,12 +211,26 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
         assert "agents: step 2 dk do done" in tail, tail[-2000:]
         settled(machine, tail)
         assert machine.submit('(file-read "task")').strip().startswith('"now count the files instead"')
+        # A page the bridge delivers ahead of its reply (`:page NAME LINE`)
+        # is written to the file NAME once the step is done: how a lookup
+        # through the host lands where a program reads.
+        with machine.serial_lock:
+            send_line(machine, ":agents 1")
+            number, line, _ = request(machine)
+            machine.serial.sendall(b":page notes first line of the page\n")
+            machine.serial.sendall(b":page notes second line\n")
+            answer(machine, number, "wait", 0, 900)
+            tail = until_text(machine, b"AGENTS DONE AFTER 1 STEPS", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
+        assert "page: notes 35 bytes" in tail, tail[-2000:]
+        settled(machine, tail)
+        assert machine.submit('(file-read "notes")').strip().startswith('"first line of the page\\nsecond line\\n"')
         # The reviewer beside the player: it joins the player's world, its
         # needs are the player's summary file, and what it decides to change
         # is a def on the player's tunable cells in the shared world.
         assert "DOOM JUDGE AGENT READY" in machine.submit(":load doom-agent-judge")
         assert "REVIEW AGENT READY" in machine.submit(":join review")
-        assert "CELLS 19" in machine.submit(":cells")
+        assert "CELLS 20" in machine.submit(":cells")
         assert machine.submit("follow-steps").strip().startswith("8")
         machine.submit('(rv-apply "follow-longer")')
         assert machine.submit("follow-steps").strip().startswith("12")

@@ -65,6 +65,11 @@ struct Options {
     /// of `:play`: the reviewer reads the player's summary and may redefine
     /// its cells.
     agents: bool,
+    /// Programs joined before `:agents` beside the reviewer (`--join NAME`).
+    joins: Vec<String>,
+    /// The provider that writes a plan from a fetched page, once
+    /// (`--plan claude|codex`); none means `(plan ...)` answers with no plan.
+    plan: Option<String>,
     attach: Option<PathBuf>,
 }
 
@@ -89,6 +94,8 @@ fn options() -> Result<Options, String> {
         agel: PathBuf::from("boot/posix/target/x86_64-unknown-none/release/agel"),
         attach: None,
         agents: false,
+        joins: Vec::new(),
+        plan: None,
     };
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
@@ -118,6 +125,8 @@ fn options() -> Result<Options, String> {
             "--agel" => options.agel = PathBuf::from(value()?),
             "--attach" => options.attach = Some(PathBuf::from(value()?)),
             "--agents" => options.agents = true,
+            "--join" => options.joins.push(value()?),
+            "--plan" => options.plan = Some(value()?),
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -398,6 +407,238 @@ impl Frame {
             text.push('\n');
         }
         text
+    }
+}
+
+/// A quoted argument of a `(fetch ...)` or `(plan ...)` form: the n-th
+/// double-quoted string in the text.
+fn quoted(text: &str, index: usize) -> Option<String> {
+    let mut parts = text.split('"');
+    parts.next()?;
+    let mut found = 0;
+    while let Some(part) = parts.next() {
+        if found == index {
+            return Some(part.to_owned());
+        }
+        parts.next()?;
+        found += 1;
+    }
+    None
+}
+
+/// A page reduced to text: scripts and styles dropped, tags replaced by
+/// spaces or line breaks, a few entities decoded, whitespace collapsed.
+fn page_text(html: &str) -> Vec<String> {
+    let mut text = String::with_capacity(html.len());
+    let lower = html.to_ascii_lowercase();
+    let mut at = 0;
+    while at < html.len() {
+        let rest = &lower[at..];
+        if rest.starts_with("<script") || rest.starts_with("<style") {
+            let close = if rest.starts_with("<script") {
+                "</script>"
+            } else {
+                "</style>"
+            };
+            at = match rest.find(close) {
+                Some(end) => at + end + close.len(),
+                None => html.len(),
+            };
+            continue;
+        }
+        if rest.starts_with('<') {
+            let end = rest.find('>').map(|end| at + end + 1).unwrap_or(html.len());
+            let tag = &lower[at..end];
+            let breaks = [
+                "</p", "<br", "</li", "</h1", "</h2", "</h3", "</h4", "</tr", "</div", "</dd",
+                "</dt", "</td",
+            ];
+            text.push(if breaks.iter().any(|b| tag.starts_with(b)) {
+                '\n'
+            } else {
+                ' '
+            });
+            at = end;
+            continue;
+        }
+        let next = rest.find('<').map(|end| at + end).unwrap_or(html.len());
+        text.push_str(&html[at..next]);
+        at = next;
+    }
+    let text = text
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ");
+    text.lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| line.len() >= 24)
+        .collect()
+}
+
+/// The host's part of a lookup: a program asks `(fetch "URL" "NAME")` and
+/// the page arrives as `:page NAME LINE` lines the desktop writes to the
+/// file NAME (at most 3 KiB), then `fetched NAME LINES BYTES`; it asks
+/// `(plan "NAME" "GOAL")` and, with a planner configured, a model reads
+/// the fetched text once and answers with at most eight typed steps, sent
+/// as `:page plan LINE` lines, then `planned plan COUNT`; without one,
+/// `planned plan 0`. Neither goes through the judge.
+struct Lookup {
+    curl: PathBuf,
+    planner: Option<Box<dyn Provider>>,
+    pages: std::collections::HashMap<String, String>,
+    out: PathBuf,
+}
+
+impl Lookup {
+    const PAGE_BYTES: usize = 3000;
+    const LINE_BYTES: usize = 180;
+    const PLAN_STEPS: usize = 8;
+    const PLAN_LINE_BYTES: usize = 70;
+
+    fn serve(
+        &mut self,
+        prompt: &str,
+        number: u64,
+        serial: &mut Serial,
+    ) -> Result<Option<String>, String> {
+        let prompt = prompt.trim_start();
+        if prompt.starts_with("(fetch ") {
+            let (Some(url), Some(name)) = (quoted(prompt, 0), quoted(prompt, 1)) else {
+                return Ok(Some("error fetch expects a url and a name".to_owned()));
+            };
+            let name: String = name
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '.')
+                .take(16)
+                .collect();
+            let output = std::process::Command::new(&self.curl)
+                .args([
+                    "-sL",
+                    "--max-time",
+                    "30",
+                    "--max-filesize",
+                    "600000",
+                    "-A",
+                    "agel-lookup/0.3",
+                    &url,
+                ])
+                .output()
+                .map_err(|error| error.to_string())?;
+            let html = String::from_utf8_lossy(&output.stdout).into_owned();
+            let lines = page_text(&html);
+            let _ = fs::write(
+                self.out.join(format!("fetched-{name}.txt")),
+                lines.join("\n"),
+            );
+            self.pages.insert(
+                name.clone(),
+                lines.join("\n").chars().take(12_000).collect(),
+            );
+            let mut sent = 0;
+            let mut bytes = 0;
+            for line in &lines {
+                let line: String = line.chars().take(Self::LINE_BYTES).collect();
+                if bytes + line.len() + 1 > Self::PAGE_BYTES {
+                    break;
+                }
+                serial.write_raw(&format!(":page {name} {line}"))?;
+                sent += 1;
+                bytes += line.len() + 1;
+            }
+            return Ok(Some(format!("fetched {name} {sent} {bytes}")));
+        }
+        if prompt.starts_with("(plan ") {
+            let (Some(name), Some(goal)) = (quoted(prompt, 0), quoted(prompt, 1)) else {
+                return Ok(Some("error plan expects a page name and a goal".to_owned()));
+            };
+            let Some(page) = self.pages.get(&name).cloned() else {
+                return Ok(Some("planned plan 0 no such page".to_owned()));
+            };
+            let Some(planner) = &self.planner else {
+                return Ok(Some("planned plan 0 no planner".to_owned()));
+            };
+            let prompt = format!(
+                "Below is the text of a page about the goal: {goal}. Write a plan of at most {} steps for a player \
+                 starting at the level's start, one step per line, in the form `N. DIRECTION - instruction` where \
+                 DIRECTION is exactly one of north, east, south, west, door, switch, keep and the instruction is at \
+                 most eight words. Output only those lines.\n\n{page}",
+                Self::PLAN_STEPS
+            );
+            let prompt_digest = agel_integrity::sha256(prompt.as_bytes());
+            let request = ModelRequest {
+                id: number,
+                world_id: 0,
+                requester: 0,
+                reply_to: 0,
+                provider: planner.name().to_owned(),
+                prompt,
+                prompt_digest,
+                effect_key: agel_integrity::sha256(
+                    format!("agel-play:plan:{number}:{}", prompt_digest.to_hex()).as_bytes(),
+                ),
+            };
+            let answer = planner.infer(&request).map_err(|error| error.to_string());
+            let _ = fs::write(
+                self.out.join("plan-answer.txt"),
+                answer.clone().unwrap_or_else(|e| e.clone()),
+            );
+            let steps: Vec<String> = match &answer {
+                Ok(text) => text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| line.chars().next().is_some_and(|c| c.is_ascii_digit()))
+                    .map(|line| line.chars().take(Self::PLAN_LINE_BYTES).collect())
+                    .take(Self::PLAN_STEPS)
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+            for step in &steps {
+                serial.write_raw(&format!(":page plan {step}"))?;
+            }
+            return Ok(Some(match answer {
+                Ok(_) => format!("planned plan {}", steps.len()),
+                Err(error) => format!(
+                    "planned plan 0 {}",
+                    error
+                        .replace(['\n', '\r'], " ")
+                        .chars()
+                        .take(80)
+                        .collect::<String>()
+                ),
+            }));
+        }
+        Ok(None)
+    }
+}
+
+fn lookup_for(options: &Options) -> Lookup {
+    let planner: Option<Box<dyn Provider>> = match options.plan.as_deref() {
+        Some("claude") => {
+            let mut limits = CommandLimits::new(&options.out);
+            limits.timeout = Duration::from_secs(180);
+            limits.max_output_bytes = 64 * 1024;
+            let mut provider = ClaudeCodeProvider::new(&options.claude_bin, limits);
+            if let Some(model) = &options.model {
+                provider = provider.with_model(model);
+            }
+            Some(Box::new(provider))
+        }
+        Some("codex") => {
+            let mut limits = CommandLimits::new(&options.out);
+            limits.timeout = Duration::from_secs(180);
+            limits.max_output_bytes = 64 * 1024;
+            Some(Box::new(CodexProvider::new(&options.codex_bin, limits)))
+        }
+        _ => None,
+    };
+    Lookup {
+        curl: options.curl_bin.clone(),
+        planner,
+        pages: std::collections::HashMap::new(),
+        out: options.out.clone(),
     }
 }
 
@@ -736,6 +977,11 @@ impl Policy for Judge {
             // own policy, and the run records why.
             Err(error) if typed => {
                 let reason: String = error.replace(['\n', '\r'], " ").chars().take(120).collect();
+                // The request that failed, for whoever reads the run.
+                eprintln!(
+                    "agel-play: request {id} could not be judged ({reason}); its prompt: {}",
+                    block.prompt.chars().take(400).collect::<String>()
+                );
                 format!("error {reason}")
             }
             Err(error) => {
@@ -983,6 +1229,7 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
         policy.name()
     );
     let mut cursor = 0;
+    let mut lookup = lookup_for(options);
     let mut block = String::new();
     let mut in_block = false;
     let mut request_number = 0_u64;
@@ -1022,6 +1269,13 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
                     block.push_str("history: ");
                     block.push_str(decided);
                     block.push('\n');
+                }
+                if let Some(reply) =
+                    lookup.serve(&Block::parse(&block).prompt, request_number, &mut serial)?
+                {
+                    serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
+                    println!("agel-play: lookup {request_number}: {reply}");
+                    continue;
                 }
                 if let Some(reply) = policy.answer(&block) {
                     serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
@@ -1309,9 +1563,15 @@ fn play(
         serial.send_line(":exec agel -- /data/browse.agel")?;
     } else {
         if options.agents {
-            // The reviewer joins the player and both run as agents.
+            // The reviewer joins the player, and any program asked for, and
+            // all run as agents.
             serial.send_line(":join review")?;
             serial.wait_for(0, b"REVIEW AGENT READY", Duration::from_secs(60))?;
+            for name in &options.joins {
+                let start = serial.len();
+                serial.send_line(&format!(":join {name}"))?;
+                serial.wait_for(start, b"READY", Duration::from_secs(60))?;
+            }
             serial.send_line(&format!(":agents {} {}", options.steps, options.hold))?;
         } else {
             let loop_word = if desktop { ":drive" } else { ":play" };
@@ -1319,6 +1579,7 @@ fn play(
         }
     }
 
+    let mut lookup = lookup_for(options);
     let mut block = String::new();
     let mut in_block = false;
     let mut request_number = 0_u64;
@@ -1359,7 +1620,12 @@ fn play(
                     block.push_str(decided);
                     block.push('\n');
                 }
-                if let Some(reply) = policy.answer(&block) {
+                if let Some(reply) =
+                    lookup.serve(&Block::parse(&block).prompt, request_number, &mut serial)?
+                {
+                    serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
+                    println!("agel-play: lookup {request_number}: {reply}");
+                } else if let Some(reply) = policy.answer(&block) {
                     serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
                     println!("agel-play: model reply {request_number}: {reply}");
                 } else {

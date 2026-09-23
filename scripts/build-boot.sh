@@ -80,7 +80,7 @@ done
 # of a desktop (`--features native-graphics`) and removed by a build of
 # anything else, so the persistent image's data region holds what its
 # kernel reads and nothing a test of the workshop would list unasked.
-for program in workbench:wb doom-agent:da doom-agent-model:dm doom-agent-judge:dj desktop-agent:dk review:rv; do
+for program in workbench:wb doom-agent:da doom-agent-model:dm doom-agent-judge:dj desktop-agent:dk review:rv lookup:lk; do
   case " $* " in
     *native-graphics*)
       source="$project_dir/boot/desktop/${program%%:*}.agel"

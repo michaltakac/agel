@@ -2571,6 +2571,12 @@ const PROGRAMS: &[Program] = &[
         file: b"/data/rv.agel",
         ready: b"REVIEW AGENT READY - :AGENTS STEPS",
     },
+    Program {
+        name: b"lookup",
+        prefix: b"lk-",
+        file: b"/data/lk.agel",
+        ready: b"LOOKUP AGENT READY - :AGENTS STEPS",
+    },
 ];
 
 /// How long the play loop holds a step's keys, in passes of the run, unless
@@ -2678,8 +2684,16 @@ fn relay_request(
         .iter()
         .take_while(|byte| byte.is_ascii_digit())
         .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
+    // The request is one serial line: a newline in its text (a file's
+    // lines a program embedded in a question) becomes a space.
     let mut text = StatusLine::new(b"model-request ");
-    text.push(request);
+    for byte in request {
+        text.push(if matches!(*byte, b'\n' | b'\r') {
+            b" "
+        } else {
+            core::slice::from_ref(byte)
+        });
+    }
     text.push(b"\n");
     crate::process::Console::write(serial, text.get());
     let mut shown = StatusLine::new(b"look-line: ");
@@ -2708,10 +2722,13 @@ fn relay_request(
     let mut delivered = false;
     while let Some(length) = serial_line(serial, &mut answer) {
         let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
-            // A sentence said while the reply was awaited is kept for the
-            // loop to hear once the step is done, not dropped.
+            // A page the bridge delivers ahead of its reply, line by line,
+            // is kept for the loop to write to a file once the step is
+            // done; a sentence said meanwhile is kept to be heard.
             let line = trim(&answer[..length]);
-            if is_prose(line) {
+            if let Some(page) = line.strip_prefix(b":page ") {
+                keep_page_line(page);
+            } else if is_prose(line) {
                 set_heard(line);
             }
             continue;
@@ -2943,6 +2960,95 @@ fn join_program(
 /// drive loop relays as its `task:` line.
 static mut INTENT: [u8; crate::native::EXEC_BYTES] = [0; crate::native::EXEC_BYTES];
 static mut INTENT_LEN: usize = 0;
+
+/// A page the bridge delivered ahead of a reply (`:page NAME TEXT` lines),
+/// kept until the loop can write it to the file NAME in the filesystem
+/// region: how a lookup through the host lands where a program reads.
+const PAGE_BYTES: usize = 3072;
+const PAGE_NAME_BYTES: usize = 16;
+static mut PAGE_TEXT: [u8; PAGE_BYTES] = [0; PAGE_BYTES];
+static mut PAGE_LEN: usize = 0;
+static mut PAGE_NAME: [u8; PAGE_NAME_BYTES] = [0; PAGE_NAME_BYTES];
+static mut PAGE_NAME_LEN: usize = 0;
+
+#[inline(never)]
+fn keep_page_line(line: &[u8]) {
+    let (name, text) = match line.iter().position(|byte| *byte == b' ') {
+        Some(space) => (&line[..space], &line[space + 1..]),
+        None => (line, &b""[..]),
+    };
+    let name = &name[..name.len().min(PAGE_NAME_BYTES)];
+    // Safety: the desktop loop is the only writer and the only reader.
+    unsafe {
+        let kept_name = &mut *core::ptr::addr_of_mut!(PAGE_NAME);
+        let kept_length = core::ptr::read(core::ptr::addr_of!(PAGE_NAME_LEN));
+        let mut length = core::ptr::read(core::ptr::addr_of!(PAGE_LEN));
+        if &kept_name[..kept_length] != name {
+            // A new page starts; the old one, if any, was flushed or is dropped.
+            kept_name[..name.len()].copy_from_slice(name);
+            core::ptr::write(core::ptr::addr_of_mut!(PAGE_NAME_LEN), name.len());
+            length = 0;
+        }
+        let page = &mut *core::ptr::addr_of_mut!(PAGE_TEXT);
+        let take = text.len().min(PAGE_BYTES.saturating_sub(length + 1));
+        page[length..length + take].copy_from_slice(&text[..take]);
+        length += take;
+        if length < PAGE_BYTES {
+            page[length] = b'\n';
+            length += 1;
+        }
+        core::ptr::write(core::ptr::addr_of_mut!(PAGE_LEN), length);
+    }
+}
+
+/// Write the kept page to its file and say so; nothing when none is kept.
+#[inline(never)]
+fn flush_page(
+    serial: &mut ServiceDomain,
+    current: &mut Scene,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+    clock: Option<&mut ServiceDomain>,
+) {
+    // Safety: as for `keep_page_line`; the page is read then cleared.
+    let (name, length) = unsafe {
+        let name_length = core::ptr::read(core::ptr::addr_of!(PAGE_NAME_LEN));
+        let length = core::ptr::read(core::ptr::addr_of!(PAGE_LEN));
+        core::ptr::write(core::ptr::addr_of_mut!(PAGE_LEN), 0);
+        core::ptr::write(core::ptr::addr_of_mut!(PAGE_NAME_LEN), 0);
+        (name_length, length)
+    };
+    if length == 0 || name == 0 {
+        return;
+    }
+    let mut tee = Tee {
+        serial,
+        terminal: &mut current.terminal,
+    };
+    let mut host = EffectHost {
+        storage,
+        filesystem,
+        console: &mut tee,
+        clock,
+    };
+    // Safety: the statics are read while nothing writes them.
+    let (page, name) = unsafe {
+        let page: &[u8; PAGE_BYTES] = &*core::ptr::addr_of!(PAGE_TEXT);
+        let kept: &[u8; PAGE_NAME_BYTES] = &*core::ptr::addr_of!(PAGE_NAME);
+        (&page[..length], &kept[..name])
+    };
+    let mut said = StatusLine::new(b"page: ");
+    said.push(name);
+    match host.file_write(name, page, false) {
+        Ok(_) => {
+            said.push(b" ");
+            said.number_u64(length as u64);
+            said.push(b" bytes\n");
+        }
+        Err(_) => said.push(b" could not be written\n"),
+    }
+    crate::process::Console::write(&mut tee, said.get());
+}
 
 /// A sentence that arrived while a reply was awaited, kept until the loop
 /// is between steps.
@@ -4665,6 +4771,13 @@ fn agents(
                 if relay_request(evaluator, serial, &look, task) != Some(true) {
                     break;
                 }
+                flush_page(
+                    serial,
+                    current,
+                    storage,
+                    filesystem.as_deref_mut(),
+                    clock.as_deref_mut(),
+                );
                 if let Some(again) = evaluate!(step_name.get()) {
                     decision = again;
                 }

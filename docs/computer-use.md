@@ -165,7 +165,13 @@ A sentence heard between steps is also written to the file `task`
 step can read what was said; the DOOM agent reads it and asks the judge
 what it asks for. `:handover NAME STEPS agents` loads NAME, joins the
 reviewer and runs `:agents` instead of `:play`; the desktop agent's
-`review-doom` command is that handover. A watch is an agent whose need
+`review-doom` command is that handover. A lookup is a request too (v0.3.1):
+`(model-request "(fetch \"URL\" \"NAME\")")` is served by the bridge
+rather than the judge, and the page's text lands in the file NAME through
+`:page NAME LINE` lines the kernel keeps and writes once the step is done
+(`page: NAME BYTES` on the console); `(plan "NAME" "GOAL")` asks a
+planner on the bridge (`--plan claude|codex`) for at most eight typed
+steps into the file `plan`. A watch is an agent whose need
 is its trigger; a scheduled job is one whose need is `(after SECONDS)`. A fact only the judge can settle is
 asked by the agent in its own step and defined as a need, so the loop
 never waits on a reply. The first agent that changes another is

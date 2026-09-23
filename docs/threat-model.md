@@ -1985,6 +1985,25 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.3.1
+
+- **A fetch is the host's.** The OS asks for a page through the request
+  it already had; the bridge fetches with curl under a time and size
+  bound and delivers text, not HTML, at most 3 KiB, which the kernel
+  writes to a file in the filesystem region under a name the program
+  chose (sixteen bytes, alphanumerics, dashes and dots). A page is data
+  on the OS; nothing reads it as a form. What the bridge fetches is the
+  host's network reaching the host, as the judge's endpoint already was.
+- **A plan is a model's answer, once, as lines.** The planner runs under
+  the same sandbox, limits and audit log as the model policy; its answer
+  is filtered to lines that start with a digit, at most eight, at most
+  seventy bytes each, and lands in `plan`. The player embeds the plan's
+  tail in a typed question and takes a heading from the judge's answer;
+  no line of the plan is executed as anything.
+- **Not claimed:** that the fetched text is what a person would read of
+  the page, or that a plan is safe to follow; it is a heading for ten
+  steps.
+
 ## v0.3.0
 
 - **A sentence writes a file.** A line heard between steps of `:agents`

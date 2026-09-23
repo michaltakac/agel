@@ -484,6 +484,10 @@ promise.
   judge what it asks for and acts on it; `review-doom` hands the desktop
   to the player and the reviewer side by side; the reviewer says its
   notes and learns from them across runs; filmed.
+  `v0.3.1` is the lookup: `(fetch URL NAME)` and `(plan NAME GOAL)`
+  served by the bridge, the page and the model's typed steps written to
+  files on the OS, the `lookup` agent, and the player asking the judge
+  where the plan says to head.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

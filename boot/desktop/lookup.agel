@@ -1,0 +1,13 @@
+; A lookup beside a task: an agent that asks the host, through the same
+; request the judge answers, for a page (`(fetch "URL" "NAME")`: the
+; bridge fetches it, reduces it to text and delivers at most 3 KiB of
+; lines, which the desktop writes to the file NAME), then for a plan from
+; it (`(plan "NAME" "GOAL")`: with a planner configured on the host a
+; model reads the fetched text once and answers with at most eight typed
+; steps, `N. DIRECTION - instruction`, written to the file `plan`;
+; without one the plan is empty and says so). The OS has no network; the
+; lookup is the host's, said on the console as it goes, and the files are
+; what the player reads. Two requests, then done. Three cells.
+(begin (def lk-phase 0) (def lk-reason "looking up") (def lk-url "https://doomwiki.org/wiki/E1M1:_Hangar_(Doom)") (def lk-goal "reach the exit of E1M1 from the start") (def lk-needs (fn () '())))
+(begin (def lk-ask (fn () (if (= lk-phase 0) (model-request (text-concat "(fetch \"" (text-concat lk-url "\" \"e1m1\")"))) (model-request (text-concat "(plan \"e1m1\" \"" (text-concat lk-goal "\")")))))) (def lk-heard (fn (a) (begin (def lk-reason a) (def lk-phase (+ lk-phase 1)) (console-log (text-concat "lookup: " a)) (if (< lk-phase 2) "wait" "done")))))
+(def lk-step (fn () (begin (def a (model-result)) (if (= a nil) (if (< lk-phase 2) (begin (lk-ask) "wait") "done") (lk-heard a)))))

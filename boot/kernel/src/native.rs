@@ -83,7 +83,7 @@ pub type Port = unsafe fn(
 struct Context {
     look: [u8; LOOK_BYTES],
     reply: [u8; REQUEST_BYTES],
-    reply_length: u8,
+    reply_length: u16,
     reply_number: u32,
     /// The shared page and the port out to the desktop; none where the
     /// session has no desktop, and the effect words then answer an error.
@@ -393,12 +393,12 @@ struct World {
     /// The text of the model request the language made last, and its
     /// number; both roll back with the world.
     request: [u8; REQUEST_BYTES],
-    request_length: u8,
+    request_length: u16,
     request_number: u32,
     /// A program the language asked the desktop to start, taken by the
     /// desktop after the form commits; rolls back with the world.
     exec: [u8; EXEC_BYTES],
-    exec_length: u8,
+    exec_length: u16,
     /// The owning session's context, set before every evaluation; null in a
     /// world that has none, where the `look` words answer with an error.
     context: *const Context,
@@ -571,7 +571,7 @@ impl Session {
     pub fn deliver(&mut self, number: u32, text: &[u8]) {
         let length = text.len().min(REQUEST_BYTES);
         self.context.reply[..length].copy_from_slice(&text[..length]);
-        self.context.reply_length = length as u8;
+        self.context.reply_length = length as u16;
         self.context.reply_number = number;
     }
 
@@ -3641,7 +3641,7 @@ fn look_builtin(
             let mut copy = [0_u8; REQUEST_BYTES];
             copy[..bytes.len()].copy_from_slice(bytes);
             world.request = copy;
-            world.request_length = len as u8;
+            world.request_length = len;
             world.request_number = world.request_number.wrapping_add(1);
             Scalar::Int(i64::from(world.request_number))
         }
@@ -3699,7 +3699,7 @@ fn effect_builtin(
             let mut copy = [0_u8; EXEC_BYTES];
             copy[..bytes.len()].copy_from_slice(bytes);
             world.exec = copy;
-            world.exec_length = len as u8;
+            world.exec_length = len;
             return Ok(Some(Scalar::Bool(true)));
         }
         _ => return Ok(None),

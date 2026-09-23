@@ -608,6 +608,11 @@ Each rung must be runnable and differentially testable against the rung below:
    by side; the reviewer says its notes and re-applies the last one on
    the next run; the bridge forwards its input to the serial line. See
    [`computer-use.md`](computer-use.md) and [`release-v0.3.0.md`](release-v0.3.0.md).
+96. **A lookup through the host (v0.3.1):** `(fetch URL NAME)` and
+   `(plan NAME GOAL)` are served by the bridge, the page's text and the
+   model's typed steps landing in files on the OS through `:page` lines;
+   the `lookup` agent asks for them, and the player asks the judge where
+   the plan says to head. See [`release-v0.3.1.md`](release-v0.3.1.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.
