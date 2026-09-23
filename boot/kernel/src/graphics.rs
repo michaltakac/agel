@@ -655,6 +655,7 @@ impl Desk<'_, '_> {
 }
 
 impl crate::process::Display for Desk<'_, '_> {
+    #[inline(never)]
     fn open(&mut self, owner: usize, width: u32, height: u32, title: &[u8]) -> i64 {
         use crate::world::process::{WINDOW_MAX, WINDOW_MIN};
         if width < WINDOW_MIN.0
@@ -833,6 +834,7 @@ static mut CANVAS_FRAMES: [[u64; CANVAS_PAGES]; crate::world::process::WINDOWS] 
 /// What the language may look at: the played window's canvas as a grid of
 /// shades, one pixel sampled at each cell's centre, and the program's last
 /// console line, in the layout `native::LOOK_*` describes.
+#[inline(never)]
 fn observe(window: &Window, terminal: &Terminal, out: &mut [u8; LOOK_BYTES]) {
     out.fill(0);
     let length = usize::from(terminal.last_length);
@@ -889,10 +891,12 @@ const PLAY_KEYS: &[(&[u8], u8, bool, Option<u8>)] = &[
 ];
 const PLAY_KEYS_HELD: usize = 4;
 
+#[inline(never)]
 fn play_key(name: &[u8]) -> Option<usize> {
     PLAY_KEYS.iter().position(|(key, ..)| *key == name)
 }
 
+#[inline(never)]
 fn inject(window: &mut Window, key: usize, pressed: bool) {
     use crate::world::process::{EVENT_KEY, EVENT_KEY_DOWN, EVENT_KEY_UP};
     let (_, code, extended, byte) = PLAY_KEYS[key];
@@ -909,6 +913,7 @@ fn inject(window: &mut Window, key: usize, pressed: bool) {
 
 /// The keys an evaluated form names: symbols in a list, or one symbol;
 /// anything else names none.
+#[inline(never)]
 fn keys_named(form: &[u8], out: &mut [usize; PLAY_KEYS_HELD]) -> usize {
     let mut count = 0;
     for word in form.split(|byte| matches!(byte, b'(' | b')' | b' ' | b'\'')) {
@@ -925,6 +930,7 @@ fn keys_named(form: &[u8], out: &mut [usize; PLAY_KEYS_HELD]) -> usize {
 /// Withdraw a window's canvas from the compositor: its pages unmapped and
 /// its words cleared, so no record can reach them; the blit records the
 /// window keeps are no longer permitted and are skipped.
+#[inline(never)]
 fn drop_canvas(compositor: &mut arch::Domain, window: &mut Window) {
     let Some((width, height)) = window.canvas.take() else {
         return;
@@ -1193,6 +1199,7 @@ impl Terminal {
 
     /// A newline ends the row; the next row opens when something is written
     /// on it, so a line a process finished does not leave a blank one.
+    #[inline(never)]
     fn push(&mut self, bytes: &[u8]) {
         self.dirty = true;
         for byte in bytes {
@@ -1246,6 +1253,7 @@ struct Tee<'a> {
 }
 
 impl crate::process::Console for Tee<'_> {
+    #[inline(never)]
     fn write(&mut self, bytes: &[u8]) {
         crate::process::Console::write(self.serial, bytes);
         self.terminal.push(bytes);
@@ -1791,6 +1799,7 @@ fn replace_text(record: &mut [u8; RECORD_BYTES], text: &[u8]) {
     put_u32(record, 8, length as u32);
 }
 
+#[inline(never)]
 fn materialize(scene: Scene, line: Option<&[u8]>, status: &[u8]) -> Result<Frame, &'static str> {
     let mut frame = Frame::empty();
     let (commands, remainder) = VECTOR_STREAM[STREAM_HEADER_BYTES..].as_chunks::<RECORD_BYTES>();
@@ -2131,6 +2140,7 @@ fn parse_intent(line: &[u8]) -> Result<Intent, &'static str> {
     Err("TRY (HELP)")
 }
 
+#[inline(never)]
 fn trim(mut value: &[u8]) -> &[u8] {
     while value.first().is_some_and(u8::is_ascii_whitespace) {
         value = &value[1..];
@@ -2151,6 +2161,7 @@ fn argument<'a>(line: &'a [u8], prefix: &[u8], suffix: &[u8]) -> Option<&'a [u8]
     Some(&line[prefix.len()..line.len() - suffix.len()])
 }
 
+#[inline(never)]
 fn failed(reason: &str) -> ! {
     console::write("AGEL_GRAPHICS_FAILED: ");
     console::write(reason);
@@ -2174,6 +2185,7 @@ fn configure(
     core.write_shared(shared::DISPLAY_LOGICAL_HEIGHT, u64::from(logical_height));
 }
 
+#[inline(never)]
 fn request(domain: &mut arch::Domain, command: u64) -> Result<(), &'static str> {
     domain.core().stage_command(command);
     match domain.run() {
@@ -2189,6 +2201,7 @@ fn checksum(domain: &mut arch::Domain) -> Result<u64, &'static str> {
     Ok(domain.core().read_shared(shared::VALUES))
 }
 
+#[inline(never)]
 fn render(
     domain: &mut arch::Domain,
     mut inputs: Option<&mut Inputs<'_>>,
@@ -2200,6 +2213,7 @@ fn render(
 
 /// The compositor copies the clip of its back buffer — all of it when no
 /// clip is set — to the device: one record, kind 12.
+#[inline(never)]
 fn present(domain: &mut arch::Domain, inputs: Option<&mut Inputs<'_>>) -> Result<(), &'static str> {
     let mut record = [0_u8; RECORD_BYTES];
     record[..4].copy_from_slice(&12_u32.to_le_bytes());
@@ -2210,6 +2224,7 @@ fn present(domain: &mut arch::Domain, inputs: Option<&mut Inputs<'_>>) -> Result
 /// `BACK_BASE`, drawn into by every record and presented to the device a
 /// clip at a time, so a frame is never seen half-drawn. Without the
 /// memory the compositor draws straight to the device, as before.
+#[inline(never)]
 fn attach_back_buffer(
     machine: &mut arch::Machine,
     compositor: &mut arch::Domain,
@@ -2259,6 +2274,7 @@ fn emit_records(
 /// Redraw the whole frame, but only the pixels inside `region`: what a
 /// pointer that moved or a widget that changed needs, at the cost of that
 /// area rather than the screen.
+#[inline(never)]
 fn render_region(
     domain: &mut arch::Domain,
     inputs: Option<&mut Inputs<'_>>,
@@ -2338,6 +2354,7 @@ struct StatusLine {
 }
 
 impl StatusLine {
+    #[inline(never)]
     fn new(text: &[u8]) -> Self {
         let mut status = Self {
             bytes: [0; PAYLOAD_BYTES],
@@ -2347,6 +2364,7 @@ impl StatusLine {
         status
     }
 
+    #[inline(never)]
     fn push(&mut self, text: &[u8]) {
         let count = text.len().min(self.bytes.len() - self.len);
         self.bytes[self.len..self.len + count].copy_from_slice(&text[..count]);
@@ -2360,6 +2378,7 @@ impl StatusLine {
         }
     }
 
+    #[inline(never)]
     fn number_u64(&mut self, value: u64) {
         let mut digits = [0_u8; 20];
         let mut cursor = digits.len();
@@ -2472,6 +2491,7 @@ fn restore_from_disk(
     Ok((empty, highest_generation, revision))
 }
 
+#[inline(never)]
 fn command_argument<'a>(line: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
     line.strip_prefix(prefix).map(trim)
 }
@@ -2545,6 +2565,12 @@ const PROGRAMS: &[Program] = &[
         file: b"/data/dk.agel",
         ready: b"DESKTOP AGENT READY - :DRIVE STEPS",
     },
+    Program {
+        name: b"review",
+        prefix: b"rv-",
+        file: b"/data/rv.agel",
+        ready: b"REVIEW AGENT READY - :AGENTS STEPS",
+    },
 ];
 
 /// How long the play loop holds a step's keys, in passes of the run, unless
@@ -2558,6 +2584,7 @@ const PLAY_REPLY_POLLS: usize = 60_000_000;
 /// Run the desktop's programs for up to `passes` passes, or until one prints
 /// a whole line when `until_line` asks; whether every program ended.
 #[allow(clippy::too_many_arguments)]
+#[inline(never)]
 fn play_passes(
     machine: &mut arch::Machine,
     compositor: &mut arch::Domain,
@@ -2606,6 +2633,7 @@ fn play_passes(
 
 /// A line typed on the serial console while the play loop waits for a
 /// model's answer, bounded: none when nothing whole arrives in time.
+#[inline(never)]
 fn serial_line(serial: &mut ServiceDomain, out: &mut [u8; PAYLOAD_BYTES]) -> Option<usize> {
     let handle = serial.handle();
     let mut length = 0;
@@ -2629,173 +2657,12 @@ fn serial_line(serial: &mut ServiceDomain, out: &mut [u8; PAYLOAD_BYTES]) -> Opt
     None
 }
 
-/// The language plays the focused window's program: each step pauses the
-/// game with the key `(play-pause)` names, waits for the program's line,
-/// shows the language what the window holds, asks `(play-step)` which keys
-/// to hold, answers a model request it made through the serial console,
-/// holds the keys for the step, and unpauses. The desktop is the substrate;
-/// the policy is Agel.
-#[allow(clippy::too_many_arguments)]
-fn play(
-    machine: &mut arch::Machine,
-    compositor: &mut arch::Domain,
-    mut inputs: Option<&mut Inputs<'_>>,
-    evaluator: &mut arch::Domain,
-    storage: &mut ServiceDomain,
-    mut filesystem: Option<&mut ServiceDomain>,
-    serial: &mut ServiceDomain,
-    mut clock: Option<&mut ServiceDomain>,
-    current: &mut Scene,
-    evaluator_revision: &mut u64,
-    running: &mut Option<&'static mut crate::process::Run>,
-    line: &[u8],
-    steps: usize,
-    hold: usize,
-) -> StatusLine {
-    let Some(run) = running.as_deref_mut() else {
-        return StatusLine::new(b"NO PROGRAM TO PLAY - :EXEC ONE");
-    };
-    let Some(slot) = current
-        .focus
-        .filter(|slot| current.windows[usize::from(*slot)].is_some_and(|window| window.listens()))
-    else {
-        return StatusLine::new(b"NO WINDOW TO PLAY - CLICK ONE");
-    };
-    let slot = usize::from(slot);
-    // Each form the loop asks is evaluated with the desktop answering the
-    // language's effects, so the program can log its own steps to a file.
-    macro_rules! evaluate {
-        ($form:expr) => {{
-            let mut tee = Tee {
-                serial: &mut *serial,
-                terminal: &mut current.terminal,
-            };
-            let mut host = EffectHost {
-                storage: &mut *storage,
-                filesystem: filesystem.as_deref_mut(),
-                console: &mut tee,
-                clock: clock.as_deref_mut(),
-            };
-            evaluate_form(evaluator, evaluator_revision, $form, &mut host)
-        }};
-    }
-    let pause = evaluate!(b"(play-pause)").and_then(|key| play_key(key.get()));
-    let mut ended = false;
-    let mut played = 0;
-    for step in 1..=steps {
-        if let Some(key) = pause {
-            let window = current.windows[slot].as_mut().expect("the played window");
-            inject(window, key, true);
-            inject(window, key, false);
-            ended = play_passes(
-                machine,
-                compositor,
-                inputs.as_deref_mut(),
-                storage,
-                filesystem.as_deref_mut(),
-                serial,
-                current,
-                run,
-                PLAY_PAUSE_PASSES,
-                true,
-            );
-            if ended {
-                break;
-            }
-        }
-        let mut look = [0_u8; LOOK_BYTES];
-        observe(
-            current.windows[slot].as_ref().expect("the played window"),
-            &current.terminal,
-            &mut look,
-        );
-        for (offset, byte) in look.iter().enumerate() {
-            evaluator.core().write_observation(offset, *byte);
-        }
-        if evaluator_request(evaluator, shared::COMMAND_EVALUATOR_OBSERVE, b"").is_err() {
-            return StatusLine::new(b"THE EVALUATOR COULD NOT LOOK");
-        }
-        let Some(mut decision) = evaluate!(b"(play-step)") else {
-            return StatusLine::new(b"PLAY-STEP FAILED - :LOAD DOOM-AGENT");
-        };
-        // A request the step made goes out on the serial console with what
-        // the language saw; the answer comes back as `:model-reply N TEXT`
-        // and the step is asked again with it.
-        if relay_request(evaluator, serial, &look, b"") == Some(true) {
-            if let Some(again) = evaluate!(b"(play-step)") {
-                decision = again;
-            }
-        }
-        let mut keys = [0; PLAY_KEYS_HELD];
-        let count = keys_named(decision.get(), &mut keys);
-        let mut report = StatusLine::new(b"play: step ");
-        report.number_u64(step as u64);
-        report.push(b" keys ");
-        report.push(decision.get());
-        if let Some(reason) = evaluate!(b"play-reason").filter(|r| r.get() != b"nil") {
-            report.push(b" reason ");
-            report.push(reason.get());
-        }
-        report.push(b"\n");
-        {
-            let mut tee = Tee {
-                serial,
-                terminal: &mut current.terminal,
-            };
-            crate::process::Console::write(&mut tee, report.get());
-        }
-        {
-            let window = current.windows[slot].as_mut().expect("the played window");
-            for key in &keys[..count] {
-                inject(window, *key, true);
-            }
-            if let Some(key) = pause {
-                inject(window, key, true);
-                inject(window, key, false);
-            }
-        }
-        ended = play_passes(
-            machine,
-            compositor,
-            inputs.as_deref_mut(),
-            storage,
-            filesystem.as_deref_mut(),
-            serial,
-            current,
-            run,
-            hold,
-            false,
-        );
-        if let Some(window) = current.windows[slot].as_mut() {
-            for key in &keys[..count] {
-                inject(window, *key, false);
-            }
-        }
-        played = step;
-        current.terminal.dirty = false;
-        let frame =
-            materialize(*current, Some(line), b"PLAYING").unwrap_or_else(|reason| failed(reason));
-        render_region(compositor, inputs.as_deref_mut(), &frame, TERMINAL_REGION)
-            .unwrap_or_else(|reason| failed(reason));
-        if ended || !run.alive(slot_owner(current, slot)) {
-            break;
-        }
-    }
-    if ended {
-        *running = None;
-        return StatusLine::new(b"PROCESS ENDED");
-    }
-    let mut status = StatusLine::new(b"PLAYED ");
-    status.number_u64(played as u64);
-    status.push(b" STEPS");
-    status
-}
-
 /// A request the step made goes out on the serial console with what the
 /// language saw — `model-request N TEXT`, the look line, the shades, and
 /// `model-request end` — and the answer is read back as `:model-reply N
 /// TEXT` and delivered. None when the step made no request; otherwise
 /// whether an answer was delivered, `model-reply: none` said when not.
+#[inline(never)]
 fn relay_request(
     evaluator: &mut arch::Domain,
     serial: &mut ServiceDomain,
@@ -2867,6 +2734,7 @@ fn relay_request(
 /// windows (slot, title, hidden, maximized, ended), the focus, whether a
 /// process runs, and the last line the terminal finished; the shades are
 /// the focused window's canvas when there is one, dark otherwise.
+#[inline(never)]
 fn observe_desktop(current: &Scene, running: bool, out: &mut [u8; LOOK_BYTES]) {
     out.fill(0);
     if let Some(window) = current
@@ -2920,188 +2788,11 @@ fn observe_desktop(current: &Scene, running: bool, out: &mut [u8; LOOK_BYTES]) {
 
 /// The commands a driving program may not type: the loops that would nest
 /// this one, and the one that halts the machine.
+#[inline(never)]
 fn drive_refuses(line: &[u8]) -> bool {
-    [&b":drive"[..], b":play", b":shutdown"]
+    [&b":drive"[..], b":play", b":agents", b":shutdown"]
         .iter()
         .any(|word| line.starts_with(word))
-}
-
-/// `:drive STEPS [HOLD]`: the loaded program drives the desktop. Each step
-/// the desktop shows the program its own state through the look words,
-/// asks `(drive-step)` for one command line, relays a request the step
-/// made to the serial console and asks again with the answer, then types
-/// the line as the operator would — `wait` types nothing, `done` ends the
-/// run — and lets a running process go on for `hold` passes. The program
-/// needs no window: it is the desktop, not a window, that it drives.
-#[allow(clippy::too_many_arguments)]
-fn drive(
-    machine: &mut arch::Machine,
-    compositor: &mut arch::Domain,
-    mut inputs: Option<&mut Inputs<'_>>,
-    evaluator: &mut arch::Domain,
-    storage: &mut ServiceDomain,
-    mut filesystem: Option<&mut ServiceDomain>,
-    serial: &mut ServiceDomain,
-    mut clock: Option<&mut ServiceDomain>,
-    recovery: &mut Option<LiveRecovery>,
-    kernel: &mut Option<KernelRecovery>,
-    current: &mut Scene,
-    previous: &mut Scene,
-    scene_revision: &mut u8,
-    evaluator_revision: &mut u64,
-    workspace: &mut Workspace,
-    committed_workspace: &mut Workspace,
-    generation: &mut u64,
-    dirty: &mut bool,
-    running: &mut Option<&'static mut crate::process::Run>,
-    line: &[u8],
-    steps: usize,
-    hold: usize,
-) -> StatusLine {
-    macro_rules! evaluate {
-        ($form:expr) => {{
-            let mut tee = Tee {
-                serial: &mut *serial,
-                terminal: &mut current.terminal,
-            };
-            let mut host = EffectHost {
-                storage: &mut *storage,
-                filesystem: filesystem.as_deref_mut(),
-                console: &mut tee,
-                clock: clock.as_deref_mut(),
-            };
-            evaluate_form(evaluator, evaluator_revision, $form, &mut host)
-        }};
-    }
-    if evaluate!(b"drive-step").is_none_or(|value| value.get() == b"nil") {
-        return StatusLine::new(b"NO PROGRAM TO DRIVE - :LOAD DESKTOP-AGENT");
-    }
-    let mut driven = 0;
-    let mut finished = false;
-    for step in 1..=steps {
-        let mut look = [0_u8; LOOK_BYTES];
-        observe_desktop(current, running.is_some(), &mut look);
-        for (offset, byte) in look.iter().enumerate() {
-            evaluator.core().write_observation(offset, *byte);
-        }
-        if evaluator_request(evaluator, shared::COMMAND_EVALUATOR_OBSERVE, b"").is_err() {
-            return StatusLine::new(b"THE EVALUATOR COULD NOT LOOK");
-        }
-        let Some(mut decision) = evaluate!(b"(drive-step)") else {
-            return StatusLine::new(b"DRIVE-STEP FAILED - :LOAD DESKTOP-AGENT");
-        };
-        if relay_request(evaluator, serial, &look, intent()) == Some(true) {
-            if let Some(again) = evaluate!(b"(drive-step)") {
-                decision = again;
-            }
-        }
-        // The decision is text: a command line, or `wait`, or `done`.
-        let text = decision.get();
-        let text = text
-            .strip_prefix(b"\"")
-            .and_then(|rest| rest.strip_suffix(b"\""))
-            .unwrap_or(text);
-        let mut command = StatusLine::new(trim(text));
-        let mut report = StatusLine::new(b"drive: step ");
-        report.number_u64(step as u64);
-        report.push(b" do ");
-        report.push(command.get());
-        if let Some(reason) = evaluate!(b"drive-reason").filter(|r| r.get() != b"nil") {
-            report.push(b" reason ");
-            report.push(reason.get());
-        }
-        report.push(b"\n");
-        {
-            let mut tee = Tee {
-                serial: &mut *serial,
-                terminal: &mut current.terminal,
-            };
-            crate::process::Console::write(&mut tee, report.get());
-        }
-        driven = step;
-        let typed = command.get();
-        if typed == b"done" {
-            finished = true;
-            break;
-        }
-        // A handover ends this loop: the desktop loads the named program
-        // and plays it after the drive returns, since one loop cannot run
-        // inside another.
-        if let Some(rest) = command_argument(typed, b":handover ") {
-            let mut status = StatusLine::new(b"HANDOVER ");
-            status.push(rest);
-            return status;
-        }
-        if typed.is_empty() || typed == b"wait" || typed == b"nil" {
-            command = StatusLine::new(b"WAITED");
-        } else if drive_refuses(typed) {
-            command = StatusLine::new(b"REFUSED");
-        } else {
-            let status = execute_workshop(
-                machine,
-                compositor,
-                inputs.as_deref_mut(),
-                evaluator,
-                storage,
-                filesystem.as_deref_mut(),
-                serial,
-                clock.as_deref_mut(),
-                recovery,
-                kernel,
-                current,
-                previous,
-                scene_revision,
-                evaluator_revision,
-                workspace,
-                committed_workspace,
-                generation,
-                dirty,
-                running,
-                typed,
-            );
-            command = status;
-        }
-        // What the command said is the last line the program sees next.
-        let mut said = StatusLine::new(b"drive: ");
-        said.push(command.get());
-        said.push(b"\n");
-        {
-            let mut tee = Tee {
-                serial: &mut *serial,
-                terminal: &mut current.terminal,
-            };
-            crate::process::Console::write(&mut tee, said.get());
-        }
-        if let Some(run) = running.as_deref_mut() {
-            if play_passes(
-                machine,
-                compositor,
-                inputs.as_deref_mut(),
-                storage,
-                filesystem.as_deref_mut(),
-                serial,
-                current,
-                run,
-                hold,
-                false,
-            ) {
-                *running = None;
-            }
-        }
-        current.terminal.dirty = false;
-        let frame =
-            materialize(*current, Some(line), b"DRIVING").unwrap_or_else(|reason| failed(reason));
-        render_region(compositor, inputs.as_deref_mut(), &frame, TERMINAL_REGION)
-            .unwrap_or_else(|reason| failed(reason));
-    }
-    let mut status = StatusLine::new(if finished {
-        b"DRIVE DONE AFTER "
-    } else {
-        b"DROVE "
-    });
-    status.number_u64(driven as u64);
-    status.push(b" STEPS");
-    status
 }
 
 /// The process slot that owns window `slot`, or one no run has, so a window
@@ -3113,6 +2804,7 @@ fn drive(
 const PROGRAM_SOURCE_BYTES: usize = 8192;
 
 /// A program's source, read from its file in the data region.
+#[inline(never)]
 fn program_source(
     program: &Program,
     host: &mut EffectHost<'_>,
@@ -3131,6 +2823,7 @@ fn program_source(
     }
 }
 
+#[inline(never)]
 fn load_program(
     program: &Program,
     evaluator: &mut arch::Domain,
@@ -3179,6 +2872,7 @@ fn load_program(
 
 /// Whether every cell in the workspace came from a program the desktop
 /// carries, by its prefix: such a world holds nothing of the operator's.
+#[inline(never)]
 fn program_cells_only(workspace: &Workspace) -> bool {
     (0..workspace.count()).all(|ordinal| {
         workspace.cell(ordinal).is_some_and(|cell| {
@@ -3193,6 +2887,7 @@ fn program_cells_only(workspace: &Workspace) -> bool {
 /// under its prefix and the whole workspace replays. The workbench and
 /// the desktop agent share no names, which is what makes the agent
 /// summonable beside the workbench; a program already joined is ready.
+#[inline(never)]
 fn join_program(
     program: &Program,
     evaluator: &mut arch::Domain,
@@ -3243,6 +2938,7 @@ fn join_program(
 static mut INTENT: [u8; crate::native::EXEC_BYTES] = [0; crate::native::EXEC_BYTES];
 static mut INTENT_LEN: usize = 0;
 
+#[inline(never)]
 fn set_intent(line: &[u8]) {
     let length = line.len().min(crate::native::EXEC_BYTES);
     // Safety: the desktop loop is the only writer and the only reader.
@@ -3264,6 +2960,7 @@ fn intent() -> &'static [u8] {
 
 /// A line that reads as a sentence — it opens with a letter and has a
 /// space in it — is the operator's intent, not a form or a command.
+#[inline(never)]
 fn is_prose(line: &[u8]) -> bool {
     line.first().is_some_and(u8::is_ascii_alphabetic) && line.contains(&b' ')
 }
@@ -3275,6 +2972,7 @@ const SUMMON_STEPS: usize = 8;
 /// would change nothing but the bar is drawn as the bar alone.
 static mut LAST_SCENE: u64 = 0;
 
+#[inline(never)]
 fn scene_digest(frame: &Frame) -> u64 {
     let has_pointer = frame.count > 0 && record_u32(&frame.records[frame.count - 1], 0) == 9;
     let end = frame.count.saturating_sub(if has_pointer { 4 } else { 3 });
@@ -3288,6 +2986,7 @@ fn scene_digest(frame: &Frame) -> u64 {
     digest ^ end as u64
 }
 
+#[inline(never)]
 fn slot_owner(current: &Scene, slot: usize) -> usize {
     current.windows[slot]
         .and_then(|window| window.owner)
@@ -3334,6 +3033,31 @@ fn execute_workshop(
     } else {
         command_argument(line, b":load ")
     };
+    // `:join NAME`: a program the desktop carries joins the world beside
+    // what is in it, under its own prefix, as a sentence joins the agent.
+    if let Some(name) = command_argument(line, b":join ") {
+        let Some(program) = PROGRAMS.iter().find(|program| program.name == name) else {
+            return StatusLine::new(b"NO SUCH PROGRAM TO JOIN");
+        };
+        let mut tee = Tee {
+            serial: &mut *serial,
+            terminal: &mut current.terminal,
+        };
+        let mut host = EffectHost {
+            storage: &mut *storage,
+            filesystem: filesystem.as_deref_mut(),
+            console: &mut tee,
+            clock: clock.as_deref_mut(),
+        };
+        return join_program(
+            program,
+            evaluator,
+            evaluator_revision,
+            workspace,
+            dirty,
+            &mut host,
+        );
+    }
     // A program to load from a file: `:load-file PATH`, or `:load NAME` for a
     // name the desktop does not carry, read as `/NAME.agel`.
     let mut load_path: Option<StatusLine> =
@@ -3374,7 +3098,8 @@ fn execute_workshop(
         };
         let steps = number(words.next(), 1).clamp(1, 999);
         let hold = number(words.next(), PLAY_HOLD_PASSES).clamp(1, 100_000);
-        return play(
+        return agents(
+            LoopMode::Play,
             machine,
             compositor,
             inputs,
@@ -3383,8 +3108,16 @@ fn execute_workshop(
             filesystem,
             serial,
             clock,
+            recovery,
+            kernel,
             current,
+            previous,
+            scene_revision,
             evaluator_revision,
+            workspace,
+            committed_workspace,
+            generation,
+            dirty,
             running,
             line,
             steps,
@@ -3395,9 +3128,66 @@ fn execute_workshop(
     // it for STEPS. The desktop's console loop performs it after this
     // command returns, so a driving program can ask for it too.
     if let Some(rest) = command_argument(line, b":handover ") {
-        let mut status = StatusLine::new(b"HANDOVER ");
-        status.push(rest);
-        return status;
+        return perform_handover(
+            machine,
+            compositor,
+            inputs,
+            evaluator,
+            storage,
+            filesystem,
+            serial,
+            clock,
+            recovery,
+            kernel,
+            current,
+            previous,
+            scene_revision,
+            evaluator_revision,
+            workspace,
+            committed_workspace,
+            generation,
+            dirty,
+            running,
+            rest,
+        );
+    }
+    // `:agents STEPS [HOLD]`: every program in the world that defines
+    // `NAME-step` is an agent; each step, those whose needs are met step.
+    if let Some(rest) = command_argument(line, b":agents ") {
+        let mut words = rest
+            .split(|byte| *byte == b' ')
+            .filter(|word| !word.is_empty());
+        let number = |word: Option<&[u8]>, default: usize| {
+            word.and_then(|word| core::str::from_utf8(word).ok()?.parse::<usize>().ok())
+                .unwrap_or(default)
+        };
+        let steps = number(words.next(), 1).clamp(1, 999);
+        let hold = number(words.next(), PLAY_HOLD_PASSES).clamp(1, 100_000);
+        return agents(
+            LoopMode::Agents,
+            machine,
+            compositor,
+            inputs,
+            evaluator,
+            storage,
+            filesystem,
+            serial,
+            clock,
+            recovery,
+            kernel,
+            current,
+            previous,
+            scene_revision,
+            evaluator_revision,
+            workspace,
+            committed_workspace,
+            generation,
+            dirty,
+            running,
+            line,
+            steps,
+            hold,
+        );
     }
     if let Some(rest) = command_argument(line, b":drive ") {
         let mut words = rest
@@ -3409,7 +3199,8 @@ fn execute_workshop(
         };
         let steps = number(words.next(), 1).clamp(1, 999);
         let hold = number(words.next(), PLAY_HOLD_PASSES).clamp(1, 100_000);
-        return drive(
+        return agents(
+            LoopMode::Drive,
             machine,
             compositor,
             inputs,
@@ -3904,7 +3695,8 @@ fn execute_workshop(
                 return joined;
             }
         }
-        return drive(
+        return agents(
+            LoopMode::Drive,
             machine,
             compositor,
             inputs,
@@ -4066,7 +3858,7 @@ impl EffectHost<'_> {
         }
         let mut reply = [0_u8; EFFECT_BYTES];
         let outcome = match kind {
-            EFFECT_FILE_READ => self.file_read(&text[..length], &mut reply),
+            EFFECT_FILE_READ => self.file_read(&text[..length], words, &mut reply),
             EFFECT_FILE_WRITE | EFFECT_FILE_APPEND => {
                 let path_length = (words[0] as usize).min(length);
                 let (path, content) = text[..length].split_at(path_length);
@@ -4127,9 +3919,18 @@ impl EffectHost<'_> {
     fn file_read(
         &mut self,
         path: &[u8],
+        words: [u64; 3],
         out: &mut [u8; EFFECT_BYTES],
     ) -> Result<(u64, usize), u64> {
-        let read = self.read_file(path, out)?;
+        let offset = words[1] as usize;
+        let from = if words[2] == 1 {
+            // From the end: the file's length less the offset asked.
+            let [_, length, _] = self.open(path, 0)?;
+            (length as usize).saturating_sub(offset)
+        } else {
+            offset
+        };
+        let read = self.read_file_from(path, from, out)?;
         Ok((read as u64, read))
     }
 
@@ -4141,6 +3942,7 @@ impl EffectHost<'_> {
 
     /// Bytes of a file from `from`, at most `out`'s length: how many, 0 at
     /// the end; a reader of a file too large to hold walks it this way.
+    #[inline(never)]
     fn read_file_from(&mut self, path: &[u8], from: usize, out: &mut [u8]) -> Result<usize, u64> {
         use crate::world::fs;
         let [entry, length, kind] = self.open(path, 0)?;
@@ -4256,6 +4058,725 @@ impl EffectHost<'_> {
             }
         }
     }
+}
+
+/// The most agents the world can hold at once: one per program the desktop
+/// carries.
+const MAX_AGENTS: usize = 8;
+/// Spins to wait for a line at the prompt between steps: a sentence typed
+/// while agents run is heard, and `:stop` ends the run.
+const AGENTS_PROMPT_POLLS: usize = 20_000;
+/// The loop's three shapes: `:drive` steps one program as the desktop's
+/// driver, `:play` steps one program as a window's player, `:agents`
+/// steps every agent whose needs are met.
+#[derive(Clone, Copy, PartialEq)]
+enum LoopMode {
+    Drive,
+    Play,
+    Agents,
+}
+
+/// A line at the prompt if one is waiting, without holding the loop.
+#[inline(never)]
+fn serial_peek_line(serial: &mut ServiceDomain, out: &mut [u8; PAYLOAD_BYTES]) -> Option<usize> {
+    let handle = serial.handle();
+    let mut length = 0;
+    for _ in 0..AGENTS_PROMPT_POLLS {
+        match serial.read_console(handle) {
+            Ok(Some(b'\n')) | Ok(Some(b'\r')) => {
+                if length > 0 {
+                    return Some(length);
+                }
+            }
+            Ok(Some(byte)) => {
+                if length < out.len() {
+                    out[length] = byte;
+                    length += 1;
+                }
+            }
+            Ok(None) => {
+                if length == 0 {
+                    return None;
+                }
+                core::hint::spin_loop();
+            }
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// The forms of a needs list: `(file "NAME")`, `(window)`, `(process)`,
+/// `(done NAME)`, `(after SECONDS)`. Each yields
+/// its head word and its argument (quotes stripped).
+#[inline(never)]
+fn needs_forms(text: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> {
+    text.split(|byte| *byte == b'(').skip(1).map(|form| {
+        let form = form.split(|byte| *byte == b')').next().unwrap_or(b"");
+        let form = trim(form);
+        let (head, rest) = match form.iter().position(|byte| *byte == b' ') {
+            Some(space) => (&form[..space], trim(&form[space + 1..])),
+            None => (form, &b""[..]),
+        };
+        let rest = rest
+            .strip_prefix(b"\"")
+            .and_then(|rest| rest.strip_suffix(b"\""))
+            .unwrap_or(rest);
+        (head, rest)
+    })
+}
+
+/// Whether a file is present, and the clock's seconds: the facts the
+/// loop checks through the desktop's own effect host.
+#[inline(never)]
+fn file_present(
+    serial: &mut ServiceDomain,
+    current: &mut Scene,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+    clock: Option<&mut ServiceDomain>,
+    path: &[u8],
+) -> bool {
+    let mut tee = Tee {
+        serial,
+        terminal: &mut current.terminal,
+    };
+    let mut host = EffectHost {
+        storage,
+        filesystem,
+        console: &mut tee,
+        clock,
+    };
+    host.open(path, 0).is_ok()
+}
+
+#[inline(never)]
+fn seconds_now(
+    serial: &mut ServiceDomain,
+    current: &mut Scene,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+    clock: Option<&mut ServiceDomain>,
+) -> u64 {
+    let mut tee = Tee {
+        serial,
+        terminal: &mut current.terminal,
+    };
+    let mut host = EffectHost {
+        storage,
+        filesystem,
+        console: &mut tee,
+        clock,
+    };
+    host.clock().map(|(seconds, _)| seconds).unwrap_or(0)
+}
+
+/// `:handover NAME STEPS`, performed: NAME is loaded over the world of
+/// programs, the game it plays is given time to draw its first frame,
+/// the front-most window a live process owns takes the keyboard, and the
+/// program plays for STEPS. A drive loop that decides on a handover ends
+/// and performs it; one loop never runs inside another.
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn perform_handover(
+    machine: &mut arch::Machine,
+    compositor: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
+    evaluator: &mut arch::Domain,
+    storage: &mut ServiceDomain,
+    mut filesystem: Option<&mut ServiceDomain>,
+    serial: &mut ServiceDomain,
+    mut clock: Option<&mut ServiceDomain>,
+    recovery: &mut Option<LiveRecovery>,
+    kernel: &mut Option<KernelRecovery>,
+    current: &mut Scene,
+    previous: &mut Scene,
+    scene_revision: &mut u8,
+    evaluator_revision: &mut u64,
+    workspace: &mut Workspace,
+    committed_workspace: &mut Workspace,
+    generation: &mut u64,
+    dirty: &mut bool,
+    running: &mut Option<&'static mut crate::process::Run>,
+    rest: &[u8],
+) -> StatusLine {
+    let mut words = rest
+        .split(|byte| *byte == b' ')
+        .filter(|word| !word.is_empty());
+    let mut load = StatusLine::new(b":load ");
+    load.push(words.next().unwrap_or(b""));
+    let mut play_line = StatusLine::new(b":play ");
+    play_line.push(words.next().unwrap_or(b"1"));
+    let status = execute_workshop(
+        machine,
+        compositor,
+        inputs.as_deref_mut(),
+        evaluator,
+        storage,
+        filesystem.as_deref_mut(),
+        serial,
+        clock.as_deref_mut(),
+        recovery,
+        kernel,
+        current,
+        previous,
+        scene_revision,
+        evaluator_revision,
+        workspace,
+        committed_workspace,
+        generation,
+        dirty,
+        running,
+        load.get(),
+    );
+    if !status.get().ends_with(b"READY - :PLAY STEPS") {
+        return status;
+    }
+    // The game prints its first frame when it is ready to be played; up
+    // to a bounded wait for that line.
+    if let Some(run) = running.as_deref_mut() {
+        let mut waited = 0;
+        while waited < 200
+            && !current.terminal.last[..usize::from(current.terminal.last_length)]
+                .starts_with(b"doom:")
+        {
+            if play_passes(
+                machine,
+                compositor,
+                inputs.as_deref_mut(),
+                storage,
+                filesystem.as_deref_mut(),
+                serial,
+                current,
+                run,
+                PLAY_PAUSE_PASSES,
+                true,
+            ) {
+                break;
+            }
+            waited += 1;
+        }
+    }
+    let listening =
+        |slot: &u8| current.windows[usize::from(*slot)].is_some_and(|window| window.listens());
+    if !current.focus.as_ref().is_some_and(listening) {
+        current.focus = current
+            .order
+            .iter()
+            .rev()
+            .copied()
+            .find(|slot| listening(slot));
+    }
+    execute_workshop(
+        machine,
+        compositor,
+        inputs,
+        evaluator,
+        storage,
+        filesystem,
+        serial,
+        clock,
+        recovery,
+        kernel,
+        current,
+        previous,
+        scene_revision,
+        evaluator_revision,
+        workspace,
+        committed_workspace,
+        generation,
+        dirty,
+        running,
+        play_line.get(),
+    )
+}
+
+/// `:agents STEPS [HOLD]`: every program in the world that defines
+/// `NAME-step` (NAME its cell prefix without the dash) is an agent. Each
+/// step, each agent's `(NAME-needs)` is read — a list of facts the desktop
+/// checks without asking anyone: a file present, a listening window
+/// focused, a process running, another agent done, seconds passed; a
+/// fact only the judge can settle is one the program asks in its own
+/// step and defines as a need, so the loop never waits on a reply — and an
+/// agent whose needs are met steps once: with `(window)` among them as
+/// the play loop steps (the game paused, the window looked at, keys held
+/// for `hold` passes), otherwise as the drive loop steps (the desktop
+/// looked at, a command line typed). Between steps a line at the prompt
+/// is heard: a sentence becomes the task the requests carry, and `:stop`
+/// ends the run. The run ends when every agent has said `done`.
+#[allow(clippy::too_many_arguments)]
+fn agents(
+    mode: LoopMode,
+    machine: &mut arch::Machine,
+    compositor: &mut arch::Domain,
+    mut inputs: Option<&mut Inputs<'_>>,
+    evaluator: &mut arch::Domain,
+    storage: &mut ServiceDomain,
+    mut filesystem: Option<&mut ServiceDomain>,
+    serial: &mut ServiceDomain,
+    mut clock: Option<&mut ServiceDomain>,
+    recovery: &mut Option<LiveRecovery>,
+    kernel: &mut Option<KernelRecovery>,
+    current: &mut Scene,
+    previous: &mut Scene,
+    scene_revision: &mut u8,
+    evaluator_revision: &mut u64,
+    workspace: &mut Workspace,
+    committed_workspace: &mut Workspace,
+    generation: &mut u64,
+    dirty: &mut bool,
+    running: &mut Option<&'static mut crate::process::Run>,
+    line: &[u8],
+    steps: usize,
+    hold: usize,
+) -> StatusLine {
+    macro_rules! evaluate {
+        ($form:expr) => {{
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            let mut host = EffectHost {
+                storage: &mut *storage,
+                filesystem: filesystem.as_deref_mut(),
+                console: &mut tee,
+                clock: clock.as_deref_mut(),
+            };
+            evaluate_form(evaluator, evaluator_revision, $form, &mut host)
+        }};
+    }
+    macro_rules! say {
+        ($text:expr) => {{
+            let mut tee = Tee {
+                serial: &mut *serial,
+                terminal: &mut current.terminal,
+            };
+            crate::process::Console::write(&mut tee, $text);
+        }};
+    }
+    // The agents: for `:agents`, the programs whose first cell is in the
+    // world and whose step function is bound; for `:drive` and `:play`,
+    // the one program named by its step function.
+    let mut names: [&'static [u8]; MAX_AGENTS] = [b""; MAX_AGENTS];
+    let mut count = 0;
+    match mode {
+        LoopMode::Drive => {
+            if evaluate!(b"drive-step").is_none_or(|value| value.get() == b"nil") {
+                return StatusLine::new(b"NO PROGRAM TO DRIVE - :LOAD DESKTOP-AGENT");
+            }
+            names[0] = b"drive";
+            count = 1;
+        }
+        LoopMode::Play => {
+            if running.is_none() {
+                return StatusLine::new(b"NO PROGRAM TO PLAY - :EXEC ONE");
+            }
+            if !current.focus.is_some_and(|slot| {
+                current.windows[usize::from(slot)].is_some_and(|window| window.listens())
+            }) {
+                return StatusLine::new(b"NO WINDOW TO PLAY - CLICK ONE");
+            }
+            names[0] = b"play";
+            count = 1;
+        }
+        LoopMode::Agents => {
+            for program in PROGRAMS {
+                let mut first = StatusLine::new(program.prefix);
+                first.push(b"0");
+                if workspace.find(first.get()).is_none() || count == MAX_AGENTS {
+                    continue;
+                }
+                let name = &program.prefix[..program.prefix.len() - 1];
+                let mut step_name = StatusLine::new(name);
+                step_name.push(b"-step");
+                if evaluate!(step_name.get()).is_none_or(|value| value.get() == b"nil") {
+                    continue;
+                }
+                names[count] = name;
+                count += 1;
+            }
+            if count == 0 {
+                return StatusLine::new(b"NO AGENTS - :LOAD OR :JOIN A PROGRAM WITH NAME-STEP");
+            }
+        }
+    }
+    let label: &[u8] = match mode {
+        LoopMode::Drive => b"drive: ",
+        LoopMode::Play => b"play: ",
+        LoopMode::Agents => b"agents: ",
+    };
+    let mut ended = false;
+    let mut handover: Option<StatusLine> = None;
+    let mut done = [false; MAX_AGENTS];
+    let started = seconds_now(
+        serial,
+        current,
+        storage,
+        filesystem.as_deref_mut(),
+        clock.as_deref_mut(),
+    );
+    let mut ran = 0;
+    let mut all_done = false;
+    for step in 1..=steps {
+        // A line at the prompt between steps, when agents run beside it.
+        let mut heard = [0_u8; PAYLOAD_BYTES];
+        if mode == LoopMode::Agents
+            && serial_peek_line(serial, &mut heard).is_some_and(|length| {
+                let heard = trim(&heard[..length]);
+                if heard == b":stop" {
+                    true
+                } else {
+                    if is_prose(heard) {
+                        set_intent(heard);
+                        let mut said = StatusLine::new(b"agents: heard ");
+                        said.push(heard);
+                        said.push(b"\n");
+                        say!(said.get());
+                    }
+                    false
+                }
+            })
+        {
+            say!(b"agents: stopped\n");
+            break;
+        }
+        for index in 0..count {
+            if done[index] {
+                continue;
+            }
+            let name = names[index];
+            // The needs, and whether each is met.
+            let mut needs_name = StatusLine::new(b"(");
+            needs_name.push(name);
+            needs_name.push(b"-needs)");
+            let needs = if mode == LoopMode::Agents {
+                evaluate!(needs_name.get())
+            } else {
+                None
+            };
+            let needs_text = needs.as_ref().map(|value| value.get()).unwrap_or(b"nil");
+            let mut window_step = mode == LoopMode::Play;
+            let mut unmet: Option<StatusLine> = None;
+            for (head, argument) in needs_forms(needs_text) {
+                let met = match head {
+                    b"file" => file_present(
+                        serial,
+                        current,
+                        storage,
+                        filesystem.as_deref_mut(),
+                        clock.as_deref_mut(),
+                        argument,
+                    ),
+                    b"window" => {
+                        window_step = true;
+                        current.focus.is_some_and(|slot| {
+                            current.windows[usize::from(slot)]
+                                .is_some_and(|window| window.listens())
+                        })
+                    }
+                    b"process" => running.is_some(),
+                    b"done" => (0..count).any(|other| names[other] == argument && done[other]),
+                    b"after" => {
+                        let seconds = argument
+                            .iter()
+                            .take_while(|byte| byte.is_ascii_digit())
+                            .fold(0_u64, |n, byte| n * 10 + u64::from(byte - b'0'));
+                        let now = seconds_now(
+                            serial,
+                            current,
+                            storage,
+                            filesystem.as_deref_mut(),
+                            clock.as_deref_mut(),
+                        );
+                        now.wrapping_sub(started) >= seconds
+                    }
+                    _ => true,
+                };
+                if !met && unmet.is_none() {
+                    let mut waits = StatusLine::new(head);
+                    if !argument.is_empty() {
+                        waits.push(b" ");
+                        waits.push(argument);
+                    }
+                    unmet = Some(waits);
+                }
+            }
+            if let Some(waits) = unmet {
+                let mut said = StatusLine::new(b"agents: step ");
+                said.number_u64(step as u64);
+                said.push(b" ");
+                said.push(name);
+                said.push(b" waits ");
+                said.push(waits.get());
+                said.push(b"\n");
+                say!(said.get());
+                continue;
+            }
+            // Look, then step; a request the step made is relayed and the
+            // step asked again with the answer.
+            let mut step_name = StatusLine::new(b"(");
+            step_name.push(name);
+            step_name.push(b"-step)");
+            let mut look = [0_u8; LOOK_BYTES];
+            let slot = current.focus.map(usize::from);
+            if window_step {
+                if let (Some(pause), Some(slot)) = (
+                    evaluate!(b"(play-pause)").and_then(|key| play_key(key.get())),
+                    slot,
+                ) {
+                    if let Some(run) = running.as_deref_mut() {
+                        let window = current.windows[slot].as_mut().expect("the focused window");
+                        inject(window, pause, true);
+                        inject(window, pause, false);
+                        if play_passes(
+                            machine,
+                            compositor,
+                            inputs.as_deref_mut(),
+                            storage,
+                            filesystem.as_deref_mut(),
+                            serial,
+                            current,
+                            run,
+                            PLAY_PAUSE_PASSES,
+                            true,
+                        ) {
+                            *running = None;
+                            ended = true;
+                        }
+                    }
+                }
+                match slot.and_then(|slot| current.windows[slot].as_ref()) {
+                    Some(window) => observe(window, &current.terminal, &mut look),
+                    None => observe_desktop(current, running.is_some(), &mut look),
+                }
+            } else {
+                observe_desktop(current, running.is_some(), &mut look);
+            }
+            for (offset, byte) in look.iter().enumerate() {
+                evaluator.core().write_observation(offset, *byte);
+            }
+            if evaluator_request(evaluator, shared::COMMAND_EVALUATOR_OBSERVE, b"").is_err() {
+                return StatusLine::new(b"THE EVALUATOR COULD NOT LOOK");
+            }
+            let Some(mut decision) = evaluate!(step_name.get()) else {
+                return StatusLine::new(match mode {
+                    LoopMode::Drive => b"DRIVE-STEP FAILED - :LOAD DESKTOP-AGENT",
+                    LoopMode::Play => b"PLAY-STEP FAILED - :LOAD DOOM-AGENT",
+                    LoopMode::Agents => b"STEP FAILED - :LOAD THE AGENT AGAIN",
+                });
+            };
+            // A request the step made is relayed and the step asked again
+            // with the answer; a step that asks again on the answer (a
+            // second question that depends on the first) is served within
+            // the same step, up to a bound, since the world holds one
+            // pending request and another agent's step would overwrite it.
+            let task = if window_step { &b""[..] } else { intent() };
+            for _ in 0..4 {
+                if relay_request(evaluator, serial, &look, task) != Some(true) {
+                    break;
+                }
+                if let Some(again) = evaluate!(step_name.get()) {
+                    decision = again;
+                }
+            }
+            let text = decision.get();
+            let text = text
+                .strip_prefix(b"\"")
+                .and_then(|rest| rest.strip_suffix(b"\""))
+                .unwrap_or(text);
+            let mut command = StatusLine::new(trim(text));
+            let mut report = StatusLine::new(label);
+            report.push(b"step ");
+            report.number_u64(step as u64);
+            if mode == LoopMode::Agents {
+                report.push(b" ");
+                report.push(name);
+            }
+            report.push(if window_step { b" keys " } else { b" do " });
+            report.push(command.get());
+            let mut reason_name = StatusLine::new(name);
+            reason_name.push(b"-reason");
+            if let Some(reason) = evaluate!(reason_name.get()).filter(|r| r.get() != b"nil") {
+                report.push(b" reason ");
+                report.push(reason.get());
+            }
+            report.push(b"\n");
+            say!(report.get());
+            ran = step;
+            let typed = command.get();
+            if typed == b"done" {
+                done[index] = true;
+                continue;
+            }
+            // A handover ends a drive: the desktop loads the named program
+            // and plays it after the loop returns, since one loop cannot
+            // run inside another.
+            if let Some(rest) = command_argument(typed, b":handover ") {
+                let mut status = StatusLine::new(b"HANDOVER ");
+                status.push(rest);
+                handover = Some(status);
+                break;
+            }
+            if window_step {
+                let mut keys = [0; PLAY_KEYS_HELD];
+                let held = keys_named(typed, &mut keys);
+                let pause = evaluate!(b"(play-pause)").and_then(|key| play_key(key.get()));
+                if let Some(slot) = slot {
+                    if let Some(window) = current.windows[slot].as_mut() {
+                        for key in &keys[..held] {
+                            inject(window, *key, true);
+                        }
+                        if let Some(key) = pause {
+                            inject(window, key, true);
+                            inject(window, key, false);
+                        }
+                    }
+                }
+                if let Some(run) = running.as_deref_mut() {
+                    if play_passes(
+                        machine,
+                        compositor,
+                        inputs.as_deref_mut(),
+                        storage,
+                        filesystem.as_deref_mut(),
+                        serial,
+                        current,
+                        run,
+                        hold,
+                        false,
+                    ) {
+                        *running = None;
+                        ended = true;
+                    } else if let Some(slot) = slot {
+                        if !run.alive(slot_owner(current, slot)) {
+                            ended = true;
+                        }
+                    }
+                }
+                if let Some(window) = slot.and_then(|slot| current.windows[slot].as_mut()) {
+                    for key in &keys[..held] {
+                        inject(window, *key, false);
+                    }
+                }
+            } else if typed.is_empty() || typed == b"wait" || typed == b"nil" {
+                command = StatusLine::new(b"WAITED");
+            } else if drive_refuses(typed) {
+                command = StatusLine::new(b"REFUSED");
+            } else {
+                let status = execute_workshop(
+                    machine,
+                    compositor,
+                    inputs.as_deref_mut(),
+                    evaluator,
+                    storage,
+                    filesystem.as_deref_mut(),
+                    serial,
+                    clock.as_deref_mut(),
+                    recovery,
+                    kernel,
+                    current,
+                    previous,
+                    scene_revision,
+                    evaluator_revision,
+                    workspace,
+                    committed_workspace,
+                    generation,
+                    dirty,
+                    running,
+                    typed,
+                );
+                command = status;
+            }
+            if !window_step {
+                // What the command said is the last line the program sees
+                // next; a running process goes on meanwhile.
+                let mut said = StatusLine::new(label);
+                said.push(command.get());
+                said.push(b"\n");
+                say!(said.get());
+                if let Some(run) = running.as_deref_mut() {
+                    if play_passes(
+                        machine,
+                        compositor,
+                        inputs.as_deref_mut(),
+                        storage,
+                        filesystem.as_deref_mut(),
+                        serial,
+                        current,
+                        run,
+                        hold,
+                        false,
+                    ) {
+                        *running = None;
+                    }
+                }
+            }
+            if ended {
+                break;
+            }
+        }
+        current.terminal.dirty = false;
+        let frame = materialize(
+            *current,
+            Some(line),
+            match mode {
+                LoopMode::Drive => b"DRIVING",
+                LoopMode::Play => b"PLAYING",
+                LoopMode::Agents => b"AGENTS",
+            },
+        )
+        .unwrap_or_else(|reason| failed(reason));
+        render_region(compositor, inputs.as_deref_mut(), &frame, TERMINAL_REGION)
+            .unwrap_or_else(|reason| failed(reason));
+        if ended || handover.is_some() {
+            break;
+        }
+        if (0..count).all(|index| done[index]) {
+            all_done = true;
+            break;
+        }
+    }
+    if let Some(status) = handover {
+        let mut rest = [0_u8; PAYLOAD_BYTES];
+        let asked = status.get();
+        let asked = asked.strip_prefix(b"HANDOVER ").unwrap_or(asked);
+        rest[..asked.len()].copy_from_slice(asked);
+        return perform_handover(
+            machine,
+            compositor,
+            inputs,
+            evaluator,
+            storage,
+            filesystem,
+            serial,
+            clock,
+            recovery,
+            kernel,
+            current,
+            previous,
+            scene_revision,
+            evaluator_revision,
+            workspace,
+            committed_workspace,
+            generation,
+            dirty,
+            running,
+            &rest[..asked.len()],
+        );
+    }
+    if ended {
+        return StatusLine::new(b"PROCESS ENDED");
+    }
+    let mut status = StatusLine::new(match (mode, all_done) {
+        (LoopMode::Drive, true) => &b"DRIVE DONE AFTER "[..],
+        (LoopMode::Drive, false) => b"DROVE ",
+        (LoopMode::Play, _) => b"PLAYED ",
+        (LoopMode::Agents, true) => b"AGENTS DONE AFTER ",
+        (LoopMode::Agents, false) => b"AGENTS RAN ",
+    });
+    status.number_u64(ran as u64);
+    status.push(b" STEPS");
+    status
 }
 
 /// The most a program file may hold; the supervisor reads it whole.
@@ -5504,112 +6025,6 @@ fn interactive(
                         &mut running,
                         &line[..length],
                     );
-                }
-                // A handover: the program named is loaded over the world of
-                // programs, the game it plays is given time to draw its
-                // first frame, and it is played for the steps asked.
-                if let Some(rest) = command_argument(status.get(), b"HANDOVER ") {
-                    let mut words = rest
-                        .split(|byte| *byte == b' ')
-                        .filter(|word| !word.is_empty());
-                    let mut load = StatusLine::new(b":load ");
-                    load.push(words.next().unwrap_or(b""));
-                    let mut play_line = StatusLine::new(b":play ");
-                    play_line.push(words.next().unwrap_or(b"1"));
-                    #[cfg(target_arch = "x86_64")]
-                    let clock = clock_driver.as_mut();
-                    #[cfg(not(target_arch = "x86_64"))]
-                    let clock: Option<&mut ServiceDomain> = None;
-                    status = execute_workshop(
-                        machine,
-                        compositor,
-                        Some(&mut inputs),
-                        &mut evaluator,
-                        &mut storage,
-                        filesystem.as_mut(),
-                        &mut console_driver,
-                        clock,
-                        &mut recovery,
-                        &mut kernel,
-                        &mut current,
-                        &mut previous,
-                        &mut scene_revision,
-                        &mut evaluator_revision,
-                        &mut workspace,
-                        &mut committed_workspace,
-                        &mut generation,
-                        &mut dirty,
-                        &mut running,
-                        load.get(),
-                    );
-                    if status.get().ends_with(b"READY - :PLAY STEPS") {
-                        // The game prints its first frame when it is ready
-                        // to be played; up to a bounded wait for that line.
-                        if let Some(run) = running.as_deref_mut() {
-                            let mut waited = 0;
-                            while waited < 200
-                                && !current.terminal.last
-                                    [..usize::from(current.terminal.last_length)]
-                                    .starts_with(b"doom:")
-                            {
-                                if play_passes(
-                                    machine,
-                                    compositor,
-                                    Some(&mut inputs),
-                                    &mut storage,
-                                    filesystem.as_mut(),
-                                    &mut console_driver,
-                                    &mut current,
-                                    run,
-                                    PLAY_PAUSE_PASSES,
-                                    true,
-                                ) {
-                                    break;
-                                }
-                                waited += 1;
-                            }
-                        }
-                        // The game is played in its window: the front-most one a
-                        // live process owns takes the keyboard, whatever had it.
-                        let listening = |slot: &u8| {
-                            current.windows[usize::from(*slot)]
-                                .is_some_and(|window| window.listens())
-                        };
-                        if !current.focus.as_ref().is_some_and(listening) {
-                            current.focus = current
-                                .order
-                                .iter()
-                                .rev()
-                                .copied()
-                                .find(|slot| listening(slot));
-                        }
-                        #[cfg(target_arch = "x86_64")]
-                        let clock = clock_driver.as_mut();
-                        #[cfg(not(target_arch = "x86_64"))]
-                        let clock: Option<&mut ServiceDomain> = None;
-                        status = execute_workshop(
-                            machine,
-                            compositor,
-                            Some(&mut inputs),
-                            &mut evaluator,
-                            &mut storage,
-                            filesystem.as_mut(),
-                            &mut console_driver,
-                            clock,
-                            &mut recovery,
-                            &mut kernel,
-                            &mut current,
-                            &mut previous,
-                            &mut scene_revision,
-                            &mut evaluator_revision,
-                            &mut workspace,
-                            &mut committed_workspace,
-                            &mut generation,
-                            &mut dirty,
-                            &mut running,
-                            play_line.get(),
-                        );
-                    }
                 }
                 current.terminal.dirty = false;
                 current.previewing = trim(&line[..length]).starts_with(b":preview ")

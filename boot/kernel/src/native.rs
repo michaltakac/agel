@@ -3707,6 +3707,17 @@ fn effect_builtin(
         (Builtin::FileRead, [path]) | (Builtin::FileList, [path]) => {
             words[0] = push(&mut text, &mut length, path)?;
         }
+        // `(file-read PATH FROM)`: bytes from an offset, or, when FROM is
+        // negative, the last -FROM bytes: how a program reads the tail of
+        // a file larger than one reply holds.
+        (Builtin::FileRead, [path, from]) => {
+            words[0] = push(&mut text, &mut length, path)?;
+            let RuntimeValue::Scalar(Scalar::Int(from)) = from else {
+                return Err(Error("file-read expects a path and an integer offset"));
+            };
+            words[1] = from.unsigned_abs();
+            words[2] = u64::from(*from < 0);
+        }
         (Builtin::FileList, []) | (Builtin::Clock, []) => {}
         (Builtin::FileWrite, [path, content]) | (Builtin::FileAppend, [path, content]) => {
             words[0] = push(&mut text, &mut length, path)?;

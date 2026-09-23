@@ -46,7 +46,7 @@ if test ! -e "$desktop_image"; then
 fi
 dd if="$image" of="$desktop_image" bs=512 count=512 conv=notrunc 2>/dev/null
 dd if="$image" of="$desktop_image" bs=512 skip=10240 seek=10240 count=3072 conv=notrunc 2>/dev/null
-for program in workbench:wb doom-agent:da doom-agent-model:dm doom-agent-judge:dj desktop-agent:dk; do
+for program in workbench:wb doom-agent:da doom-agent-model:dm doom-agent-judge:dj desktop-agent:dk review:rv; do
   python3 ./scripts/install-program.py --region data "$desktop_image" "${program##*:}.agel" "boot/desktop/${program%%:*}.agel" >/dev/null
 done
 if doom=$(./scripts/build-c-program.sh doom x86_64 2>/dev/null | tail -n 1) && test -f "$doom" \

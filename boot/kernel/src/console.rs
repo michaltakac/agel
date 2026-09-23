@@ -103,7 +103,6 @@ impl fmt::Write for Writer {
     }
 }
 
-/// Write formatted text to the console.
 #[macro_export]
 macro_rules! kprint {
     ($($argument:tt)*) => {{

@@ -1985,6 +1985,37 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.99
+
+- **Agents step in turn, never at once.** `:agents` is the same
+  supervisor loop as `:drive` and `:play`, one thread, one step at a
+  time; an agent's step is bounded by the evaluator's fuel and the
+  passes it is given, and a step that blocks the machine is the same
+  bug it was. No agent can preempt another or the prompt; a sentence
+  typed between steps is read only between steps.
+- **A need is a fact the desktop checks, not a promise a program makes.**
+  The five facts are read from the desktop's own state (a file's presence
+  through the filesystem service, the focus, the run table, the loop's
+  own done flags, the clock). A program cannot declare a need the
+  desktop cannot check; unknown heads are ignored, which is the honest
+  reading of a fact the desktop knows nothing about: it does not hold
+  the agent.
+- **One agent can redefine another's cells.** `review` redefines
+  `follow-steps` and `facing-tolerance` in the world it shares with the
+  player. This is the language's `def`, in a world the operator can read
+  and roll back, on cells the player's author named as tunable; it is
+  not a new privilege, and nothing here reaches an effect the judged
+  gate does not already cover. What changed and why is a line in
+  `notes`.
+- **`:join` loads source from the data region** as `:load` does, under
+  the same reads; a program not in the image says so.
+- **The TSS is zero at rest.** Its I/O bitmap base is set at install,
+  before any ring-3 code runs; between reset and install no ring-3 code
+  exists to reach a port.
+- **Not claimed:** fairness beyond round-robin, a bound on how many
+  steps an agent holds the loop, or any isolation between agents in one
+  world.
+
 ## v0.2.98
 
 - **The engine reports more of itself, to the same console.** The next

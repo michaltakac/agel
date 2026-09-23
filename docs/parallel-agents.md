@@ -162,9 +162,9 @@ through the judged gate as a proposal, never straight to a domain.
 | The judged agent steers to the exit on the engine's route and rays; Jev answers what the picture holds | done | v0.2.98: `doom-agent-judge`, the bridge test; one live run of 120 steps halved the route to the exit and opened its first door |
 | The map is checked on Tab and Jev names the unexplored quadrant | done | v0.2.98: after three stalled forwards; not needed in the measured run, seen in earlier cuts |
 | Metrics appended per step on the OS | done | v0.2.98: `metrics` in the filesystem region, the state line and the answer per step |
-| The agent reads its own metrics and changes its cells when they say it is failing, by typed questions, nobody at the keyboard | open | v0.2.98's changes were made by hand from the same metrics; this is the next milestone |
+| The agent reads its own metrics and changes its cells when they say it is failing, by typed questions, nobody at the keyboard | done | v0.2.99: `review` reads the player's `summary`, asks Jev whether it stalled and what to change, redefines `follow-steps` or `facing-tolerance`, notes it; one live run: six reviews, two questions, `nothing` chosen twice, no cell changed; the apply path tested |
 | The route as an Agel program over facts the engine writes, not C | open | the route is in `doom.c` |
-| `:agents`, needs, and a second sentence beside a running agent | open | |
+| `:agents`, needs, and a second sentence beside a running agent | done | v0.2.99: `scripts/test-drive.sh`; a line at the prompt between steps becomes the task, `:stop` ends the run |
 | A metrics window painted by an Agel program from the file | open | |
 | A fetch through the bridge into the data region | open | |
 | A plan of typed steps from a page, through a model, once | open | |

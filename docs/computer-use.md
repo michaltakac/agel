@@ -138,6 +138,36 @@ The whole path is on video, recorded live by `scripts/record-demo.py`:
 [`media/agel-jev-demo.mp4`](media/agel-jev-demo.mp4), with the console's
 transcript in [v0.2.97](release-v0.2.97.md).
 
+## Agents side by side: `:agents STEPS [HOLD]` (v0.2.99)
+
+`:drive` and `:play` are one loop with a mode now, and `:agents` is its
+third shape: every program in the world that defines `NAME-step` (NAME
+its cell prefix without the dash) is an agent, and each step the loop
+reads `(NAME-needs)`, a list of facts the desktop checks without asking
+anyone — `(file "NAME")` present, `(window)` a listening window
+focused, `(process)` a process running, `(done NAME)` another agent
+finished, `(after SECONDS)` the clock past a mark since the run began —
+and steps each agent whose needs are met, once, round-robin. With
+`(window)` among the needs the step is a play step (the game paused,
+the window looked at, keys held for `hold` passes); otherwise a drive
+step (the desktop looked at, a command line typed, refusals as for
+`:drive`). The loop says `agents: step N NAME waits FACT` for an agent
+held back, `agents: step N NAME keys FORM` or `... do LINE reason R` for
+one that stepped, and ends with `AGENTS DONE AFTER N STEPS` when every
+agent has said `done`, or `AGENTS RAN N STEPS`. Between steps a line at
+the prompt is heard: a sentence becomes the task the requests carry,
+and `:stop` ends the run. `:join NAME` puts a program the desktop
+carries beside what is in the world, as a sentence joins the desktop
+agent; forty cells hold the workbench, a player and a reviewer.
+
+A watch is an agent whose need is its trigger; a scheduled job is one
+whose need is `(after SECONDS)`. A fact only the judge can settle is
+asked by the agent in its own step and defined as a need, so the loop
+never waits on a reply. The first agent that changes another is
+`review` (`rv-`), described in [`doom.md`](doom.md) and
+[`release-v0.2.99.md`](release-v0.2.99.md); the general model these
+belong to is [`real-work.md`](real-work.md).
+
 ## What is proven, and where
 
 - `scripts/test-drive.sh` (v0.2.96 additions): a blank region is

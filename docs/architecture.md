@@ -587,6 +587,14 @@ Each rung must be runnable and differentially testable against the rung below:
    asks the judge what the picture holds, follows walls when blocked,
    uses doors, checks the automap on Tab when stalled, and appends its metrics to a file on the OS. The plan it opens
    is [`parallel-agents.md`](parallel-agents.md). See [`doom.md`](doom.md).
+93. **Agents side by side, and one that changes the other (v0.2.99):**
+   `:drive`, `:play` and `:agents` are one supervisor loop with a mode;
+   every program that defines `NAME-step` is an agent, stepped when its
+   `NAME-needs` facts hold (a file, a window, a process, another agent
+   done, the clock); `review` reads the DOOM agent's summary line, asks
+   the judge whether it stalled and what to change, and redefines its
+   tunable cells in the shared world. See [`computer-use.md`](computer-use.md),
+   [`real-work.md`](real-work.md) and [`parallel-agents.md`](parallel-agents.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

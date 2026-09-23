@@ -139,9 +139,12 @@ impl TaskStateSegment {
         ist: [0; 7],
         reserved2: 0,
         reserved3: 0,
-        // Past the end of the segment: with no reachable bitmap, every port
-        // instruction from ring 3 faults rather than reaching a device.
-        iomap_base: (core::mem::size_of::<Self>() + 1) as u16,
+        // Zero here so the empty segment is all-zero and lives in `.bss`
+        // rather than costing the image its size; `install` points it past
+        // the end of the segment before any ring-3 code runs, so that with
+        // no reachable bitmap every port instruction from ring 3 faults
+        // rather than reaching a device.
+        iomap_base: 0,
         io_bitmap: [0; IO_BITMAP_BYTES],
     };
 }
@@ -268,6 +271,7 @@ pub unsafe fn install(trap_stack_top: u64, fault_stack_top: u64) {
     unsafe {
         (*tss).rsp[0] = trap_stack_top;
         (*tss).ist[0] = fault_stack_top;
+        (*tss).iomap_base = (core::mem::size_of::<TaskStateSegment>() + 1) as u16;
         // Deny every port. A driver's ports are cleared around its entries by
         // `grant_ports`; the map is only consulted while `iomap_base` points at
         // it, which is only while a driver domain is running.

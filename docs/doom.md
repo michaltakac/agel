@@ -487,6 +487,18 @@ route (route unchanged); the grid route reached the first door and spent
 seventy steps against it (route 4416 → 3264) until "door" was checked
 before "blocked".
 
+## Reviewed by itself (v0.2.99)
+
+The player runs beside a reviewer under `:agents`: `review` reads the
+one line the player rewrites each step (`summary`, its state line),
+counts the steps in which the player did not move and how far the
+route shrank, and every twenty steps either notes progress (a route
+two hundred units shorter needs no question) or asks the judge whether
+the player has stalled and, if so, which of the player's two tunable
+cells to change (`follow-steps`, `facing-tolerance`), redefines it in
+the shared world and notes why. Nobody is at the keyboard for the
+change. In the measured run of 120 steps the reviewer reviewed six times, found progress by arithmetic four times, asked Jev twice, and Jev chose `nothing` both times (590 and 490 thousandths); no cell changed, and the run is in [`release-v0.2.99.md`](release-v0.2.99.md).
+
 ## What this is not
 
 Sound is out of scope: the engine is built without it. RISC-V has no

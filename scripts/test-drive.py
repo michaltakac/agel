@@ -182,6 +182,42 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
             tail = until_text(machine, b"DRIVE DONE AFTER 2 STEPS", 60).decode(errors="replace")
         machine.serial.settimeout(15)
         settled(machine, tail)
+        # Agents side by side: a program that defines NAME-step and
+        # NAME-needs is an agent for `:agents`; it steps only when its needs
+        # are met (here a file present), and the run ends when every agent
+        # has said done.
+        machine.submit('(def dk-step (fn () (drive-step)))')
+        machine.submit('(def dk-needs (fn () \'((file "seen"))))')
+        waited = machine.submit(":agents 2")
+        assert "agents: step 1 dk waits file seen" in waited, waited[-2000:]
+        assert "AGENTS RAN 0 STEPS" in waited, waited[-2000:]
+        machine.submit('(file-write "seen" "x")')
+        machine.submit('(def command-for (fn (a) ":fs-ls /"))')
+        with machine.serial_lock:
+            send_line(machine, ":agents 3")
+            number, line, block = request(machine)
+            assert "task: show me the help and then finish" in block, block
+            answer(machine, number, "files", 900, 100)
+            until_text(machine, b"agents: step 1 dk do :fs-ls /", 60)
+            number, line, _ = request(machine)
+            answer(machine, number, "wait", 0, 900)
+            tail = until_text(machine, b"AGENTS DONE AFTER 2 STEPS", 60).decode(errors="replace")
+        machine.serial.settimeout(15)
+        assert "agents: step 2 dk do done" in tail, tail[-2000:]
+        settled(machine, tail)
+        # The reviewer beside the player: it joins the player's world, its
+        # needs are the player's summary file, and what it decides to change
+        # is a def on the player's tunable cells in the shared world.
+        assert "DOOM JUDGE AGENT READY" in machine.submit(":load doom-agent-judge")
+        assert "REVIEW AGENT READY" in machine.submit(":join review")
+        assert "CELLS 35" in machine.submit(":cells")
+        assert machine.submit("follow-steps").strip().startswith("8")
+        machine.submit('(rv-apply "follow-longer")')
+        assert machine.submit("follow-steps").strip().startswith("12")
+        machine.submit('(rv-apply "tolerance-wider")')
+        assert machine.submit("facing-tolerance").strip().startswith("20")
+        waited = machine.submit(":agents 1")
+        assert "agents: step 1 dj waits window" in waited and "rv waits file summary" in waited, waited[-2000:]
     finally:
         machine.close()
 print("An Agel program drives the desktop from inside the OS: the desktop's state read "

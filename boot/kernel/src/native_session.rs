@@ -18,6 +18,7 @@ pub struct EvaluatorReply {
 
 /// A request with no one to answer the language's effects: an effect word
 /// evaluated here is refused with "no service" and evaluation goes on.
+#[inline(never)]
 pub fn request(
     evaluator: &mut arch::Domain,
     command: u64,

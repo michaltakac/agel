@@ -467,6 +467,13 @@ promise.
   keeps its metrics in a file on the OS; a judge's short answer no
   longer stops a loop. Labelled honestly as a sensor and a hand-tuned
   policy; `parallel-agents.md` puts the agent's own adaptation next.
+  `v0.2.99` makes `:drive`, `:play` and the new `:agents` one loop:
+  every program with `NAME-step` is an agent, stepped when its
+  `NAME-needs` facts hold; `:join` puts a program beside the world's;
+  forty cells; `review` reads the player's summary line, asks the
+  judge whether it stalled and what to change, and redefines the
+  player's tunable cells; `real-work.md` is the research and the
+  general model behind it.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

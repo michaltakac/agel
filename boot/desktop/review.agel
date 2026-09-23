@@ -1,0 +1,30 @@
+; A reviewer beside a task: an agent that reads the one line the task
+; keeps of its own state (`summary`, the last state line the DOOM agent
+; wrote) every step, counts for itself the steps in which the player did
+; not move and how much of the route to the exit was covered, and every
+; twenty steps decides: if the route shrank by two hundred units or more,
+; code says the player progresses and nothing is asked; if the player did
+; not move in ten or more of those steps, code says it stalled and asks
+; only what to change; otherwise the judge is asked whether the player
+; has stalled (a number that could mean fighting or blocked), and if so which of the
+; player's own cells should change — the follow longer or shorter, the
+; heading's tolerance wider, or nothing — and the reviewer redefines that
+; cell in the shared world (`follow-steps`, `facing-tolerance`) and appends
+; what it changed and why to `notes`. Jev decides what the state is; code
+; decides what follows; no model writes anything. `rv-needs` is the summary
+; file; `rv-step` is the review. Fifteen cells, each under 256 bytes.
+(begin (def rv-reason "watching") (def rv-line "") (def rv-last-x 0) (def rv-last-y 0) (def rv-stalls 0) (def rv-steps 0) (def rv-path-then -1) (def rv-phase 0))
+(begin (def rv-needs (fn () '((file "summary")))) (def rv-field (fn (n d) (if (= (text-field rv-line n) nil) d (if (= (text-int (text-field rv-line n)) nil) d (text-int (text-field rv-line n)))))))
+(def rv-step (fn () (begin (def rv-line (file-read "summary")) (if (= rv-phase 0) (rv-watch) (rv-answer)))))
+(def rv-watch (fn () (begin (def rv-steps (+ rv-steps 1)) (def rv-stalls (if (if (= (rv-field 5 0) rv-last-x) (= (rv-field 7 0) rv-last-y) #f) (+ rv-stalls 1) rv-stalls)) (def rv-last-x (rv-field 5 0)) (def rv-last-y (rv-field 7 0)) (rv-due))))
+(def rv-due (fn () (begin (if (= rv-path-then -1) (def rv-path-then (rv-field 23 0)) nil) (if (= (- rv-steps (* 20 (/ rv-steps 20))) 0) (rv-review) "wait"))))
+(def rv-review (fn () (if (< 200 (- rv-path-then (rv-field 23 0))) (rv-note "progressing") (if (< 9 rv-stalls) (rv-ask-change) (rv-ask-stalled)))))
+(def rv-ask-stalled (fn () (begin (def rv-phase 1) (model-request (text-concat "(judge (noul stalled \"Stalled? " (text-concat rv-line "\"))"))) "wait")))
+(def rv-ask-change (fn () (begin (def rv-phase 2) (model-request rv-change-question) "wait")))
+(def rv-change-question "(judge (choice change \"What should change in the player?\" follow-longer follow-shorter tolerance-wider nothing))")
+(def rv-note (fn (what) (begin (def rv-reason what) (def rv-path-then -1) (def rv-stalls 0) (def rv-phase 0) (file-append "notes" (text-concat "review: " (text-concat what "\n"))) "wait")))
+(def rv-answer (fn () (begin (def a (model-result)) (if (= a nil) (if (= rv-phase 1) (rv-ask-stalled) (rv-ask-change)) (if (= rv-phase 1) (rv-stalled a) (rv-change a))))))
+(def rv-stalled (fn (a) (if (< 500 (rv-num a 2)) (rv-ask-change) (rv-note "not stalled"))))
+(begin (def rv-num (fn (a n) (if (= (text-int (text-field a n)) nil) 0 (text-int (text-field a n))))) (def rv-change (fn (a) (begin (rv-apply (text-field a 3)) (rv-note (text-field a 3))))))
+(begin (def rv-apply (fn (c) (if (= c "follow-longer") (def follow-steps (+ follow-steps 4)) (if (= c "follow-shorter") (rv-shorter) (rv-wider c))))) (def rv-shorter (fn () (def follow-steps (if (< 4 follow-steps) (- follow-steps 4) follow-steps)))))
+(def rv-wider (fn (c) (if (= c "tolerance-wider") (def facing-tolerance (+ facing-tolerance 8)) nil)))

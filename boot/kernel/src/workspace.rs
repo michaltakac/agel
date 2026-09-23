@@ -8,10 +8,13 @@
 use crate::service::{ServiceDomain, ServiceError};
 use crate::user::storage_status;
 
-/// Sixteen cells hold the workbench (nine) and the desktop agent summoned
-/// beside it (six), with one to spare; more would grow every workspace
-/// copy on the kernel's stack past what boot can carry.
-pub const MAX_CELLS: usize = 16;
+/// Forty cells hold the workbench (eight), an agent summoned beside it
+/// (the judged player is twenty) and a reviewer beside that (fifteen). Sixteen held the workbench and one agent;
+/// twenty-four overflowed the supervisor's stack while it was 200 KiB at
+/// 0x90000, and more fit since it is a megabyte (v0.2.97). The workspace
+/// slot on the disk (fifteen sectors) bounds the cells' encoded bytes, not
+/// their count; `encode` refuses what does not fit.
+pub const MAX_CELLS: usize = 40;
 pub const MAX_CELL_NAME: usize = 24;
 pub const MAX_CELL_SOURCE: usize = crate::world::PAYLOAD_BYTES;
 

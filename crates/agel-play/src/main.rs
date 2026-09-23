@@ -61,6 +61,10 @@ struct Options {
     agel: PathBuf,
     /// Instead of booting: attach to a running desktop's serial socket and
     /// answer the requests it relays, the operator at the window.
+    /// Run the player and the reviewer side by side with `:agents` instead
+    /// of `:play`: the reviewer reads the player's summary and may redefine
+    /// its cells.
+    agents: bool,
     attach: Option<PathBuf>,
 }
 
@@ -84,6 +88,7 @@ fn options() -> Result<Options, String> {
         pages: PathBuf::from("examples/pages"),
         agel: PathBuf::from("boot/posix/target/x86_64-unknown-none/release/agel"),
         attach: None,
+        agents: false,
     };
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
@@ -112,6 +117,7 @@ fn options() -> Result<Options, String> {
             "--pages" => options.pages = PathBuf::from(value()?),
             "--agel" => options.agel = PathBuf::from(value()?),
             "--attach" => options.attach = Some(PathBuf::from(value()?)),
+            "--agents" => options.agents = true,
             other => return Err(format!("unknown option {other}")),
         }
     }
@@ -1290,8 +1296,15 @@ fn play(
         // steps written into it and asks on its own console.
         serial.send_line(":exec agel -- /data/browse.agel")?;
     } else {
-        let loop_word = if desktop { ":drive" } else { ":play" };
-        serial.send_line(&format!("{loop_word} {} {}", options.steps, options.hold))?;
+        if options.agents {
+            // The reviewer joins the player and both run as agents.
+            serial.send_line(":join review")?;
+            serial.wait_for(0, b"REVIEW AGENT READY", Duration::from_secs(60))?;
+            serial.send_line(&format!(":agents {} {}", options.steps, options.hold))?;
+        } else {
+            let loop_word = if desktop { ":drive" } else { ":play" };
+            serial.send_line(&format!("{loop_word} {} {}", options.steps, options.hold))?;
+        }
     }
 
     let mut block = String::new();
@@ -1363,11 +1376,25 @@ fn play(
             // `play: step N keys FORM reason R` from the game's loop, or
             // `drive: step N do LINE reason R` from the desktop's: the
             // decision is recorded either way.
+            // `agents: step N NAME keys FORM` or `... do LINE` from the
+            // agents loop: the agent's name is kept with the decision.
             let stepped = line
                 .strip_prefix("play: step ")
                 .map(|rest| (rest, "keys "))
                 .or_else(|| line.strip_prefix("drive: step ").map(|rest| (rest, "do ")))
-                .or_else(|| line.strip_prefix("browse: step ").map(|rest| (rest, "do ")));
+                .or_else(|| line.strip_prefix("browse: step ").map(|rest| (rest, "do ")))
+                .or_else(|| {
+                    line.strip_prefix("agents: step ").map(|rest| {
+                        (
+                            rest,
+                            if rest.contains(" keys ") {
+                                "keys "
+                            } else {
+                                "do "
+                            },
+                        )
+                    })
+                });
             if let Some((rest, decided)) = stepped {
                 let index: usize = rest
                     .split(' ')
@@ -1419,6 +1446,8 @@ fn play(
             if line.contains("PLAYED")
                 || line.contains("PROCESS ENDED")
                 || line.starts_with("DROVE ")
+                || line.starts_with("AGENTS RAN ")
+                || line.starts_with("AGENTS DONE")
                 || line.starts_with("DRIVE DONE")
                 || line.starts_with("process agel exited")
                 // The loop refused to start or stopped: no program, no
