@@ -1985,6 +1985,28 @@ produced or run there.
   source-level integer-overflow conformance, or a stack quota. Arbitrary ELF
   programs can omit all these checks; kernel isolation remains mandatory.
 
+## v0.2.100
+
+- **The BIOS stage copies through unreal mode.** It enters protected
+  mode to load 4 GiB limits into the data segments and leaves it; real
+  mode then addresses above the megabyte through those limits. The
+  firmware's disk service runs with those segments in place; what it
+  does with them is the firmware's, as before. A failed read halts the
+  machine silently, since the message no longer fits the sector.
+- **The kernel lives at 1 MiB.** Its text, data and stack are below the
+  pool as before, mapped page by page for the first 6 MiB; the ring-3
+  text hole is the same hole at a new address, and the probe address the
+  isolation self-test writes is the image's first page there.
+- **Bigger worlds, same boundaries.** A world is 636 KiB and the
+  evaluator's stack 8 MiB; the absent page beneath the stack still
+  turns overflow into a contained fault, and a unit test guards that a
+  session and two previewed worlds use at most half the stack.
+- **Longer payloads across the shared page** stay inside it: the payload
+  runs from byte 640 to 1536, the block area from 1536 to 2048, the
+  observation area from 2048; the handshake words end at byte 608. A
+  domain writing past a payload wraps within it, as before.
+- **Not claimed:** any new isolation; the change is size.
+
 ## v0.2.99
 
 - **Agents step in turn, never at once.** `:agents` is the same

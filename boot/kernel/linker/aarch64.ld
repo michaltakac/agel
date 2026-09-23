@@ -52,9 +52,10 @@ SECTIONS
      guess about where RAM is free. */
   . = ALIGN(4K);
   __stack_bottom = .;
-  /* 512 KiB, like x86-64: the workshop keeps two bounded source workspaces
+  /* 4 MiB since v0.2.100 (512 KiB before): the workshop keeps several
+     bounded source workspaces, 60 KiB each now that a cell is 896 bytes,
      and a sector image on this stack rather than in an allocator. */
-  . += 0x80000;
+  . += 0x400000;
   __stack_top = .;
 
   /DISCARD/ : { *(.eh_frame*) *(.comment*) }

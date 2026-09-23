@@ -14,5 +14,6 @@ test_image=$(mktemp "${TMPDIR:-/tmp}/agel-kernel-ab.XXXXXX")
 trap 'rm -f "$test_image"' EXIT HUP INT TERM
 cp "$image" "$test_image"
 # Blank the workspace slots, the recovery record, the selector and slot B.
-dd if=/dev/zero of="$test_image" bs=512 seek=512 count=546 conv=notrunc 2>/dev/null
+dd if=/dev/zero of="$test_image" bs=512 seek=1024 count=66 conv=notrunc 2>/dev/null
+dd if=/dev/zero of="$test_image" bs=512 seek=69760 count=4224 conv=notrunc 2>/dev/null
 python3 ./scripts/test-native-repl.py "$test_image" --kernel-rollback target/boot/kernel.bin

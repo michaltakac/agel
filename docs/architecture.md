@@ -595,6 +595,12 @@ Each rung must be runnable and differentially testable against the rung below:
    the judge whether it stalled and what to change, and redefines its
    tunable cells in the shared world. See [`computer-use.md`](computer-use.md),
    [`real-work.md`](real-work.md) and [`parallel-agents.md`](parallel-agents.md).
+94. **Room (v0.2.100):** disk layout v3, the kernel loaded above the
+   real-mode megabyte through unreal mode into a 2 MiB slot, and the
+   native evaluator's limits raised to what a program needs (kilobyte
+   bodies, 896-byte cells, 1000-byte requests, 64 KiB of text, an 8 MiB
+   evaluator stack). See [`native-boot.md`](native-boot.md) and
+   [`release-v0.2.100.md`](release-v0.2.100.md).
 50. **Local inference:** model inference in its own domain, over quantized
    weights, requiring no proprietary kernel-mode driver. External providers
    already work through the same capability-scoped effect boundary.

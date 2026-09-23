@@ -14,13 +14,16 @@ use crate::user::storage_status;
 /// 0x90000, and more fit since it is a megabyte (v0.2.97). The workspace
 /// slot on the disk (fifteen sectors) bounds the cells' encoded bytes, not
 /// their count; `encode` refuses what does not fit.
-pub const MAX_CELLS: usize = 40;
-pub const MAX_CELL_NAME: usize = 24;
+pub const MAX_CELLS: usize = 64;
+pub const MAX_CELL_NAME: usize = 32;
 pub const MAX_CELL_SOURCE: usize = crate::world::PAYLOAD_BYTES;
 
+/// The two workspace slots: A at 1024, thirty-two sectors, up to the
+/// recovery record; B past the selector. Sixteen sectors each before
+/// v0.2.100, when a cell grew to a kilobyte.
 const SLOT_A: u32 = 1024;
-const SLOT_B: u32 = 1040;
-const SLOT_SECTORS: u32 = 16;
+const SLOT_B: u32 = 1058;
+const SLOT_SECTORS: u32 = 32;
 const PAYLOAD_SECTORS: usize = SLOT_SECTORS as usize - 1;
 const PAYLOAD_BYTES: usize = PAYLOAD_SECTORS * 512;
 /// The recovery record follows the two workspace slots. It names which
@@ -43,9 +46,9 @@ const KERNEL_SELECTOR_MAGIC: &[u8; 4] = b"AGKS";
 const KERNEL_SELECTOR_VERSION: u8 = 2;
 #[cfg(target_arch = "x86_64")]
 /// First sector of each kernel slot and the sectors a slot holds.
-pub const KERNEL_SLOT_BASE: [u32; 2] = [1, 512];
+pub const KERNEL_SLOT_BASE: [u32; 2] = [65536, 69760];
 #[cfg(target_arch = "x86_64")]
-pub const KERNEL_SLOT_SECTORS: u32 = 508;
+pub const KERNEL_SLOT_SECTORS: u32 = 4096;
 #[cfg(target_arch = "x86_64")]
 pub const NO_CANDIDATE: u8 = 0xff;
 const MAGIC: &[u8; 8] = b"AGELWS1\0";

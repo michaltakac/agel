@@ -474,6 +474,11 @@ promise.
   judge whether it stalled and what to change, and redefines the
   player's tunable cells; `real-work.md` is the research and the
   general model behind it.
+  `v0.2.100` is room: disk layout v3 with 2 MiB kernel slots past the
+  data region, the kernel loaded above the real-mode megabyte through
+  unreal mode, and the evaluator's limits raised (kilobyte bodies,
+  896-byte cells, 1000-byte requests, 64 KiB of text, 64 cells, an 8 MiB
+  evaluator stack).
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

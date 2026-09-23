@@ -2,7 +2,7 @@ ENTRY(agel_boot)
 
 SECTIONS
 {
-  . = 0x10000;
+  . = 0x100000;
   .entry : ALIGN(4K) { KEEP(*(.text.entry)) }
 
   /* Ring-3 program text. It is the only part of the kernel image the page

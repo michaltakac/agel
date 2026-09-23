@@ -103,7 +103,31 @@ goes to a model once, through the judged gate, as a proposal of cells.
 Nobody is at the keyboard. The measure is the same live run, before and
 after the agent's own change, and the change itself in the file.
 
-### v0.3.0 — agents side by side, and what blocks what
+### v0.2.100 — room
+
+The disk layout, the kernel's load address and the evaluator's limits
+were the first version's; [`release-v0.2.100.md`](release-v0.2.100.md)
+raises them so that a program is written for the job, not for the cell.
+
+### v0.3.0 — a sentence is a fact, and the game is played with instructions
+
+The general features, exercised on DOOM and filmed. A sentence heard
+while agents run is written to the file `task`, so it is a fact any
+agent's needs can wait on and any step can read: the desktop's one input
+channel reaching every agent. The DOOM agent reads it and, when it holds
+text, asks Jev one more typed question, what the operator asks for (a
+look at the map, care, a fight, nothing), and acts on the answer with
+its own reflexes; the desktop agent's menu gains `review-doom`, a handover
+that joins the reviewer and runs `:agents` instead of `:play`. The
+reviewer says its notes on the console as it writes them, and on joining
+reads its notes' tail and re-applies the last change it made, so a run
+learns from the run before it (AgentRun's notes, one line each). The
+film: a click, three sentences, the game started by the desktop agent,
+played by the judged agent beside the reviewer, an instruction typed
+mid-run and followed, the reviewer's notes as captions, everything the
+agents did, tried and changed, from the serial trail alone.
+
+### v0.3.1 — agents side by side, and what blocks what (done at v0.2.99)
 
 `:agents` replaces the one-loop-at-a-time desktop. Each program in the
 world that defines `NAME-step` and `NAME-needs` is an agent; the desktop
@@ -119,7 +143,7 @@ cooperative concurrency in one supervisor thread: an agent's step is
 bounded, and a step that blocks the machine is the same bug it was
 before.
 
-### v0.3.1 — a lookup through the host, a plan from it, a tool it wrote
+### v0.3.2 — a lookup through the host, a plan from it, a tool it wrote
 
 A program asks `(fetch URL)` through the same request the judge answers;
 the bridge on the host fetches, reduces the page to text, and delivers

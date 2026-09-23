@@ -36,20 +36,22 @@ use crate::world::Provocation;
 pub const NAME: &str = "x86_64";
 
 /// Start of the frame pool. Everything below is BIOS structures, the boot
-/// sector, the kernel image, and the kernel stack.
+/// sector, the kernel image at 1 MiB (a 2 MiB slot, its zeroed data to
+/// 4 MiB) and the kernel stack from 4 to 5 MiB.
 #[cfg(feature = "isolation-selftest")]
-pub const POOL_START: u64 = 0x0020_0000;
-/// End of the frame pool: 46 MiB, as much as the other machines' pools.
-/// QEMU is started with 64 MiB; the bound is a deliberate fixed resource
-/// policy, not a probe result, and the BIOS stage identity-maps the first
-/// gibibyte for the supervisor.
+pub const POOL_START: u64 = 0x0060_0000;
+/// End of the frame pool: 56 MiB of the 64 MiB QEMU is started with
+/// (48 MiB before v0.2.100; the evaluator's stack and a process's zone
+/// grew). The bound is a deliberate fixed resource policy, not a probe
+/// result, and the BIOS stage identity-maps the first gibibyte for the
+/// supervisor.
 #[cfg(feature = "isolation-selftest")]
-pub const POOL_END: u64 = 0x0300_0000;
+pub const POOL_END: u64 = 0x03E0_0000;
 
 /// A supervisor-only address a world may try to write. It is the first page of
 /// the kernel image, which every domain maps without the user bit.
 #[cfg(feature = "isolation-selftest")]
-pub const KERNEL_PROBE_ADDRESS: u64 = 0x0001_0000;
+pub const KERNEL_PROBE_ADDRESS: u64 = 0x0010_0000;
 
 /// Time-stamp counter ticks per microsecond, measured once at bring-up.
 #[cfg(feature = "process")]

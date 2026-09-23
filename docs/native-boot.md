@@ -9,24 +9,28 @@ on that substrate while retaining the recovery boundary.
 AArch64 and RISC-V need none of this: QEMU's `virt` machine loads an ELF by its
 program headers, so those images state where they want to live and start there.
 x86-64 keeps the BIOS seed because that is where the project's native work
-began, and because a reproducible 256 KiB boot seed is a useful thing to have.
+began, and because a reproducible boot seed is a useful thing to have.
 
 1. The 512-byte BIOS stage reads the kernel slot selector at sector 1057,
-   charges an unverified candidate one boot and writes the selector back, and
-   loads 508 kernel sectors from the chosen slot in four conservative
-   127-sector requests beginning at physical `0x10000`. It leaves the chosen
-   slot at `0x6fec` behind a marker at `0x6fe8` for the kernel.
+   charges an unverified candidate one boot and writes the selector back,
+   enters and leaves protected mode with the data segments' limits kept
+   (unreal mode), and loads the chosen 4096-sector slot in 33 conservative
+   127-sector requests into a bounce buffer at `0x10000`, copying each up
+   to physical `0x100000` with 32-bit addressing (since v0.2.100; before,
+   508 sectors in four requests straight to `0x10000`, the real-mode
+   megabyte being the budget). It leaves the chosen slot at `0x6fec`
+   behind a marker at `0x6fe8` for the kernel.
 2. It creates identity-mapped four-level page tables for the first GiB.
 3. It enables A20, PAE, long mode, protected mode, and paging.
 4. It jumps through a 64-bit GDT entry and calls the fixed kernel entry at
-   `0x10000`.
+   `0x100000`, with the supervisor stack at `0x500000`.
 5. The `no_std`, `no_main` Rust seed zeroes `.bss`, initializes COM1, and starts
    the native Agel workshop. Recovery policy remains separate from the
    evaluator's world banks.
 
 The linker keeps `.text.entry` first so helper-function reordering cannot move
-the address called by the BIOS stage. The x86-64 image is 65,536 sectors
-(32 MiB) since v0.2.69, laid out as follows since v0.2.42 with the asset
+the address called by the BIOS stage. The x86-64 image is 73,984 sectors
+(36 MiB) since v0.2.100 (65,536 before), laid out as follows since v0.2.42 with the asset
 region added at v0.2.47 and moved, with the program region grown and the
 data region added, at v0.2.69; the virtio disks of the AArch64 and RISC-V
 machines start at 3,072 sectors, have no BIOS stage, kernel slots or
@@ -36,14 +40,16 @@ when a program or data file is installed past their end.
 | Sectors | Contents |
 |---|---|
 | 0 | the BIOS stage |
-| 1–508 | kernel slot A; with sector 0 it is the replaceable boot seed, and the build rejects a kernel over 508 sectors (260,096 bytes) |
-| 512–1019 | kernel slot B |
-| 1024–1055 | the two v0.1.7 workspace slots, 16 sectors each |
+| 1–1023 | free since v0.2.100 (kernel slots A and B before, 508 sectors each) |
+| 1024–1055 | workspace slot A, 32 sectors since v0.2.100 (16 before, with slot B at 1040) |
+| 1058–1089 | workspace slot B, 32 sectors (v0.2.100) |
 | 1056 | the v0.2.29 recovery record |
 | 1057 | the v0.2.30 kernel slot selector |
 | 1536–2047 | the v0.2.43 filesystem region, `agelfs`, served by the filesystem service |
 | 2048–10239 | the v0.2.41 program region: a table sector and static ELF images, 4 MiB since v0.2.69 (512 KiB before) |
 | 10240–13311 | the v0.2.47 asset region: a table sector, the compositor's font atlases and, since v0.2.48, its sprite sheet (3072–6143 before v0.2.69) |
+| 65536–69759 | kernel slot A (v0.2.100): 4096 sectors, 2 MiB, and with sector 0 the replaceable boot seed; the build rejects a kernel over 2,097,152 bytes; the loader reads 33 × 127 sectors, so 128 sectors past the slot are read and ignored |
+| 69760–73983 | kernel slot B (v0.2.100) |
 | 13312–65535 | the v0.2.69 data region: a table sector and large read-only files installed from the host (`scripts/install-program.py --region data`), served by the filesystem service under `/data`; 25.5 MiB |
 
 Rebuilding installs the new kernel as slot A, clears the selector so that

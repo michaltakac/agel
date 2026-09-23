@@ -36,8 +36,11 @@ SHOT_EVERY = 0.5
 
 SENTENCES = [
     "list the files on the disk, then finish",
-    "hi Jev, can you play DOOM for a minute?",
-    "the game is running now, please play it",
+    "hi Jev, play DOOM and review yourself as you go",
+    "the game is running now, play it and review yourself",
+    # Said at the console while the agents run: a sentence is a fact the
+    # DOOM agent reads from the file `task` and asks the judge about.
+    "check the map and be careful",
 ]
 
 
@@ -248,6 +251,9 @@ def captions(events):
         if raw.startswith("typed> "):
             state["headline"] = f'You type: "{raw[len("typed> "):]}"'
             state["judge"] = "Agel summons its desktop agent; Jev, a System One model, judges each step"
+        elif raw.startswith("said> "):
+            state["headline"] = f'You say, at the console: "{raw[len("said> "):]}"'
+            state["judge"] = "The sentence becomes a fact (the file task) every agent can read"
         elif line.startswith("WORKBENCH READY"):
             state["headline"] = "A click on the desktop opens the workbench"
         elif line.startswith("agel-play: model reply"):
@@ -258,6 +264,8 @@ def captions(events):
             names = {":fs-ls /": "lists the files", ":help": "shows the help", "wait": "waits", "done": "is done"}
             if command.startswith(":exec c-doom"):
                 what = "starts DOOM in a window"
+            elif command.startswith(":handover") and command.endswith(" agents"):
+                what = "hands the desktop to its DOOM agent and a reviewer, side by side"
             elif command.startswith(":handover"):
                 what = "hands the desktop to its DOOM-playing agent"
             else:
@@ -273,6 +281,30 @@ def captions(events):
             keys = rest.split("keys ", 1)[-1].split(" reason ", 1)[0].strip("() ")
             held = " + ".join(KEYS.get(key, key) for key in keys.split()) or "nothing"
             state["headline"] = f"Agel's DOOM agent, step {number}: {held}"
+        elif line.startswith("agents: step ") and " dj keys " in line:
+            rest = line[len("agents: step "):]
+            number = rest.split(" ", 1)[0]
+            keys = rest.split("keys ", 1)[-1].split(" reason ", 1)[0].strip("() ")
+            held = " + ".join(KEYS.get(key, key) for key in keys.split()) or "nothing"
+            state["headline"] = f"The DOOM agent, step {number}: {held}"
+        elif line.startswith("agents: step ") and " rv waits " in line:
+            state["headline"] = "The reviewer waits for the player's first summary line"
+        elif line.startswith("agents: heard "):
+            state["judge"] = "Heard mid-run: " + line[len("agents: heard "):]
+        elif line.startswith("doom: instruction "):
+            what = line[len("doom: instruction "):].split(" for: ", 1)[0]
+            state["judge"] = f"Jev read the sentence as: {what}; the DOOM agent acts on it"
+        elif line.startswith("review: "):
+            note = line[len("review: "):]
+            meanings = {"progressing": "the route shrank; nothing to change",
+                        "not stalled": "Jev says the player is not stalled",
+                        "nothing": "Jev chose to change nothing",
+                        "follow-longer": "Jev: follow walls longer; the reviewer redefined follow-steps",
+                        "follow-shorter": "Jev: follow walls less; the reviewer redefined follow-steps",
+                        "tolerance-wider": "Jev: aim looser; the reviewer redefined facing-tolerance"}
+            state["judge"] = "The reviewer: " + meanings.get(note, note)
+        elif line.startswith(("AGENTS RAN ", "AGENTS DONE")):
+            state["headline"] = f"Agel {line.lower()}: the player and its reviewer, side by side"
         elif line.startswith("PLAYED "):
             state["headline"] = f"Agel {line.lower()}: Jev judged every one"
         elif line.startswith(("DRIVE DONE", "DROVE ")):
@@ -385,7 +417,7 @@ def main():
         log = work / "bridge.log"
         bridge = subprocess.Popen([str(ROOT / "target/release/agel-play"), "--attach", str(work / "serial"),
                                    "--scene", "desktop", "--policy", "jev", "--out", str(work / "run")],
-                                  cwd=ROOT, stdout=open(log, "w"), stderr=subprocess.STDOUT)
+                                  cwd=ROOT, stdin=subprocess.PIPE, stdout=open(log, "w"), stderr=subprocess.STDOUT)
         console = Console(log)
         recorder = Recorder(qmp, work / "shots")
         begun = time.monotonic()
@@ -431,7 +463,17 @@ def main():
             again = time.monotonic()
             type_text(qmp, SENTENCES[2], console)
             console.wait(["do :handover"], 300, after=again)
-        console.wait(["PLAYED ", "PROCESS ENDED"], 1800, after=frame_time)
+        # The agents run: the player and the reviewer. A minute in, a
+        # sentence at the console (the bridge forwards its standard input
+        # to the serial line, the OS's other keyboard) becomes the file
+        # `task`, which the DOOM agent reads and asks the judge about.
+        handed = time.monotonic()
+        console.wait(["agents: step "], 600, after=handed)
+        time.sleep(45)
+        console.events.append((time.monotonic(), "said> " + SENTENCES[3]))
+        bridge.stdin.write((SENTENCES[3] + "\n").encode())
+        bridge.stdin.flush()
+        console.wait(["AGENTS RAN ", "AGENTS DONE", "PLAYED ", "PROCESS ENDED"], 1800, after=frame_time)
         time.sleep(4)
     except TimeoutError as error:
         print(f"record-demo: {error}; composing what was recorded", file=sys.stderr)
@@ -462,7 +504,7 @@ def finish(work, output, events, shots, speeds):
     (work / "frames").mkdir()
     timeline = captions(events)
     handover = next((stamp for stamp, line in events if "do :handover" in line), None)
-    played = next((stamp for stamp, line in events if line.startswith(("PLAYED ", "PROCESS ENDED"))), None)
+    played = next((stamp for stamp, line in events if line.startswith(("PLAYED ", "PROCESS ENDED", "AGENTS RAN ", "AGENTS DONE"))), None)
     zooms = [(handover + 2.0, played + 1.0 if played else None)] if handover else []
     frames = compose(shots, timeline, work / "frames", speeds, zooms)
     opening, closing = work / "frames" / "opening.jpg", work / "frames" / "closing.jpg"

@@ -44,7 +44,8 @@ test ! -L "$desktop_image"
 if test ! -e "$desktop_image"; then
   cp "$image" "$desktop_image"
 fi
-dd if="$image" of="$desktop_image" bs=512 count=512 conv=notrunc 2>/dev/null
+dd if="$image" of="$desktop_image" bs=512 count=1 conv=notrunc 2>/dev/null
+dd if="$image" of="$desktop_image" bs=512 skip=65536 seek=65536 count=4224 conv=notrunc 2>/dev/null
 dd if="$image" of="$desktop_image" bs=512 skip=10240 seek=10240 count=3072 conv=notrunc 2>/dev/null
 for program in workbench:wb doom-agent:da doom-agent-model:dm doom-agent-judge:dj desktop-agent:dk review:rv; do
   python3 ./scripts/install-program.py --region data "$desktop_image" "${program##*:}.agel" "boot/desktop/${program%%:*}.agel" >/dev/null
@@ -69,10 +70,11 @@ if $workbench; then
   workbench_image="$(dirname "$image")/agel-workbench.img"
   test ! -L "$workbench_image"
   if test ! -e "$workbench_image"; then
-    dd if=/dev/zero of="$workbench_image" bs=512 count=6144 2>/dev/null
+    dd if=/dev/zero of="$workbench_image" bs=512 count=73984 2>/dev/null
   fi
   test -f "$workbench_image"
-  dd if="$image" of="$workbench_image" bs=512 count=512 conv=notrunc 2>/dev/null
+  dd if="$image" of="$workbench_image" bs=512 count=1 conv=notrunc 2>/dev/null
+  dd if="$image" of="$workbench_image" bs=512 skip=65536 seek=65536 count=4224 conv=notrunc 2>/dev/null
   # The asset region travels with the seed: the fonts the desktop is set in.
   dd if="$image" of="$workbench_image" bs=512 skip=10240 seek=10240 count=3072 conv=notrunc 2>/dev/null
   image="$workbench_image"

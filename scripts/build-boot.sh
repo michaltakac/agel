@@ -38,28 +38,30 @@ clang -target i386-none-elf -c "$project_dir/boot/bios/boot.S" -o "$boot_object"
 "$objcopy_bin" -O binary "$boot_elf" "$boot_bin"
 
 test "$(wc -c < "$boot_bin" | tr -d ' ')" -eq 512
-# A kernel slot holds 508 sectors: four 127-sector BIOS transfers.
-test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 260096
+# A kernel slot holds 4096 sectors (2 MiB), read by 33 conservative
+# 127-sector BIOS transfers (disk layout v3, v0.2.100).
+test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 2097152
 
-# The first 512 sectors are the reproducible boot seed: the BIOS stage and
-# kernel slot A. Sectors from 512 onward belong to kernel slot B, the native
-# dual-slot source workspace, the recovery record, the kernel slot selector,
-# the filesystem region and the program region, and must survive rebuilding
-# the kernel between workshop sessions. A rebuild installs the new kernel as
-# slot A and clears the selector (sector 1057): it is a new baseline, and any
+# The boot seed is the BIOS stage (sector 0) and kernel slot A (sectors
+# 65536-69759, past the data region; the transfers read on to 69759).
+# Everything between belongs to the native dual-slot source workspace, the
+# recovery record, the kernel slot selector, the filesystem region, the
+# program, asset and data regions, and must survive rebuilding the kernel
+# between workshop sessions. A rebuild installs the new kernel as slot A
+# and clears the selector (sector 1057): it is a new baseline, and any
 # candidate staged with scripts/stage-kernel.py is dropped rather than
-# silently kept in front of the kernel just built. Slot B (sectors 512-1019)
-# is left as it was.
-disk_bytes=33554432
+# silently kept in front of the kernel just built. Slot B (sectors
+# 69760-73983) is left as it was.
+disk_bytes=37879808
 if test ! -f "$disk_image"; then
-  dd if=/dev/zero of="$disk_image" bs=512 count=65536 2>/dev/null
+  dd if=/dev/zero of="$disk_image" bs=512 count=73984 2>/dev/null
 elif test "$(wc -c < "$disk_image" | tr -d ' ')" -lt "$disk_bytes"; then
   dd if=/dev/zero of="$disk_image" bs=1 count=1 seek=$((disk_bytes - 1)) conv=notrunc 2>/dev/null
 fi
-dd if=/dev/zero of="$disk_image" bs=512 seek=1 count=511 conv=notrunc 2>/dev/null
+dd if=/dev/zero of="$disk_image" bs=512 seek=65536 count=4224 conv=notrunc 2>/dev/null
 dd if=/dev/zero of="$disk_image" bs=512 seek=1057 count=1 conv=notrunc 2>/dev/null
 dd if="$boot_bin" of="$disk_image" conv=notrunc 2>/dev/null
-dd if="$kernel_bin" of="$disk_image" bs=512 seek=1 conv=notrunc 2>/dev/null
+dd if="$kernel_bin" of="$disk_image" bs=512 seek=65536 conv=notrunc 2>/dev/null
 
 # The asset region (sectors 10240-13311) holds the compositor's font atlases
 # and sprite sheet, committed under boot/desktop/assets so that every build

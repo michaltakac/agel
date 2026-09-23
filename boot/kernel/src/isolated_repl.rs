@@ -1016,6 +1016,13 @@ fn driver_text_error(driver: &mut ServiceDomain, prefix: &[u8], detail: &[u8]) {
     if driver.write_console(driver.handle(), prefix).is_err()
         || driver.write_console(driver.handle(), detail).is_err()
     {
+        // The supervisor's own console, so the error is not lost with the
+        // driver that was to print it.
+        crate::kprint!(
+            "{}{}\n",
+            core::str::from_utf8(prefix).unwrap_or("?"),
+            core::str::from_utf8(detail).unwrap_or("?")
+        );
         fatal("console driver stopped while reporting an error");
     }
     driver_line(driver, b"");

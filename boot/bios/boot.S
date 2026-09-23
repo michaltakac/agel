@@ -52,7 +52,7 @@ graphics_done:
     movb boot_drive, %dl
     movb $0x42, %ah
     int $0x13
-    jc disk_error
+    jc halt
     xorw %bx, %bx
     cmpl $0x534b4741, 0x6000
     jne select_done
@@ -69,7 +69,7 @@ graphics_done:
     incb 0x6007
     movw $0x4300, %ax
     int $0x13
-    jc disk_error
+    jc halt
     movb 0x6006, %al
 select_candidate:
     movb %al, %bl
@@ -77,29 +77,51 @@ select_done:
     movb %bl, 0x6fec
     movl $0xa6e15107, 0x6fe8
 
-    # Load the kernel in four conservative 127-sector BIOS transfers from the
-    # chosen slot: slot A begins at sector 1, slot B at sector 512. One DAP
-    # request is deliberately kept below the common firmware limit; together
-    # they load a 508-sector slot to physical 0x10000 without making the
-    # seed depend on a filesystem.
-    movw $1, %ax
+    # Load the kernel to physical 0x100000, above the real-mode megabyte:
+    # 33 conservative 127-sector BIOS transfers (each below the common
+    # firmware limit) from the chosen slot into a bounce buffer at 0x10000,
+    # each copied up with 32-bit addressing while the data segments carry a
+    # 4 GiB limit (unreal mode: protected mode entered and left with the
+    # limits kept). Slot A begins at sector 65536, slot B at 69760, past the
+    # data region, so a 2 MiB kernel needs no filesystem to be found.
+    lgdt gdt_pointer
+    movl %cr0, %eax
+    orl $1, %eax
+    movl %eax, %cr0
+    movw $0x10, %cx
+    movw %cx, %ds
+    movw %cx, %es
+    decl %eax
+    movl %eax, %cr0
+    xorw %cx, %cx
+    movw %cx, %ds
+    movw %cx, %es
+    movl $65536, %eax
     testb %bl, %bl
     jz base_done
-    movw $512, %ax
+    addw $4224, %ax
 base_done:
-    movw %ax, disk_packet + 8
+    movl %eax, disk_packet + 8
     movw $127, disk_packet + 2
-    movw $0, disk_packet + 4
-    movw $0x1000, disk_packet + 6
-    movw $4, %cx
+    # Offset 0, segment 0x1000: the bounce buffer at 0x10000.
+    movl $0x10000000, disk_packet + 4
+    movl $0x100000, %edi
+    movw $33, %cx
 load_loop:
     pushw %cx
+    pushl %edi
+    # The copy leaves esi past the buffer; the packet is at si again.
+    movw $disk_packet, %si
     movb $0x42, %ah
     int $0x13
-    jc disk_error
+    jc halt
+    popl %edi
+    addl $127, disk_packet + 8
+    movl $0x10000, %esi
+    movl $16256, %ecx
+    # addr32 rep movsl: esi/edi through the unreal data segments.
+    .byte 0x67, 0xf3, 0x66, 0xa5
     popw %cx
-    addw $127, disk_packet + 8
-    addw $0xfe0, disk_packet + 6
     loop load_loop
 
     # Zero PML4, PDPT and PD at 0x1000..0x3fff.
@@ -139,15 +161,6 @@ page_loop:
     movl %eax, %cr0
     ljmpl $0x08, $long_mode
 
-disk_error:
-    movw $disk_error_message, %si
-print:
-    lodsb
-    testb %al, %al
-    jz halt
-    movb $0x0e, %ah
-    int $0x10
-    jmp print
 halt:
     cli
     hlt
@@ -159,19 +172,17 @@ long_mode:
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %ss
-    # The supervisor stack: a megabyte, from 2 MiB down to 1 MiB, between the
-    # kernel image below 640 KiB and the frame pool at 2 MiB; nothing else
-    # lives there. It was 0x90000 in low memory, some 200 KiB, and one
-    # command started from inside another overflowed it.
-    movq $0x200000, %rsp
-    xorq %rbp, %rbp
-    movq $0x10000, %rax
-    call *%rax
+    # The supervisor stack: a megabyte, from 5 MiB down to 4 MiB, above the
+    # kernel image at 1 MiB (2 MiB of slot, then its zeroed data to 4 MiB)
+    # and below the frame pool at 6 MiB; nothing else lives there. It was
+    # 0x90000 in low memory, some 200 KiB, and one command started from
+    # inside another overflowed it.
+    movq $0x500000, %rsp
+    call 0x100000
     jmp halt
 
 .code16
 boot_drive: .byte 0
-disk_error_message: .asciz "Agel disk read failed"
 
 .align 8
 gdt:

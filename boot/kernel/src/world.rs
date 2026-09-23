@@ -34,11 +34,14 @@ pub const STACK_PAGES: u64 = 4;
 /// Pages reserved for a native evaluator domain.
 ///
 /// The evaluator keeps its fixed transactional worlds and recursive parser on
-/// this private stack. 4 MiB since v0.2.76, when the worlds grew (512 KiB
-/// before); a hard bound, not a growable heap, and the absent page beneath it
-/// still turns overflow into a contained fault. It needs its own region away
-/// from the shared page, which [`crate::arch`] gives it (`STACK_BASE`).
-pub const EVALUATOR_STACK_PAGES: u64 = 1024;
+/// this private stack. 8 MiB since v0.2.100, when a world grew to 636 KiB
+/// (kilobyte bodies, 160 bindings, 64 KiB of text) and the session's three
+/// banks to 1.9 MiB, with a preview's copies beside them (a unit test
+/// keeps that under half the stack); 4 MiB from v0.2.76, 512 KiB before. A hard bound, not a growable heap, and the
+/// absent page beneath it still turns overflow into a contained fault. It
+/// needs its own region away from the shared page, which [`crate::arch`]
+/// gives it (`STACK_BASE`).
+pub const EVALUATOR_STACK_PAGES: u64 = 2048;
 
 /// Offsets, in 64-bit words, of the supervisor/world handshake block.
 ///
@@ -728,15 +731,15 @@ pub const SCENE_HEIGHT: u32 = 1080;
 ///
 /// The handshake words occupy the start of the page; bytes a domain is asked to
 /// print start well past them so a long line cannot walk into the protocol.
-pub const PAYLOAD_OFFSET: usize = 128;
+pub const PAYLOAD_OFFSET: usize = 640;
 
 /// Bytes of console payload one request may carry.
-pub const PAYLOAD_BYTES: usize = 256;
+pub const PAYLOAD_BYTES: usize = 896;
 
 /// Byte offset in the shared page of the one-sector block area a storage
 /// driver domain reads from and writes to. It sits well past the text payload
 /// so the two can never overlap.
-pub const BLOCK_OFFSET: usize = 1024;
+pub const BLOCK_OFFSET: usize = 1536;
 
 /// Bytes in the block area: exactly one disk sector.
 pub const BLOCK_BYTES: usize = 512;

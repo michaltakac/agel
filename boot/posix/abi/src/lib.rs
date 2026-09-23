@@ -12,7 +12,7 @@ pub const KIND: usize = 64;
 pub const ARGUMENTS: usize = 65;
 pub const RESULT: usize = 69;
 /// Byte offset of the block area used for request data.
-pub const BLOCK_OFFSET: usize = 1024;
+pub const BLOCK_OFFSET: usize = 1536;
 pub const BLOCK_BYTES: usize = 512;
 pub const EXIT: u64 = 1;
 pub const WRITE: u64 = 2;
@@ -78,8 +78,8 @@ pub const O_CREAT: u64 = 0o100;
 pub const O_DIRECTORY: u64 = 0o200000;
 /// Byte offset of the payload area, where `open` reads its path: the same
 /// 256 bytes at byte 128 that every world's shared page carries.
-pub const PAYLOAD_OFFSET: usize = 128;
-pub const PAYLOAD_BYTES: usize = 256;
+pub const PAYLOAD_OFFSET: usize = 640;
+pub const PAYLOAD_BYTES: usize = 896;
 /// The contract's `endpoint.send` on the supervisor's well-known slot: how a
 /// world hands control back.
 const ENDPOINT_SEND: u64 = 0x0402;

@@ -181,28 +181,38 @@ pub fn build_identity_window(
     // Safety: both frames are freshly zeroed and identity mapped.
     unsafe { write_entry(pdpt, 0, directory | PRESENT | WRITABLE | USER) };
 
-    // The first 2 MiB, page by page, so the user-code hole is expressible.
-    let first = pool.allocate()?;
-    for page in 0..512_u64 {
-        let address = page * PAGE;
-        let bits = if user_code.contains(&address) {
-            // Ring-3 program text: readable and executable, never writable.
-            leaf_bits(Access::UserCode)
-        } else if user_rodata.contains(&address) {
-            leaf_bits(Access::UserReadOnly)
-        } else {
-            // Everything else in the low 2 MiB is kernel text, kernel rodata,
-            // BIOS tables, and the kernel stack. It is mapped writable and
-            // executable together only because the boot-time layout does not
-            // separate them; ring 3 carries no user bit for any of it.
-            PRESENT | WRITABLE
+    // The first 6 MiB, page by page, so the user-code hole is expressible:
+    // BIOS tables, the kernel image at 1 MiB, its data and its stack.
+    for region in 0..3_u64 {
+        let table = pool.allocate()?;
+        for page in 0..512_u64 {
+            let address = region * 0x0020_0000 + page * PAGE;
+            let bits = if user_code.contains(&address) {
+                // Ring-3 program text: readable and executable, never writable.
+                leaf_bits(Access::UserCode)
+            } else if user_rodata.contains(&address) {
+                leaf_bits(Access::UserReadOnly)
+            } else {
+                // Everything else below the pool is kernel text, kernel
+                // rodata, BIOS tables, and the kernel stack. It is mapped
+                // writable and executable together only because the boot-time
+                // layout does not separate them; ring 3 carries no user bit
+                // for any of it.
+                PRESENT | WRITABLE
+            };
+            unsafe { write_entry(table, page as usize, address | bits) };
+        }
+        unsafe {
+            write_entry(
+                directory,
+                region as usize,
+                table | PRESENT | WRITABLE | USER,
+            )
         };
-        unsafe { write_entry(first, page as usize, address | bits) };
     }
-    unsafe { write_entry(directory, 0, first | PRESENT | WRITABLE | USER) };
 
     // The rest of the identity window as supervisor 2 MiB pages.
-    let mut address = 0x0020_0000_u64;
+    let mut address = super::POOL_START;
     while address < IDENTITY_BYTES {
         let index = table_index(address, 1);
         unsafe { write_entry(directory, index, address | PRESENT | WRITABLE | HUGE) };

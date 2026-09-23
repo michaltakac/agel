@@ -70,11 +70,11 @@ def connect(path):
             time.sleep(0.05)
 
 
-def prepared_image(source, directory, blank_sectors=33):
+def prepared_image(source, directory, blank_sectors=66):
     """A copy of the disk image for one test, with `blank_sectors` from
-    sector 1024 zeroed: 33 covers both workspace slots and the recovery
-    record, 1024 the filesystem region as well, so a test never sees the
-    developer's workshop."""
+    sector 1024 zeroed: 66 covers both workspace slots, the recovery
+    record and the selector, 1024 the filesystem region as well, so a test
+    never sees the developer's workshop."""
     image = Path(directory) / "disk.img"
     shutil.copyfile(source, image)
     with image.open("r+b") as disk:

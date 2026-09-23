@@ -8,23 +8,23 @@ use core::mem;
 // Raised at v0.2.76 so a program is kilobytes, not a postcard. The banks
 // live on the evaluator's 4 MiB private stack (grown and moved to its own
 // region for the room). Every bound is fixed and reported by `:limits`.
-const MAX_NODES: usize = 512;
-const MAX_BINDINGS: usize = 96;
-const MAX_NAME: usize = 24;
-const MAX_PARAMS: usize = 6;
-const MAX_LOCALS: usize = 12;
-const MAX_BODY: usize = 224;
-const MAX_ARGUMENTS: usize = 12;
+const MAX_NODES: usize = 2048;
+const MAX_BINDINGS: usize = 160;
+const MAX_NAME: usize = 32;
+const MAX_PARAMS: usize = 8;
+const MAX_LOCALS: usize = 16;
+const MAX_BODY: usize = 1024;
+const MAX_ARGUMENTS: usize = 16;
 const MAX_DEPTH: u8 = 48;
-const INITIAL_FUEL: u16 = 10_000;
+const INITIAL_FUEL: u16 = 40_000;
 const MAX_AGENTS: usize = 32;
 const MAX_MAILBOX: usize = 16;
 const MAX_RUN_TURNS: usize = 128;
 const MAX_SCENE_RECTS: usize = 12;
 const MAX_CELLS: usize = 4096;
-const MAX_TEXT: usize = 16384;
+const MAX_TEXT: usize = 65536;
 /// Rendered result bytes retained for the frontends; one shared-page payload.
-const RESULT_BYTES: usize = 256;
+const RESULT_BYTES: usize = 1024;
 /// The native scene's drawable geometry, validated here inside the evaluator
 /// world and again by the supervisor: the screen's width, and the height
 /// above the command field. This file is also compiled into the seL4 world
@@ -40,11 +40,11 @@ const NONE: u16 = u16::MAX;
 /// `LOOK_SHADES_OFFSET` one byte per cell, rows first, 0 dark to 255 light.
 pub const LOOK_COLUMNS: usize = 64;
 pub const LOOK_ROWS: usize = 25;
-pub const LOOK_LINE_BYTES: usize = 192;
+pub const LOOK_LINE_BYTES: usize = 255;
 pub const LOOK_SHADES_OFFSET: usize = 256;
 pub const LOOK_BYTES: usize = LOOK_SHADES_OFFSET + LOOK_COLUMNS * LOOK_ROWS;
 /// The longest text a program may ask a model, and the longest answer.
-pub const REQUEST_BYTES: usize = 200;
+pub const REQUEST_BYTES: usize = 1000;
 
 /// The effects a program in the OS may ask of the desktop, through the
 /// session's port: the request is written to the shared page with this
@@ -59,11 +59,11 @@ pub const EFFECT_FILE_APPEND: u64 = 3;
 pub const EFFECT_FILE_LIST: u64 = 4;
 pub const EFFECT_CLOCK: u64 = 5;
 pub const EFFECT_LOG: u64 = 6;
-pub const EFFECT_BYTES: usize = 2048;
+pub const EFFECT_BYTES: usize = 4096;
 /// What one write may carry, so that a read of it fits the text arena.
-pub const EFFECT_TEXT_BYTES: usize = 1024;
+pub const EFFECT_TEXT_BYTES: usize = 3072;
 /// A program the language asks the desktop to start, as `:exec` would.
-pub const EXEC_BYTES: usize = 200;
+pub const EXEC_BYTES: usize = 256;
 
 /// The session's way out to the desktop: given the shared page, an effect
 /// kind, three words and the request's text, it answers two words and the
@@ -3312,7 +3312,7 @@ mod tests {
             "(let ((1 2)) 3)",
             "(let ())",
             "(let ((if 1)) 1)",
-            "(let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6) (g 7) (h 8) (i 9) (j 10) (k 11) (l 12) (m 13)) m)",
+            "(let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6) (g 7) (h 8) (i 9) (j 10) (k 11) (l 12) (m 13) (n 14) (o 15) (p 16) (q 17)) q)",
             "(/ 1)",
             "(/ 1 0 2)",
             "(-)",
@@ -3502,9 +3502,24 @@ mod tests {
     }
 
     #[test]
+    fn the_session_and_a_previewed_world_fit_the_evaluator_stack() {
+        // The session's banks and a preview's copies live on the evaluator
+        // domain's private stack; leave it half for the parser and the
+        // frames. 636 KiB per world, 1.9 MiB per session at v0.2.100.
+        // `world::EVALUATOR_STACK_PAGES` (this file is also compiled alone
+        // for the host tests): 8 MiB.
+        let stack = 2048 * 4096;
+        let held = core::mem::size_of::<Session>() + 2 * core::mem::size_of::<World>();
+        assert!(
+            held * 2 <= stack,
+            "session and previews hold {held} of a {stack} byte stack"
+        );
+    }
+
+    #[test]
     fn shared_fuel_exhaustion_aborts_all_turns() {
         let mut session = Session::new();
-        let work = "(+ 1 1) ".repeat(23);
+        let work = "(+ 1 1) ".repeat(92);
         eval(
             &mut session,
             &format!("(def tick (fn (self state message) (begin {work}(send self 1) state)))"),
