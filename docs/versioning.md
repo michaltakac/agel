@@ -498,6 +498,10 @@ promise.
   history and bounded retries with feedback. The same Lisp contract runs
   hosted and in an OS process. Protected disk history and real OS service
   activation are later steps in `exo-programme.md`.
+  `v0.3.4` adds protected `judge-log` OS storage, refusing overwrite,
+  truncation, unlink, rename and format, and an opt-in Agel judge wrapper
+  that records dispatch and result. Syscall denial and reboot are tested;
+  universal accounting and guardian-only append authority remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

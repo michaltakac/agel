@@ -1,0 +1,18 @@
+(module agel/judge-log
+  (export judge-with-log)
+
+  (def judge-with-log
+    (fn (id request invoke append-record)
+      (begin
+        (append-record (dict 'event 'judge-start 'id id 'request request))
+        (let ((receipt
+                (with-handler (* problem)
+                  (dict 'allowed #f 'status 'error 'reason (get problem 'message)
+                        'cost-microusd nil)
+                  (invoke request))))
+          (begin
+            (append-record
+              (dict 'event 'judge-result 'id id 'receipt receipt
+                    'cost-microusd (if (= (type-of receipt) 'map)
+                                      (get receipt 'cost-microusd) nil)))
+            receipt))))))

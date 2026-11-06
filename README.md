@@ -5,13 +5,19 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.3.** An evolution gate written in Agel: source diffs,
+**Current release: v0.3.4.** Protected append-only OS log storage and an
+Agel judge wrapper that records requests before dispatch and receipts before
+returning. Overwrite, truncation, deletion and rename are refused; the log
+survives reboot. Existing judge entry points still need integration. See the
+[release notes](docs/release-v0.3.4.md).
+
+v0.3.3 added an evolution gate written in Agel: source diffs,
 judge receipts, recorded-case replay, version retention, guarded revert and
 bounded retries carrying refusal reasons. The same Lisp contract runs hosted
-and inside an OS protection domain. This is policy machinery; protected disk
-history, actual OS service replacement and the private OSRS client remain in
+and inside an OS protection domain. Universal judge accounting,
+actual OS service replacement and the private OSRS client remain in
 the [release programme](docs/exo-programme.md). See the
-[release notes](docs/release-v0.3.3.md). The previous desktop tool-building
+[v0.3.3 release notes](docs/release-v0.3.3.md). The previous desktop tool-building
 demo is documented in [v0.3.2](docs/release-v0.3.2.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).

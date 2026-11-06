@@ -13,8 +13,8 @@ Version labels below are planned until a corresponding tag exists.
 | Release | Work | Required evidence |
 | --- | --- | --- |
 | v0.3.3 | Agel version/diff/replay policy | Same Lisp contract hosted and in an OS process; failed candidates preserve active versions |
-| v0.3.4 | Protected durable history | Every judge attempt logged before dispatch and after response; tokens, price basis, cost or explicitly unknown; reboot and truncation tests |
-| v0.3.5 | Native replacement guardian | Whole-program admission; replay in an isolated domain; commit only after durable evidence; failure recovery and bounded retries |
+| v0.3.4 | Protected log storage and Agel wrapper | Before/after dispatch ordering; OS overwrite/truncate/unlink denial and normal reboot; opt-in until entry-point integration |
+| v0.3.5 | Native replacement guardian and canonical accounting | Route every judge entry point through protected history; tokens, price basis and cost receipts; whole-program isolated replay; durable commit and recovery; partial-tail and power-cut tests |
 | v0.3.6 | Private server and Agel client | Pinned RSMod revision/cache, login, observe/action protocol in Agel; byte relay only outside Agel; tested skill/item setup commands |
 | v0.3.7 | Agel agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel; frozen control and repeated paired tasks |
 | v0.3.8 | OS service evolution | Versioned actual programs, domain generations and kernel slots; isolated replay, watchdog recovery and reboot evidence |
@@ -63,10 +63,27 @@ dollar; transfer combat $1.92 and crafting $0.88. A different server cannot
 establish a direct win from these numbers alone. Publish Agel/control paired
 results and distinguish them from a reproduction with a matched Exo arm.
 
+## Server inspection
+
+RSMod commit `fa13b3f67172ef36e15d6b1514358aee61411796` was cloned to
+`target/external/rsmod`; `./gradlew install --console=plain` succeeded with
+Gradle's managed Java 21 toolchain. This downloaded the cache and generated
+local RSA keys, all outside version control. The server has not yet been
+started or exercised by an Agel client.
+
+This checkout has cooking, fishing, magic and woodcutting skill modules, but
+no smithing or quest modules. It cannot yet provide the required adamant
+platebody and quest workloads. Its admin commands include `master`, `reset`
+and `invadd`; per-skill setup still needs implementation and verification.
+Before choosing this as the benchmark server, either supply the missing
+faithful content or find a better-covered private OSRS implementation.
+
 ## Current boundary
 
 v0.3.3 adds policy machinery, not a replacement OS or game result. Versioned
 `domain` and `kernel-slot` entries are namespaced source records; they do not
 change page tables or boot slots. Its functional history can be replaced by
-its caller and is not protected disk storage. The existing desktop gate and
-DOOM demo continue until their replacements pass the later evidence gates.
+its caller. v0.3.4 adds protected OS bytes and an opt-in Agel judge wrapper,
+but universal accounting and guardian-only append authority are still open.
+The existing desktop gate and DOOM demo continue until their replacements
+pass the later evidence gates.

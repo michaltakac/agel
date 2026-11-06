@@ -4309,13 +4309,19 @@ impl EffectHost<'_> {
             for (index, byte) in content[written..written + chunk].iter().enumerate() {
                 filesystem.write_block(index, *byte);
             }
-            let [count, _, _] =
-                self.filesystem(fs::COMMAND_WRITE, [entry, offset, chunk as u64])?;
+            let [count, end, _] = self.filesystem(
+                fs::COMMAND_WRITE,
+                [
+                    entry,
+                    if append { fs::APPEND_OFFSET } else { offset },
+                    chunk as u64,
+                ],
+            )?;
             if count == 0 {
                 break;
             }
             written += count as usize;
-            offset += count;
+            offset = end;
         }
         Ok((written as u64, 0))
     }

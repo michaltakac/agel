@@ -2083,6 +2083,13 @@ struct Entry {
 
 #[cfg(feature = "process")]
 impl Entry {
+    #[link_section = ".user_text"]
+    fn append_only(&self) -> bool {
+        self.parent == 0
+            && self.name.get(..self.name_len as usize) == Some(&b"judge-log"[..])
+            && self.kind != 0
+    }
+
     const EMPTY: Self = Self {
         name: [0; agelfs::NAME_BYTES],
         name_len: 0,
@@ -2334,6 +2341,9 @@ impl Filesystem {
 
     #[link_section = ".user_text"]
     unsafe fn format(&mut self) -> Result<(), u64> {
+        if unsafe { self.mount() }.is_ok() && self.entries.iter().any(Entry::append_only) {
+            return Err(crate::world::fs::EACCES);
+        }
         self.sector = [0; 512];
         for (stored, byte) in self.sector.iter_mut().zip(agelfs::MAGIC.iter()) {
             *stored = *byte;
@@ -2411,6 +2421,10 @@ impl Filesystem {
                     current = index as u16;
                 }
                 None if last && flags & fs::O_CREAT_BIT != 0 => {
+                    if current == 0 && component == b"judge-log" && flags & fs::O_DIRECTORY_BIT != 0
+                    {
+                        return Err(fs::EACCES);
+                    }
                     let Some(index) = self
                         .entries
                         .iter()
@@ -2633,6 +2647,9 @@ impl Filesystem {
         if entry.kind != fs::KIND_FILE as u8 {
             return Err(fs::EINVAL);
         }
+        if entry.append_only() && offset != fs::APPEND_OFFSET {
+            return Err(fs::EACCES);
+        }
         let offset = if offset == fs::APPEND_OFFSET {
             u64::from(entry.length)
         } else {
@@ -2693,6 +2710,9 @@ impl Filesystem {
     unsafe fn unlink(&mut self, root: u16, path: &[u8]) -> Result<(), u64> {
         use crate::world::fs;
         let (index, _, kind) = unsafe { self.open(root, 0, path)? };
+        if self.entry(index)?.append_only() {
+            return Err(fs::EACCES);
+        }
         if index == 0 || index == usize::from(root) || index >= usize::from(fs::DATA_DIRECTORY) {
             return Err(fs::EACCES);
         }
@@ -2718,6 +2738,9 @@ impl Filesystem {
     unsafe fn rename(&mut self, root: u16, old: &[u8], new: &[u8]) -> Result<(), u64> {
         use crate::world::fs;
         let (index, _, kind) = unsafe { self.open(root, 0, old)? };
+        if self.entry(index)?.append_only() {
+            return Err(fs::EACCES);
+        }
         if index == 0 || index == usize::from(root) || index >= usize::from(fs::DATA_DIRECTORY) {
             return Err(fs::EACCES);
         }
@@ -2732,6 +2755,9 @@ impl Filesystem {
         let (parent, _, parent_kind) = unsafe { self.open(root, fs::O_DIRECTORY_BIT, directory)? };
         if parent_kind != fs::KIND_DIRECTORY as u8 {
             return Err(fs::ENOTDIR);
+        }
+        if parent == 0 && name == b"judge-log" {
+            return Err(fs::EACCES);
         }
         // Climbing from the destination's directory must not reach the
         // entry being moved: a directory inside itself is unreachable.
@@ -2770,6 +2796,9 @@ impl Filesystem {
         }
         unsafe { self.mount()? };
         let entry = self.entry(index)?;
+        if entry.append_only() {
+            return Err(fs::EACCES);
+        }
         if entry.kind != fs::KIND_FILE as u8 {
             return Err(fs::EINVAL);
         }

@@ -13,7 +13,9 @@ code. Each release moves lines here; the release-by-release history is in
 The current OSRS and runtime evolution work is tracked in
 [`exo-programme.md`](exo-programme.md). Its first step, the Agel-written
 version/diff/judge/replay/retry policy, is tested hosted and in an OS process
-by `sh scripts/test-evolution.sh`. Protected disk history, native activation
+by `sh scripts/test-evolution.sh`. Protected `judge-log` bytes and an opt-in
+Agel dispatch wrapper are tested by `sh scripts/test-judge-log.sh`.
+Universal judge accounting, guardian-only append authority, native activation
 and game experiments are still open.
 
 | Line | Status | Proof and limits |

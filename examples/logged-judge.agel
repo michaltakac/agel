@@ -1,0 +1,14 @@
+(import agel/judge-log)
+(def append-judge-record
+  (fn (record)
+    (file-append "judge-log" (text-concat (print-form record) "\n"))))
+(judge-with-log "example-1" (dict 'text "may this tool run?")
+  (fn (request)
+    (dict 'allowed #t 'reason "test receipt" 'model "fixture"
+          'input-tokens 10 'output-tokens 2 'cost-microusd 7
+          'price-basis "fixture, not provider billing"))
+  append-judge-record)
+(judge-with-log "example-2" (dict 'text "provider fails")
+  (fn (request) (signal 'provider/down "provider unavailable"))
+  append-judge-record)
+#t
