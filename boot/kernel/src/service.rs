@@ -323,8 +323,10 @@ impl ServiceDomain {
             // the sector must lie inside the region the service owns, or,
             // for a read, inside the data region it serves read-only.
             let sector = self.domain.core().read_shared(fs::DISK_SECTOR);
-            let owned =
-                (u64::from(fs::FIRST_SECTOR)..=u64::from(fs::LAST_SECTOR)).contains(&sector);
+            let owned = (u64::from(fs::FIRST_SECTOR)..=u64::from(fs::LAST_SECTOR))
+                .contains(&sector)
+                || (u64::from(fs::LEDGER_FIRST)..u64::from(fs::LEDGER_FIRST + fs::LEDGER_SECTORS))
+                    .contains(&sector);
             let data = (u64::from(fs::DATA_TABLE_SECTOR)..=u64::from(fs::DATA_LAST_SECTOR))
                 .contains(&sector);
             let status = if !(owned || (data && operation == fs::DISK_READ)) {

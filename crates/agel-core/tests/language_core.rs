@@ -540,10 +540,9 @@ mod host_words {
 mod canonical_digest {
     use agel_core::{Snapshot, World};
 
-    /// The content digest of a fresh world, pinned: the canonical encoding
-    /// changes only with its version prefix, and this vector catches an
-    /// accidental change to either.
-    const FRESH_WORLD: &str = "0865eb17787f00e85f79d05ba6fa95abdf46ce50e899cd0b2e7daec4b678f888";
+    /// Pins both the canonical encoding and the seed bindings. The byte-to-text
+    /// constructor changes the seed in v0.3.6, without changing the encoding.
+    const FRESH_WORLD: &str = "d2d579bf94957abdf17c1823fc6f95da93bd56f54a583d8eeb6c100014c24214";
 
     #[test]
     fn a_fresh_world_has_the_pinned_digest() {

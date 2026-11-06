@@ -15,7 +15,8 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.3 | Agel version/diff/replay policy | Same Lisp contract hosted and in an OS process; failed candidates preserve active versions |
 | v0.3.4 | Protected log storage and Agel wrapper | Before/after dispatch ordering; OS overwrite/truncate/unlink denial and normal reboot; opt-in until entry-point integration |
 | v0.3.5 | Provider-wide attempt accounting | All existing Jev HTTP paths append Agel records; native requests wait for guest storage; pricing receipts, retries, resume and storage failure tests |
-| Next: guardian and canonical history | Protected append authority, recoverable/scalable history and actual activation | Result-space reservation; partial-tail and power-cut tests; whole-program isolated replay; durable commit/recovery |
+| v0.3.6 | Recoverable and larger native storage | Agel framing, interrupted-append recovery, capacity reservation, resume beyond 64 KiB and syscall exclusion tests |
+| Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: private server and Agel client | Pinned server with required content, login, observe/action protocol in Agel | Byte relay only outside Agel; tested skill/item setup commands |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
 | Following: OS service evolution | Actual programs, domain generations and kernel slots | Isolated replay, version retention, watchdog recovery and reboot evidence |
@@ -85,7 +86,15 @@ A more complete candidate is now checked out at `target/external/openrune`:
 smithing (including platebody recipe handling) and quest implementations
 such as Doric's Quest, The Knight's Sword and Gertrude's Cat. Its generated
 progress report explicitly says presence does not prove wiki parity.
-Installation is being validated before switching the benchmark server.
+`./gradlew install --no-configuration-cache --console=plain` succeeded.
+The default install task completed its work but failed Gradle configuration
+cache serialization, so this explicit flag is required for this checkout.
+The full `:server:app:classes` build also passed. The local checkout is
+configured to bind the game listener to `127.0.0.1` and use
+`quest-requirements.mode: respect-progress`; the stock quest bypass must
+not enter scored experiments. These local changes still need live checks
+and a reproducible server setup release.
+No live game mechanics or Agel client have yet been verified.
 
 ## Current boundary
 
@@ -94,7 +103,8 @@ v0.3.3 adds policy machinery, not a replacement OS or game result. Versioned
 change page tables or boot slots. Its functional history can be replaced by
 its caller. v0.3.4 adds protected OS bytes and an opt-in Agel judge wrapper.
 v0.3.5 connects existing Jev provider calls to Agel accounting and guest
-storage where a guest exists. Complete accounting under crash/storage
-failure, scalable history and guardian-only append authority remain open.
+storage where a guest exists. v0.3.6 adds a larger recoverable append store
+and result-space reservation. Complete accounting for paid calls interrupted
+by a crash/device failure and guardian-only append authority remain open.
 The existing desktop gate and DOOM demo continue until their replacements
 pass the later evidence gates.

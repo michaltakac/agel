@@ -150,6 +150,7 @@ struct Serial {
 struct NativeJudgeJournal {
     serial: Mutex<Serial>,
     failed: std::sync::atomic::AtomicBool,
+    token: std::sync::atomic::AtomicU64,
 }
 
 impl std::fmt::Debug for NativeJudgeJournal {
@@ -170,6 +171,7 @@ impl NativeJudgeJournal {
                 closed: Arc::clone(&serial.closed),
             }),
             failed: std::sync::atomic::AtomicBool::new(false),
+            token: std::sync::atomic::AtomicU64::new(0),
         }))
     }
 
@@ -183,41 +185,105 @@ impl NativeJudgeJournal {
             Ok(())
         }
     }
+
+    fn exchange(&self, command: &str) -> Result<u64, String> {
+        static REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut serial = self.serial.lock().map_err(|error| error.to_string())?;
+        let start = serial.len();
+        let (word, arguments) = command
+            .split_once(' ')
+            .ok_or("invalid ledger byte request")?;
+        serial.write_raw(&format!("{word} {id} {arguments}"))?;
+        let success = format!("ledger {id} ok ");
+        let failure = format!("ledger {id} error ");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let reply = {
+                let buffer = serial.received.lock().map_err(|error| error.to_string())?;
+                String::from_utf8_lossy(&buffer[start.min(buffer.len())..]).replace('\r', "")
+            };
+            for line in reply
+                .split_inclusive('\n')
+                .filter(|line| line.ends_with('\n'))
+            {
+                let line = line.trim_start_matches("live-desktop> ");
+                if let Some(value) = line.strip_prefix(&success) {
+                    return value
+                        .trim()
+                        .parse()
+                        .map_err(|error| format!("invalid ledger acknowledgement: {error}"));
+                }
+                if line.starts_with(&failure) {
+                    return Err(format!("OS judge ledger refused storage: {}", line.trim()));
+                }
+            }
+            if serial.closed() || Instant::now() > deadline {
+                return Err("OS judge ledger acknowledgement unavailable".into());
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
 }
 
 impl JudgeJournal for NativeJudgeJournal {
+    fn reserve(&self, bytes: u64) -> Result<(), String> {
+        self.check()?;
+        if self
+            .token
+            .compare_exchange(
+                0,
+                u64::MAX,
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            return Err("judge ledger reservation is already held".into());
+        }
+        match self.exchange(&format!(":ledger-reserve {bytes}")) {
+            Ok(token) if token > 0 && token < (1 << 62) => {
+                self.token
+                    .store(token, std::sync::atomic::Ordering::Relaxed);
+                Ok(())
+            }
+            outcome => {
+                self.failed
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                Err(format!("judge ledger reservation failed: {outcome:?}"))
+            }
+        }
+    }
+
+    fn release(&self) -> Result<(), String> {
+        let token = self.token.load(std::sync::atomic::Ordering::Relaxed);
+        if token == 0 {
+            return Ok(());
+        }
+        let result = self.exchange(&format!(":ledger-release {token}"));
+        self.token.store(0, std::sync::atomic::Ordering::Relaxed);
+        result.map(|_| ())
+    }
+
     fn append(&self, bytes: &[u8]) -> Result<(), String> {
         self.check()?;
         let result = (|| {
-            static CHUNKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-            let mut serial = self.serial.lock().map_err(|error| error.to_string())?;
-            for chunk in bytes.chunks(128) {
-                let id = CHUNKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let hex = chunk
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<String>();
-                let start = serial.len();
-                serial.write_raw(&format!(":audit {id} {hex}"))?;
-                let success = format!("audit {id} ok\n");
-                let failure = format!("audit {id} error\n");
-                let deadline = Instant::now() + Duration::from_secs(30);
-                loop {
-                    let reply = {
-                        let buffer = serial.received.lock().map_err(|error| error.to_string())?;
-                        String::from_utf8_lossy(&buffer[start.min(buffer.len())..])
-                            .replace('\r', "")
-                    };
-                    if reply.contains(&success) {
-                        break;
-                    }
-                    if reply.contains(&failure) || serial.closed() {
-                        return Err("OS judge log refused bytes".to_owned());
-                    }
-                    if Instant::now() > deadline {
-                        return Err("OS judge log acknowledgement timed out".into());
-                    }
-                    thread::sleep(Duration::from_millis(5));
+            let token = self.token.load(std::sync::atomic::Ordering::Relaxed);
+            if token == 0 || token >= (1 << 62) {
+                return Err("judge ledger has no reservation".into());
+            }
+            for chunk in agel_model::journal::frames(bytes)? {
+                if chunk.len() != 512
+                    || chunk[511] != b'\n'
+                    || !chunk[..511].iter().all(|byte| (32..=126).contains(byte))
+                {
+                    return Err("ledger frame is not an ASCII sector".into());
+                }
+                let packet =
+                    std::str::from_utf8(&chunk[..511]).map_err(|error| error.to_string())?;
+                let written = self.exchange(&format!(":ledger {token} {packet}"))?;
+                if written != 512 {
+                    return Err("OS judge ledger short write".into());
                 }
             }
             Ok(())
@@ -1196,6 +1262,17 @@ fn main() -> Result<(), String> {
         file.seek(std::io::SeekFrom::Start(1024 * 512))
             .map_err(|error| error.to_string())?;
         file.write_all(&vec![0_u8; 1024 * 512])
+            .map_err(|error| error.to_string())?;
+    }
+    if fs::metadata(&disk)
+        .map_err(|error| error.to_string())?
+        .len()
+        < 134_217_728
+    {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&disk)
+            .and_then(|file| file.set_len(134_217_728))
             .map_err(|error| error.to_string())?;
     }
     if options.scene == "doom" {

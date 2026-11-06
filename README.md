@@ -5,7 +5,13 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.5.** Jev requests and results now reach the guest's
+**Current release: v0.3.6.** A protected 64 MiB judge ledger with Agel
+framing, torn-write recovery and result-space reservation before dispatch.
+Existing bytes survive resume and interrupted appends; ordinary writers
+cannot consume reserved space. See the [release notes](docs/release-v0.3.6.md)
+for the tested scope and remaining guardian/client work.
+
+v0.3.5 made Jev requests and results reach the guest's
 protected log before dispatch and delivery, including retries. Agel owns
 record construction and published-rate cost arithmetic. One live call's
 usage and cost survived guest reboot. Existing run disks require `--resume`

@@ -52,9 +52,9 @@ test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 2097152
 # candidate staged with scripts/stage-kernel.py is dropped rather than
 # silently kept in front of the kernel just built. Slot B (sectors
 # 69760-73983) is left as it was.
-disk_bytes=37879808
+disk_bytes=134217728
 if test ! -f "$disk_image"; then
-  dd if=/dev/zero of="$disk_image" bs=512 count=73984 2>/dev/null
+  dd if=/dev/zero of="$disk_image" bs=1 count=1 seek=$((disk_bytes - 1)) 2>/dev/null
 elif test "$(wc -c < "$disk_image" | tr -d ' ')" -lt "$disk_bytes"; then
   dd if=/dev/zero of="$disk_image" bs=1 count=1 seek=$((disk_bytes - 1)) conv=notrunc 2>/dev/null
 fi

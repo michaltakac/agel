@@ -17,7 +17,9 @@ by `sh scripts/test-evolution.sh`. Protected `judge-log` bytes and an opt-in
 Agel dispatch wrapper are tested by `sh scripts/test-judge-log.sh`.
 Provider-wide Jev attempt accounting reaches guest storage in v0.3.5;
 `sh scripts/test-judge-bridge.sh` checks reboot, resume and full-log denial.
-Complete accounting under crash/storage failure, guardian-only append authority, native activation
+`sh scripts/test-ledger.sh` adds framed recovery, growth beyond 64 KiB and
+reserved result capacity in v0.3.6. Complete accounting after in-flight
+crashes/device failure, guardian-only append authority, native activation
 and game experiments are still open.
 
 | Line | Status | Proof and limits |

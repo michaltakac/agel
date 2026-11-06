@@ -401,21 +401,50 @@ fn file_error(word: &str, path: &str, error: i64) -> HostError {
 }
 
 fn file_read(arguments: &[Value]) -> Result<Value, HostError> {
-    expect_arguments("file-read", arguments, 1)?;
+    if arguments.is_empty() || arguments.len() > 3 {
+        return Err(fail(
+            "arity",
+            "file-read expects path, optional offset and byte limit".into(),
+        ));
+    }
     let path = text_argument("file-read", arguments, 0)?;
     let process = process();
+    let from = match arguments.get(1) {
+        None => 0,
+        Some(Value::Int(n)) if *n >= 0 => *n,
+        _ => return Err(fail("type", "file-read offset must be nonnegative".into())),
+    };
+    let limit = match arguments.get(2) {
+        None => FILE_READ_BYTES,
+        Some(Value::Int(n)) if *n >= 0 && *n <= FILE_READ_BYTES as i64 => *n as usize,
+        _ => {
+            return Err(fail(
+                "type",
+                "file-read limit is outside its byte bound".into(),
+            ))
+        }
+    };
     let descriptor = process.open(namespace_path(path), abi::O_RDONLY);
     if descriptor < 0 {
         return Err(file_error("file-read", path, descriptor));
     }
+    let sought = process.seek(descriptor as u64, from, 0);
+    if sought < 0 {
+        process.close(descriptor as u64);
+        return Err(file_error("file-read", path, sought));
+    }
     let mut bytes = Vec::new();
     let mut block = [0_u8; abi::BLOCK_BYTES];
     let outcome = loop {
-        let count = process.read(descriptor as u64, &mut block);
+        if bytes.len() >= limit {
+            break Ok(());
+        }
+        let take = (limit - bytes.len()).min(block.len());
+        let count = process.read(descriptor as u64, &mut block[..take]);
         if count < 0 {
             break Err(file_error("file-read", path, count));
         }
-        if count == 0 || bytes.len() >= FILE_READ_BYTES {
+        if count == 0 {
             break Ok(());
         }
         bytes.extend_from_slice(&block[..count as usize]);
@@ -560,11 +589,73 @@ fn model_request(arguments: &[Value]) -> Result<Value, HostError> {
             relay_audit(rest);
             continue;
         }
+        if line.starts_with(b":ledger") {
+            relay_ledger(&line);
+            continue;
+        }
         if let Some(reply) = line.strip_prefix(prefix.as_bytes()) {
             return Ok(Value::String(String::from(
                 String::from_utf8_lossy(reply).trim(),
             )));
         }
+    }
+}
+
+fn ledger_number(bytes: &[u8]) -> Option<u64> {
+    if bytes.is_empty() {
+        return None;
+    }
+    bytes.iter().try_fold(0_u64, |n, byte| {
+        if byte.is_ascii_digit() {
+            n.checked_mul(10)?.checked_add(u64::from(byte - b'0'))
+        } else {
+            None
+        }
+    })
+}
+
+fn relay_ledger(line: &[u8]) {
+    let mut fields = line.splitn(4, |byte| *byte == b' ');
+    let (Some(command), Some(id), Some(argument)) = (fields.next(), fields.next(), fields.next())
+    else {
+        return;
+    };
+    if ledger_number(id).is_none() {
+        return;
+    }
+    let process = process();
+    let outcome = (|| -> Option<i64> {
+        let number = ledger_number(argument)?;
+        if command == b":ledger-reserve" {
+            if fields.next().is_some() {
+                return None;
+            }
+            Some(process.ledger_reserve(number))
+        } else if command == b":ledger-release" {
+            if fields.next().is_some() {
+                return None;
+            }
+            Some(process.ledger_release(number))
+        } else if command == b":ledger" {
+            let packet = fields.next()?;
+            if packet.len() != 511 || !packet.iter().all(|byte| (32..=126).contains(byte)) {
+                return None;
+            }
+            let mut bytes = [0; 512];
+            bytes[..511].copy_from_slice(packet);
+            bytes[511] = b'\n';
+            Some(process.ledger_append(number, &bytes))
+        } else {
+            None
+        }
+    })()
+    .unwrap_or(-22);
+    process.write(1, b"ledger ");
+    process.write(1, id);
+    if outcome >= 0 {
+        process.report(1, b" ok ", outcome, b"\n");
+    } else {
+        process.report(1, b" error ", -outcome, b"\n");
     }
 }
 

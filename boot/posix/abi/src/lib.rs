@@ -57,6 +57,9 @@ pub const BRK_PAGES: u64 = 64;
 pub const FTRUNCATE: u64 = 21;
 /// A canvas for a window: pixels the process draws, blitted by record 11.
 pub const CANVAS: u64 = 22;
+pub const LEDGER_RESERVE: u64 = 23;
+pub const LEDGER_RELEASE: u64 = 24;
+pub const LEDGER_APPEND: u64 = 25;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;
@@ -125,6 +128,25 @@ impl Process {
             written += result as usize;
         }
         written as u64
+    }
+
+    pub fn ledger_reserve(&self, bytes: u64) -> i64 {
+        self.request(LEDGER_RESERVE, [bytes, 0, 0, 0]) as i64
+    }
+
+    pub fn ledger_release(&self, token: u64) -> i64 {
+        self.request(LEDGER_RELEASE, [token, 0, 0, 0]) as i64
+    }
+
+    pub fn ledger_append(&self, token: u64, bytes: &[u8]) -> i64 {
+        if bytes.len() != 512 {
+            return -22;
+        }
+        let payload = (self.page as usize + PAYLOAD_OFFSET) as *mut u8;
+        for (i, byte) in bytes.iter().enumerate() {
+            unsafe { payload.add(i).write_volatile(*byte) };
+        }
+        self.request(LEDGER_APPEND, [token, 512, 0, 0]) as i64
     }
 
     /// Open `path` through the process's namespace. A descriptor, or a

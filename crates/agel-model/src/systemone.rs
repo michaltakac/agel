@@ -580,31 +580,40 @@ impl JevProvider {
             start.push(journal_time());
             let bytes =
                 crate::journal::record("judge-attempt-start", start).map_err(ProviderError::Io)?;
-            self.journal.append(&bytes).map_err(ProviderError::Io)?;
-            let outcome = self.exchange(&arguments, &configuration, principal.clone(), operation);
-            let (status, response) = match &outcome {
-                Ok((status, body)) => (Value::Int(i64::from(*status)), body.clone()),
-                Err(error) => (Value::Symbol("transport-error".into()), error.to_string()),
-            };
-            let decoded = serde_json::from_str::<serde_json::Value>(&response).unwrap_or_default();
-            let token = |name: &str| {
-                decoded["usage"][name]
-                    .as_i64()
-                    .map(Value::Int)
-                    .unwrap_or(Value::Nil)
-            };
-            let mut finish = common;
-            finish.extend([
-                status,
-                token("input_tokens"),
-                token("output_tokens"),
-                Value::String(response),
-                journal_time(),
-            ]);
-            let bytes = crate::journal::record("judge-attempt-result", finish)
+            let bound = crate::journal::reservation(bytes.len(), self.limits.max_output_bytes)
                 .map_err(ProviderError::Io)?;
-            self.journal.append(&bytes).map_err(ProviderError::Io)?;
-            let (status, body) = outcome?;
+            self.journal.reserve(bound).map_err(ProviderError::Io)?;
+            let attempt_result = (|| {
+                self.journal.append(&bytes).map_err(ProviderError::Io)?;
+                let outcome =
+                    self.exchange(&arguments, &configuration, principal.clone(), operation);
+                let (status, response) = match &outcome {
+                    Ok((status, body)) => (Value::Int(i64::from(*status)), body.clone()),
+                    Err(error) => (Value::Symbol("transport-error".into()), error.to_string()),
+                };
+                let decoded =
+                    serde_json::from_str::<serde_json::Value>(&response).unwrap_or_default();
+                let token = |name: &str| {
+                    decoded["usage"][name]
+                        .as_i64()
+                        .map(Value::Int)
+                        .unwrap_or(Value::Nil)
+                };
+                let mut finish = common;
+                finish.extend([
+                    status,
+                    token("input_tokens"),
+                    token("output_tokens"),
+                    Value::String(response),
+                    journal_time(),
+                ]);
+                let bytes = crate::journal::record("judge-attempt-result", finish)
+                    .map_err(ProviderError::Io)?;
+                self.journal.append(&bytes).map_err(ProviderError::Io)?;
+                outcome
+            })();
+            self.journal.release().map_err(ProviderError::Io)?;
+            let (status, body) = attempt_result?;
             if (status == 429 || status == 529) && attempt < RETRY_PAUSES.len() {
                 std::thread::sleep(RETRY_PAUSES[attempt]);
                 attempt += 1;

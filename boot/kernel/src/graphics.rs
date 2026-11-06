@@ -2646,7 +2646,7 @@ fn play_passes(
 /// A line typed on the serial console while the play loop waits for a
 /// model's answer, bounded: none when nothing whole arrives in time.
 #[inline(never)]
-fn serial_line(serial: &mut ServiceDomain, out: &mut [u8; PAYLOAD_BYTES]) -> Option<usize> {
+fn serial_line(serial: &mut ServiceDomain, out: &mut [u8]) -> Option<usize> {
     let handle = serial.handle();
     let mut length = 0;
     for _ in 0..PLAY_REPLY_POLLS {
@@ -2726,9 +2726,17 @@ fn relay_request(
         crate::process::Console::write(serial, &shades);
     }
     crate::process::Console::write(serial, b"model-request end\n");
-    let mut answer = [0_u8; PAYLOAD_BYTES];
+    let mut answer = [0_u8; 2048];
     let mut delivered = false;
     while let Some(length) = serial_line(serial, &mut answer) {
+        if relay_ledger(
+            &answer[..length],
+            serial,
+            storage,
+            filesystem.as_deref_mut(),
+        ) {
+            continue;
+        }
         if relay_audit(
             &answer[..length],
             serial,
@@ -3015,8 +3023,16 @@ fn judge_fact(
     }
     text.push(b"\"))\nlook-line: desktop\nmodel-request end\n");
     crate::process::Console::write(serial, text.get());
-    let mut answer = [0_u8; PAYLOAD_BYTES];
+    let mut answer = [0_u8; 2048];
     while let Some(length) = serial_line(serial, &mut answer) {
+        if relay_ledger(
+            &answer[..length],
+            serial,
+            storage,
+            filesystem.as_deref_mut(),
+        ) {
+            continue;
+        }
         if relay_audit(
             &answer[..length],
             serial,
@@ -3048,6 +3064,94 @@ fn judge_fact(
         return Some(probability > 500);
     }
     None
+}
+
+fn ledger_number(bytes: &[u8]) -> Option<u64> {
+    if bytes.is_empty() {
+        return None;
+    }
+    bytes.iter().try_fold(0_u64, |n, byte| {
+        if byte.is_ascii_digit() {
+            n.checked_mul(10)?.checked_add(u64::from(byte - b'0'))
+        } else {
+            None
+        }
+    })
+}
+
+fn relay_ledger(
+    line: &[u8],
+    serial: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+) -> bool {
+    use crate::world::fs;
+    if !line.starts_with(b":ledger") {
+        return false;
+    }
+    let mut fields = line.splitn(4, |byte| *byte == b' ');
+    let (Some(command), Some(id), Some(argument)) = (fields.next(), fields.next(), fields.next())
+    else {
+        return true;
+    };
+    if ledger_number(id).is_none() {
+        return true;
+    }
+    let mut host = EffectHost {
+        storage,
+        filesystem,
+        console: serial,
+        clock: None,
+    };
+    let outcome = (|| -> Result<u64, u64> {
+        let number = ledger_number(argument).ok_or(fs::EINVAL)?;
+        let result = if command == b":ledger-reserve" {
+            if fields.next().is_some() {
+                return Err(fs::EINVAL);
+            }
+            host.filesystem(fs::COMMAND_RESERVE, [number, 0, 0])?
+        } else if command == b":ledger-release" {
+            if fields.next().is_some() {
+                return Err(fs::EINVAL);
+            }
+            host.filesystem(fs::COMMAND_RELEASE, [number, 0, 0])?
+        } else if command == b":ledger" {
+            if number == 0 || number >= fs::RESERVED_OFFSET {
+                return Err(fs::EINVAL);
+            }
+            let packet = fields.next().ok_or(fs::EINVAL)?;
+            if packet.len() != 511 || !packet.iter().all(|byte| (32..=126).contains(byte)) {
+                return Err(fs::EINVAL);
+            }
+            let filesystem = host.filesystem.as_deref_mut().ok_or(38_u64)?;
+            for (index, byte) in packet.iter().enumerate() {
+                filesystem.write_block(index, *byte);
+            }
+            filesystem.write_block(511, b'\n');
+            host.filesystem(
+                fs::COMMAND_WRITE,
+                [fs::LEDGER_ENTRY as u64, fs::RESERVED_OFFSET | number, 512],
+            )?
+        } else {
+            return Err(fs::EINVAL);
+        };
+        Ok(result[0])
+    })();
+    let mut reply = StatusLine::new(b"ledger ");
+    reply.push(id);
+    match outcome {
+        Ok(value) => {
+            reply.push(b" ok ");
+            reply.number_u64(value);
+        }
+        Err(error) => {
+            reply.push(b" error ");
+            reply.number_u64(error);
+        }
+    }
+    reply.push(b"\n");
+    crate::process::Console::write(serial, reply.get());
+    true
 }
 
 fn relay_audit(
@@ -6571,6 +6675,11 @@ fn interactive(
                 }
             }
             _ => {}
+        }
+        if line[..length].starts_with(b":ledger")
+            && running.as_ref().is_some_and(|run| run.reading_console())
+        {
+            continue;
         }
         let frame = materialize(current, Some(&line[..length]), status.get())
             .unwrap_or_else(|reason| failed(reason));

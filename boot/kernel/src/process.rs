@@ -1060,6 +1060,9 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         process::KILL => kill(machine, services, table, index, arguments),
         process::BRK => brk(machine, table, index, arguments[0]),
         process::FTRUNCATE => truncate(table, index, services, arguments[0], arguments[1]),
+        process::LEDGER_RESERVE | process::LEDGER_RELEASE | process::LEDGER_APPEND => {
+            ledger_request(table, index, services, kind, arguments)
+        }
         process::CLOSE => close(table, index, arguments[0]),
         process::PIPE => pipe(table, index),
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
@@ -1257,6 +1260,50 @@ fn file_request<'a>(
 }
 
 /// `FTRUNCATE`: the file's length set through a writable descriptor.
+fn ledger_request(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    kind: u64,
+    arguments: [u64; 4],
+) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    if process.namespace.root != 0 || !process.namespace.write {
+        return error(EACCES);
+    }
+    let Some(filesystem) = services.filesystem.as_deref_mut() else {
+        return error(ENOSYS);
+    };
+    let (command, words) = match kind {
+        process::LEDGER_RESERVE => (fs::COMMAND_RESERVE, [arguments[0], 0, 0]),
+        process::LEDGER_RELEASE => (fs::COMMAND_RELEASE, [arguments[0], 0, 0]),
+        _ => {
+            if arguments[1] != 512 || arguments[0] == 0 || arguments[0] >= fs::RESERVED_OFFSET {
+                return error(EINVAL);
+            }
+            for i in 0..512 {
+                filesystem.write_block(i, process.domain.core().read_payload(i));
+            }
+            (
+                fs::COMMAND_WRITE,
+                [
+                    fs::LEDGER_ENTRY as u64,
+                    fs::RESERVED_OFFSET | arguments[0],
+                    512,
+                ],
+            )
+        }
+    };
+    let outcome =
+        filesystem.filesystem_request(filesystem.handle(), services.storage, command, words);
+    match service_error(outcome) {
+        Ok(values) => values[0],
+        Err(number) => error(number),
+    }
+}
+
 fn truncate(
     table: &mut Table,
     index: usize,

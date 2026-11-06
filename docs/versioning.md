@@ -508,6 +508,11 @@ promise.
   `--resume`; guest failures propagate. Native effect buffers now fit their
   shared mapping. Scalable crash-safe canonical history and activation
   remain open.
+  `v0.3.6` adds a protected 64 MiB `judge-ledger`, Agel framing and recovery,
+  and reserved result capacity before HTTP dispatch. Append sectors are
+  immutable; interrupted tails remain available as raw evidence. The process
+  ABI gains reservation operations, and the hosted seed gains a pure UTF-8
+  byte constructor. Guardian-only writes and real OS activation remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

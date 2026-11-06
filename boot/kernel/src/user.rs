@@ -2123,10 +2123,132 @@ struct Filesystem {
     data: [DataRow; crate::world::fs::DATA_ROWS],
     data_count: u8,
     data_loaded: bool,
+    ledger_loaded: bool,
+    ledger: agel_integrity::append::Head,
+    reserved: u32,
+    reservation: u64,
 }
 
 #[cfg(feature = "process")]
 impl Filesystem {
+    #[link_section = ".user_text"]
+    unsafe fn ledger_load(&mut self) -> Result<(), u64> {
+        use crate::world::fs;
+        if self.ledger_loaded {
+            return Ok(());
+        }
+        unsafe { self.read_sector(u64::from(fs::LEDGER_FIRST + fs::LEDGER_SECTORS - 1))? };
+        unsafe { self.read_sector(u64::from(fs::LEDGER_FIRST))? };
+        let first = self.sector;
+        unsafe { self.read_sector(u64::from(fs::LEDGER_FIRST + 1))? };
+        let second = self.sector;
+        let a = agel_integrity::append::Head::decode(first, fs::LEDGER_CAPACITY);
+        let b = agel_integrity::append::Head::decode(second, fs::LEDGER_CAPACITY);
+        self.ledger = match (a, b) {
+            (Some(a), Some(b)) => {
+                if a.generation > b.generation {
+                    a
+                } else {
+                    b
+                }
+            }
+            (Some(head), None) | (None, Some(head)) => head,
+            (None, None) => agel_integrity::append::Head {
+                generation: 0,
+                sectors: 0,
+            },
+        };
+        while self.ledger.sectors < fs::LEDGER_CAPACITY {
+            unsafe { self.read_sector(u64::from(fs::LEDGER_DATA + self.ledger.sectors))? };
+            if self.sector.iter().all(|byte| *byte == 0) {
+                break;
+            }
+            self.ledger.sectors += 1;
+        }
+        self.ledger_loaded = true;
+        Ok(())
+    }
+
+    #[link_section = ".user_text"]
+    unsafe fn ledger_reserve(&mut self, bytes: u64) -> Result<[u64; 3], u64> {
+        use crate::world::fs;
+        unsafe { self.mount()? };
+        unsafe { self.ledger_load()? };
+        let sectors = bytes.checked_add(511).ok_or(fs::EFBIG)? / 512;
+        if self.reservation != 0 || sectors > u64::from(fs::LEDGER_CAPACITY - self.ledger.sectors) {
+            return Err(fs::ENOSPC);
+        }
+        if sectors == 0 {
+            return Err(fs::EINVAL);
+        }
+        self.ledger.generation = self
+            .ledger
+            .generation
+            .checked_add(1)
+            .filter(|generation| *generation < fs::RESERVED_OFFSET)
+            .ok_or(fs::EFBIG)?;
+        self.sector = self.ledger.encode();
+        if unsafe { self.write_sector(u64::from(fs::LEDGER_FIRST) + self.ledger.generation % 2) }
+            .is_err()
+        {
+            self.ledger_loaded = false;
+            return Err(fs::EIO);
+        }
+        self.reservation = self.ledger.generation;
+        self.reserved = sectors as u32;
+        Ok([
+            self.reservation,
+            u64::from(self.ledger.sectors) * 512,
+            u64::from(fs::LEDGER_CAPACITY - self.ledger.sectors) * 512,
+        ])
+    }
+
+    #[link_section = ".user_text"]
+    unsafe fn ledger_write(&mut self, offset: u64, length: u64) -> Result<(u64, u64), u64> {
+        use crate::world::fs;
+        let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *const u8;
+        let mut data = [0_u8; 512];
+        for (position, byte) in data.iter_mut().enumerate() {
+            *byte = unsafe { block.add(position).read_volatile() };
+        }
+        unsafe { self.ledger_load()? };
+        if length != 512 {
+            return Err(fs::EINVAL);
+        }
+        let leased = offset & fs::RESERVED_OFFSET != 0 && offset != fs::APPEND_OFFSET;
+        if leased {
+            if (offset ^ fs::RESERVED_OFFSET) != self.reservation || self.reserved == 0 {
+                return Err(fs::EACCES);
+            }
+        } else if offset != fs::APPEND_OFFSET {
+            return Err(fs::EACCES);
+        }
+        let free = fs::LEDGER_CAPACITY - self.ledger.sectors;
+        if free == 0 || (!leased && free <= self.reserved) {
+            return Err(fs::ENOSPC);
+        }
+        self.sector = data;
+        if self.sector.iter().all(|byte| *byte == 0) {
+            return Err(fs::EINVAL);
+        }
+        let next_generation = self.ledger.generation.checked_add(1).ok_or(fs::EFBIG)?;
+        if unsafe { self.write_sector(u64::from(fs::LEDGER_DATA + self.ledger.sectors)) }.is_err() {
+            self.ledger_loaded = false;
+            return Err(fs::EIO);
+        }
+        self.ledger.sectors += 1;
+        if leased {
+            self.reserved -= 1;
+        }
+        self.ledger.generation = next_generation;
+        self.sector = self.ledger.encode();
+        if unsafe { self.write_sector(u64::from(fs::LEDGER_FIRST) + next_generation % 2) }.is_err()
+        {
+            self.ledger_loaded = false;
+            return Err(fs::EIO);
+        }
+        Ok((512, u64::from(self.ledger.sectors) * 512))
+    }
     /// Ask the supervisor for one sector into this world's block area, then
     /// copy it into the local buffer. Yields; the supervisor resumes here.
     #[link_section = ".user_text"]
@@ -2341,6 +2463,9 @@ impl Filesystem {
 
     #[link_section = ".user_text"]
     unsafe fn format(&mut self) -> Result<(), u64> {
+        if unsafe { self.ledger_load() }.is_ok() && self.ledger.sectors != 0 {
+            return Err(crate::world::fs::EACCES);
+        }
         if unsafe { self.mount() }.is_ok() && self.entries.iter().any(Entry::append_only) {
             return Err(crate::world::fs::EACCES);
         }
@@ -2400,6 +2525,17 @@ impl Filesystem {
         let mut current = root;
         while let Some(component) = components.next() {
             let last = components.peek().is_none();
+            if current == 0 && last && component == b"judge-ledger" {
+                if flags & fs::O_DIRECTORY_BIT != 0 {
+                    return Err(fs::EACCES);
+                }
+                unsafe { self.ledger_load()? };
+                return Ok((
+                    fs::LEDGER_ENTRY,
+                    self.ledger.sectors * 512,
+                    fs::KIND_FILE as u8,
+                ));
+            }
             if component == b"." {
                 continue;
             }
@@ -2598,6 +2734,24 @@ impl Filesystem {
     #[link_section = ".user_text"]
     unsafe fn read(&mut self, index: usize, offset: u64, length: u64) -> Result<u64, u64> {
         use crate::world::fs;
+        if index == fs::LEDGER_ENTRY {
+            unsafe { self.ledger_load()? };
+            let size = u64::from(self.ledger.sectors) * 512;
+            if offset >= size {
+                return Ok(0);
+            }
+            let count = length.min(512 - offset % 512).min(size - offset);
+            unsafe { self.read_sector(u64::from(fs::LEDGER_DATA) + offset / 512)? };
+            let block = (self.page as usize + crate::world::BLOCK_OFFSET) as *mut u8;
+            for i in 0..count as usize {
+                unsafe {
+                    block
+                        .add(i)
+                        .write_volatile(self.sector[(offset % 512) as usize + i])
+                };
+            }
+            return Ok(count);
+        }
         if index > usize::from(fs::DATA_DIRECTORY) {
             return unsafe {
                 self.read_data(index - usize::from(fs::DATA_DIRECTORY) - 1, offset, length)
@@ -2639,6 +2793,9 @@ impl Filesystem {
     #[link_section = ".user_text"]
     unsafe fn write(&mut self, index: usize, offset: u64, length: u64) -> Result<(u64, u64), u64> {
         use crate::world::fs;
+        if index == fs::LEDGER_ENTRY {
+            return unsafe { self.ledger_write(offset, length) };
+        }
         if index >= usize::from(fs::DATA_DIRECTORY) {
             return Err(fs::EACCES);
         }
@@ -2710,6 +2867,9 @@ impl Filesystem {
     unsafe fn unlink(&mut self, root: u16, path: &[u8]) -> Result<(), u64> {
         use crate::world::fs;
         let (index, _, kind) = unsafe { self.open(root, 0, path)? };
+        if index == fs::LEDGER_ENTRY {
+            return Err(fs::EACCES);
+        }
         if self.entry(index)?.append_only() {
             return Err(fs::EACCES);
         }
@@ -2738,6 +2898,9 @@ impl Filesystem {
     unsafe fn rename(&mut self, root: u16, old: &[u8], new: &[u8]) -> Result<(), u64> {
         use crate::world::fs;
         let (index, _, kind) = unsafe { self.open(root, 0, old)? };
+        if index == fs::LEDGER_ENTRY {
+            return Err(fs::EACCES);
+        }
         if self.entry(index)?.append_only() {
             return Err(fs::EACCES);
         }
@@ -2756,7 +2919,7 @@ impl Filesystem {
         if parent_kind != fs::KIND_DIRECTORY as u8 {
             return Err(fs::ENOTDIR);
         }
-        if parent == 0 && name == b"judge-log" {
+        if parent == 0 && (name == b"judge-log" || name == b"judge-ledger") {
             return Err(fs::EACCES);
         }
         // Climbing from the destination's directory must not reach the
@@ -2791,6 +2954,9 @@ impl Filesystem {
     #[link_section = ".user_text"]
     unsafe fn truncate(&mut self, index: usize, length: u64) -> Result<(), u64> {
         use crate::world::fs;
+        if index == fs::LEDGER_ENTRY {
+            return Err(fs::EACCES);
+        }
         if index >= usize::from(fs::DATA_DIRECTORY) {
             return Err(fs::EACCES);
         }
@@ -2880,6 +3046,20 @@ impl Filesystem {
                 seen += 1;
             }
         }
+        if directory == 0 && unsafe { self.ledger_load() }.is_ok() && self.ledger.sectors != 0 {
+            if seen == position {
+                for (offset, byte) in b"judge-ledger".iter().enumerate() {
+                    unsafe { payload.add(offset).write_volatile(*byte) };
+                }
+                unsafe { self.page.add(shared::VALUES + 3).write_volatile(12) };
+                return Ok((
+                    fs::LEDGER_ENTRY,
+                    fs::KIND_FILE as u8,
+                    self.ledger.sectors * 512,
+                ));
+            }
+            seen += 1;
+        }
         // The root lists `data` last: the directory every root has.
         if directory == 0 && seen == position {
             for (offset, byte) in b"data".iter().enumerate() {
@@ -2917,6 +3097,13 @@ pub unsafe extern "C" fn agel_fs_main(shared_page: u64) -> ! {
         }; crate::world::fs::DATA_ROWS],
         data_count: 0,
         data_loaded: false,
+        ledger_loaded: false,
+        ledger: agel_integrity::append::Head {
+            generation: 0,
+            sectors: 0,
+        },
+        reserved: 0,
+        reservation: 0,
     };
     loop {
         let command = unsafe { page.add(shared::COMMAND).read_volatile() };
@@ -2925,7 +3112,17 @@ pub unsafe extern "C" fn agel_fs_main(shared_page: u64) -> ! {
             unsafe { page.add(shared::ARGUMENTS + 1).read_volatile() },
             unsafe { page.add(shared::ARGUMENTS + 2).read_volatile() },
         ];
-        let outcome: Result<[u64; 3], u64> = if command == fs::COMMAND_FORMAT {
+        let outcome: Result<[u64; 3], u64> = if command == fs::COMMAND_RESERVE {
+            unsafe { filesystem.ledger_reserve(arguments[0]) }
+        } else if command == fs::COMMAND_RELEASE {
+            if filesystem.reservation == arguments[0] && arguments[0] != 0 {
+                filesystem.reservation = 0;
+                filesystem.reserved = 0;
+                Ok([0; 3])
+            } else {
+                Err(fs::EACCES)
+            }
+        } else if command == fs::COMMAND_FORMAT {
             unsafe { filesystem.format() }.map(|()| [0, 0, 0])
         } else if command == fs::COMMAND_OPEN {
             let length = (arguments[2] as usize).min(crate::world::PAYLOAD_BYTES);

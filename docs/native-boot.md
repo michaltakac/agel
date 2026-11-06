@@ -51,6 +51,7 @@ when a program or data file is installed past their end.
 | 65536–69759 | kernel slot A (v0.2.100): 4096 sectors, 2 MiB, and with sector 0 the replaceable boot seed; the build rejects a kernel over 2,097,152 bytes; the loader reads 33 × 127 sectors, so 128 sectors past the slot are read and ignored |
 | 69760–73983 | kernel slot B (v0.2.100) |
 | 13312–65535 | the v0.2.69 data region: a table sector and large read-only files installed from the host (`scripts/install-program.py --region data`), served by the filesystem service under `/data`; 25.5 MiB |
+| 131072–262143 | the v0.3.6 append store: two position sectors followed by protected data sectors, exposed as `/judge-ledger`; the build grows the disk to 128 MiB |
 
 Rebuilding installs the new kernel as slot A, clears the selector so that
 kernel is what boots, and preserves everything else. Before v0.2.42 a kernel

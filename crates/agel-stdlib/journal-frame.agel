@@ -1,0 +1,127 @@
+(module agel/journal-frame
+  (export journal-pack journal-read journal-reservation journal-reader journal-feed journal-snapshot)
+
+  (def decimal
+    (fn (n)
+      (let ((digit (text-slice "0123456789" (- n (* 10 (/ n 10))) (+ 1 (- n (* 10 (/ n 10)))))))
+        (if (< n 10) digit (text-concat (decimal (/ n 10)) digit)))))
+  (def width
+    (fn (text length)
+      (if (< (text-bytes text) length) (width (text-concat "0" text) length) text)))
+  (def spaces
+    (fn (n)
+      (if (= n 0) ""
+          (let ((half (spaces (/ n 2))))
+            (text-concat half (text-concat half (if (= n (* 2 (/ n 2))) "" " ")))))))
+  (def pad (fn (text) (text-concat text (text-concat (spaces (- 511 (text-bytes text))) "\n"))))
+  (def checksum-loop
+    (fn (text at value)
+      (if (= at (text-bytes text)) value
+          (let ((next (+ (* value 31) (text-byte text at))))
+            (checksum-loop text (+ at 1) (- next (* 1000000007 (/ next 1000000007))))))))
+  (def checksum (fn (text) (checksum-loop text 0 0)))
+  (def hex
+    (fn (text at end out)
+      (if (= at end) out
+          (let ((byte (text-byte text at)))
+            (hex text (+ at 1) end
+              (text-concat out
+                (text-concat (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
+                  (text-slice "0123456789abcdef" (- byte (* 16 (/ byte 16))) (+ 1 (- byte (* 16 (/ byte 16))))))))))))
+  (def frame
+    (fn (payload part last)
+      (let ((prefix (text-concat "AGELJ1 "
+                      (text-concat (width (decimal part) 6)
+                        (text-concat (if last " 1 " " 0 ")
+                          (text-concat (width (decimal (text-bytes payload)) 3) " "))))))
+        (pad (text-concat prefix
+               (text-concat (width (decimal (checksum (text-concat prefix payload))) 10)
+                 (text-concat " " payload)))))))
+  (def reverse-into
+    (fn (values out)
+      (if (= values nil) out (reverse-into (cdr values) (cons (car values) out)))))
+  (def pack-loop
+    (fn (text at part out)
+      (if (= at (text-bytes text)) (reverse-into out nil)
+          (let ((end (if (< (+ at 192) (text-bytes text)) (+ at 192) (text-bytes text))))
+            (pack-loop text end (+ part 1)
+              (cons (frame (hex text at end "") part (= end (text-bytes text))) out))))))
+  (def journal-pack (fn (text) (pack-loop text 0 0 nil)))
+  (def journal-reservation
+    (fn (start-bytes response-limit)
+      (* 512 (+ 4 (/ (+ (* 2 start-bytes) (* 6 response-limit) 8192 191) 192)))))
+
+  (def number-loop
+    (fn (text at end value)
+      (if (= at end) value
+          (let ((digit (- (text-byte text at) 48)))
+            (if (if (< -1 digit) (< digit 10) #f)
+                (number-loop text (+ at 1) end (+ (* value 10) digit))
+                (signal 'journal/frame "invalid decimal field"))))))
+  (def padding?
+    (fn (text at)
+      (if (= at 511) (= (text-byte text 511) 10)
+          (if (= (text-byte text at) 32) (padding? text (+ at 1)) #f))))
+  (def hex-digit
+    (fn (byte)
+      (if (if (< 47 byte) (< byte 58) #f) (- byte 48)
+          (if (if (< 96 byte) (< byte 103) #f) (- byte 87)
+              (signal 'journal/frame "invalid hex byte")))))
+  (def unhex
+    (fn (text at out)
+      (if (= at (text-bytes text)) (reverse-into out nil)
+          (unhex text (+ at 2)
+            (cons (+ (* 16 (hex-digit (text-byte text at)))
+                     (hex-digit (text-byte text (+ at 1)))) out)))))
+  (def decode
+    (fn (text)
+      (with-handler (* problem) nil
+        (if (= (text-slice text 0 7) "AGELJ1 ")
+            (let ((part (number-loop text 7 13 0))
+                  (last (number-loop text 14 15 0))
+                  (length (number-loop text 16 19 0))
+                  (digest (number-loop text 20 30 0)))
+              (if (if (< length 385)
+                      (if (< last 2)
+                          (if (= (text-byte text 13) 32)
+                              (if (= (text-byte text 15) 32)
+                                  (if (= (text-byte text 19) 32) (= (text-byte text 30) 32) #f) #f) #f) #f) #f)
+                  (let ((payload (text-slice text 31 (+ 31 length))))
+                    (if (if (= digest (checksum (text-concat (text-slice text 0 20) payload))) (padding? text (+ 31 length)) #f)
+                        (begin (unhex payload 0 nil)
+                          (dict 'part part 'last (= last 1) 'payload payload)) nil)) nil)) nil))))
+  (def finish
+    (fn (text)
+      (with-handler (* problem) nil (list (text-from-bytes (unhex text 0 nil))))))
+  (def journal-reader
+    (fn () (dict 'expected 0 'current "" 'records nil 'corrupt 0)))
+  (def journal-snapshot
+    (fn (state)
+      (dict 'records (reverse-into (get state 'records) nil)
+            'corrupt (get state 'corrupt)
+            'incomplete (if (= (get state 'current) "") #f #t))))
+  (def journal-feed
+    (fn (state text)
+      (let ((block (if (= (text-bytes text) 512) (decode text) nil))
+            (current (get state 'current)) (out (get state 'records))
+            (corrupt (get state 'corrupt)))
+        (if block
+            (let ((part (get block 'part)))
+              (if (if (= part 0) #t (= part (get state 'expected)))
+                  (let ((joined (text-concat (if (= part 0) "" current) (get block 'payload))))
+                    (let ((complete (if (get block 'last) (finish joined) nil)))
+                      (dict 'expected (if (get block 'last) 0 (+ part 1))
+                            'current (if (get block 'last) "" joined)
+                            'records (if complete (cons (car complete) out) out)
+                            'corrupt (+ corrupt (if (if (= part 0) (= current "") #t) 0 1)
+                                        (if (if (get block 'last) (= complete nil) #f) 1 0)))))
+                  (dict 'expected 0 'current "" 'records out 'corrupt (+ corrupt 1))))
+            (dict 'expected 0 'current "" 'records out 'corrupt (+ corrupt 1))))))
+  (def read-loop
+    (fn (text at state)
+      (if (< (- (text-bytes text) at) 512)
+          (dict 'records (reverse-into (get state 'records) nil) 'corrupt (get state 'corrupt)
+                'incomplete (if (= (get state 'current) "") #f #t)
+                'trailing-bytes (- (text-bytes text) at))
+          (read-loop text (+ at 512) (journal-feed state (text-slice text at (+ at 512)))))))
+  (def journal-read (fn (text) (read-loop text 0 (journal-reader)))))

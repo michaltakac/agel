@@ -549,6 +549,9 @@ pub mod process {
     /// and per process; a blit record (operation 11: x, y, scale 1 to 4)
     /// shows it inside the content. Graphics only; `-ENODEV` elsewhere.
     pub const CANVAS: u64 = 22;
+    pub const LEDGER_RESERVE: u64 = 23;
+    pub const LEDGER_RELEASE: u64 = 24;
+    pub const LEDGER_APPEND: u64 = 25;
     #[cfg(feature = "native-graphics")]
     pub const CANVAS_MAX: (u32, u32) = (640, 400);
     pub const CANVAS_BYTES: u64 = 0x0010_0000;
@@ -639,6 +642,14 @@ pub mod process {
 /// inside the region it was told it owns.
 #[cfg(feature = "process")]
 pub mod fs {
+    pub const LEDGER_FIRST: u32 = 131072;
+    pub const LEDGER_SECTORS: u32 = 131072;
+    pub const LEDGER_DATA: u32 = LEDGER_FIRST + 2;
+    pub const LEDGER_CAPACITY: u32 = LEDGER_SECTORS - 2;
+    pub const LEDGER_ENTRY: usize = 0x7fff;
+    pub const COMMAND_RESERVE: u64 = 0xb800;
+    pub const COMMAND_RELEASE: u64 = 0xb900;
+    pub const RESERVED_OFFSET: u64 = 1 << 62;
     /// The data region: large read-only files installed from the host
     /// (`scripts/install-program.py --region data`), a table sector like
     /// the program region's and the bytes after it, which the service

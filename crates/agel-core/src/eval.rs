@@ -950,6 +950,28 @@ fn apply_builtin(
         Builtin::Keys => keys(arguments, runtime),
         Builtin::Count => count(arguments),
         Builtin::TypeOf => type_of(arguments),
+        Builtin::TextFromBytes => {
+            expect_arity("text-from-bytes", arguments.len(), 1)?;
+            let bytes = match &arguments[0] {
+                Value::Nil => &[][..],
+                Value::List(bytes) => bytes.as_slice(),
+                _ => return Err(condition("type", "text-from-bytes expects a byte list")),
+            };
+            runtime.check_collection(bytes.len())?;
+            runtime.charge(bytes.len() as u64)?;
+            let bytes = bytes
+                .iter()
+                .map(|value| match value {
+                    Value::Int(n) => {
+                        u8::try_from(*n).map_err(|_| condition("text/range", "byte out of range"))
+                    }
+                    _ => Err(condition("type", "expected an integer byte")),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            String::from_utf8(bytes)
+                .map(Value::String)
+                .map_err(|_| condition("text/range", "invalid UTF-8 bytes"))
+        }
         Builtin::TextBytes
         | Builtin::TextByte
         | Builtin::TextSlice
