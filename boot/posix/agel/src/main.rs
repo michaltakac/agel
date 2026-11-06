@@ -287,7 +287,7 @@ fn pulse() {
 /// kind, an agent holds what it was spawned with — and `print-form`, the
 /// printed form of a value as text, pure, so a program can write source
 /// the reader reads.
-static HOST: [HostWord; 9] = [
+static HOST: [HostWord; 14] = [
     HostWord {
         name: "file-read",
         capability: "file/read",
@@ -333,18 +333,45 @@ static HOST: [HostWord; 9] = [
         capability: "",
         call: print_form,
     },
+    HostWord {
+        name: "program-region",
+        capability: "program/read",
+        call: program_region,
+    },
+    HostWord {
+        name: "program-sector-read",
+        capability: "program/read",
+        call: program_sector_read,
+    },
+    HostWord {
+        name: "program-sector-write",
+        capability: "program/write",
+        call: program_sector_write,
+    },
+    HostWord {
+        name: "program-flush",
+        capability: "program/write",
+        call: program_flush,
+    },
+    HostWord {
+        name: "exec-canary",
+        capability: "process/run",
+        call: exec_canary,
+    },
 ];
 
 /// The capability kinds the words need, issued to the evaluation for
 /// every scope: the namespace `:exec` granted is the bound on what they
 /// can name, and an agent gets only what it is spawned with.
-const CAPABILITY_KINDS: [&str; 6] = [
+const CAPABILITY_KINDS: [&str; 8] = [
     "file/read",
     "file/write",
     "clock/read",
     "console/write",
     "process/run",
     "model/infer",
+    "program/read",
+    "program/write",
 ];
 
 /// The most bytes `file-read` answers.
@@ -541,10 +568,61 @@ fn print_form(arguments: &[Value]) -> Result<Value, HostError> {
 /// no standard input, this process's console as its output, and wait for
 /// it: its status.
 fn exec(arguments: &[Value]) -> Result<Value, HostError> {
-    expect_arguments("exec", arguments, 1)?;
-    let name = text_argument("exec", arguments, 0)?;
+    exec_flags("exec", arguments, 0)
+}
+
+fn exec_canary(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("exec-canary", arguments, 1)?;
+    let name = text_argument("exec-canary", arguments, 0)?;
     let process = process();
-    let child = process.spawn(name.as_bytes(), b"", abi::NO_DESCRIPTOR, 1, 0);
+    let (reader, writer) = process
+        .pipe()
+        .map_err(|e| fail("process/error", format!("pipe: {e}")))?;
+    let child = process.spawn(
+        name.as_bytes(),
+        b"",
+        abi::NO_DESCRIPTOR,
+        writer,
+        abi::SPAWN_NO_FILES,
+    );
+    process.close(writer);
+    if child < 0 {
+        process.close(reader);
+        return Err(fail("process/error", format!("spawn: {child}")));
+    }
+    let mut out = Vec::new();
+    let mut block = [0; 512];
+    loop {
+        let count = process.read(reader, &mut block);
+        if count == 0 {
+            break;
+        }
+        if count < 0 || out.len() + count as usize > 4096 {
+            process.kill(child as u64, abi::SIGNAL_KILLED);
+            process.close(reader);
+            process.wait(child as u64);
+            return Err(fail(
+                "process/error",
+                String::from("canary output failed or exceeded 4096 bytes"),
+            ));
+        }
+        out.extend_from_slice(&block[..count as usize]);
+    }
+    process.close(reader);
+    let status = process.wait(child as u64);
+    let text = String::from_utf8(out)
+        .map_err(|_| fail("process/error", String::from("non-UTF8 canary output")))?;
+    Ok(Value::List(alloc::vec![
+        Value::Int(status),
+        Value::String(text)
+    ]))
+}
+
+fn exec_flags(word: &str, arguments: &[Value], flags: u64) -> Result<Value, HostError> {
+    expect_arguments(word, arguments, 1)?;
+    let name = text_argument(word, arguments, 0)?;
+    let process = process();
+    let child = process.spawn(name.as_bytes(), b"", abi::NO_DESCRIPTOR, 1, flags);
     if child < 0 {
         return Err(fail(
             "process/error",
@@ -552,6 +630,76 @@ fn exec(arguments: &[Value]) -> Result<Value, HostError> {
         ));
     }
     Ok(Value::Int(process.wait(child as u64)))
+}
+
+fn program_result(result: i64) -> Result<i64, HostError> {
+    if result < 0 {
+        Err(fail(
+            "program/io",
+            format!("program region error {}", -result),
+        ))
+    } else {
+        Ok(result)
+    }
+}
+
+fn program_region(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("program-region", arguments, 0)?;
+    let info = program_result(process().program_info())? as u64;
+    Ok(Value::List(alloc::vec![
+        Value::Int((info & 0xffff_ffff) as i64),
+        Value::Int((info >> 32) as i64)
+    ]))
+}
+
+fn program_sector_read(arguments: &[Value]) -> Result<Value, HostError> {
+    let [Value::Int(sector)] = arguments else {
+        return Err(fail(
+            "type",
+            String::from("program-sector-read expects an index"),
+        ));
+    };
+    if *sector < 0 {
+        return Err(fail("type", String::from("negative sector index")));
+    }
+    let mut bytes = [0; 512];
+    program_result(process().program_read(*sector as u64, &mut bytes))?;
+    Ok(Value::List(
+        bytes
+            .into_iter()
+            .map(|b| Value::Int(i64::from(b)))
+            .collect(),
+    ))
+}
+
+fn program_sector_write(arguments: &[Value]) -> Result<Value, HostError> {
+    let [Value::Int(sector), Value::List(values)] = arguments else {
+        return Err(fail(
+            "type",
+            String::from("program-sector-write expects an index and byte list"),
+        ));
+    };
+    if *sector < 0 || values.len() != 512 {
+        return Err(fail(
+            "type",
+            String::from("expected nonnegative index and 512 bytes"),
+        ));
+    }
+    let mut bytes = [0; 512];
+    for (out, value) in bytes.iter_mut().zip(values) {
+        let Value::Int(value) = value else {
+            return Err(fail("type", String::from("expected byte")));
+        };
+        *out = u8::try_from(*value).map_err(|_| fail("type", String::from("expected byte")))?;
+    }
+    program_result(process().program_write(*sector as u64, &bytes))?;
+    Ok(Value::Int(0))
+}
+
+fn program_flush(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("program-flush", arguments, 0)?;
+    program_result(process().program_flush())?;
+    Ok(Value::Int(0))
 }
 
 fn say(descriptor: u64, text: &str) {

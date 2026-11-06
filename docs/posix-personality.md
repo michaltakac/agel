@@ -76,11 +76,11 @@ and resumes the process.
 | Kind | Arguments | Answer |
 |---|---|---|
 | `1` exit | status | never returns; the domain is not resumed and its frames go back to the pool |
-| `2` write | descriptor, length ≤ 512 | bytes written; the data is the first `length` bytes of the block area at byte 1024 of the page; descriptors 1 and 2 are the console, through the console driver domain, with `\n` written as `\r\n`; a file descriptor from stratum 1 writes at its offset; anything else is `-EBADF` |
+| `2` write | descriptor, length ≤ 512 | bytes written; the data is the first `length` bytes of the block area at byte 1536 of the page; descriptors 1 and 2 are the console, through the console driver domain, with `\n` written as `\r\n`; a file descriptor from stratum 1 writes at its offset; anything else is `-EBADF` |
 | `3` open | flags, path length ≤ 256 | a descriptor from 3 up, or a negated error; the path is the first `length` bytes of the payload area at byte 128; stratum 1 |
 | `4` read | descriptor, length ≤ 512 | bytes read into the block area, 0 at the end of the file, or a negated error; stratum 1 |
 | `5` close | descriptor | 0, or `-EBADF`; stratum 1 |
-| `6` spawn | name length, stdin descriptor, stdout descriptor, flags | the child's id; the name is in the payload area; `0xffff` names no descriptor; flag `1` gives the child a read-only namespace; stratum 3 |
+| `6` spawn | name length, stdin descriptor, stdout descriptor, flags | the child's id; the name is in the payload area; `0xffff` names no descriptor; flag `1` gives a read-only namespace, flag `2` removes all file namespace rights and takes precedence; stratum 3 |
 | `7` pipe | none | read descriptor in the low sixteen bits, write descriptor in the next sixteen; stratum 3 |
 | `8` wait | child id | the child's exit status, or `0x100` with a signal number in the low byte when the machine stopped it (`11` a fault, `9` a budget or a deadlock); blocks until the child ends; `-ECHILD` for a child that is not the caller's; stratum 3 |
 | `9` seek | descriptor, offset, whence (0 start, 1 current, 2 end) | the new offset; `-ESPIPE` for a pipe or the console; stratum 4 |
@@ -98,6 +98,19 @@ and resumes the process.
 | `12` event (kinds) | | kinds `1` press, `2` key (a character), `3` release, `4` motion, `5` resize, `6` key down and `7` key up (a scan code, bit 8 for an extended key); see `<agel/window.h>` |
 | `22` canvas | window, width, height | the canvas's address in the process, the top 1 MiB of its window, mapped read-write; `-EBUSY` for a second, `-EINVAL` past 640×400, `-ENODEV` without a display; a blit record (operation 11: x, y, scale 1..4) shows it; see [`native-graphics.md`](native-graphics.md) |
 | `11` draw | window, record count ≤ 8, flags (`1` clears first) | the records the window holds after this; the records are 64-byte compositor records in the block area, relative to the window's content; `-EINVAL` and nothing drawn when any is not permitted or reaches outside the content, `-ENOSPC` past 24 records, `-EBADF` for a window the process does not own; not POSIX |
+| `23` ledger reserve | byte count | positive reservation token, or a negated error; protected ledger capacity reservation |
+| `24` ledger release | token | 0 or a negated error; releases unused reservation capacity |
+| `25` ledger append | token, 512 | bytes appended from the payload area under that reservation, or a negated error |
+| `26` program read | relative sector, 512 | 0; one sector copied into the block area; root namespace with `read` required |
+| `27` program write | relative sector, 512 | 0; one sector copied from the block area; root namespace with `read` and `write` required |
+| `28` program flush | none | 0 after storage flush; same authority as program write |
+| `29` program info | none | absolute base sector in the low 32 bits, sector count in the high 32 bits; same authority as program read |
+
+Program-sector requests are bounded to the installed-program region and
+return `-EINVAL` for an index outside it or a transfer length other than
+512. They do not reach the filesystem, kernel slots or protected ledger.
+The byte interface does not parse tables or choose versions. The Agel
+program store owns those policies; see [v0.3.12](release-v0.3.12.md).
 
 Before a process first runs, the supervisor places its arguments in the
 payload area as NUL-terminated strings, the program's name first, and

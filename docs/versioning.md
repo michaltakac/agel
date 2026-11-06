@@ -534,6 +534,10 @@ promise.
   separate text judgment, held-out replay, bounded retries and retained
   control evals. Real successful and refused trials are recorded. Full
   model cost accounting and actual OS service replacement remain open.
+  `v0.3.12` adds native program byte transport and Agel table management,
+  compiled canary replay, activation and revert. Retained binaries and judge
+  logs survive reboot. Running-domain migration, canonical activation recovery
+  and native integration of model-driven repairs remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

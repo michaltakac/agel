@@ -20,7 +20,8 @@ Provider-wide Jev attempt accounting reaches guest storage in v0.3.5;
 `sh scripts/test-ledger.sh` adds framed recovery, growth beyond 64 KiB and
 reserved result capacity in v0.3.6. Complete accounting after in-flight
 crashes/device failure, guardian-only append authority, native activation
-and game experiments are still open.
+and game experiments are still open; v0.3.12 adds native program activation
+for new child executions, while durable guarded activation remains open.
 The private OpenRune world and pre-login/cache wire client are verified
 in v0.3.7. v0.3.8 adds Agel password login, game ciphers, movement,
 stat/inventory observations and skill/item setup. `sh scripts/test-osrs-game.sh`
@@ -39,6 +40,11 @@ tools pass separate text judgments and held-out replay before activation.
 Recorded controls, diagnoses, predictions, failures and judge costs are linked
 in [the release notes](release-v0.3.11.md). It does not yet rewrite native
 services or measure Exo task performance.
+v0.3.12 adds Agel program-table management and real compiled program activation.
+`sh scripts/test-native-evolution.sh` verifies contained native replay, refusal,
+revert and retained executable images after reboot. The controller remains
+running during edits. Existing service-domain state migration, canonical
+activation recovery and the real model loop's native integration remain open.
 
 | Line | Status | Proof and limits |
 |---|---|---|

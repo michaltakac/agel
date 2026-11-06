@@ -1,0 +1,40 @@
+(module agel/bytes
+  (import agel/sequence)
+  (export bytes-from-hex bytes-crc32)
+  (def rem (fn (a b) (- a (* b (/ a b)))))
+  (def digit
+    (fn (c)
+      (if (if (< 47 c) (< c 58) #f) (- c 48)
+        (if (if (< 96 c) (< c 103) #f) (- c 87)
+          (if (if (< 64 c) (< c 71) #f) (- c 55)
+            (signal 'bytes/hex "invalid hex digit"))))))
+  (def decode
+    (fn (text at high out)
+      (if (= at (text-bytes text))
+        (if (= high nil) (reverse out) (signal 'bytes/hex "odd hex length"))
+        (let ((c (text-byte text at)))
+          (if (if (= c 32) #t (if (= c 9) #t (if (= c 10) #t (= c 13))))
+            (decode text (+ at 1) high out)
+            (let ((n (digit c)))
+              (if (= high nil) (decode text (+ at 1) n out)
+                (decode text (+ at 1) nil (cons (+ (* high 16) n) out)))))))))
+  (def bytes-from-hex
+    (fn (text)
+      (decode text 0 nil nil)))
+  (def xor-table "0123456789abcdef1032547698badcfe23016745ab89efcd32107654ba98fedc45670123cdef89ab54761032dcfe98ba67452301efcdab8976543210fedcba9889abcdef0123456798badcfe10325476ab89efcd23016745ba98fedc32107654cdef89ab45670123dcfe98ba54761032efcdab8967452301fedcba9876543210")
+  (def xor
+    (fn (a b place out)
+      (if (= place 4294967296) out
+        (xor (/ a 16) (/ b 16) (* place 16)
+          (+ out (* place (digit (text-byte xor-table (+ (* (rem a 16) 16) (rem b 16))))))))))
+  (def crc-nibbles '(0 498536548 997073096 651767980 1994146192 1802195444 1303535960 1342533948 3988292384 4027552580 3604390888 3412177804 2607071920 2262029012 2685067896 3183342108))
+  (def nth (fn (xs n) (if (= n 0) (car xs) (nth (cdr xs) (- n 1)))))
+  (def nibble (fn (crc) (xor (/ crc 16) (nth crc-nibbles (rem crc 16)) 1 0)))
+  (def crc-loop
+    (fn (bytes crc)
+      (if (= bytes nil) (- 4294967295 crc)
+        (let ((byte (car bytes)))
+          (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
+            (crc-loop (cdr bytes) (nibble (nibble (xor crc byte 1 0))))
+            (signal 'bytes/value "expected byte"))))))
+  (def bytes-crc32 (fn (bytes) (crc-loop bytes 4294967295))))

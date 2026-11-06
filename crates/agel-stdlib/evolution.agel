@@ -2,7 +2,8 @@
   (import agel/sequence)
   (import agel/meta)
   (export evolution-new evolution-current evolution-source evolution-edit
-          evolution-revert evolution-retry evolution-replay evolution-cost)
+          evolution-revert evolution-retry evolution-replay evolution-cost
+          evolution-edit-with-activation)
 
   (def evolution-new
     (fn () (dict 'versions (dict) 'active (dict) 'history nil 'next 1)))
@@ -67,6 +68,35 @@
                      (get (get state 'active) kind) (dict)) name version)))))
   (def evolution-edit
     (fn (state kind name before after cases judge)
+      (evolution-edit-with-activation state kind name before after cases judge nil)))
+  (def commit-version
+    (fn (state request version activation)
+      (record
+        (activate
+          (assoc (assoc state 'next (+ version 1)) 'versions
+            (assoc (get state 'versions) version
+              (let ((entry (assoc request 'source (get request 'after))))
+                (if activation (assoc entry 'activation activation) entry))))
+          (get request 'kind) (get request 'name) version)
+        (dict 'event 'commit 'kind (get request 'kind) 'name (get request 'name) 'version version))))
+  (def prepare-commit
+    (fn (state request cases hook)
+      (let ((version (get state 'next)))
+        (if hook
+          (let ((receipt
+                  (with-handler (* problem) (dict 'passed #f 'reason (get problem 'message))
+                    (let ((result (hook (assoc request 'version version) cases)))
+                      (if (= (type-of result) 'map)
+                        (if (= (type-of (get result 'reason)) 'string) result
+                          (dict 'passed #f 'reason "activation omitted its reason"))
+                        (dict 'passed #f 'reason "activation returned no receipt"))))))
+            (let ((staged (record state (dict 'event 'activation 'version version 'result receipt))))
+              (if (= (get receipt 'passed) #t)
+                (commit-version staged request version receipt)
+                (record staged (dict 'event 'rollback 'reason (get receipt 'reason))))))
+          (commit-version state request version nil)))))
+  (def evolution-edit-with-activation
+    (fn (state kind name before after cases judge hook)
       (if (valid-kind? kind)
           (let ((current (evolution-current state kind name)))
             (if (= before (evolution-source state current))
@@ -79,14 +109,7 @@
                           (let ((replay (evolution-replay after cases)))
                             (let ((tested (record judged (dict 'event 'replay 'result replay))))
                               (if (= (get replay 'passed) #t)
-                                  (let ((version (get state 'next)))
-                                    (record
-                                      (activate
-                                        (assoc (assoc tested 'next (+ version 1)) 'versions
-                                          (assoc (get tested 'versions) version
-                                            (assoc request 'source after)))
-                                        kind name version)
-                                      (dict 'event 'commit 'kind kind 'name name 'version version)))
+                                  (prepare-commit tested request cases hook)
                                   (record tested (dict 'event 'rollback 'reason (get replay 'reason))))))
                           (record judged (dict 'event 'refused 'reason (get receipt 'reason)))))))
                 (record state (dict 'event 'conflict 'reason "diff base is stale"))))

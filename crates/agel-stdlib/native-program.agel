@@ -1,0 +1,61 @@
+(module agel/native-program
+  (import agel/sequence)
+  (import agel/evolution)
+  (import agel/native)
+  (import agel/native-x86)
+  (import agel/program-store)
+  (import agel/judgment)
+  (export native-program-edit native-program-revert native-program-run)
+  (def require (fn (ok reason) (if ok #t (signal 'program/activation reason))))
+  (def rem (fn (a b) (- a (* b (/ a b)))))
+  (def status (fn (n) (let ((r (rem n 256))) (if (< r 0) (+ r 256) r))))
+  (def plans
+    (fn (source cases fuel)
+      (map (fn (case)
+        (let ((expected (get case 'expected)))
+          (begin
+            (require (= (type-of expected) 'int) "native program cases require integer results")
+            (require (if (< -4611686018427387905 expected) (< expected 4611686018427387904) #f)
+              "result outside tagged integer range")
+            (dict 'arguments (get case 'arguments) 'expected expected
+              'hex (native-x86-emit-limited (native-compile source) (get case 'arguments) fuel))))) cases)))
+  (def stage
+    (fn (adapter stem remaining index completed)
+      (if (= remaining nil)
+        (dict 'passed #t 'reason "compiled canaries match" 'programs (reverse completed))
+        (let ((name (text-concat stem (text-concat "c" (int->text index)))) (plan (car remaining)))
+          (with-handler (* problem)
+            (dict 'passed #f 'reason (get problem 'message) 'programs (reverse completed) 'uncertain-name name)
+            (let ((entry (program-install-hex (get adapter 'geometry) name (get plan 'hex)
+                          (get adapter 'read) (get adapter 'write) (get adapter 'flush))))
+              (let ((actual ((get adapter 'run) name)) (expected (get plan 'expected)))
+                (let ((artifact (dict 'program entry 'arguments (get plan 'arguments) 'expected expected 'actual actual)))
+                  (if (= actual (list (status expected) (text-concat (int->text expected) "\n")))
+                    (stage adapter stem (cdr remaining) (+ index 1) (cons artifact completed))
+                    (dict 'passed #f 'reason "compiled canary differs" 'programs (reverse (cons artifact completed))))))))))))
+  (def native-program-edit
+    (fn (state name before after cases judge adapter)
+      (evolution-edit-with-activation state 'program name before after cases judge
+        (fn (request replay)
+          (stage adapter
+            (text-concat (get adapter 'prefix)
+              (text-concat (int->text (get request 'version))
+                (text-concat "a" (int->text (count (get state 'history))))))
+            (plans (get request 'after) replay (get adapter 'fuel)) 0 nil)))))
+  (def native-program-revert
+    (fn (state name version cases judge adapter)
+      (let ((old (get (get state 'versions) version)))
+        (begin
+          (require (if old (if (= (get old 'kind) 'program) (= (get old 'name) name) #f) #f)
+            "version belongs to another object")
+          (native-program-edit state name
+            (evolution-source state (evolution-current state 'program name))
+            (get old 'source) cases judge adapter)))))
+  (def native-program-run
+    (fn (state name arguments run)
+      (let ((version (evolution-current state 'program name)))
+        (let ((entry (get (get state 'versions) version)))
+          (let ((matches (filter (fn (artifact) (= arguments (get artifact 'arguments)))
+                          (get (get entry 'activation) 'programs))))
+            (if (= matches nil) (signal 'program/arguments "no activated image for these arguments")
+              (run (get (get (car matches) 'program) 'name)))))))))

@@ -552,6 +552,10 @@ pub mod process {
     pub const LEDGER_RESERVE: u64 = 23;
     pub const LEDGER_RELEASE: u64 = 24;
     pub const LEDGER_APPEND: u64 = 25;
+    pub const PROGRAM_READ: u64 = 26;
+    pub const PROGRAM_WRITE: u64 = 27;
+    pub const PROGRAM_FLUSH: u64 = 28;
+    pub const PROGRAM_INFO: u64 = 29;
     #[cfg(feature = "native-graphics")]
     pub const CANVAS_MAX: (u32, u32) = (640, 400);
     pub const CANVAS_BYTES: u64 = 0x0010_0000;
@@ -606,6 +610,7 @@ pub mod process {
     /// A descriptor argument that names none.
     pub const NO_DESCRIPTOR: u64 = 0xffff;
     pub const SPAWN_READ_ONLY: u64 = 1;
+    pub const SPAWN_NO_FILES: u64 = 2;
     /// Set in a `wait` answer when the child did not exit but was stopped:
     /// the low byte is then the signal a POSIX parent would see.
     pub const WAIT_SIGNALED: u64 = 0x100;

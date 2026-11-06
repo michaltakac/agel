@@ -5,14 +5,18 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.11.** General Agel agents request diagnoses, code
-repairs and predictions from a model, judge their text, replay displayed and
-held-out cases, then activate or refuse the change. Two real model-written
-tools improved from 4/8 to 8/8 and 3/6 to 6/6 checks. Run
-`sh scripts/test-repair.sh`; the real-model demo is `python3 scripts/demo-repair.py`.
-RuneScape is an application adapter, not part of the repair mechanism.
-Native OS service replacement and complete cost accounting remain unfinished.
-See the [release notes and failed-run evidence](docs/release-v0.3.11.md).
+**Current release: v0.3.12.** An Agel process compiles and installs real
+native ELF versions, checks their output in contained canaries, activates
+them for new calls and reverts. The controller stays running; earlier images
+and judge records survive reboot. Run `sh scripts/test-native-evolution.sh`.
+This does not yet replace a running service domain or migrate its state.
+See the [release notes and native transcript](docs/release-v0.3.12.md).
+
+v0.3.11 added general model-written repairs, predictions, text judgment,
+held-out replay and control evals. Run `sh scripts/test-repair.sh` or
+`python3 scripts/demo-repair.py`. Connecting that model loop to native
+activation and completing cost accounting remain open. RuneScape is an
+application adapter, not part of these mechanisms.
 
 v0.3.8 added live RuneScape tests that log in, walk, set one
 skill and grant items through an Agel client. Agel owns RSA/XTEA/ISAAC,

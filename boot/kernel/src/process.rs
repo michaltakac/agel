@@ -1063,6 +1063,10 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         process::LEDGER_RESERVE | process::LEDGER_RELEASE | process::LEDGER_APPEND => {
             ledger_request(table, index, services, kind, arguments)
         }
+        process::PROGRAM_READ
+        | process::PROGRAM_WRITE
+        | process::PROGRAM_FLUSH
+        | process::PROGRAM_INFO => program_sector_request(table, index, services, kind, arguments),
         process::CLOSE => close(table, index, arguments[0]),
         process::PIPE => pipe(table, index),
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
@@ -1302,6 +1306,57 @@ fn ledger_request(
         Ok(values) => values[0],
         Err(number) => error(number),
     }
+}
+
+fn program_sector_request(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    kind: u64,
+    arguments: [u64; 4],
+) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let writing = matches!(kind, process::PROGRAM_WRITE | process::PROGRAM_FLUSH);
+    if process.namespace.root != 0
+        || !process.namespace.read
+        || (writing && !process.namespace.write)
+    {
+        return error(EACCES);
+    }
+    let sectors = u64::from(LAST_SECTOR - TABLE_SECTOR + 1);
+    if kind == process::PROGRAM_INFO {
+        return (sectors << 32) | u64::from(TABLE_SECTOR);
+    }
+    if kind == process::PROGRAM_FLUSH {
+        return match crate::workspace::flush(services.storage) {
+            Ok(()) => 0,
+            Err(_) => error(EIO),
+        };
+    }
+    if arguments[0] >= sectors || arguments[1] != 512 {
+        return error(EINVAL);
+    }
+    let lba = TABLE_SECTOR + arguments[0] as u32;
+    let mut bytes = [0_u8; 512];
+    let outcome = if writing {
+        for (offset, byte) in bytes.iter_mut().enumerate() {
+            *byte = process.domain.core().read_block(offset);
+        }
+        crate::workspace::write_sector(services.storage, lba, &bytes)
+    } else {
+        crate::workspace::read_sector(services.storage, lba, &mut bytes)
+    };
+    if outcome.is_err() {
+        return error(EIO);
+    }
+    if !writing {
+        for (offset, byte) in bytes.iter().enumerate() {
+            process.domain.core().write_block(offset, *byte);
+        }
+    }
+    0
 }
 
 fn truncate(
@@ -1863,7 +1918,14 @@ fn spawn(
         } else {
             block_length
         };
-        let namespace = if arguments[3] & process::SPAWN_READ_ONLY != 0 {
+        let namespace = if arguments[3] & process::SPAWN_NO_FILES != 0 {
+            Namespace {
+                read: false,
+                write: false,
+                create: false,
+                ..parent.namespace
+            }
+        } else if arguments[3] & process::SPAWN_READ_ONLY != 0 {
             Namespace {
                 write: false,
                 create: false,
