@@ -1,0 +1,125 @@
+(module agel/evolution
+  (import agel/sequence)
+  (import agel/meta)
+  (export evolution-new evolution-current evolution-source evolution-edit
+          evolution-revert evolution-retry evolution-replay evolution-cost)
+
+  (def evolution-new
+    (fn () (dict 'versions (dict) 'active (dict) 'history nil 'next 1)))
+  (def evolution-current
+    (fn (state kind name)
+      (let ((objects (get (get state 'active) kind)))
+        (if objects (get objects name) nil))))
+  (def evolution-source
+    (fn (state version)
+      (let ((entry (get (get state 'versions) version)))
+        (if entry (get entry 'source) nil))))
+  (def record
+    (fn (state event)
+      (assoc state 'history (append (get state 'history) (list event)))))
+  (def valid-kind?
+    (fn (kind)
+      (if (= kind 'cell) #t
+      (if (= kind 'program) #t
+      (if (= kind 'domain) #t (= kind 'kernel-slot))))))
+  (def evolution-replay
+    (fn (source cases)
+      (with-handler (* problem)
+        (dict 'passed #f 'reason (get problem 'message))
+        (if (= cases nil)
+            (dict 'passed #f 'reason "replay corpus is empty")
+            (let ((candidate (meta-eval source (meta-base-env))))
+              (replay-cases candidate cases 0))))))
+  (def replay-cases
+    (fn (candidate cases checked)
+      (if (= cases nil)
+          (dict 'passed #t 'checked checked 'reason "recorded steps agree")
+          (let ((case (car cases)))
+            (if (if (= (type-of case) 'map)
+                    (if (has-key? case 'expected)
+                        (if (= (get case 'arguments) nil) #t
+                            (= (type-of (get case 'arguments)) 'list)) #f) #f)
+              (let ((actual (meta-apply candidate (get case 'arguments))))
+              (if (= actual (get case 'expected))
+                  (replay-cases candidate (cdr cases) (+ checked 1))
+                  (dict 'passed #f 'checked checked 'reason "recorded step differs"
+                        'arguments (get case 'arguments)
+                        'expected (get case 'expected) 'actual actual)))
+              (dict 'passed #f 'checked checked 'reason "invalid recorded step"))))))
+  (def ask
+    (fn (judge request)
+      (with-handler (* problem)
+        (dict 'allowed #f 'reason (get problem 'message) 'cost-microusd nil
+              'status 'error)
+        (let ((answer (judge request)))
+          (if (= (type-of answer) 'map)
+              (if (= (type-of (get answer 'reason)) 'string)
+                  answer
+                  (assoc (assoc (assoc answer 'allowed #f)
+                           'reason "judge omitted its reason") 'status 'invalid))
+              (dict 'allowed #f 'reason "judge returned no receipt"
+                    'response answer 'cost-microusd nil 'status 'invalid))))))
+  (def activate
+    (fn (state kind name version)
+      (assoc state 'active
+        (assoc (get state 'active) kind
+          (assoc (if (get (get state 'active) kind)
+                     (get (get state 'active) kind) (dict)) name version)))))
+  (def evolution-edit
+    (fn (state kind name before after cases judge)
+      (if (valid-kind? kind)
+          (let ((current (evolution-current state kind name)))
+            (if (= before (evolution-source state current))
+                (let ((request (dict 'kind kind 'name name 'base current
+                                     'before before 'after after)))
+                  (let ((receipt (ask judge request)))
+                    (let ((judged (record state
+                            (dict 'event 'judge 'request request 'receipt receipt))))
+                      (if (= (get receipt 'allowed) #t)
+                          (let ((replay (evolution-replay after cases)))
+                            (let ((tested (record judged (dict 'event 'replay 'result replay))))
+                              (if (= (get replay 'passed) #t)
+                                  (let ((version (get state 'next)))
+                                    (record
+                                      (activate
+                                        (assoc (assoc tested 'next (+ version 1)) 'versions
+                                          (assoc (get tested 'versions) version
+                                            (assoc request 'source after)))
+                                        kind name version)
+                                      (dict 'event 'commit 'kind kind 'name name 'version version)))
+                                  (record tested (dict 'event 'rollback 'reason (get replay 'reason))))))
+                          (record judged (dict 'event 'refused 'reason (get receipt 'reason)))))))
+                (record state (dict 'event 'conflict 'reason "diff base is stale"))))
+          (signal 'evolution/kind "unknown versioned object kind" kind))))
+  (def evolution-revert
+    (fn (state kind name version cases judge)
+      (let ((old (get (get state 'versions) version)))
+        (if (if old (if (= (get old 'kind) kind) (= (get old 'name) name) #f) #f)
+            (evolution-edit state kind name
+              (evolution-source state (evolution-current state kind name))
+              (get old 'source) cases judge)
+            (record state (dict 'event 'refused 'reason "version belongs to another object"))))))
+  (def evolution-retry
+    (fn (state kind name cases judge propose remaining)
+      (if (< 0 remaining)
+          (let ((current (evolution-current state kind name)))
+            (let ((after (propose state)))
+              (let ((next (evolution-edit state kind name
+                            (evolution-source state current) after cases judge)))
+                (if (= current (evolution-current next kind name))
+                    (evolution-retry next kind name cases judge propose (- remaining 1))
+                    next))))
+          state)))
+  (def evolution-cost
+    (fn (state)
+      (foldl
+        (fn (total event)
+          (if (= (get event 'event) 'judge)
+              (let ((cost (get (get event 'receipt) 'cost-microusd)))
+                (if (= (type-of cost) 'int)
+                    (if (< cost 0)
+                        (assoc total 'unknown (+ 1 (get total 'unknown)))
+                        (assoc total 'microusd (+ cost (get total 'microusd))))
+                    (assoc total 'unknown (+ 1 (get total 'unknown)))))
+              total))
+        (dict 'microusd 0 'unknown 0) (get state 'history)))))

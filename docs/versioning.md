@@ -493,6 +493,11 @@ promise.
   `:join-file NAME` admits it cell by cell through the judged gate, and
   any program with a step is an agent; the builder's chart paints the
   player's route beside it.
+  `v0.3.3` adds `agel/evolution`: source diffs, namespaced version records,
+  judge receipts, nonempty replay before activation, reverts retaining
+  history and bounded retries with feedback. The same Lisp contract runs
+  hosted and in an OS process. Protected disk history and real OS service
+  activation are later steps in `exo-programme.md`.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

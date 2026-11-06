@@ -5,7 +5,14 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.2.** A tool the agent built for itself, through the gate. The `builder` agent asks the host's model, once, for an Agel program that charts the player's route; the desktop admits it cell by cell on the yes of Jev, TypeSafe's System One model, asked per cell whether it may run here; and the chart is then an agent like any other, painting from the player's own summary beside the player and its reviewer. The player follows a plan step by step by typed questions. The OS runs no model and has no network; the model writes, the judge admits, the desktop runs. DOOM is the instrument; the loop, the needs, the sentence, the reviewer, the lookup and the gate are general, per [`docs/real-work.md`](docs/real-work.md). See [`docs/release-v0.3.2.md`](docs/release-v0.3.2.md), [`docs/computer-use.md`](docs/computer-use.md) and [`docs/parallel-agents.md`](docs/parallel-agents.md). What is done, partial and open is in
+**Current release: v0.3.3.** An evolution gate written in Agel: source diffs,
+judge receipts, recorded-case replay, version retention, guarded revert and
+bounded retries carrying refusal reasons. The same Lisp contract runs hosted
+and inside an OS protection domain. This is policy machinery; protected disk
+history, actual OS service replacement and the private OSRS client remain in
+the [release programme](docs/exo-programme.md). See the
+[release notes](docs/release-v0.3.3.md). The previous desktop tool-building
+demo is documented in [v0.3.2](docs/release-v0.3.2.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 

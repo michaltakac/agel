@@ -10,6 +10,12 @@ code. Each release moves lines here; the release-by-release history is in
 
 ## The language and the hosted runtime
 
+The current OSRS and runtime evolution work is tracked in
+[`exo-programme.md`](exo-programme.md). Its first step, the Agel-written
+version/diff/judge/replay/retry policy, is tested hosted and in an OS process
+by `sh scripts/test-evolution.sh`. Protected disk history, native activation
+and game experiments are still open.
+
 | Line | Status | Proof and limits |
 |---|---|---|
 | Homoiconic reader, evaluator, atomic batches, versioned worlds with rollback | done | `cargo test --workspace`, `scripts/test-bootstrap.sh` |
