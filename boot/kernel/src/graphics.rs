@@ -39,7 +39,7 @@ const STREAM_HEADER_BYTES: usize = 16;
 const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
 const MAX_SCENE_COMMANDS: usize = 224;
-const INPUT_BYTES: usize = PAYLOAD_BYTES;
+const INPUT_BYTES: usize = 4104;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
 const HELP_POSTCARD: &[u8] = b"click the desktop or :workbench | a sentence summons the agent | :load NAME :play/:drive N | :preview FORM :promote :discard | :cell :run :show :cells :save | :exec NAME :close :min/max N | :fs-ls :fs-format | :rollback :shutdown";
@@ -6591,25 +6591,42 @@ fn interactive(
                 // A program reading the console owns the line, as a
                 // terminal's foreground program does; `:eof` alone ends
                 // its input, the way a terminal's end-of-file key does.
-                let fed = match running.as_mut().filter(|run| run.reading_console()) {
-                    Some(run) => {
-                        status = if trim(&line[..length]) == b":eof" {
-                            run.end_console();
-                            StatusLine::new(b"END OF INPUT")
-                        } else if run.feed_console(&line[..length]) {
-                            StatusLine::new(b"LINE GIVEN TO THE PROGRAM")
-                        } else {
-                            StatusLine::new(b"THE PROGRAM'S INPUT IS FULL")
-                        };
-                        true
+                let queued = line[..length].strip_prefix(b":stdin ");
+                let fed = if let Some(payload) = queued {
+                    status = match running.as_mut() {
+                        Some(run) => {
+                            if run.feed_console(payload) {
+                                StatusLine::new(b"INPUT QUEUED")
+                            } else {
+                                StatusLine::new(b"THE PROGRAM'S INPUT IS FULL OR CLOSED")
+                            }
+                        }
+                        None => StatusLine::new(b"NO RUNNING PROGRAM"),
+                    };
+                    true
+                } else {
+                    match running.as_mut().filter(|run| run.reading_console()) {
+                        Some(run) => {
+                            status = if trim(&line[..length]) == b":eof" {
+                                run.end_console();
+                                StatusLine::new(b"END OF INPUT")
+                            } else if run.feed_console(&line[..length]) {
+                                StatusLine::new(b"LINE GIVEN TO THE PROGRAM")
+                            } else {
+                                StatusLine::new(b"THE PROGRAM'S INPUT IS FULL")
+                            };
+                            true
+                        }
+                        None => false,
                     }
-                    None => false,
                 };
                 #[cfg(target_arch = "x86_64")]
                 let clock = clock_driver.as_mut();
                 #[cfg(not(target_arch = "x86_64"))]
                 let clock: Option<&mut ServiceDomain> = None;
-                if !fed {
+                if !fed && length > PAYLOAD_BYTES {
+                    status = StatusLine::new(b"WORKSHOP INPUT LIMIT 896 BYTES");
+                } else if !fed {
                     status = execute_workshop(
                         machine,
                         compositor,
@@ -6671,13 +6688,14 @@ fn interactive(
                     length += 1;
                     console::write_byte(byte);
                 } else {
-                    status = StatusLine::new(b"INPUT LIMIT 256 BYTES");
+                    status = StatusLine::new(b"INPUT LIMIT 4104 BYTES");
                 }
             }
             _ => {}
         }
-        if line[..length].starts_with(b":ledger")
-            && running.as_ref().is_some_and(|run| run.reading_console())
+        if line[..length].starts_with(b":stdin ")
+            || (line[..length].starts_with(b":ledger")
+                && running.as_ref().is_some_and(|run| run.reading_console()))
         {
             continue;
         }

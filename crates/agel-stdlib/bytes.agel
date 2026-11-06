@@ -1,6 +1,57 @@
 (module agel/bytes
   (import agel/sequence)
-  (export bytes-from-hex bytes-crc32)
+  (export bytes-from-hex bytes-crc32 text-hex text-from-hex bytes-hex-chunks bytes-crc32-feed bytes-crc32-finish)
+  (def byte-drop (fn (xs n) (if (= n 0) xs (byte-drop (cdr xs) (- n 1)))))
+  (def byte-take
+    (fn (xs n out) (if (= n 0) (reverse out) (byte-take (cdr xs) (- n 1) (cons (car xs) out)))))
+  (def utf8-boundary
+    (fn (xs at needed boundary)
+      (if (= xs nil) boundary
+        (let ((c (car xs)))
+          (let ((next
+            (if (= needed 0)
+              (if (< c 128) 0 (if (if (< 193 c) (< c 224) #f) 1
+                (if (if (< 223 c) (< c 240) #f) 2 (if (if (< 239 c) (< c 245) #f) 3
+                  (signal 'bytes/utf8 "invalid UTF-8 byte")))))
+              (if (if (< 127 c) (< c 192) #f) (- needed 1) (signal 'bytes/utf8 "invalid UTF-8 continuation")))))
+            (utf8-boundary (cdr xs) (+ at 1) next (if (= next 0) (+ at 1) boundary)))))))
+  (def text-chunks
+    (fn (chunks carry out)
+      (if (= chunks nil)
+        (if (= carry nil) out (signal 'bytes/utf8 "incomplete UTF-8 sequence"))
+        (let ((bytes (append carry (car chunks))))
+          (let ((end (utf8-boundary bytes 0 0 0)))
+            (text-chunks (cdr chunks) (byte-drop bytes end)
+              (text-concat out (text-from-bytes (byte-take bytes end nil)))))))))
+  (def text-from-hex (fn (text) (text-chunks (bytes-hex-chunks text 128) nil "")))
+  (def chunks-loop
+    (fn (text at high limit bytes size out)
+      (if (= size limit)
+        (chunks-loop text at high limit nil 0 (cons (reverse bytes) out))
+        (if (= at (text-bytes text))
+          (if (= high nil) (reverse (if (= size 0) out (cons (reverse bytes) out)))
+            (signal 'bytes/hex "odd hex length"))
+          (let ((c (text-byte text at)))
+            (if (if (= c 32) #t (if (= c 9) #t (if (= c 10) #t (= c 13))))
+              (chunks-loop text (+ at 1) high limit bytes size out)
+              (let ((n (digit c)))
+                (if (= high nil) (chunks-loop text (+ at 1) n limit bytes size out)
+                  (chunks-loop text (+ at 1) nil limit (cons (+ (* high 16) n) bytes) (+ size 1) out)))))))))
+  (def bytes-hex-chunks
+    (fn (text limit)
+      (if (if (= (type-of limit) 'int) (if (< 0 limit) (< limit 257) #f) #f)
+        (chunks-loop text 0 nil limit nil 0 nil)
+        (signal 'bytes/chunk "chunk size must be 1..256"))))
+  (def hex-span
+    (fn (text start end)
+      (if (= start end) ""
+        (if (= (+ start 1) end)
+          (let ((byte (text-byte text start)))
+            (text-concat (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
+              (text-slice "0123456789abcdef" (- byte (* 16 (/ byte 16))) (+ 1 (- byte (* 16 (/ byte 16)))))))
+          (let ((middle (/ (+ start end) 2)))
+            (text-concat (hex-span text start middle) (hex-span text middle end)))))))
+  (def text-hex (fn (text) (hex-span text 0 (text-bytes text))))
   (def rem (fn (a b) (- a (* b (/ a b)))))
   (def digit
     (fn (c)
@@ -32,9 +83,11 @@
   (def nibble (fn (crc) (xor (/ crc 16) (nth crc-nibbles (rem crc 16)) 1 0)))
   (def crc-loop
     (fn (bytes crc)
-      (if (= bytes nil) (- 4294967295 crc)
+      (if (= bytes nil) crc
         (let ((byte (car bytes)))
           (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
             (crc-loop (cdr bytes) (nibble (nibble (xor crc byte 1 0))))
             (signal 'bytes/value "expected byte"))))))
-  (def bytes-crc32 (fn (bytes) (crc-loop bytes 4294967295))))
+  (def bytes-crc32-feed (fn (crc bytes) (crc-loop bytes crc)))
+  (def bytes-crc32-finish (fn (crc) (- 4294967295 crc)))
+  (def bytes-crc32 (fn (bytes) (bytes-crc32-finish (crc-loop bytes 4294967295)))))

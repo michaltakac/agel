@@ -3,13 +3,17 @@
   (import agel/meta)
   (import agel/native-reader)
   (import agel/evolution)
-  (import agel/live-tools)
   (import agel/judgment)
-  (export make-repair-agent repair-state repair-prompt repair-evaluate)
+  (export make-repair-agent repair-state repair-prompt repair-evaluate
+          repair-new repair-start repair-pending repair-complete repair-fail repair-exchange repair-advance)
 
   (def repair-state (fn (agent) (get (agent-info agent) 'heap)))
   (def nth (fn (values n) (if (= n 0) (car values) (nth (cdr values) (- n 1)))))
   (def note (fn (state event) (assoc state 'history (append (get state 'history) (list event)))))
+  (def object-kind (fn (state) (if (get state 'kind) (get state 'kind) 'cell)))
+  (def request-id
+    (fn (self state provider prompt)
+      (if self (model-request provider prompt self) (+ 1 (count (get state 'history))))))
   (def evaluate-cases
     (fn (candidate cases report)
       (if (= cases nil) report
@@ -24,7 +28,7 @@
   (def repair-evaluate
     (fn (state version)
       (let ((entry (get (get (get state 'versions) 'versions) version)))
-        (if (if entry (if (= (get entry 'kind) 'cell) (= (get entry 'name) (get state 'tool)) #f) #f)
+        (if (if entry (if (= (get entry 'kind) (object-kind state)) (= (get entry 'name) (get state 'tool)) #f) #f)
           (evaluate-cases (meta-eval (get entry 'source) (meta-base-env))
             (append (get state 'examples) (get state 'held-out))
             (dict 'version version 'total 0 'correct 0 'steps nil))
@@ -46,7 +50,7 @@
     (fn (self state)
       (if (< 0 (get state 'remaining))
           (let ((prompt (repair-prompt state)))
-            (let ((id (model-request (get state 'proposal-provider) prompt self)))
+            (let ((id (request-id self state (get state 'proposal-provider) prompt)))
               (assoc (assoc (assoc (assoc
                 (note state (dict 'event 'proposal-request 'id id 'prompt prompt 'cost-microusd nil))
                 'status 'proposing) 'pending id) 'remaining (- (get state 'remaining) 1))
@@ -89,7 +93,7 @@
                       ("boundary" "Fails at valid boundaries, types or integer limits")
                       ("syntax" "Invalid Agel or unsupported primitives")
                       ("effects" "Requires unavailable effects or authority"))))))
-        (let ((id (model-request (get state 'judge-provider) prompt self)))
+        (let ((id (request-id self state (get state 'judge-provider) prompt)))
           (assoc (assoc (assoc (assoc
             (note state (dict 'event 'judge-request 'id id 'prompt prompt 'cost-microusd nil))
             'status 'judging) 'pending id) 'candidate report)
@@ -111,16 +115,27 @@
               (dict 'allowed #f 'reason "judge omitted the patch verdict" 'cost-microusd nil)))))))
   (def finish-judge
     (fn (self state text)
-      (let ((receipt (verdict state text)) (before (read-one (get state 'before-text))))
-        (let ((versions (evolution-edit (get state 'versions) 'cell (get state 'tool)
+      (let ((receipt (verdict state text)))
+        (if (if (= (get receipt 'allowed) #t) (get state 'defer-activation) #f)
+          (begin
+            (if self (send self '(repair/advance)) nil)
+            (assoc (assoc state 'approved-receipt receipt) 'status 'approved))
+          (apply-judgment self state receipt)))))
+  (def apply-judgment
+    (fn (self state receipt)
+      (let ((before (read-one (get state 'before-text))))
+        (let ((versions (evolution-edit-with-activation (get state 'versions) (object-kind state) (get state 'tool)
                 before (get (get state 'candidate) 'after)
                 (append (prediction-cases (get state 'examples) (get (get state 'candidate) 'predictions))
-                  (append (get state 'examples) (get state 'held-out))) (fn (request) receipt))))
+                  (append (get state 'examples) (get state 'held-out))) (fn (request) receipt) (get state 'activate))))
           (let ((next (assoc state 'versions versions)))
-            (if (= (evolution-current versions 'cell (get state 'tool))
-                   (evolution-current (get state 'versions) 'cell (get state 'tool)))
+            (if (= (evolution-current versions (object-kind state) (get state 'tool))
+                   (evolution-current (get state 'versions) (object-kind state) (get state 'tool)))
                 (retry self next (get (car (reverse (get versions 'history))) 'reason))
                 (assoc next 'status 'done)))))))
+  (def advance
+    (fn (self state)
+      (if (= (get state 'status) 'approved) (apply-judgment self state (get state 'approved-receipt)) state)))
   (def result
     (fn (self state message)
       (if (if (= (nth message 1) (get state 'pending))
@@ -138,17 +153,46 @@
     (fn (self state message)
       (if (= (car message) 'repair/start)
           (if (= (get state 'status) 'idle) (propose self state) state)
+          (if (= (car message) 'repair/advance) (advance self state)
           (if (= (car message) 'system/model-result) (result self state message)
               (if (= (car message) 'system/model-error) (result self state message)
-                  (signal 'repair/message "unknown repair message"))))))
-  (def make-repair-agent
-    (fn (name options capabilities)
+                  (signal 'repair/message "unknown repair message")))))))
+  (def repair-new
+    (fn (options)
       (let ((before (read-one (get options 'before-text)))
             (versions (get options 'versions)) (threshold (get options 'threshold)))
         (if (if (= (type-of threshold) 'int) (if (< -1 threshold) (< threshold 1001) #f) #f)
-          (if (= before (evolution-source versions (evolution-current versions 'cell (get options 'tool))))
-            (spawn name behavior
+          (if (= before (evolution-source versions (evolution-current versions (object-kind options) (get options 'tool))))
               (assoc (assoc (assoc (assoc (assoc options 'status 'idle) 'history nil) 'reason "")
-                'previous-report "") 'remaining (get options 'max-attempts)) nil nil 'stop 0 capabilities)
+                'previous-report "") 'remaining (get options 'max-attempts))
             (signal 'repair/base "source text does not match the active tool"))
-          (signal 'repair/threshold "threshold must be in 0..1000"))))))
+          (signal 'repair/threshold "threshold must be in 0..1000")))))
+  (def make-repair-agent
+    (fn (name options capabilities)
+      (spawn name behavior (repair-new options) nil nil 'stop 0 capabilities)))
+  (def repair-start
+    (fn (state) (if (= (get state 'status) 'idle) (propose nil state) state)))
+  (def repair-pending
+    (fn (state)
+      (if (if (= (get state 'status) 'proposing) #t (= (get state 'status) 'judging))
+        (dict 'id (get state 'pending) 'provider (get state 'pending-provider)
+              'prompt (get (car (reverse (get state 'history))) 'prompt)) nil)))
+  (def repair-complete
+    (fn (state id provider text) (result nil state (list 'system/model-result id provider text))))
+  (def repair-fail
+    (fn (state id provider message) (result nil state (list 'system/model-error id provider 'provider/error message))))
+  (def repair-advance (fn (state) (advance nil state)))
+  (def repair-exchange
+    (fn (state infer append-record)
+      (let ((request (repair-pending state)))
+        (if request
+          (begin
+            (append-record (dict 'event 'inference-start 'request request 'cost-microusd nil))
+            (let ((answer (with-handler (* problem) (dict 'error (get problem 'message))
+                            (dict 'text (infer (get request 'provider) (get request 'prompt))))))
+              (begin
+                (append-record (dict 'event 'inference-result 'id (get request 'id) 'answer answer 'cost-microusd nil))
+                (if (get answer 'error)
+                  (repair-fail state (get request 'id) (get request 'provider) (get answer 'error))
+                  (repair-complete state (get request 'id) (get request 'provider) (get answer 'text))))))
+          (repair-advance state))))))

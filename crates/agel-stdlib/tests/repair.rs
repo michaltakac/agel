@@ -163,3 +163,98 @@ fn refusal_prevents_replay_and_provider_failure_preserves_the_tool() {
     let result = world.evaluate("(def state (repair-state worker)) (list (get state 'status) (get (live-tools-call state 'batches '(6 3)) 'value) (count (filter (fn (entry) (= (get entry 'event) 'replay)) (get (get state 'versions) 'history))))").unwrap();
     assert_eq!(result.values.last().unwrap().to_string(), "(exhausted 2 1)");
 }
+
+#[test]
+fn pure_session_uses_the_same_gates_without_dispatching() {
+    let (mut world, options) = setup();
+    world
+        .evaluate_with(
+            "(def session (repair-start (repair-new (repair-state worker))))",
+            &options,
+        )
+        .unwrap();
+    let source = format!(
+        "(def session (repair-complete session (get (repair-pending session) 'id) 'writer {}))",
+        agel_core::Value::String(GOOD.into())
+    );
+    world.evaluate_with(&source, &options).unwrap();
+    let status = world.evaluate("(get session 'status)").unwrap();
+    assert_eq!(status.values[0].to_string(), "judging");
+    world.evaluate_with("(def session (repair-complete session (get (repair-pending session) 'id) 'judge \"patch noul 950 reason choice 5 none 900 900 25 25 25 25\"))", &options).unwrap();
+    assert_eq!(world.evaluate("(list (get session 'status) (repair-pending session) (get (repair-evaluate session 2) 'correct))").unwrap().values[0].to_string(), "(done nil 6)");
+    assert_eq!(
+        world.pending_model_requests().len(),
+        1,
+        "pure session must not add a runtime request"
+    );
+}
+
+#[test]
+fn native_inference_framing_is_agel_and_preserves_bytes() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world.evaluate(include_str!("../bytes.agel")).unwrap();
+    world.evaluate(include_str!("../inference.agel")).unwrap();
+    let result = world.evaluate("(import agel/inference) (inference-call (dict 'writer \"writer\") (fn (request) (if (= request \"AGEL-INFER/1 writer\\n6869\") \"ok 410acebb\" (signal 'test/failed \"wrong envelope\"))) 'writer \"hi\")").unwrap();
+    assert_eq!(
+        result.values.last(),
+        Some(&agel_core::Value::String("A\nλ".into()))
+    );
+    assert!(world.evaluate("(inference-call (dict 'writer \"writer\\njudge\") (fn (request) (signal 'test/failed \"must not dispatch\")) 'writer \"hi\")").unwrap_err().to_string().contains("invalid provider route"));
+}
+
+#[test]
+fn program_repair_uses_activation_and_synchronous_audit_order() {
+    let (mut world, options) = setup();
+    world.evaluate_with("(def program-versions (evolution-edit (evolution-new) 'program 'batches nil before (list (dict 'arguments '(6 3) 'expected 2)) (fn (r) (dict 'allowed #t 'reason \"fixture\" 'cost-microusd 0)))) (def activated 0) (def session (repair-start (repair-new (assoc (assoc (assoc (repair-state worker) 'kind 'program) 'versions program-versions) 'activate (fn (r cases) (begin (def activated (+ activated 1)) (dict 'passed #t 'reason \"artifact verified\" 'attempt (get r 'attempt)))))))) (def audit-events nil)", &options).unwrap();
+    let call = format!("(def session (repair-exchange session (fn (provider prompt) (begin (def audit-events (append audit-events '(infer))) {})) (fn (record) (def audit-events (append audit-events (list (get record 'event)))))))", agel_core::Value::String(GOOD.into()));
+    world.evaluate_with(&call, &options).unwrap();
+    assert_eq!(
+        world.evaluate("audit-events").unwrap().values[0].to_string(),
+        "(inference-start infer inference-result)"
+    );
+    world.evaluate_with("(def session (repair-complete session (get (repair-pending session) 'id) 'judge \"patch noul 950 reason choice 5 none 900 900 25 25 25 25\"))", &options).unwrap();
+    assert_eq!(world.evaluate("(list (get session 'status) activated (evolution-current (get session 'versions) 'program 'batches))").unwrap().values[0].to_string(), "(done 1 2)");
+}
+
+#[test]
+fn deferred_text_approval_does_not_commit_before_advance() {
+    let (mut world, options) = setup();
+    world.evaluate_with("(def session (repair-start (repair-new (assoc (repair-state worker) 'defer-activation #t))))", &options).unwrap();
+    let source = format!(
+        "(def session (repair-complete session (get (repair-pending session) 'id) 'writer {}))",
+        agel_core::Value::String(GOOD.into())
+    );
+    world.evaluate_with(&source, &options).unwrap();
+    world.evaluate_with("(def session (repair-complete session (get (repair-pending session) 'id) 'judge \"patch noul 950 reason choice 5 none 900 900 25 25 25 25\"))", &options).unwrap();
+    assert_eq!(world.evaluate("(list (get session 'status) (evolution-current (get session 'versions) 'cell 'batches))").unwrap().values[0].to_string(), "(approved 1)");
+    world
+        .evaluate_with("(def session (repair-advance session))", &options)
+        .unwrap();
+    assert_eq!(world.evaluate("(list (get session 'status) (evolution-current (get session 'versions) 'cell 'batches))").unwrap().values[0].to_string(), "(done 2)");
+}
+
+#[test]
+fn hex_text_decoder_preserves_utf8_across_chunk_boundaries() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world.evaluate(include_str!("../bytes.agel")).unwrap();
+    let text = format!("{}λ\n{}", "a".repeat(127), "b".repeat(130));
+    let result = world
+        .evaluate_with(
+            &format!(
+                "(import agel/bytes) (text-from-hex (text-hex {}))",
+                agel_core::Value::String(text.clone())
+            ),
+            &EvaluationOptions {
+                budget: agel_core::Budget {
+                    fuel: 1_000_000,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(result.values.last(), Some(&agel_core::Value::String(text)));
+    assert!(world.evaluate("(text-from-hex \"c080\")").is_err());
+}

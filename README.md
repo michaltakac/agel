@@ -5,12 +5,16 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.12.** An Agel process compiles and installs real
-native ELF versions, checks their output in contained canaries, activates
-them for new calls and reverts. The controller stays running; earlier images
-and judge records survive reboot. Run `sh scripts/test-native-evolution.sh`.
-This does not yet replace a running service domain or migrate its state.
-See the [release notes and native transcript](docs/release-v0.3.12.md).
+**Current release: v0.3.13.** A native Agel controller now requests a real
+model-written repair, gets a separate text judgment, replays cases and
+activates compiled program versions without restarting. The example improves
+from 3/6 to 6/6 cases; paid judge records reach protected OS storage.
+The machinery is application-neutral. Running-service migration and Exo
+benchmarks remain open. See the [release notes and evidence](docs/release-v0.3.13.md).
+
+v0.3.12 added Agel compilation, program-table installation, contained native
+canaries, activation and revert, with retained images after reboot.
+See the [release notes](docs/release-v0.3.12.md).
 
 v0.3.11 added general model-written repairs, predictions, text judgment,
 held-out replay and control evals. Run `sh scripts/test-repair.sh` or

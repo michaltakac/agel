@@ -19,8 +19,8 @@ Provider-wide Jev attempt accounting reaches guest storage in v0.3.5;
 `sh scripts/test-judge-bridge.sh` checks reboot, resume and full-log denial.
 `sh scripts/test-ledger.sh` adds framed recovery, growth beyond 64 KiB and
 reserved result capacity in v0.3.6. Complete accounting after in-flight
-crashes/device failure, guardian-only append authority, native activation
-and game experiments are still open; v0.3.12 adds native program activation
+crashes/device failure, guardian-only append authority
+and full game experiments are still open; v0.3.12 adds native program activation
 for new child executions, while durable guarded activation remains open.
 The private OpenRune world and pre-login/cache wire client are verified
 in v0.3.7. v0.3.8 adds Agel password login, game ciphers, movement,
@@ -44,7 +44,11 @@ v0.3.12 adds Agel program-table management and real compiled program activation.
 `sh scripts/test-native-evolution.sh` verifies contained native replay, refusal,
 revert and retained executable images after reboot. The controller remains
 running during edits. Existing service-domain state migration, canonical
-activation recovery and the real model loop's native integration remain open.
+activation recovery remain open. v0.3.13 connects the real model repair loop
+to native activation in the same Agel controller. Its scheduler example
+improves from 3/6 to 6/6 cases after independent judgment and compiled replay.
+Paid attempts reach protected guest storage; complete model costs and Exo
+comparisons remain open. See [the evidence and limits](release-v0.3.13.md).
 
 | Line | Status | Proof and limits |
 |---|---|---|

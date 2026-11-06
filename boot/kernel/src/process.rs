@@ -547,7 +547,7 @@ struct ConsoleInput {
     ended: bool,
 }
 
-const CONSOLE_INPUT_BYTES: usize = 1024;
+const CONSOLE_INPUT_BYTES: usize = 4096;
 
 impl ConsoleInput {
     const EMPTY: Self = Self {
@@ -605,7 +605,7 @@ impl Run {
     #[cfg(feature = "native-graphics")]
     pub fn feed_console(&mut self, line: &[u8]) -> bool {
         let console = &mut self.table.console;
-        if console.length + line.len() + 1 > CONSOLE_INPUT_BYTES {
+        if console.ended || console.length + line.len() + 1 > CONSOLE_INPUT_BYTES {
             return false;
         }
         for byte in line.iter().chain(b"\n") {

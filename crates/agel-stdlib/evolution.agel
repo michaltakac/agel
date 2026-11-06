@@ -85,7 +85,7 @@
         (if hook
           (let ((receipt
                   (with-handler (* problem) (dict 'passed #f 'reason (get problem 'message))
-                    (let ((result (hook (assoc request 'version version) cases)))
+                    (let ((result (hook (assoc (assoc request 'version version) 'attempt (count (get state 'history))) cases)))
                       (if (= (type-of result) 'map)
                         (if (= (type-of (get result 'reason)) 'string) result
                           (dict 'passed #f 'reason "activation omitted its reason"))

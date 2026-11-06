@@ -1,0 +1,8 @@
+Mode: deterministic transport fixtures; no paid inference.
+Before bounded binary chunks; QEMU configured with 64 MiB.
+live-desktop> native-repair: activation {phase emit case 0 name "m1a0c0"}
+live-desktop> native-repair: activation {phase emit case 0 name "m2s6c0"}
+agel: out of memory: the process window is full after 14 free pages
+agel: allocation bytes 81920
+agel: cached large-run pages 517
+process agel exited with status 12

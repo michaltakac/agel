@@ -538,6 +538,11 @@ promise.
   compiled canary replay, activation and revert. Retained binaries and judge
   logs survive reboot. Running-domain migration, canonical activation recovery
   and native integration of model-driven repairs remain open.
+  `v0.3.13` connects real model-written repairs to native activation in one
+  Agel controller. General inference framing, pure repair sessions, deferred
+  activation, streamed executable bytes and queued console input support the
+  path. Protected guest accounting includes failed paid attempts; full model
+  cost, service migration and Exo comparisons remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

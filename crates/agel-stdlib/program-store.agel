@@ -48,15 +48,18 @@
             (assoc (assoc (rows (drop bytes 16) count (car geometry) (car (cdr geometry))
               (dict) (+ (car geometry) 1)) 'count count) 'bytes bytes))))))
   (def write-data
-    (fn (write sector bytes)
-      (if (= bytes nil) #t
-        (let ((size (if (< (count bytes) 512) (count bytes) 512)))
-          (begin (require (= (write sector (join (take bytes size) (zeros (- 512 size) nil))) 0) "program sector write failed")
-            (write-data write (+ sector 1) (drop bytes size)))))))
+    (fn (write sector chunks)
+      (if (= chunks nil) #t
+        (let ((size (if (< (count chunks) 4) (count chunks) 4)))
+          (let ((parts (map (fn (chunk) (join chunk (zeros (- 128 (count chunk)) nil))) (take chunks size))))
+            (begin
+              (require (= (write sector (join parts (zeros-parts (- 4 size) nil))) 0) "program sector write failed")
+              (write-data write (+ sector 1) (drop chunks size))))))))
+  (def zeros-parts (fn (n out) (if (= n 0) out (zeros-parts (- n 1) (cons (zeros 128 nil) out)))))
   (def program-install-hex
     (fn (geometry name hex read write flush)
-      (let ((table (program-table geometry (read 0))) (bytes (bytes-from-hex hex)))
-        (let ((start (get table 'end)) (length (count bytes)))
+      (let ((table (program-table geometry (read 0))) (chunks (bytes-hex-chunks hex 128)))
+        (let ((start (get table 'end)) (length (foldl (fn (n chunk) (+ n (count chunk))) 0 chunks)))
           (begin
             (require (if (< 0 (text-bytes name)) (< (text-bytes name) 17) #f) "program name must be 1..16 bytes")
             (foldl (fn (_ byte) (require (if (< 32 byte) (< byte 127) #f) "invalid program name")) #t (text-bytes-list name))
@@ -64,14 +67,14 @@
             (require (< (get table 'count) 15) "program table full")
             (require (< 0 length) "empty program")
             (require (if (< (+ (car geometry) (car (cdr geometry))) (+ start (/ (+ length 511) 512))) #f #t) "program region full")
-            (let ((crc (bytes-crc32 bytes)))
+            (let ((crc (bytes-crc32-finish (foldl bytes-crc32-feed 4294967295 chunks))))
               (let ((row (join (join (text-bytes-list name) (zeros (- 16 (text-bytes name)) nil))
                            (join (le32 start) (join (le32 length) (join (le32 crc) '(0 0 0 0))))))
                     (old (get table 'bytes)) (offset (+ 16 (* 32 (get table 'count)))))
                 (let ((next (join (take old 8) (join (le32 (+ (get table 'count) 1))
                               (join (take (drop old 12) (- offset 12)) (join row (drop old (+ offset 32))))))))
                   (begin
-                    (write-data write (- start (car geometry)) bytes)
+                    (write-data write (- start (car geometry)) chunks)
                     (require (= (flush) 0) "program data flush failed")
                     (require (= old (read 0)) "program table changed while staging")
                     (require (= (write 0 next) 0) "program table write failed")

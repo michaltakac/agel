@@ -147,153 +147,57 @@ struct Serial {
     closed: Arc<std::sync::atomic::AtomicBool>,
 }
 
-struct NativeJudgeJournal {
-    serial: Mutex<Serial>,
-    failed: std::sync::atomic::AtomicBool,
-    token: std::sync::atomic::AtomicU64,
-}
-
-impl std::fmt::Debug for NativeJudgeJournal {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("NativeJudgeJournal")
-    }
-}
-
-impl NativeJudgeJournal {
-    fn new(serial: &Serial) -> Result<Arc<Self>, String> {
-        Ok(Arc::new(Self {
-            serial: Mutex::new(Serial {
-                stream: serial
-                    .stream
-                    .try_clone()
-                    .map_err(|error| error.to_string())?,
-                received: Arc::clone(&serial.received),
-                closed: Arc::clone(&serial.closed),
-            }),
-            failed: std::sync::atomic::AtomicBool::new(false),
-            token: std::sync::atomic::AtomicU64::new(0),
-        }))
-    }
-
-    fn check(&self) -> Result<(), String> {
-        if self.failed.load(std::sync::atomic::Ordering::Relaxed) {
-            Err(
-                "the OS judge log did not acknowledge storage; stopped before delivering a result"
-                    .into(),
-            )
-        } else {
-            Ok(())
-        }
-    }
-
-    fn exchange(&self, command: &str) -> Result<u64, String> {
-        static REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let id = REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let mut serial = self.serial.lock().map_err(|error| error.to_string())?;
-        let start = serial.len();
-        let (word, arguments) = command
-            .split_once(' ')
-            .ok_or("invalid ledger byte request")?;
-        serial.write_raw(&format!("{word} {id} {arguments}"))?;
-        let success = format!("ledger {id} ok ");
-        let failure = format!("ledger {id} error ");
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            let reply = {
-                let buffer = serial.received.lock().map_err(|error| error.to_string())?;
-                String::from_utf8_lossy(&buffer[start.min(buffer.len())..]).replace('\r', "")
-            };
-            for line in reply
-                .split_inclusive('\n')
-                .filter(|line| line.ends_with('\n'))
-            {
-                let line = line.trim_start_matches("live-desktop> ");
-                if let Some(value) = line.strip_prefix(&success) {
-                    return value
-                        .trim()
-                        .parse()
-                        .map_err(|error| format!("invalid ledger acknowledgement: {error}"));
-                }
-                if line.starts_with(&failure) {
-                    return Err(format!("OS judge ledger refused storage: {}", line.trim()));
-                }
-            }
-            if serial.closed() || Instant::now() > deadline {
-                return Err("OS judge ledger acknowledgement unavailable".into());
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-    }
-}
-
-impl JudgeJournal for NativeJudgeJournal {
-    fn reserve(&self, bytes: u64) -> Result<(), String> {
-        self.check()?;
-        if self
-            .token
-            .compare_exchange(
-                0,
-                u64::MAX,
-                std::sync::atomic::Ordering::Relaxed,
-                std::sync::atomic::Ordering::Relaxed,
-            )
-            .is_err()
-        {
-            return Err("judge ledger reservation is already held".into());
-        }
-        match self.exchange(&format!(":ledger-reserve {bytes}")) {
-            Ok(token) if token > 0 && token < (1 << 62) => {
-                self.token
-                    .store(token, std::sync::atomic::Ordering::Relaxed);
-                Ok(())
-            }
-            outcome => {
-                self.failed
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                Err(format!("judge ledger reservation failed: {outcome:?}"))
-            }
-        }
-    }
-
-    fn release(&self) -> Result<(), String> {
-        let token = self.token.load(std::sync::atomic::Ordering::Relaxed);
-        if token == 0 {
-            return Ok(());
-        }
-        let result = self.exchange(&format!(":ledger-release {token}"));
-        self.token.store(0, std::sync::atomic::Ordering::Relaxed);
-        result.map(|_| ())
-    }
-
-    fn append(&self, bytes: &[u8]) -> Result<(), String> {
-        self.check()?;
-        let result = (|| {
-            let token = self.token.load(std::sync::atomic::Ordering::Relaxed);
-            if token == 0 || token >= (1 << 62) {
-                return Err("judge ledger has no reservation".into());
-            }
-            for chunk in agel_model::journal::frames(bytes)? {
-                if chunk.len() != 512
-                    || chunk[511] != b'\n'
-                    || !chunk[..511].iter().all(|byte| (32..=126).contains(byte))
+fn native_judge_journal(
+    serial: &Serial,
+) -> Result<Arc<agel_model::guest_journal::GuestJudgeJournal>, String> {
+    let transport = Mutex::new(Serial {
+        stream: serial
+            .stream
+            .try_clone()
+            .map_err(|error| error.to_string())?,
+        received: Arc::clone(&serial.received),
+        closed: Arc::clone(&serial.closed),
+    });
+    Ok(Arc::new(agel_model::guest_journal::GuestJudgeJournal::new(
+        move |command| {
+            static REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            let id = REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut serial = transport.lock().map_err(|error| error.to_string())?;
+            let start = serial.len();
+            let (word, arguments) = command
+                .split_once(' ')
+                .ok_or("invalid ledger byte request")?;
+            serial.write_raw(&format!("{word} {id} {arguments}"))?;
+            let success = format!("ledger {id} ok ");
+            let failure = format!("ledger {id} error ");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                let reply = {
+                    let buffer = serial.received.lock().map_err(|error| error.to_string())?;
+                    String::from_utf8_lossy(&buffer[start.min(buffer.len())..]).replace('\r', "")
+                };
+                for line in reply
+                    .split_inclusive('\n')
+                    .filter(|line| line.ends_with('\n'))
                 {
-                    return Err("ledger frame is not an ASCII sector".into());
+                    let line = line.trim_start_matches("live-desktop> ");
+                    if let Some(value) = line.strip_prefix(&success) {
+                        return value
+                            .trim()
+                            .parse()
+                            .map_err(|error| format!("invalid ledger acknowledgement: {error}"));
+                    }
+                    if line.starts_with(&failure) {
+                        return Err(format!("OS judge ledger refused storage: {}", line.trim()));
+                    }
                 }
-                let packet =
-                    std::str::from_utf8(&chunk[..511]).map_err(|error| error.to_string())?;
-                let written = self.exchange(&format!(":ledger {token} {packet}"))?;
-                if written != 512 {
-                    return Err("OS judge ledger short write".into());
+                if serial.closed() || Instant::now() > deadline {
+                    return Err("OS judge ledger acknowledgement unavailable".into());
                 }
+                thread::sleep(Duration::from_millis(5));
             }
-            Ok(())
-        })();
-        if result.is_err() {
-            self.failed
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        result
-    }
+        },
+    )))
 }
 
 impl Serial {
@@ -1465,7 +1369,7 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
             Err(error) => return Err(format!("{}: {error}", socket.display())),
         }
     };
-    let judge_log = NativeJudgeJournal::new(&serial)?;
+    let judge_log = native_judge_journal(&serial)?;
     policy.journal(judge_log.clone());
     // Lines on the bridge's standard input go to the serial line: the
     // operator's other keyboard, for a sentence said while agents run.
@@ -1790,7 +1694,7 @@ fn play(
     policy: &mut dyn Policy,
 ) -> Result<(), String> {
     let mut serial = Serial::connect(serial_path)?;
-    let judge_log = NativeJudgeJournal::new(&serial)?;
+    let judge_log = native_judge_journal(&serial)?;
     policy.journal(judge_log.clone());
     let mut monitor = Monitor::connect(qmp)?;
     serial.wait_for(0, b"live-desktop> ", Duration::from_secs(120))?;

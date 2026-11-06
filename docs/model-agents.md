@@ -141,3 +141,14 @@ and state digest without contacting Claude or Codex.
 
 This distinction is fundamental: transactional memory protects Agel state; the
 outbox and completion log make irreversible effects explicit and auditable.
+
+## Native repair controller
+
+v0.3.13 exposes the same `agel/repair` policy as pure session transitions:
+`repair-new`, `repair-start`, `repair-pending`, `repair-complete`, `repair-fail`
+and `repair-advance`. `repair-exchange` logs before inference and before
+policy delivery. With `defer-activation`, approved text waits for a separate
+advance; no version is committed at approval. `kind` selects the versioned
+object, and an explicit activation hook supplies native execution evidence.
+`agel/inference` maps caller-configured routes to a bounded byte envelope.
+See [the native example, real records and limits](release-v0.3.13.md).

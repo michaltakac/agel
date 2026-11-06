@@ -142,6 +142,9 @@ unsafe fn carve(heap: &mut Heap, bytes: usize, align: usize) -> *mut u8 {
                 ((heap.end - heap.bump) / PAGE) as i64,
                 b" free pages\n",
             );
+            process.report(2, b"agel: allocation bytes ", bytes as i64, b"\n");
+            let cached: usize = heap.runs.iter().map(|run| run.1).sum();
+            process.report(2, b"agel: cached large-run pages ", cached as i64, b"\n");
             process.exit(12);
         }
         if heap.bump == 0 {
@@ -679,18 +682,38 @@ fn program_sector_write(arguments: &[Value]) -> Result<Value, HostError> {
             String::from("program-sector-write expects an index and byte list"),
         ));
     };
-    if *sector < 0 || values.len() != 512 {
+    if *sector < 0 {
         return Err(fail(
             "type",
             String::from("expected nonnegative index and 512 bytes"),
         ));
     }
     let mut bytes = [0; 512];
-    for (out, value) in bytes.iter_mut().zip(values) {
+    let mut offset = 0;
+    let parts: Vec<&[Value]> = if values.iter().all(|v| matches!(v, Value::List(_))) {
+        values
+            .iter()
+            .map(|v| match v {
+                Value::List(xs) => xs.as_slice(),
+                _ => unreachable!(),
+            })
+            .collect()
+    } else {
+        alloc::vec![values.as_slice()]
+    };
+    for value in parts.into_iter().flatten() {
+        if offset == 512 {
+            return Err(fail("type", String::from("sector exceeds 512 bytes")));
+        }
         let Value::Int(value) = value else {
             return Err(fail("type", String::from("expected byte")));
         };
-        *out = u8::try_from(*value).map_err(|_| fail("type", String::from("expected byte")))?;
+        bytes[offset] =
+            u8::try_from(*value).map_err(|_| fail("type", String::from("expected byte")))?;
+        offset += 1;
+    }
+    if offset != 512 {
+        return Err(fail("type", String::from("sector needs exactly 512 bytes")));
     }
     program_result(process().program_write(*sector as u64, &bytes))?;
     Ok(Value::Int(0))

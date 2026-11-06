@@ -1,0 +1,24 @@
+(module agel/inference
+  (import agel/sequence)
+  (import agel/bytes)
+  (export inference-call)
+  (def check-name
+    (fn (text at)
+      (if (= at (text-bytes text)) #t
+        (let ((c (text-byte text at)))
+          (if (if (if (< 96 c) (< c 123) #f) #t
+                  (if (if (< 47 c) (< c 58) #f) #t (if (= c 45) #t (= c 95))))
+            (check-name text (+ at 1)) (signal 'inference/provider "invalid provider route"))))))
+  (def inference-call
+    (fn (routes ask provider prompt)
+      (let ((route (get routes provider)))
+        (if (= (type-of route) 'string)
+          (begin
+            (if (< 0 (text-bytes route)) (check-name route 0) (signal 'inference/provider "empty provider route"))
+            (let ((reply (ask (text-concat "AGEL-INFER/1 " (text-concat route (text-concat "\n" (text-hex prompt)))))))
+              (if (if (< 2 (text-bytes reply)) (= (text-slice reply 0 3) "ok ") #f)
+                (text-from-hex (text-slice reply 3 (text-bytes reply)))
+                (if (if (< 5 (text-bytes reply)) (= (text-slice reply 0 6) "error ") #f)
+                  (signal 'inference/provider (text-from-hex (text-slice reply 6 (text-bytes reply))))
+                  (signal 'inference/protocol "invalid inference response")))))
+          (signal 'inference/provider "provider route is not configured"))))))
