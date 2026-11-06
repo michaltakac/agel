@@ -1,0 +1,26 @@
+2026-11-06: sh scripts/test-osrs-game.sh (exit 0)
+
+RuneScape: running Agel skill and item setup test
+RuneScape PASS: Smithing 1 -> 70 and inventory 0 -> 100 coins observed from live packets
+RuneScape: movement and normal-account permission checks observed; checking persistence
+{test admin-setup passed #t smithing-level 70 coins 100}
+{test walk-and-authority passed #t target-x 3223 target-z 3218 unauthorized-setup refused}
+persisted control: account=9 character=9 rights= x=3223 z=3218 level=0 xp_rate_in_hundreds=100
+persisted setup: account=4 character=4 rights=ADMINISTRATOR x=3221 z=3218 level=0 xp_rate_in_hundreds=100
+stat=13 base=70 visible=70 fine_xp=7376270
+inv=inv.inv item=obj.coins count=100
+RuneScape PASS: live movement, skill/item setup, permission separation and persistence
+
+Offline authentication/cipher checks (exit 0):
+OSRS crypto: 1024-bit RSA boundaries/Python pow, XTEA vectors/tails and invalid moduli passed
+OSRS cipher: two 600-draw ISAAC sequences match the pinned server reference, including refill
+OSRS login fixture: RSA private-key oracle, XTEA body, high-bit nonce/seed, CRC layout and truncated reply passed
+
+Live authentication checks from the same private profile (exit 0):
+live account login accepted
+live server is still retiring the previous session (status 5)
+live server is still retiring the previous session (status 5)
+live wrong password refused with status 3
+live account login accepted
+live persisted character: account=3 character=3 rights= x=3221 z=3218 level=0 xp_rate_in_hundreds=100
+OSRS live login: new account, wrong password, reconnect and authoritative persistence passed

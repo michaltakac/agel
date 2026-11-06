@@ -517,6 +517,11 @@ promise.
   Agel wire client tested against its cache and pre-login protocols. Baseline
   setup enforces 1× XP and disables automatic admin grants. Player login,
   gameplay, native network transport and Exo comparisons remain open.
+  `v0.3.8` adds Agel RSA/XTEA/ISAAC, password login, revision-241 game
+  frames, stat/inventory observations and executable RuneScape smoke tests.
+  Movement, skill/item setup, permission separation and persisted state are
+  verified against the private world. Native gameplay and task benchmarks
+  remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

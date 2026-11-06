@@ -1,12 +1,28 @@
 diff --git a/api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt b/api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt
-index 0c3cdf4..89696c1 100644
+index 0c3cdf4..8d93e26 100644
 --- a/api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt
 +++ b/api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt
-@@ -39,6 +39,8 @@ constructor(
+@@ -13,6 +13,8 @@ import net.rsprot.protocol.api.AbstractNetworkServiceFactory
+ import net.rsprot.protocol.api.GameConnectionHandler
+ import net.rsprot.protocol.api.bootstrap.BootstrapBuilder
+ import net.rsprot.protocol.api.handlers.ExceptionHandlers
++import net.rsprot.protocol.api.handlers.LoginHandlers
++import net.rsprot.protocol.loginprot.incoming.pow.NopProofOfWorkProvider
+ import net.rsprot.protocol.api.js5.Js5GroupProvider
+ import net.rsprot.protocol.api.suppliers.NpcInfoSupplier
+ import net.rsprot.protocol.api.suppliers.WorldEntityInfoSupplier
+@@ -39,6 +41,15 @@ constructor(
      private val js5Groups = Js5GroupResponseProvider()
      private val npcSupplier = NpcSupplier.provide()
  
 +    override val host: String = System.getenv("AGEL_GAME_BIND") ?: "127.0.0.1"
++
++    override fun getLoginHandlers(): LoginHandlers =
++        if (System.getenv("AGEL_PRIVATE_NO_POW") == "1") {
++            LoginHandlers(proofOfWorkProvider = NopProofOfWorkProvider)
++        } else {
++            super.getLoginHandlers()
++        }
 +
      override val ports: List<Int> = listOf(config.gamePort)
  

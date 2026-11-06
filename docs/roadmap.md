@@ -21,9 +21,11 @@ Provider-wide Jev attempt accounting reaches guest storage in v0.3.5;
 reserved result capacity in v0.3.6. Complete accounting after in-flight
 crashes/device failure, guardian-only append authority, native activation
 and game experiments are still open.
-The private OpenRune world and Agel pre-login/cache wire client are verified
-in v0.3.7 by `sh scripts/test-osrs-wire.sh --live`. Player authentication,
-gameplay, native transport and tested skill/item setup commands are open;
+The private OpenRune world and pre-login/cache wire client are verified
+in v0.3.7. v0.3.8 adds Agel password login, game ciphers, movement,
+stat/inventory observations and skill/item setup. `sh scripts/test-osrs-game.sh`
+checks those live with a normal account and a separate administrator.
+Native transport, agent policies and the actual benchmark tasks are open;
 see [the setup and precise scope](osrs-client.md).
 
 | Line | Status | Proof and limits |

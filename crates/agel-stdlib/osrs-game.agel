@@ -1,0 +1,142 @@
+(module agel/osrs-game
+  (import agel/sequence)
+  (import agel/osrs-crypto)
+  (import agel/osrs-wire)
+  (import agel/osrs-packets)
+  (export osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-stat osrs-inventory-count)
+  (def rem (fn (n d) (- n (* d (/ n d)))))
+  (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
+  (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
+  (def drop (fn (xs n) (if (= n 0) xs (drop (cdr xs) (- n 1)))))
+  (def nth (fn (xs n) (if (= n 0) (car xs) (nth (cdr xs) (- n 1)))))
+  (def map-or-empty (fn (v) (if v v (dict))))
+  (def osrs-game-state
+    (fn (seed) (dict 'out (isaac-new seed)
+                     'in (isaac-new (map (fn (n) (rem (+ n 50) 4294967296)) seed))
+                     'stats (dict) 'inventories (dict) 'history nil)))
+  (def full-items
+    (fn (bytes capacity slot out)
+      (if (= slot capacity) out
+          (let ((id (- (osrs-uint (reverse (take bytes 2 nil))) 1))
+                (amount (rem (+ 256 (- 128 (nth bytes 2))) 256)))
+            (let ((quantity (if (= amount 255)
+                              (osrs-uint (list (nth bytes 5) (nth bytes 6) (nth bytes 3) (nth bytes 4))) amount)))
+              (full-items (drop bytes (if (= amount 255) 7 3)) capacity (+ slot 1)
+                (assoc out slot (dict 'item id 'count quantity))))))))
+  (def partial-items
+    (fn (bytes out)
+      (if (= bytes nil) out
+          (let ((wide (< 127 (car bytes))))
+            (let ((slot (if wide (- (osrs-uint (take bytes 2 nil)) 32768) (car bytes)))
+                  (tail (drop bytes (if wide 2 1))))
+              (let ((id (- (osrs-uint (take tail 2 nil)) 1)))
+                (if (= id -1)
+                    (partial-items (drop tail 2) (assoc out slot (dict 'item -1 'count 0)))
+                    (let ((amount (nth tail 2)))
+                      (let ((quantity (if (= amount 255) (osrs-uint (take (drop tail 3) 4 nil)) amount)))
+                        (partial-items (drop tail (if (= amount 255) 7 3))
+                          (assoc out slot (dict 'item id 'count quantity))))))))))))
+  (def observe
+    (fn (state packet)
+      (let ((name (get packet 'name)) (bytes (get packet 'bytes)))
+        (if (= name "UPDATE_STAT_V2")
+            (assoc state 'stats (assoc (get state 'stats) (rem (- 256 (nth bytes 5)) 256)
+              (dict 'xp (osrs-uint (reverse (take bytes 4 nil)))
+                    'level (rem (- 256 (nth bytes 6)) 256)
+                    'boost (rem (+ 256 (- (nth bytes 4) 128)) 256))))
+            (if (= name "UPDATE_INV_FULL")
+                (let ((inv (osrs-uint (take (drop bytes 4) 2 nil)))
+                      (capacity (osrs-uint (take (drop bytes 6) 2 nil))))
+                  (if (< capacity 4097)
+                      (assoc state 'inventories (assoc (get state 'inventories) inv
+                        (full-items (drop bytes 8) capacity 0 (dict))))
+                      (signal 'osrs/inventory "inventory capacity exceeds bound")))
+                (if (= name "UPDATE_INV_PARTIAL")
+                    (let ((inv (osrs-uint (take (drop bytes 4) 2 nil))))
+                      (assoc state 'inventories (assoc (get state 'inventories) inv
+                        (partial-items (drop bytes 6) (map-or-empty (get (get state 'inventories) inv))))))
+                    state))))))
+  (def osrs-stat (fn (state stat) (get (get state 'stats) stat)))
+  (def osrs-inventory-count
+    (fn (state inventory item)
+      (let ((slots (map-or-empty (get (get state 'inventories) inventory))))
+        (if (= slots (dict)) 0
+            (foldl (fn (n slot) (+ n (if (= (get (get slots slot) 'item) item) (get (get slots slot) 'count) 0)))
+                   0 (keys slots))))))
+  (def decipher
+    (fn (byte cipher)
+      (let ((next (isaac-next cipher)))
+        (dict 'byte (rem (+ 256 (- byte (rem (get next 'value) 256))) 256) 'cipher (get next 'state)))))
+  (def encrypted-body
+    (fn (bytes cipher out)
+      (if (= bytes nil) (dict 'bytes (reverse out) 'cipher cipher)
+          (let ((next (decipher (car bytes) cipher)))
+            (encrypted-body (cdr bytes) (get next 'cipher) (cons (get next 'byte) out))))))
+  (def read-payload
+    (fn (state opcode cipher)
+      (let ((spec (osrs-server-packet opcode)))
+        (if spec
+            (let ((size (get spec 'size)))
+              (let ((length (if (= size -1) (car (osrs-read-exact 1))
+                               (if (= size -2) (osrs-uint (osrs-read-exact 2)) size))))
+                (let ((raw (osrs-read-exact length)))
+                  (let ((body (if (get spec 'encrypted) (encrypted-body raw cipher nil)
+                                  (dict 'bytes raw 'cipher cipher))))
+                    (let ((packet (dict 'opcode opcode 'name (get spec 'name) 'bytes (get body 'bytes))))
+                      (dict 'state (assoc (observe (assoc state 'in (get body 'cipher)) packet) 'history
+                                          (cons packet (get state 'history))) 'packet packet))))))
+            (signal 'osrs/opcode "unknown revision-241 server packet" opcode)))))
+  (def osrs-next-packet
+    (fn (state)
+      (let ((first (decipher (car (osrs-read-exact 1)) (get state 'in))))
+        (if (< (get first 'byte) 128)
+            (read-payload state (get first 'byte) (get first 'cipher))
+            (let ((second (decipher (car (osrs-read-exact 1)) (get first 'cipher))))
+              (read-payload state (+ (* (- (get first 'byte) 128) 256) (get second 'byte)) (get second 'cipher)))))))
+  (def wait-ticks
+    (fn (state ticks remaining)
+      (if (= ticks 0) state
+          (if (= remaining 0) (signal 'osrs/wait "player-info packet bound exceeded")
+              (let ((next (osrs-next-packet state)))
+                (wait-ticks (get next 'state)
+                  (- ticks (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0)) (- remaining 1)))))))
+  (def osrs-wait-ticks
+    (fn (state ticks)
+      (if (if (= (type-of ticks) 'int) (if (< -1 ticks) (< ticks 33) #f) #f)
+          (wait-ticks state ticks 4096)
+          (signal 'osrs/wait "tick count must be between zero and 32"))))
+  (def await-loop
+    (fn (state ready ticks remaining)
+      (if (ready state) state
+          (if (if (= ticks 0) #t (= remaining 0))
+              (signal 'osrs/wait "observation did not arrive within the bound")
+              (let ((next (osrs-next-packet state)))
+                (await-loop (get next 'state) ready
+                  (- ticks (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0)) (- remaining 1)))))))
+  (def osrs-await (fn (state ready) (await-loop state ready 32 4096)))
+  (def send
+    (fn (state opcode payload variable event)
+      (let ((next (isaac-next (get state 'out))))
+        (let ((encoded (rem (+ opcode (get next 'value)) 256)))
+          (wire-write (cons encoded (if variable (cons (count payload) payload) payload)))
+          (assoc (assoc state 'out (get next 'state)) 'history (cons event (get state 'history)))))))
+  (def u16-alt2 (fn (n) (list (/ n 256) (rem (+ (rem n 256) 128) 256))))
+  (def coordinate? (fn (n) (if (= (type-of n) 'int) (if (< -1 n) (< n 16384) #f) #f)))
+  (def osrs-walk
+    (fn (state x z)
+      (if (if (coordinate? x) (coordinate? z) #f)
+          (send state 55 (cons 128 (append (u16-alt2 z) (u16-alt2 x))) #t (dict 'action 'walk 'x x 'z z))
+          (signal 'osrs/coordinate "coordinates must fit fourteen bits"))))
+  (def text-loop
+    (fn (text at out)
+      (if (= at (text-bytes text)) (reverse (cons 0 (cons 0 out)))
+          (let ((byte (text-byte text at)))
+            (if (if (< 31 byte) (< byte 127) #f)
+                (text-loop text (+ at 1) (cons byte out))
+                (signal 'osrs/command "printable ASCII command required"))))))
+  (def osrs-command
+    (fn (state text)
+      (if (if (< 0 (text-bytes text)) (< (text-bytes text) 201) #f)
+          (send state 84 (text-loop text 0 nil) #t (dict 'action 'command 'text text))
+          (signal 'osrs/command "command length exceeds bound"))))
+  (def osrs-keepalive (fn (state) (send state 75 nil #f (dict 'action 'keepalive)))))

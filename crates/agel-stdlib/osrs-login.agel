@@ -1,0 +1,77 @@
+(module agel/osrs-login
+  (import agel/sequence)
+  (import agel/osrs-wire)
+  (import agel/osrs-crypto)
+  (export osrs-cache-crcs osrs-login osrs-random-seed)
+
+  (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
+  (def rem (fn (n d) (- n (* d (/ n d)))))
+  (def nth (fn (xs n) (if (= n 0) (car xs) (nth (cdr xs) (- n 1)))))
+  (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
+  (def drop (fn (xs n) (if (= n 0) xs (drop (cdr xs) (- n 1)))))
+  (def flatten
+    (fn (chunks)
+      (reverse (foldl (fn (out chunk) (foldl (fn (all byte) (cons byte all)) out chunk)) nil chunks))))
+  (def ascii-loop
+    (fn (text at out)
+      (if (= at (text-bytes text)) (reverse (cons 0 out))
+          (let ((b (text-byte text at)))
+            (if (if (< 0 b) (< b 128) #f)
+                (ascii-loop text (+ at 1) (cons b out))
+                (signal 'osrs/login "login strings currently require non-NUL ASCII"))))))
+  (def ascii (fn (text) (ascii-loop text 0 nil)))
+  (def u16 (fn (n) (list (/ n 256) (rem n 256))))
+  (def zeros (fn (n out) (if (= n 0) out (zeros (- n 1) (cons 0 out)))))
+  (def crc-loop
+    (fn (bytes remaining out)
+      (if (= remaining 0) (reverse out)
+          (crc-loop (drop bytes 8) (- remaining 1) (cons (osrs-uint (take bytes 4 nil)) out)))))
+  (def osrs-cache-crcs
+    (fn (group)
+      (if (if (= (get group 'compression) 0) (< 183 (count (get group 'bytes))) #f)
+          (crc-loop (get group 'bytes) 23 nil)
+          (signal 'osrs/cache "uncompressed master index with 23 archives required"))))
+  (def seed-words
+    (fn (bytes out)
+      (if (= bytes nil) (reverse out)
+          (seed-words (drop bytes 4) (cons (osrs-uint (take bytes 4 nil)) out)))))
+  (def osrs-random-seed (fn () (seed-words (entropy-read 16) nil)))
+  (def crc-word
+    (fn (value order)
+      (let ((b (osrs-u32 value)))
+        (if (= order 0) b
+            (if (= order 1) (reverse b)
+                (if (= order 2) (list (nth b 2) (nth b 3) (nth b 0) (nth b 1))
+                    (list (nth b 1) (nth b 0) (nth b 3) (nth b 2))))))))
+  (def crc-order '((5 3) (4 3) (1 0) (17 0) (21 2) (9 3) (8 1) (22 2) (15 3)
+                   (19 1) (7 3) (0 3) (18 3) (12 3) (11 1) (14 2) (3 0) (13 3)
+                   (2 0) (10 2) (6 0) (16 0) (20 1)))
+  (def platform
+    (flatten (list '(9 3 1 0 0 4 21 0 0 1 2 0 1 0 0 0 0 0)
+                   '(0 0 0 0 0 0 0 0) '(0 0 0) '(0 0 0 0) '(1 0)
+                   (zeros 16 nil) '(0 65 103 101 108 0 0 0))))
+  (def body
+    (fn (username crcs uuid)
+      (flatten (list (ascii username) '(2) (u16 640) (u16 480) uuid '(0)
+                     (osrs-u32 0) '(0) platform '(1) (osrs-u32 0)
+                     (flatten (map (fn (spec) (crc-word (nth crcs (car spec)) (car (cdr spec)))) crc-order))))))
+  (def osrs-login
+    (fn (username password context crcs seed uuid)
+      (if (if (= (count crcs) 23) (if (= (count seed) 4) (= (count uuid) 24) #f) #f)
+          (let ((payload (xtea-encrypt (body username crcs uuid) seed)))
+            (let ((challenge (osrs-game-open)))
+              (let ((rsa (rsa-encrypt
+                           (flatten (list '(1) (flatten (map osrs-u32 seed))
+                                          (get challenge 'session-bytes) '(2 0 0 0 0 0) (ascii password))) context)))
+                (let ((packet (flatten (list (osrs-u32 241) (osrs-u32 1) (osrs-u32 0)
+                                           '(1 0 0) (u16 (count rsa)) rsa payload))))
+                  (wire-write (flatten (list '(16) (u16 (count packet)) packet)))
+                  (let ((status (car (osrs-read-exact 1))))
+                    (if (= status 2)
+                        (let ((length (car (osrs-read-exact 1))))
+                          ; RSProt advertises 37 but writes 34 login bytes; the next bytes are a game header.
+                          (if (= length 37)
+                              (dict 'phase 'logged-in 'response (osrs-read-exact 34))
+                              (signal 'osrs/login "unexpected revision-241 login size" length)))
+                        (signal 'osrs/login-refused "server refused account login" status)))))))
+          (signal 'osrs/login "23 CRCs, four seed words and 24 UUID bytes required")))))

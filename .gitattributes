@@ -1,1 +1,1 @@
-scripts/osrs/openrune.patch -whitespace
+scripts/osrs/*.patch -whitespace

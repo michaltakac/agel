@@ -1,22 +1,19 @@
-# Private OSRS world and Agel client
+# RuneScape tests and live viewing
 
-This is the first wire-protocol stage of replacing the DOOM workload. It
-does not yet log in a player, render a world or execute a game action.
-The client protocol is Agel source in `crates/agel-stdlib/osrs-wire.agel`.
-The hosted `osrs` example gives it two bounded byte-stream operations over
-a loopback TCP connection. Packet layout, exact reads, revision handling,
-challenge handling, cache-group requests and continuation markers are Agel.
-The module is loaded explicitly by the example; it is not installed in
-every default Agel world.
+The hosted Agel client can log in to the private revision-241 world, decode
+its game frames, observe skills and inventories, walk, and issue administrator
+commands. The gameplay assertions are in `examples/osrs/game-tests.agel`.
+Rust supplies bounded loopback streams, entropy bytes and the existing seed
+interpreter. Packet formats, RSA/XTEA/ISAAC, snapshots, action history and
+the smoke-test logic are Agel. These optional modules are loaded by the
+`osrs` example rather than installed into every default Agel world.
 
-## Build the world
+## Start or update the private world
 
-The supplied setup targets Linux ARM64 containers, tested from macOS ARM64.
-It needs Python 3.12 or newer, Docker, Git, a Java host for Gradle, and the
-Rust toolchain. Gradle uses its managed Java 21 toolchain; on this machine
-the launcher uses Homebrew Java 17. Downloads, generated cache data, local
-RSA keys, compiled dependencies and container build context stay in `target/`.
-They are not release artifacts and must not be published as an image.
+The supplied environment targets Linux ARM64 containers, tested from macOS
+ARM64. It needs Python 3.12+, Docker, Git, a Java launcher for Gradle and the
+Rust toolchain. Gradle uses its managed Java 21 toolchain; this machine uses
+Homebrew Java 17 to launch it.
 
 ```sh
 python3 scripts/osrs/prepare.py
@@ -24,61 +21,113 @@ sh scripts/osrs/world.sh start
 sh scripts/osrs/world.sh logs
 ```
 
-The checkout is pinned to OpenRune commit
-`c4cd45ef2d38a0badcc7a9f89773f8f1c29bb16f`, with the small listener patch in
-`scripts/osrs/openrune.patch`. The JRE and additional ARM64 PostgreSQL binary
-have pinned checksums. OpenRune supplies its own generated revision-241 cache.
-Its content coverage still needs mechanic-by-mechanic verification; a
-successful boot is not evidence of complete OSRS parity.
-
-Only game port `127.0.0.1:43594` is published. The bundled account service's
-HTTP and world-link listeners remain inside the container. The database
-lives in the named `agel-osrs-postgres` volume. `stop` and `resume` preserve
-that volume and container; `start` refuses an existing container name.
-No command here deletes a database volume.
-
-Before creating experimental accounts, wait for `Server ready`, then apply
-the baseline and restart:
+Wait for `Server ready`. Before creating experimental accounts, apply the
+1× baseline and restart:
 
 ```sh
 sh scripts/osrs/baseline.sh
 sh scripts/osrs/world.sh stop
 sh scripts/osrs/world.sh resume
-sh scripts/osrs/world.sh logs
+python3 scripts/osrs/world_manifest.py
 ```
 
-The baseline command changes only this container's realm 255: base and
-global XP become 1×, and development mode stops automatically granting
-admin to every login. Verify the new `RealmConfig` startup line before any
-scored work. The generated `game.yml` uses `respect-progress` rather than
-the stock quest-requirement bypass. This does not certify every quest's
-implementation or every experience modifier. Other rates and account
-settings still need explicit experiment manifests.
-
-`python3 scripts/osrs/inspect.py` verifies the running container's published
-ports, quest setting and latest loaded baseline, then records its image,
-dependency pins and cache-tree fingerprint. Keep this output with a run.
-
-## Exercise the client
+For later code-only changes, reuse the installed cache and replace the
+container. The named PostgreSQL volume survives replacement:
 
 ```sh
-sh scripts/test-osrs-wire.sh
-sh scripts/test-osrs-wire.sh --live
-cargo run -q -p agel-stdlib --example osrs -- 43594 examples/osrs/master-index.agel
+python3 scripts/osrs/prepare.py --reuse-cache
+sh scripts/osrs/world.sh replace
 ```
 
-The fixtures check fragmented TCP, a full unsigned eight-byte challenge,
-outdated-revision refusal, early EOF, cache response identity, and JS5
-continuation markers. `--live` performs revision negotiation, a deliberately
-rejected revision, the pre-login challenge and a master-index cache request
-against the actual local server. It fails if that server is unavailable.
-The challenge remains eight bytes, avoiding signed-64-bit overflow.
-Cache groups are bounded to 65,532 compressed bytes and returned as bytes;
-compression is identified but not decompressed or CRC-verified yet.
+`start` refuses an existing container name. `stop`/`resume` keep the same
+container. None of these commands removes a database volume. Source and
+patches are pinned; the manifest records the running image and cache hash.
+Generated cache data, RSA keys, private probe credentials and the container
+build context stay in `target/` and are not public release assets.
 
-The hosted byte carrier is not native OS networking. Player authentication,
-RSA/XTEA/ISAAC, game packet codecs, observations, actions, admin skill/item
-setup and native transport remain to be implemented and tested. Existing
-OpenRune `master`, `reset` and `item` commands are source-inspected, not yet
-verified through this client. No task score or Exo advantage follows from
-these wire checks.
+Only `127.0.0.1:43594` is published. The bundled account service's wildcard
+listeners remain inside the container. The private profile disables login
+proof-of-work; password verification, RSA, XTEA and ISAAC remain active.
+This setting must be identical for both future benchmark arms and declared
+in their manifests. Public-server proof-of-work challenges are not supported
+by this client yet.
+
+The baseline sets realm 255 to 1× base/global XP, disables automatic admin
+grants and uses saved quest progress. Other modifiers and individual
+mechanics still require parity checks; successful smoke tests are not proof
+of complete OSRS parity.
+
+## Run the working tests
+
+```sh
+sh scripts/test-osrs-game.sh
+```
+
+This runs the Agel scenarios and checks authoritative persisted server state:
+
+- The dedicated `agelsetup` account clears its inventory, changes Smithing
+  from 1 to 70 and receives 100 coins. Assertions wait for actual stat and
+  inventory packets, rather than assuming a command succeeded.
+- A fresh normal account attempts those admin commands, retains its original
+  stats/items, and walks from the Lumbridge spawn to `(3223,3218)`.
+- The read-only server oracle verifies its saved position, normal rights
+  and 1× XP, and the setup account's saved skill and coins.
+
+Only `agelsetup` receives admin rights through the explicit setup helper.
+Experimental accounts retain normal rights. This is a permission-isolation
+and mechanics smoke test, not the fixed-policy Exo comparison. The Java
+helpers operate on the external server for setup and independent verification;
+the game client and test assertions do not use them for gameplay decisions.
+
+Probe credentials are retained in private files under
+`target/osrs-login-probes/`. Do not publish that directory. The client prints
+only the final Agel form's result, avoiding intermediate credential bindings.
+Connection closure currently uses the server's disconnect grace period;
+the harness reports and bounds duplicate-session retries.
+
+Other checks:
+
+```sh
+sh scripts/test-osrs-wire.sh --live
+sh scripts/test-osrs-login.sh
+sh scripts/test-osrs-login.sh --live
+```
+
+These cover fragmented streams, revision refusal, EOF, JS5 blocks, RSA and
+XTEA oracles, 600-output ISAAC sequences including refill, encrypted login
+layout, wrong passwords, reconnect and persistence.
+
+## Watch in an Agel OS window
+
+Boot the existing graphical OS with its console, then pass the printed local
+URL to the watcher:
+
+```sh
+python3 scripts/graphical_console.py target/boot/agel-v1.img --snapshot
+# In a second terminal, substitute the URL printed above:
+python3 scripts/osrs/watch.py VIEWER_URL
+```
+
+The viewer shows the real QEMU framebuffer. The watcher copies the gameplay
+runner's status text into a `runescape-status` binding evaluated by the guest.
+It does not render RuneScape and does not move the hosted client into the OS.
+The full game scene and native byte transport remain unfinished. The current
+OS image can be built with `scripts/build-boot.sh --features native-graphics`
+if no graphical image exists yet.
+
+## Current boundary
+
+There is no combat, crafting, quest, money-making or transfer score yet.
+The agent policies, prompts, tool selection, persisted history, guarded policy
+activation and paired cost/time evaluation remain to be connected to this
+client. The DOOM demonstration still exists until its replacement is ready.
+
+The client implements password login against the explicit private profile,
+not proof-of-work, MFA, token login or reconnect packets. It starts a fresh
+login after a socket disconnect. RSA uses the server's exponent 65537 and
+moduli up to 1024 bits. Login strings currently require ASCII. Cache groups
+remain bounded and are not decompressed or CRC-verified. Game packet
+framing covers the pinned revision's descriptors; semantic observations
+currently cover skills and inventories. Player/NPC movement and combat
+state still need semantic decoders. The client retains its observed packets
+and actions as Agel state; durable native OS history remains a later stage.

@@ -5,7 +5,14 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.7.** A private revision-241 OSRS world and the first
+**Current release: v0.3.8.** Live RuneScape tests now log in, walk, set one
+skill and grant items through an Agel client. Agel owns RSA/XTEA/ISAAC,
+packet parsing, observations, action history and the smoke-test assertions.
+Run `sh scripts/test-osrs-game.sh` against the private world. Native transport,
+combat/crafting/quest benchmarks and Exo comparisons remain unfinished.
+See the [release notes](docs/release-v0.3.8.md) and [setup](docs/osrs-client.md).
+
+v0.3.7 added a private revision-241 OSRS world and the first
 Agel wire client: live JS5 negotiation, cache requests and login challenges.
 The world runs at 1× XP with automatic admin grants disabled. Player login,
 gameplay and replacing the DOOM workload remain unfinished. See the

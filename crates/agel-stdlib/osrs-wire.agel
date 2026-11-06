@@ -31,6 +31,7 @@
     (fn (revision seed)
       (if (= (foldl (fn (n _) (+ n 1)) 0 seed) 4)
           (begin
+            (wire-open)
             (wire-write (cons 15 (append (osrs-u32 revision)
               (foldl (fn (bytes word) (append bytes (osrs-u32 word))) nil seed))))
             (let ((status (car (osrs-read-exact 1))))
@@ -67,6 +68,7 @@
   (def osrs-game-open
     (fn ()
       (begin
+        (wire-open)
         (wire-write '(14))
         (let ((status (car (osrs-read-exact 1))))
           (if (= status 0)

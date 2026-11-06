@@ -35,6 +35,8 @@ if 'mode: "respect-progress"' not in config: raise SystemExit('quest bypass enab
 print(json.dumps(manifest))
 """
 manifest = json.loads(output("docker", "exec", "agel-osrs-world", "python3", "-c", program))
+if manifest.get("login_pow") == "disabled-private-profile" and "AGEL_PRIVATE_NO_POW=1" not in container["Config"]["Env"]:
+    raise SystemExit("Login profile differs from the image manifest")
 logs = subprocess.run(["docker", "logs", "agel-osrs-world"], capture_output=True, text=True, check=True)
 profiles = [line for line in (logs.stdout + logs.stderr).splitlines() if "Loaded world 255 configuration:" in line]
 if not profiles:
@@ -43,4 +45,4 @@ profile = profiles[-1]
 if not all(value in profile for value in ["baseXpRate=1.0,", "globalXpRate=1.0,", "devMode=false,"]):
     raise SystemExit("Restart with the baseline before experiments: " + profile)
 print(json.dumps({"image": container["Image"], "ports": ports, "manifest": manifest,
-                  "loaded_profile": profile, "scope": "pre-login transport; no gameplay score"}, indent=2))
+                  "loaded_profile": profile, "scope": "transport and account login; no gameplay score"}, indent=2))

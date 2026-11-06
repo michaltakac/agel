@@ -17,6 +17,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.5 | Provider-wide attempt accounting | All existing Jev HTTP paths append Agel records; native requests wait for guest storage; pricing receipts, retries, resume and storage failure tests |
 | v0.3.6 | Recoverable and larger native storage | Agel framing, interrupted-append recovery, capacity reservation, resume beyond 64 KiB and syscall exclusion tests |
 | v0.3.7 | Private world and Agel wire client | Container-isolated OpenRune, verified baseline rates and pre-login/cache protocol against the live world |
+| v0.3.8 | Working RuneScape smoke tests | Agel password login, ciphers, movement, live stats/inventory observations, skill/item setup, normal-account isolation and persisted server state |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: private server and Agel client | Pinned server with required content, login, observe/action protocol in Agel | Byte relay only outside Agel; tested skill/item setup commands |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
@@ -105,8 +106,15 @@ cache fingerprint and image identity are recorded in the release evidence.
 The Agel wire client has passed live revision negotiation, revision refusal,
 the eight-byte login challenge and JS5 master-index retrieval. Its Rust host
 only supplies bounded loopback byte reads/writes. This is hosted transport;
-player login, native OS networking, admin command execution, observations
-and actions remain unfinished. No live game mechanics have been verified.
+v0.3.8 adds password login, RSA/XTEA/ISAAC, game frames and stat/inventory
+observations in Agel. Live tests move a normal account, reject its admin
+commands, and use a separate setup account to set Smithing from 1 to 70 and
+inventory coins from 0 to 100. The tests inspect live game packets and verify
+persisted server rows. This is a smoke test, not the paper's task evaluation.
+The private profile disables login proof-of-work for both experiment arms;
+password authentication and game mechanics remain active. This profile
+must remain explicit in comparison manifests. Native OS networking and
+combat/crafting/quest gameplay tests remain unfinished.
 See [the client setup](osrs-client.md).
 
 ## Current boundary

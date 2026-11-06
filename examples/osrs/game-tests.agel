@@ -1,0 +1,29 @@
+(module agel/osrs-tests
+  (import agel/osrs-game)
+  (export test-admin-setup test-walk-control)
+  (def initial
+    (fn (state)
+      (osrs-await state (fn (g) (if (osrs-stat g 13) (if (get (get g 'inventories) 93) #t #f) #f)))))
+  (def test-admin-setup
+    (fn (state)
+      (let ((ready (initial state)))
+        (let ((cleared (osrs-await (osrs-command ready "invclear") (fn (g) (= (osrs-inventory-count g 93 995) 0)))))
+          (let ((lowered (osrs-await (osrs-command cleared "setlevel smithing 1")
+                                     (fn (g) (= (get (osrs-stat g 13) 'level) 1)))))
+            (let ((trained (osrs-await (osrs-command lowered "setlevel smithing 70")
+                                      (fn (g) (= (get (osrs-stat g 13) 'level) 70)))))
+              (let ((stocked (osrs-await (osrs-command trained "item 995 100")
+                                        (fn (g) (= (osrs-inventory-count g 93 995) 100)))))
+                (dict 'state stocked 'report (dict 'test 'admin-setup 'passed #t
+                  'smithing-level (get (osrs-stat stocked 13) 'level)
+                  'coins (osrs-inventory-count stocked 93 995))))))))))
+  (def test-walk-control
+    (fn (state)
+      (let ((ready (with-handler (* p) (signal 'osrs/test "initial snapshot" p) (initial state))))
+        (let ((smithing (with-handler (* p) (signal 'osrs/test "stat snapshot" p) (osrs-stat ready 13))) (coins (with-handler (* p) (signal 'osrs/test "coin snapshot" (dict 'condition p 'slots (get (get ready 'inventories) 93))) (osrs-inventory-count ready 93 995))))
+          (let ((attempted (with-handler (* p) (signal 'osrs/test "normal commands" p) (osrs-command (osrs-command ready "setlevel smithing 99") "item 995 100"))))
+            (let ((walked (with-handler (* p) (signal 'osrs/test "walking observation" p) (osrs-wait-ticks (osrs-walk attempted 3223 3218) 5))))
+              (if (if (= (osrs-stat walked 13) smithing) (= (osrs-inventory-count walked 93 995) coins) #f)
+                  (dict 'state walked 'report (dict 'test 'walk-and-authority 'passed #t
+                    'target-x 3223 'target-z 3218 'unauthorized-setup 'refused))
+                  (signal 'osrs/test "normal account gained unauthorized stats or items")))))))))

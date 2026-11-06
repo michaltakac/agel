@@ -1,0 +1,217 @@
+(module agel/osrs-crypto
+  (import agel/sequence)
+  (export rsa-context rsa-encrypt xtea-encrypt isaac-new isaac-next)
+
+  (def rem (fn (n divisor) (- n (* divisor (/ n divisor)))))
+  (def mod (fn (n divisor) (let ((r (rem n divisor))) (if (< r 0) (+ r divisor) r))))
+  (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
+  (def zeros (fn (n out) (if (= n 0) out (zeros (- n 1) (cons 0 out)))))
+  (def pad (fn (xs n) (append xs (zeros (- n (count xs)) nil))))
+  (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
+  (def hex-digit
+    (fn (c)
+      (if (if (< 47 c) (< c 58) #f) (- c 48)
+          (if (if (< 96 c) (< c 103) #f) (- c 87)
+              (signal 'osrs/rsa "invalid lowercase public modulus")))))
+  (def hex-bytes
+    (fn (text at out)
+      (if (= at (text-bytes text)) (reverse out)
+          (hex-bytes text (+ at 2)
+            (cons (+ (* 16 (hex-digit (text-byte text at)))
+                     (hex-digit (text-byte text (+ at 1)))) out)))))
+  (def limbs-loop
+    (fn (xs out)
+      (if (= xs nil) (reverse out)
+          (if (= (cdr xs) nil) (reverse (cons (car xs) out))
+              (limbs-loop (cdr (cdr xs)) (cons (+ (car xs) (* 256 (car (cdr xs)))) out))))))
+  (def limbs (fn (bytes) (limbs-loop (reverse bytes) nil)))
+  (def compare
+    (fn (a b result)
+      (if (= a nil) result
+          (compare (cdr a) (cdr b)
+            (if (= (car a) (car b)) result (if (< (car a) (car b)) -1 1))))))
+  (def subtract
+    (fn (a b borrow out)
+      (if (= a nil) (reverse out)
+          (let ((v (- (car a) (car b) borrow)))
+            (subtract (cdr a) (cdr b) (if (< v 0) 1 0)
+              (cons (if (< v 0) (+ v 65536) v) out))))))
+  (def reduce
+    (fn (a n) (if (< (compare a n 0) 0) a (subtract a n 0 nil))))
+  (def mul-add
+    (fn (t x scalar carry out)
+      (if (= t nil) (reverse out)
+          (let ((v (+ (car t) (* scalar (if (= x nil) 0 (car x))) carry)))
+            (mul-add (cdr t) (if (= x nil) nil (cdr x)) scalar (/ v 65536)
+                     (cons (rem v 65536) out))))))
+  (def doubling
+    (fn (x n remaining)
+      (if (= remaining 0) x
+          (doubling (reduce (mul-add x x 1 0 nil) n) n (- remaining 1)))))
+  (def inverse
+    (fn (n x remaining)
+      (if (= remaining 0) (mod (- 0 x) 65536)
+          (inverse n (mod (* x (- 2 (* n x))) 65536) (- remaining 1)))))
+  (def rsa-context
+    (fn (hex)
+      (if (if (< 1 (text-bytes hex))
+              (if (< (text-bytes hex) 257) (= (rem (text-bytes hex) 2) 0) #f) #f)
+          (let ((decoded (hex-bytes hex 0 nil)))
+            (let ((raw (limbs decoded)))
+            (if (if (< 0 (car decoded))
+                    (if (= (count raw) 1) (< 1 (car raw)) #t) #f)
+              (if (= (rem (car raw) 2) 1)
+                (let ((size (count raw)))
+                  (let ((n (pad raw (+ size 2))))
+                    (dict 'n n 'size size 'inverse (inverse (car n) 1 5)
+                          'r2 (doubling (pad '(1) (+ size 2)) n (* size 32)))))
+                (signal 'osrs/rsa "RSA modulus must be odd"))
+              (signal 'osrs/rsa "modulus must be canonical and greater than one"))))
+          (signal 'osrs/rsa "modulus requires 1 to 128 complete bytes"))))
+  (def mont-loop
+    (fn (a b n inverse t)
+      (if (= a nil) (reduce t n)
+          (let ((first (mul-add t b (car a) 0 nil)))
+            (let ((second (mul-add first n (rem (* (car first) inverse) 65536) 0 nil)))
+              (mont-loop (cdr a) b n inverse (append (cdr second) '(0))))))))
+  (def mont
+    (fn (a b context)
+      (mont-loop (take a (get context 'size) nil) b
+                 (get context 'n) (get context 'inverse)
+                 (zeros (+ (get context 'size) 2) nil))))
+  (def squares
+    (fn (x context remaining)
+      (if (= remaining 0) x (squares (mont x x context) context (- remaining 1)))))
+  (def bytes-loop
+    (fn (xs out)
+      (if (= xs nil) out
+          (bytes-loop (cdr xs) (cons (/ (car xs) 256) (cons (rem (car xs) 256) out))))))
+  (def trim
+    (fn (xs) (if (= xs nil) '(0) (if (= (car xs) 0) (trim (cdr xs)) xs))))
+  (def rsa-encrypt
+    (fn (bytes context)
+      (begin
+        (each (fn (b) (if (if (= (type-of b) 'int) (if (< -1 b) (< b 256) #f) #f)
+                         #t (signal 'osrs/rsa "invalid plaintext byte"))) bytes)
+        (if (< (count bytes) (+ 1 (* 2 (get context 'size))))
+            (let ((x (pad (limbs bytes) (+ 2 (get context 'size)))))
+              (if (< (compare x (get context 'n) 0) 0)
+                  (let ((base (mont x (get context 'r2) context)))
+                    (let ((encrypted (mont (mont (squares base context 16) base context)
+                                           (pad '(1) (+ 2 (get context 'size))) context)))
+                      (let ((result (trim (bytes-loop encrypted nil))))
+                        (if (< (car result) 128) result (cons 0 result)))))
+                  (signal 'osrs/rsa "plaintext is not smaller than the modulus")))
+            (signal 'osrs/rsa "plaintext exceeds the modulus width")))))
+  (def xor-table "0123456789abcdef1032547698badcfe23016745ab89efcd32107654ba98fedc45670123cdef89ab54761032dcfe98ba67452301efcdab8976543210fedcba9889abcdef0123456798badcfe10325476ab89efcd23016745ba98fedc32107654cdef89ab45670123dcfe98ba54761032efcdab8967452301fedcba9876543210")
+  (def powers (dict 0 1 1 2 2 4 3 8 4 16 5 32 6 64 7 128 8 256 9 512 10 1024 11 2048 12 4096 13 8192 14 16384 15 32768 16 65536 17 131072 18 262144 19 524288 20 1048576 21 2097152 22 4194304 23 8388608 24 16777216 25 33554432 26 67108864 27 134217728 28 268435456 29 536870912 30 1073741824 31 2147483648 32 4294967296))
+  (def u32 (fn (n) (mod n 4294967296)))
+  (def xor-loop
+    (fn (a b place out)
+      (if (= place 4294967296) out
+          (let ((digit (hex-digit (text-byte xor-table (+ (* (rem a 16) 16) (rem b 16))))))
+            (xor-loop (/ a 16) (/ b 16) (* place 16) (+ out (* place digit)))))))
+  (def xor32 (fn (a b) (xor-loop a b 1 0)))
+  (def and32 (fn (a b) (/ (- (+ a b) (xor32 a b)) 2)))
+  (def shr (fn (n by) (/ n (get powers by))))
+  (def shl (fn (n by) (* (rem n (get powers (- 32 by))) (get powers by))))
+  (def ror (fn (n by) (+ (shr n by) (* (rem n (get powers by)) (get powers (- 32 by))))))
+  (def nth (fn (xs n) (if (= n 0) (car xs) (nth (cdr xs) (- n 1)))))
+  (def uint (fn (bytes) (foldl (fn (n b) (+ (* n 256) b)) 0 bytes)))
+  (def bytes32
+    (fn (n) (list (shr n 24) (rem (shr n 16) 256) (rem (shr n 8) 256) (rem n 256))))
+  (def drop (fn (xs n) (if (= n 0) xs (drop (cdr xs) (- n 1)))))
+  (def xtea-rounds
+    (fn (v0 v1 sum key remaining)
+      (if (= remaining 0) (append (bytes32 v0) (bytes32 v1))
+          (let ((a (u32 (+ v0 (xor32 (u32 (+ (xor32 (shl v1 4) (shr v1 5)) v1))
+                                      (u32 (+ sum (nth key (rem sum 4)))))))))
+            (let ((next (u32 (+ sum 2654435769))))
+              (let ((b (u32 (+ v1 (xor32 (u32 (+ (xor32 (shl a 4) (shr a 5)) a))
+                                          (u32 (+ next (nth key (rem (shr next 11) 4)))))))))
+                (xtea-rounds a b next key (- remaining 1))))))))
+  (def xtea-blocks
+    (fn (bytes key remaining out)
+      (if (< remaining 8) (append (reverse out) bytes)
+          (let ((v0 (uint (take bytes 4 nil))) (v1 (uint (take (drop bytes 4) 4 nil))))
+            (xtea-blocks (drop bytes 8) key (- remaining 8)
+              (foldl (fn (all byte) (cons byte all)) out (xtea-rounds v0 v1 0 key 32)))))))
+  (def valid-u32? (fn (n) (if (= (type-of n) 'int) (if (< -1 n) (< n 4294967296) #f) #f)))
+  (def xtea-encrypt
+    (fn (bytes key)
+      (if (if (= (count key) 4) (foldl (fn (ok n) (if ok (valid-u32? n) #f)) #t key) #f)
+          (begin
+            (each (fn (b) (if (if (valid-u32? b) (< b 256) #f) #t (signal 'osrs/xtea "invalid byte"))) bytes)
+            (xtea-blocks bytes key (count bytes) nil))
+          (signal 'osrs/xtea "four unsigned key words required"))))
+  (def isaac-mix
+    (fn (v)
+      (let ((a (nth v 0)) (b (nth v 1)) (c (nth v 2)) (d (nth v 3)) (e (nth v 4)) (f (nth v 5)) (g (nth v 6)) (h (nth v 7)))
+        (let ((a (xor32 a (shl b 11))))
+          (let ((d (u32 (+ d a))) (b (u32 (+ b c))))
+        (let ((b (xor32 b (shr c 2))))
+          (let ((e (u32 (+ e b))) (c (u32 (+ c d))))
+        (let ((c (xor32 c (shl d 8))))
+          (let ((f (u32 (+ f c))) (d (u32 (+ d e))))
+        (let ((d (xor32 d (shr e 16))))
+          (let ((g (u32 (+ g d))) (e (u32 (+ e f))))
+        (let ((e (xor32 e (shl f 10))))
+          (let ((h (u32 (+ h e))) (f (u32 (+ f g))))
+        (let ((f (xor32 f (shr g 4))))
+          (let ((a (u32 (+ a f))) (g (u32 (+ g h))))
+        (let ((g (xor32 g (shl h 8))))
+          (let ((b (u32 (+ b g))) (h (u32 (+ h a))))
+        (let ((h (xor32 h (shr a 9))))
+          (let ((c (u32 (+ c h))) (a (u32 (+ a b))))
+            (list a b c d e f g h))))))))))))))))))))
+  (def zero-map
+    (fn (i out) (if (= i 256) out (zero-map (+ i 1) (assoc out i 0)))))
+  (def seed-map
+    (fn (xs i out) (if (= xs nil) out (seed-map (cdr xs) (+ i 1) (assoc out i (car xs))))))
+  (def warm-mix
+    (fn (v n) (if (= n 0) v (warm-mix (isaac-mix v) (- n 1)))))
+  (def add-registers
+    (fn (v source i out)
+      (if (= v nil) (reverse out)
+          (add-registers (cdr v) source (+ i 1) (cons (u32 (+ (car v) (get source i))) out)))))
+  (def store-registers
+    (fn (v i out)
+      (if (= v nil) out (store-registers (cdr v) (+ i 1) (assoc out i (car v))))))
+  (def mix-pass
+    (fn (v source out i)
+      (if (= i 256) (dict 'registers v 'mem out)
+          (let ((mixed (isaac-mix (add-registers v source i nil))))
+            (mix-pass mixed source (store-registers mixed i out) (+ i 8))))))
+  (def generate-loop
+    (fn (mem rsl i a b c)
+      (if (= i 256) (dict 'mem mem 'rsl rsl 'a a 'b b 'c c 'count 256)
+          (let ((x (get mem i)))
+            (let ((shifted (if (= (rem i 4) 0) (shl a 13)
+                             (if (= (rem i 4) 1) (shr a 6)
+                                 (if (= (rem i 4) 2) (shl a 2) (shr a 16))))))
+              (let ((next-a (u32 (+ (xor32 a shifted) (get mem (rem (+ i 128) 256))))))
+                (let ((y (u32 (+ (get mem (rem (/ x 4) 256)) next-a b))))
+                  (let ((next-mem (assoc mem i y)))
+                    (let ((next-b (u32 (+ (get next-mem (rem (/ y 1024) 256)) x))))
+                      (generate-loop next-mem (assoc rsl i next-b) (+ i 1) next-a next-b c))))))))))
+  (def isaac-generate
+    (fn (state)
+      (let ((c (u32 (+ 1 (get state 'c)))))
+        (generate-loop (get state 'mem) (get state 'rsl) 0
+                       (get state 'a) (u32 (+ (get state 'b) c)) c))))
+  (def isaac-new
+    (fn (seed)
+      (if (< (count seed) 257)
+          (begin
+            (each (fn (word) (if (valid-u32? word) #t (signal 'osrs/isaac "unsigned seed required"))) seed)
+            (let ((blank (zero-map 0 (dict)))
+                  (v (warm-mix '(2654435769 2654435769 2654435769 2654435769 2654435769 2654435769 2654435769 2654435769) 4)))
+              (let ((first (mix-pass v (seed-map seed 0 blank) blank 0)))
+                (let ((second (mix-pass (get first 'registers) (get first 'mem) (get first 'mem) 0)))
+                  (isaac-generate (dict 'mem (get second 'mem) 'rsl blank 'a 0 'b 0 'c 0))))))
+          (signal 'osrs/isaac "seed exceeds 256 words"))))
+  (def isaac-next
+    (fn (state)
+      (if (= (get state 'count) 0) (isaac-next (isaac-generate state))
+          (let ((i (- (get state 'count) 1)))
+            (dict 'value (get (get state 'rsl) i) 'state (assoc state 'count i)))))))

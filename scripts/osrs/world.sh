@@ -9,7 +9,12 @@ case "${1:-status}" in
     ;;
   stop) docker stop --timeout 45 agel-osrs-world ;;
   resume) docker start agel-osrs-world ;;
+  replace)
+    docker stop --timeout 45 agel-osrs-world
+    docker rm agel-osrs-world
+    exec sh "$0" start
+    ;;
   logs) docker logs --tail 50 agel-osrs-world ;;
   status) docker inspect --format '{{.State.Status}} {{json .NetworkSettings.Ports}}' agel-osrs-world ;;
-  *) echo 'usage: world.sh start|stop|resume|logs|status' >&2; exit 2 ;;
+  *) echo 'usage: world.sh start|stop|resume|replace|logs|status' >&2; exit 2 ;;
 esac

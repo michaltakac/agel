@@ -8,6 +8,11 @@ import shutil
 import subprocess
 import tarfile
 import urllib.request
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--reuse-cache", action="store_true", help="Rebuild code against the already installed cache")
+args = parser.parse_args()
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "target/external/openrune"
@@ -32,15 +37,34 @@ actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=SERVER, text=
 if actual != COMMIT:
     raise SystemExit("Server checkout differs from the pinned commit; use a separate checkout.")
 patch = ROOT / "scripts/osrs/openrune.patch"
-if subprocess.run(["git", "apply", "--reverse", "--check", str(patch)], cwd=SERVER,
-                  capture_output=True).returncode:
-    run("git", "apply", "--check", str(patch), cwd=SERVER)
-    run("git", "apply", str(patch), cwd=SERVER)
+for candidate in [patch, ROOT / "scripts/osrs/admin.patch"]:
+    if subprocess.run(["git", "apply", "--reverse", "--check", str(candidate)], cwd=SERVER,
+                      capture_output=True).returncode:
+        restored = None
+        if candidate == patch:
+            relative = "api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt"
+            original = subprocess.check_output(["git", "show", "HEAD:" + relative], cwd=SERVER, text=True)
+            legacy = original.replace("    override val ports:",
+                '    override val host: String = System.getenv("AGEL_GAME_BIND") ?: "127.0.0.1"\n\n    override val ports:')
+            file = SERVER / relative
+            if file.read_text() == legacy:
+                restored = (file, legacy)
+                file.write_text(original)
+        try:
+            run("git", "apply", "--check", str(candidate), cwd=SERVER)
+            run("git", "apply", str(candidate), cwd=SERVER)
+        except Exception:
+            if restored:
+                restored[0].write_text(restored[1])
+            raise
 env = dict(os.environ)
 mac_java = Path("/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home")
 if mac_java.exists():
     env["JAVA_HOME"] = str(mac_java)
-run("./gradlew", "install", ":server:app:installDist", "--no-configuration-cache",
+if args.reuse_cache and not (SERVER / ".data/cache/SERVER").is_dir():
+    raise SystemExit("--reuse-cache requires an installed cache")
+tasks = [":server:app:installDist"] if args.reuse_cache else ["install", ":server:app:installDist"]
+run("./gradlew", *tasks, "--no-configuration-cache",
     "--console=plain", cwd=SERVER, env=env)
 STAGE.mkdir(parents=True, exist_ok=True)
 for name in ["app", ".data", "java"]:
@@ -69,14 +93,15 @@ if hashlib.sha256(archive.read_bytes()).hexdigest() != JRE_SHA:
 with tarfile.open(archive) as source:
     source.extractall(STAGE / "java", filter="data")
 java_home = next((STAGE / "java").iterdir()).name
-manifest = {"server": COMMIT, "revision": 241, "quest_mode": "respect-progress",
+manifest = {"server": COMMIT, "revision": 241, "quest_mode": "respect-progress", "login_pow": "disabled-private-profile",
             "jre_sha256": JRE_SHA, "postgres_sha256": PG_SHA, "base": BASE,
             "patch_sha256": hashlib.sha256(patch.read_bytes()).hexdigest()}
+manifest["admin_patch_sha256"] = hashlib.sha256((ROOT / "scripts/osrs/admin.patch").read_bytes()).hexdigest()
 (STAGE / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 (STAGE / "Dockerfile").write_text(f"""FROM {BASE}
 RUN groupadd --gid 1000 agel && useradd --uid 1000 --gid 1000 --create-home agel
 COPY --chown=agel:agel . /world/
-ENV JAVA_HOME=/world/java/{java_home} AGEL_GAME_BIND=0.0.0.0
+ENV JAVA_HOME=/world/java/{java_home} AGEL_GAME_BIND=0.0.0.0 AGEL_PRIVATE_NO_POW=1
 WORKDIR /world
 USER agel
 VOLUME /world/.data/postgres
