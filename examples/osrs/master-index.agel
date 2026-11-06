@@ -1,0 +1,3 @@
+(import agel/osrs-wire)
+(osrs-js5-open 241 '(1 2 3 4))
+(osrs-js5-group 255 255)

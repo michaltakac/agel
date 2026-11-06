@@ -1,0 +1,13 @@
+diff --git a/api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt b/api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt
+index 0c3cdf4..89696c1 100644
+--- a/api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt
++++ b/api/net/src/main/kotlin/org/rsmod/api/net/rsprot/NetworkFactory.kt
+@@ -39,6 +39,8 @@ constructor(
+     private val js5Groups = Js5GroupResponseProvider()
+     private val npcSupplier = NpcSupplier.provide()
+ 
++    override val host: String = System.getenv("AGEL_GAME_BIND") ?: "127.0.0.1"
++
+     override val ports: List<Int> = listOf(config.gamePort)
+ 
+     override val supportedClientTypes: List<OldSchoolClientType> =

@@ -31,6 +31,7 @@ jobs:
       - run: cargo fmt --manifest-path boot/posix/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path boot/posix/Cargo.toml --target x86_64-unknown-none --release -- -D warnings
       - run: cargo test --workspace
+      - run: sh scripts/test-osrs-wire.sh
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The runtime a loaded process links: agel-core and the standard library
       # without std, and agel-integrity with neither std nor alloc, as the kernel links it.

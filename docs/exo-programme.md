@@ -16,6 +16,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.4 | Protected log storage and Agel wrapper | Before/after dispatch ordering; OS overwrite/truncate/unlink denial and normal reboot; opt-in until entry-point integration |
 | v0.3.5 | Provider-wide attempt accounting | All existing Jev HTTP paths append Agel records; native requests wait for guest storage; pricing receipts, retries, resume and storage failure tests |
 | v0.3.6 | Recoverable and larger native storage | Agel framing, interrupted-append recovery, capacity reservation, resume beyond 64 KiB and syscall exclusion tests |
+| v0.3.7 | Private world and Agel wire client | Container-isolated OpenRune, verified baseline rates and pre-login/cache protocol against the live world |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: private server and Agel client | Pinned server with required content, login, observe/action protocol in Agel | Byte relay only outside Agel; tested skill/item setup commands |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
@@ -94,7 +95,19 @@ configured to bind the game listener to `127.0.0.1` and use
 `quest-requirements.mode: respect-progress`; the stock quest bypass must
 not enter scored experiments. These local changes still need live checks
 and a reproducible server setup release.
-No live game mechanics or Agel client have yet been verified.
+v0.3.7 boots this world inside a Linux ARM64 container. Only
+`127.0.0.1:43594` is published; the embedded account service remains inside
+the container. A database setup command changes realm 255 to 1× base/global
+XP and disables the stock development mode, which grants every player admin
+on login. The loaded configuration was verified after restart. The server
+cache fingerprint and image identity are recorded in the release evidence.
+
+The Agel wire client has passed live revision negotiation, revision refusal,
+the eight-byte login challenge and JS5 master-index retrieval. Its Rust host
+only supplies bounded loopback byte reads/writes. This is hosted transport;
+player login, native OS networking, admin command execution, observations
+and actions remain unfinished. No live game mechanics have been verified.
+See [the client setup](osrs-client.md).
 
 ## Current boundary
 

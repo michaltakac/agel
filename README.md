@@ -5,7 +5,13 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.6.** A protected 64 MiB judge ledger with Agel
+**Current release: v0.3.7.** A private revision-241 OSRS world and the first
+Agel wire client: live JS5 negotiation, cache requests and login challenges.
+The world runs at 1× XP with automatic admin grants disabled. Player login,
+gameplay and replacing the DOOM workload remain unfinished. See the
+[release notes](docs/release-v0.3.7.md) and [setup](docs/osrs-client.md).
+
+v0.3.6 added a protected 64 MiB judge ledger with Agel
 framing, torn-write recovery and result-space reservation before dispatch.
 Existing bytes survive resume and interrupted appends; ordinary writers
 cannot consume reserved space. See the [release notes](docs/release-v0.3.6.md)

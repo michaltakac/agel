@@ -1,0 +1,12 @@
+2026-11-06: sh scripts/test-osrs-wire.sh --live (exit 0)
+
+OSRS wire: fragmented handshake, unsigned challenge, revision refusal, EOF and cache blocks passed
+live js5.agel: #<module:agel/osrs-wire>
+{phase js5 revision 241 status 0}
+live wrong-revision.agel: #<module:agel/osrs-wire>
+{phase rejected reason "JS5 connection refused" detail 6}
+live challenge.agel: #<module:agel/osrs-wire>
+{phase login-challenge status 0 session-bytes (218 15 13 199 192 199 138 90)}
+live master-index.agel: #<module:agel/osrs-wire>
+{phase js5 revision 241 status 0}
+{archive 255 group 255 compression 0 length 200 bytes (3 123 100 99 106 219 52 173 143 123 42 69 106 219 52 173 214 8 119 181 106 224 197 145 14 198 136 92 106 219 81 90 116 207 63 26 106 223 103 229 195 69 43 227 106 219 51 88 143 40 218 84 106 214 62 37 99 202 193 197 106 219 116 180 29 39 73 93 106 218 89 7 2 179 94 121 106 214 62 180 130 12 145 61 0 0 0 36 55 175 34 164 106 214 62 34 205 95 77 104 106 219 51 126 16 214 40 185 106 218 88 118 53 188 38 207 106 214 62 190 176 247 32 127 106 214 62 74 0 0 0 0 0 0 0 0 172 86 123 203 106 218 88 118 126 203 50 22 106 219 52 16 16 56 5 183 106 218 89 51 190 162 219 221 106 214 62 223 206 47 85 155 106 218 88 118 146 65 54 133 106 219 51 47 0 0 0 0 0 0 0 0 150 120 216 74 0 0 0 3)}

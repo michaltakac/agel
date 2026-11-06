@@ -513,6 +513,10 @@ promise.
   immutable; interrupted tails remain available as raw evidence. The process
   ABI gains reservation operations, and the hosted seed gains a pure UTF-8
   byte constructor. Guardian-only writes and real OS activation remain open.
+  `v0.3.7` adds a container-isolated revision-241 private OSRS world and an
+  Agel wire client tested against its cache and pre-login protocols. Baseline
+  setup enforces 1× XP and disables automatic admin grants. Player login,
+  gameplay, native network transport and Exo comparisons remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
