@@ -50,6 +50,13 @@ improves from 3/6 to 6/6 cases after independent judgment and compiled replay.
 Paid attempts reach protected guest storage; complete model costs and Exo
 comparisons remain open. See [the evidence and limits](release-v0.3.13.md).
 
+v0.3.14 adds an Agel-written subset evaluator with versioned form dispatch.
+A real model repairs a language form inside the OS; an existing closure sees
+the new form while retaining its lexical value. Refusal/retry, runtime replay,
+equivalent versions and guarded revert are verified. The version store is
+archived in protected OS storage, without automatic canonical recovery.
+See [the runtime contract](live-runtime.md) and [real evidence](release-v0.3.14.md).
+
 | Line | Status | Proof and limits |
 |---|---|---|
 | Homoiconic reader, evaluator, atomic batches, versioned worlds with rollback | done | `cargo test --workspace`, `scripts/test-bootstrap.sh` |

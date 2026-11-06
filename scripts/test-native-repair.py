@@ -1,4 +1,5 @@
 """Boot a fresh OS and carry its inference bytes to existing providers."""
+import argparse
 import hashlib
 import json
 import os
@@ -6,16 +7,19 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
-import sys
 import tempfile
 import time
 
 import graphical_console as console
 
 
-live = sys.argv[1:] == ['--live']
-if sys.argv[1:] not in ([], ['--live']):
-    raise SystemExit('usage: test-native-repair.py [--live]')
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--live', action='store_true')
+parser.add_argument('--scenario', choices=['program', 'runtime'], default='program')
+options = parser.parse_args()
+live = options.live
+runtime = options.scenario == 'runtime'
+marker = 'runtime-repair:' if runtime else 'native-repair:'
 environment = dict(os.environ)
 if live and Path('.env').is_file():
     for line in Path('.env').read_text().splitlines():
@@ -25,16 +29,20 @@ if live and Path('.env').is_file():
                 environment.setdefault('TYPESAFEAI_API_KEY', values[0])
 if live and not environment.get('TYPESAFEAI_API_KEY'):
     raise SystemExit('TYPESAFEAI_API_KEY is required for the real native text judge')
-directory = Path('target') / ('native-repair-' + ('live-' if live else 'fixture-') + str(time.time_ns()))
+directory = Path('target') / (('runtime-repair-' if runtime else 'native-repair-') + ('live-' if live else 'fixture-') + str(time.time_ns()))
 directory.mkdir(mode=0o700)
 (directory / 'mode.txt').write_text('live\n' if live else 'fixture\n')
+(directory / 'scenario.txt').write_text(options.scenario + '\n')
 if live:
     environment.pop('AGEL_CODEX_BIN', None)
     environment.pop('AGEL_CURL_BIN', None)
 if not live:
     environment['TYPESAFEAI_API_KEY'] = 'fixture-secret-never-a-model-name'
     writer = directory / 'codex-fixture'
-    writer.write_text("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' \"(dict 'diagnosis \\\"division truncates partial batches\\\" 'after '(fn (n size) (/ (+ n (- size 1)) size)) 'predictions '(2 0))\"\n")
+    proposal = "(dict 'diagnosis \"division truncates partial batches\" 'after '(fn (n size) (/ (+ n (- size 1)) size)) 'predictions '(2 0))"
+    if runtime:
+        proposal = "(dict 'diagnosis \"eager begin evaluates a skipped body\" 'after '(fn (parts) (list 'if (car parts) nil (cons 'begin (cdr parts)))) 'predictions '((if #t nil (begin 42)) (if #f nil (begin 1 2))))"
+    writer.write_text("#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' " + shlex.quote(proposal) + "\n")
     judge = directory / 'curl-fixture'
     response = {'model': 'native-repair-fixture', 'answers': {
         'patch': {'type': 'noul', 'noul': .95}, 'reason': {'type': 'choice', 'choice': 'none', 'confidence': .9,
@@ -55,8 +63,8 @@ for module, export, filename in [('native-reader', 'native-read', 'native-reader
                                   ('native', 'native-compile', 'native-compiler.agel')]:
     source += '(module agel/' + module + ' (export ' + export + ') (def ' + export + ' ' + Path('crates/agel-stdlib/' + filename).read_text() + '))\n'
 source += ''.join(Path('crates/agel-stdlib/' + name).read_text() + '\n' for name in
-                 ['native-x86.agel', 'evolution.agel', 'judge-log.agel', 'bytes.agel', 'program-store.agel', 'native-program.agel', 'repair.agel', 'inference.agel'])
-source += Path('examples/native-repair.agel').read_text()
+                 ['native-x86.agel', 'evolution.agel', 'judge-log.agel', 'bytes.agel', 'program-store.agel', 'native-program.agel', 'repair.agel', 'inference.agel'] + (['live-runtime.agel'] if runtime else []))
+source += Path('examples/native-runtime-repair.agel' if runtime else 'examples/native-repair.agel').read_text()
 script = directory / 'native-repair.agel'
 script.write_text(source)
 for command in [
@@ -87,8 +95,8 @@ with tempfile.TemporaryDirectory(prefix='agel-native-repair-', dir='/tmp') as so
         print('Elapsed seconds:', round(time.monotonic() - started, 3), flush=True)
         output = (directory / 'serial.log').read_text()
         print('\n'.join(line for line in output.splitlines()
-                        if 'native-repair:' in line or 'exited with status' in line), flush=True)
-        passed = result.returncode == 0 and 'native-repair: PASS:' in output and 'process agel exited with status 0' in output
+                        if marker in line or 'exited with status' in line), flush=True)
+        passed = result.returncode == 0 and (marker + ' PASS:') in output and 'process agel exited with status 0' in output
     finally:
         machine.terminate()
         machine.wait(timeout=10)

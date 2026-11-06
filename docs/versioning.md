@@ -543,6 +543,11 @@ promise.
   activation, streamed executable bytes and queued console input support the
   path. Protected guest accounting includes failed paid attempts; full model
   cost, service migration and Exo comparisons remain open.
+  `v0.3.14` adds an Agel-written subset evaluator with versioned language
+  forms. Real repair, refusal/retry, runtime canaries, retained closures,
+  equivalent versions and guarded revert run in one native controller.
+  Its protected version archive is not automatic canonical recovery; the
+  Rust seed, OS service evolution and Exo comparisons remain unfinished.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

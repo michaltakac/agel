@@ -5,12 +5,15 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.13.** A native Agel controller now requests a real
-model-written repair, gets a separate text judgment, replays cases and
-activates compiled program versions without restarting. The example improves
-from 3/6 to 6/6 cases; paid judge records reach protected OS storage.
-The machinery is application-neutral. Running-service migration and Exo
-benchmarks remain open. See the [release notes and evidence](docs/release-v0.3.13.md).
+**Current release: v0.3.14.** An Agel-written evaluator now resolves versioned
+language forms at runtime. Inside Agel OS, a model repairs a form used by an
+existing closure; judgment, replay and guarded revert run without restarting
+or recreating that closure. Protected OS records retain paid attempts and
+version history. The evaluator covers a subset of Agel; the Rust seed and
+OS service migration remain unfinished. See the [release notes and evidence](docs/release-v0.3.14.md).
+
+v0.3.13 connected real model repair to native compilation and activation,
+with protected judge accounting. See the [release notes](docs/release-v0.3.13.md).
 
 v0.3.12 added Agel compilation, program-table installation, contained native
 canaries, activation and revert, with retained images after reboot.

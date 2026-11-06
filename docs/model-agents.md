@@ -152,3 +152,7 @@ advance; no version is committed at approval. `kind` selects the versioned
 object, and an explicit activation hook supplies native execution evidence.
 `agel/inference` maps caller-configured routes to a bounded byte envelope.
 See [the native example, real records and limits](release-v0.3.13.md).
+
+`--scenario runtime` exercises the same controller against versioned language
+forms in v0.3.14. An existing runtime closure uses a repaired form without
+recreation. See [the runtime API](live-runtime.md) and [native evidence](release-v0.3.14.md).

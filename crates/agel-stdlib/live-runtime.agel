@@ -1,0 +1,132 @@
+(module agel/live-runtime
+  (import agel/sequence)
+  (import agel/meta)
+  (import agel/evolution)
+  (export runtime-new runtime-environment runtime-eval runtime-apply runtime-activation runtime-edit runtime-revert)
+
+  (def runtime-new (fn (versions) (dict 'versions versions 'candidate (dict))))
+  (def runtime-environment
+    (fn (bindings)
+      (foldl (fn (environment name) (assoc environment name (get bindings name)))
+        (meta-base-env) (keys bindings))))
+  (def require (fn (ok reason) (if ok #t (signal 'runtime/syntax reason))))
+  (def parameters
+    (fn (names seen)
+      (begin
+        (require (if (= names nil) #t (= (type-of names) 'list)) "parameters must be a list")
+        (if (= names nil) nil
+          (begin
+            (require (= (type-of (car names)) 'symbol) "parameter must be a symbol")
+            (require (if (has-key? seen (car names)) #f #t) "duplicate parameter")
+            (parameters (cdr names) (assoc seen (car names) #t))
+            names)))))
+  (def bind
+    (fn (parameters arguments environment)
+      (begin
+        (require (= (count parameters) (count arguments)) "function arity differs")
+        (if (= parameters nil) environment
+          (begin
+            (require (= (type-of (car parameters)) 'symbol) "parameter must be a symbol")
+            (bind (cdr parameters) (cdr arguments) (assoc environment (car parameters) (car arguments))))))))
+  (def evaluate-list
+    (fn (runtime expressions environment)
+      (if (= expressions nil) nil
+        (cons (runtime-eval runtime (car expressions) environment)
+              (evaluate-list runtime (cdr expressions) environment)))))
+  (def sequence
+    (fn (runtime expressions environment)
+      (if (= expressions nil) nil
+        (let ((value (runtime-eval runtime (car expressions) environment)))
+          (if (= (cdr expressions) nil) value
+            (sequence runtime (cdr expressions) environment))))))
+  (def let-bindings
+    (fn (runtime bindings outer local)
+      (if (= bindings nil) local
+        (let ((pair (car bindings)))
+          (begin
+            (require (= (count pair) 2) "let binding must be a pair")
+            (require (= (type-of (car pair)) 'symbol) "let binding name must be a symbol")
+            (let-bindings runtime (cdr bindings) outer
+              (assoc local (car pair) (runtime-eval runtime (car (cdr pair)) outer))))))))
+  (def runtime-apply
+    (fn (runtime function arguments)
+      (if (= function 'meta/apply)
+        (begin
+          (require (= (count arguments) 2) "apply expects two arguments")
+          (runtime-apply runtime (car arguments) (car (cdr arguments))))
+        (if (= (type-of function) 'list)
+          (begin
+            (require (= (count function) 4) "malformed runtime closure")
+            (require (= (car function) 'runtime/closure) "unknown runtime closure")
+            (runtime-eval runtime (car (cdr (cdr function)))
+              (bind (car (cdr function)) arguments (car (cdr (cdr (cdr function)))))))
+          (apply function arguments)))))
+  (def form-source
+    (fn (runtime name)
+      (if (has-key? (get runtime 'candidate) name) (get (get runtime 'candidate) name)
+        (evolution-source (get runtime 'versions)
+          (evolution-current (get runtime 'versions) 'cell name)))))
+  (def evaluate-form
+    (fn (runtime head tail environment)
+      (if (= head 'quote)
+        (begin (require (= (count tail) 1) "quote expects one argument") (car tail))
+        (let ((source (form-source runtime head)))
+          (if source
+            (runtime-eval runtime (meta-apply (meta-eval source (meta-base-env)) (list tail)) environment)
+            (if (= head 'if)
+              (begin
+                (require (= (count tail) 3) "if expects three arguments")
+                (if (runtime-eval runtime (car tail) environment)
+                  (runtime-eval runtime (car (cdr tail)) environment)
+                  (runtime-eval runtime (car (cdr (cdr tail))) environment)))
+              (if (= head 'begin) (sequence runtime tail environment)
+                (if (= head 'let)
+                  (begin
+                    (require (< 1 (count tail)) "let expects bindings and a body")
+                    (sequence runtime (cdr tail) (let-bindings runtime (car tail) environment environment)))
+                  (if (= head 'fn)
+                    (begin
+                      (require (< 1 (count tail)) "fn expects parameters and a body")
+                      (list 'runtime/closure (parameters (car tail) (dict)) (cons 'begin (cdr tail)) environment))
+                    (runtime-apply runtime (runtime-eval runtime head environment)
+                      (evaluate-list runtime tail environment)))))))))))
+  (def runtime-eval
+    (fn (runtime expression environment)
+      (if (= expression nil) nil
+        (if (= (type-of expression) 'symbol)
+          (if (has-key? environment expression) (get environment expression)
+            (signal 'runtime/unbound "unbound runtime name" expression))
+          (if (= (type-of expression) 'list)
+            (evaluate-form runtime (car expression) (cdr expression) environment)
+            expression)))))
+  (def replay
+    (fn (runtime cases completed)
+      (if (= cases nil) (dict 'passed #t 'reason "runtime replay agrees" 'steps (reverse completed))
+        (let ((case (car cases)))
+          (let ((actual (runtime-eval runtime (get case 'expression) (runtime-environment (get case 'bindings)))))
+            (if (= actual (get case 'expected))
+              (replay runtime (cdr cases) (cons (dict 'case case 'actual actual) completed))
+              (dict 'passed #f 'reason "runtime replay differs" 'case case 'actual actual)))))))
+  (def runtime-activation
+    (fn (runtime cases)
+      (fn (request recorded)
+        (begin
+          (require (if (= (get request 'kind) 'cell) #t #f) "runtime form must be a cell")
+          (require (< 0 (count cases)) "runtime replay corpus is empty")
+          (replay (assoc runtime 'candidate (assoc (get runtime 'candidate) (get request 'name) (get request 'after)))
+            cases nil)))))
+  (def runtime-edit
+    (fn (runtime name before after expansions behavior judge)
+      (assoc runtime 'versions
+        (evolution-edit-with-activation (get runtime 'versions) 'cell name before after expansions judge
+          (runtime-activation runtime behavior)))))
+  (def runtime-revert
+    (fn (runtime name version expansions behavior judge)
+      (let ((versions (get runtime 'versions)))
+        (let ((old (get (get versions 'versions) version)))
+          (begin
+            (require (if old (if (= (get old 'kind) 'cell) (= (get old 'name) name) #f) #f)
+              "version belongs to another runtime form")
+            (runtime-edit runtime name
+              (evolution-source versions (evolution-current versions 'cell name))
+              (get old 'source) expansions behavior judge)))))))

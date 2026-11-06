@@ -1,0 +1,48 @@
+(import agel/live-runtime)
+(import agel/evolution)
+(def check (fn (ok label) (if ok #t (signal 'test/runtime label))))
+(def judge (fn (request) (dict 'allowed #t 'reason "fixture" 'cost-microusd 0)))
+(def before '(fn (parts) (cons 'begin parts)))
+(def after '(fn (parts) (list 'if (car parts) nil (cons 'begin (cdr parts)))))
+(def versions (evolution-edit (evolution-new) 'cell 'unless nil before
+  (list (dict 'arguments '((#f 42)) 'expected '(begin #f 42))) judge))
+(def runtime (runtime-new versions))
+(def environment (runtime-environment (dict 'saved 9)))
+(def retained (runtime-eval runtime '(fn (condition) (unless condition (+ saved 33))) environment))
+(check (= (runtime-apply runtime retained '(#t)) 42) "control closure behavior")
+(def cases (list
+  (dict 'expression '(unless #t (/ 1 0)) 'bindings (dict) 'expected nil)
+  (dict 'expression '(unless #f 20 42) 'bindings (dict) 'expected 42)
+  (dict 'expression '(let ((n 7)) (unless #f (+ n 1))) 'bindings (dict) 'expected 8)
+  (dict 'expression '(quote (unless #f 42)) 'bindings (dict) 'expected '(unless #f 42))
+  (dict 'expression '((fn (x) (unless x 42)) #t) 'bindings (dict) 'expected nil)
+  (dict 'expression '(unless #f) 'bindings (dict) 'expected nil)))
+(def replay (list (dict 'arguments '((#f 42)) 'expected '(if #f nil (begin 42)))))
+(def next (evolution-edit-with-activation versions 'cell 'unless before after replay judge
+  (runtime-activation runtime cases)))
+(check (= (evolution-current next 'cell 'unless) 2) "macro activation")
+(check (= (runtime-apply (runtime-new next) retained '(#t)) nil) "existing closure sees new runtime")
+(check (= (runtime-apply (runtime-new next) retained '(#f)) 42) "retained lexical binding")
+(def unsafe (evolution-edit-with-activation next 'cell 'unless after before
+  (list (dict 'arguments '((#f 42)) 'expected '(begin #f 42))) judge
+  (runtime-activation (runtime-new next) cases)))
+(check (= (evolution-current unsafe 'cell 'unless) 2) "runtime replay refuses eager regression")
+(def equivalent (list 'fn '(operands) (list 'apply after '(list operands))))
+(def upgraded (runtime-edit (runtime-new unsafe) 'unless after equivalent replay cases judge))
+(check (= (evolution-current (get upgraded 'versions) 'cell 'unless) 3) "equivalent form activates")
+(def reverted (runtime-revert upgraded 'unless 2 replay cases judge))
+(check (= (evolution-current (get reverted 'versions) 'cell 'unless) 4) "guarded revert creates version")
+(check (= (runtime-apply reverted retained '(#t)) nil) "same closure sees reverted form")
+(check (= (runtime-apply reverted retained '(#f)) 42) "captured value survives revert")
+(check (= (runtime-apply runtime retained '(#t)) 42) "historical runtime remains explicit")
+(check (= (evolution-source (get reverted 'versions) 2) after) "old form source retained")
+(check (with-handler (* problem) #t
+  (begin (runtime-revert reverted 'different 2 replay cases judge) #f)) "cross-form revert refused")
+(check (= (runtime-eval (runtime-new next)
+  '(let ((x 10)) (let ((x 1) (y x)) y)) (runtime-environment (dict))) 10) "parallel let environment")
+(check (= (runtime-eval (runtime-new next) '(if #f (/ 1 0) 7) (runtime-environment (dict))) 7) "lazy core conditional")
+(check (with-handler (* problem) #t
+  (begin (runtime-eval runtime '(fn (x x) x) environment) #f)) "duplicate parameters refused")
+(check (with-handler (* problem) #t
+  (begin (runtime-apply runtime retained nil) #f)) "closure arity enforced")
+#t
