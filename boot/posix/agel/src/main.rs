@@ -556,12 +556,58 @@ fn model_request(arguments: &[Value]) -> Result<Value, HostError> {
                 format!("model-request {number}: the console ended before a reply"),
             ));
         };
+        if let Some(rest) = line.strip_prefix(b":audit ") {
+            relay_audit(rest);
+            continue;
+        }
         if let Some(reply) = line.strip_prefix(prefix.as_bytes()) {
             return Ok(Value::String(String::from(
                 String::from_utf8_lossy(reply).trim(),
             )));
         }
     }
+}
+
+fn relay_audit(rest: &[u8]) {
+    let Some(space) = rest.iter().position(|byte| *byte == b' ') else {
+        return;
+    };
+    let (id, hex) = (&rest[..space], &rest[space + 1..]);
+    let mut bytes = Vec::new();
+    let mut valid = !id.is_empty()
+        && id.iter().all(u8::is_ascii_digit)
+        && hex.len() <= 512
+        && hex.len() % 2 == 0;
+    if valid {
+        for pair in hex.as_chunks::<2>().0 {
+            let digit = |byte: u8| match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                _ => None,
+            };
+            let (Some(high), Some(low)) = (digit(pair[0]), digit(pair[1])) else {
+                valid = false;
+                break;
+            };
+            bytes.push(high * 16 + low);
+        }
+    }
+    let process = process();
+    let stored = if valid {
+        let descriptor = process.open(b"judge-log", abi::O_WRONLY | abi::O_CREAT | abi::O_APPEND);
+        if descriptor < 0 {
+            false
+        } else {
+            let written = process.write(descriptor as u64, &bytes);
+            process.close(descriptor as u64);
+            written == bytes.len() as u64
+        }
+    } else {
+        false
+    };
+    process.write(1, b"audit ");
+    process.write(1, id);
+    process.write(1, if stored { b" ok\n" } else { b" error\n" });
 }
 
 extern "C" fn main() -> ! {

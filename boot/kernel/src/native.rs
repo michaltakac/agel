@@ -59,9 +59,9 @@ pub const EFFECT_FILE_APPEND: u64 = 3;
 pub const EFFECT_FILE_LIST: u64 = 4;
 pub const EFFECT_CLOCK: u64 = 5;
 pub const EFFECT_LOG: u64 = 6;
-pub const EFFECT_BYTES: usize = 4096;
+pub const EFFECT_BYTES: usize = 2048;
 /// What one write may carry, so that a read of it fits the text arena.
-pub const EFFECT_TEXT_BYTES: usize = 3072;
+pub const EFFECT_TEXT_BYTES: usize = EFFECT_BYTES - PAYLOAD_LIMIT;
 /// A program the language asks the desktop to start, as `:exec` would.
 pub const EXEC_BYTES: usize = 256;
 

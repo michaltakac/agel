@@ -14,11 +14,12 @@ Version labels below are planned until a corresponding tag exists.
 | --- | --- | --- |
 | v0.3.3 | Agel version/diff/replay policy | Same Lisp contract hosted and in an OS process; failed candidates preserve active versions |
 | v0.3.4 | Protected log storage and Agel wrapper | Before/after dispatch ordering; OS overwrite/truncate/unlink denial and normal reboot; opt-in until entry-point integration |
-| v0.3.5 | Native replacement guardian and canonical accounting | Route every judge entry point through protected history; tokens, price basis and cost receipts; whole-program isolated replay; durable commit and recovery; partial-tail and power-cut tests |
-| v0.3.6 | Private server and Agel client | Pinned RSMod revision/cache, login, observe/action protocol in Agel; byte relay only outside Agel; tested skill/item setup commands |
-| v0.3.7 | Agel agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel; frozen control and repeated paired tasks |
-| v0.3.8 | OS service evolution | Versioned actual programs, domain generations and kernel slots; isolated replay, watchdog recovery and reboot evidence |
-| v0.3.9 | Comparative results | Standalone, transfer and quests; correctness, all-in cost, active/wall time, seeds and raw logs published |
+| v0.3.5 | Provider-wide attempt accounting | All existing Jev HTTP paths append Agel records; native requests wait for guest storage; pricing receipts, retries, resume and storage failure tests |
+| Next: guardian and canonical history | Protected append authority, recoverable/scalable history and actual activation | Result-space reservation; partial-tail and power-cut tests; whole-program isolated replay; durable commit/recovery |
+| Following: private server and Agel client | Pinned server with required content, login, observe/action protocol in Agel | Byte relay only outside Agel; tested skill/item setup commands |
+| Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
+| Following: OS service evolution | Actual programs, domain generations and kernel slots | Isolated replay, version retention, watchdog recovery and reboot evidence |
+| Following: comparative results | Standalone, transfer and quests | Correctness, all-in cost, active/wall time, seeds and raw logs published |
 
 The existing native Rust evaluator, scheduler, filesystem, drivers and desktop
 are still substantial implementations. Migrate their policy upward instead
@@ -78,12 +79,22 @@ and `invadd`; per-skill setup still needs implementation and verification.
 Before choosing this as the benchmark server, either supply the missing
 faithful content or find a better-covered private OSRS implementation.
 
+A more complete candidate is now checked out at `target/external/openrune`:
+[OpenRune-Server](https://github.com/OpenRune/OpenRune-Server), commit
+`c4cd45ef2d38a0badcc7a9f89773f8f1c29bb16f`. Source inspection found mining,
+smithing (including platebody recipe handling) and quest implementations
+such as Doric's Quest, The Knight's Sword and Gertrude's Cat. Its generated
+progress report explicitly says presence does not prove wiki parity.
+Installation is being validated before switching the benchmark server.
+
 ## Current boundary
 
 v0.3.3 adds policy machinery, not a replacement OS or game result. Versioned
 `domain` and `kernel-slot` entries are namespaced source records; they do not
 change page tables or boot slots. Its functional history can be replaced by
-its caller. v0.3.4 adds protected OS bytes and an opt-in Agel judge wrapper,
-but universal accounting and guardian-only append authority are still open.
+its caller. v0.3.4 adds protected OS bytes and an opt-in Agel judge wrapper.
+v0.3.5 connects existing Jev provider calls to Agel accounting and guest
+storage where a guest exists. Complete accounting under crash/storage
+failure, scalable history and guardian-only append authority remain open.
 The existing desktop gate and DOOM demo continue until their replacements
 pass the later evidence gates.

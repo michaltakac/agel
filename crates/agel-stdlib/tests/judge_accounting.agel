@@ -1,0 +1,28 @@
+(import agel/judge-accounting)
+(def check (fn (test) (if test #t (signal 'test/failed "judge accounting failed"))))
+(def lookup
+  (fn (fields key)
+    (if (= fields nil) nil
+        (if (= (car fields) key) (car (cdr fields))
+            (lookup (cdr (cdr fields)) key)))))
+(def field (fn (record key) (lookup (cdr record) key)))
+(def endpoint "https://api.typesafe.ai/v1/systemone")
+(def receipt
+  (fn (status input output)
+    (judge-attempt-result "id" endpoint "jev-latest" 0 status input output "raw" 123)))
+(check (= (field (receipt 200 1 99) 'cost-nanousd) 42))
+(check (= (field (receipt 200 1 99) 'cost-microusd) 1))
+(check (= (field (receipt 200 509 89) 'cost-nanousd) 21378))
+(check (= (field (receipt 200 509 89) 'cost-microusd) 22))
+(check (= (field (receipt 200 0 1000) 'cost-nanousd) 0))
+(check (= (field (receipt 200 nil 0) 'cost-status) 'unknown))
+(check (= (field (receipt 200 -1 0) 'cost-nanousd) nil))
+(check (= (field (receipt 200 9223372036854775807 0) 'cost-nanousd) nil))
+(check (= (field (receipt 402 nil nil) 'cost-nanousd) 0))
+(check (= (field (receipt 'transport-error nil nil) 'cost-nanousd) nil))
+(check (= (field (receipt 302 509 89) 'cost-nanousd) nil))
+(check (= (field (judge-attempt-result "id" "custom-endpoint" "jev-latest" 0 200 10 1 "raw" 123)
+                'cost-nanousd) nil))
+(check (= (field (judge-attempt-result "id" endpoint "custom-model" 0 200 10 1 "raw" 123)
+                'cost-nanousd) nil))
+#t

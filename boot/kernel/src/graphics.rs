@@ -2678,6 +2678,8 @@ fn serial_line(serial: &mut ServiceDomain, out: &mut [u8; PAYLOAD_BYTES]) -> Opt
 fn relay_request(
     evaluator: &mut arch::Domain,
     serial: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
+    mut filesystem: Option<&mut ServiceDomain>,
     look: &[u8; LOOK_BYTES],
     task: &[u8],
 ) -> Option<bool> {
@@ -2727,6 +2729,14 @@ fn relay_request(
     let mut answer = [0_u8; PAYLOAD_BYTES];
     let mut delivered = false;
     while let Some(length) = serial_line(serial, &mut answer) {
+        if relay_audit(
+            &answer[..length],
+            serial,
+            storage,
+            filesystem.as_deref_mut(),
+        ) {
+            continue;
+        }
         let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
             // A page the bridge delivers ahead of its reply, line by line,
             // is kept for the loop to write to a file once the step is
@@ -2986,7 +2996,13 @@ static mut INTENT_LEN: usize = 0;
 /// comes back on the line the bridge answers programs on. None when no
 /// answer came.
 #[inline(never)]
-fn judge_fact(serial: &mut ServiceDomain, number: u64, question: &[u8]) -> Option<bool> {
+fn judge_fact(
+    serial: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
+    mut filesystem: Option<&mut ServiceDomain>,
+    number: u64,
+    question: &[u8],
+) -> Option<bool> {
     let mut text = StatusLine::new(b"model-request ");
     text.number_u64(number);
     text.push(b" (judge (noul fact \"");
@@ -3001,6 +3017,14 @@ fn judge_fact(serial: &mut ServiceDomain, number: u64, question: &[u8]) -> Optio
     crate::process::Console::write(serial, text.get());
     let mut answer = [0_u8; PAYLOAD_BYTES];
     while let Some(length) = serial_line(serial, &mut answer) {
+        if relay_audit(
+            &answer[..length],
+            serial,
+            storage,
+            filesystem.as_deref_mut(),
+        ) {
+            continue;
+        }
         let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
             continue;
         };
@@ -3024,6 +3048,60 @@ fn judge_fact(serial: &mut ServiceDomain, number: u64, question: &[u8]) -> Optio
         return Some(probability > 500);
     }
     None
+}
+
+fn relay_audit(
+    line: &[u8],
+    serial: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+) -> bool {
+    let Some(rest) = line.strip_prefix(b":audit ") else {
+        return false;
+    };
+    let Some(space) = rest.iter().position(|byte| *byte == b' ') else {
+        return true;
+    };
+    let (id, hex) = (&rest[..space], &rest[space + 1..]);
+    let mut bytes = [0_u8; 256];
+    let mut count = 0;
+    let valid = !id.is_empty()
+        && id.iter().all(u8::is_ascii_digit)
+        && hex.len() <= 512
+        && hex.len() % 2 == 0;
+    let mut decoded = valid;
+    if valid {
+        for pair in hex.as_chunks::<2>().0 {
+            let digit = |byte: u8| match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                _ => None,
+            };
+            let (Some(high), Some(low)) = (digit(pair[0]), digit(pair[1])) else {
+                decoded = false;
+                break;
+            };
+            bytes[count] = high * 16 + low;
+            count += 1;
+        }
+    }
+    let stored = if decoded {
+        let mut host = EffectHost {
+            storage,
+            filesystem,
+            console: serial,
+            clock: None,
+        };
+        host.file_write(b"judge-log", &bytes[..count], true)
+            .is_ok_and(|(written, _)| written == count as u64)
+    } else {
+        false
+    };
+    let mut reply = StatusLine::new(b"audit ");
+    reply.push(id);
+    reply.push(if stored { b" ok\n" } else { b" error\n" });
+    crate::process::Console::write(serial, reply.get());
+    true
 }
 
 /// The number the desktop's own questions start at, past any program's.
@@ -3316,7 +3394,14 @@ fn execute_workshop(
                 b"May this Agel cell run on the desktop, where a program can read and write files and paint rectangles, and nothing else? ",
             );
             question.push(&form[..form.len().min(700)]);
-            if judge_fact(serial, number, question.get()) != Some(true) {
+            if judge_fact(
+                serial,
+                storage,
+                filesystem.as_deref_mut(),
+                number,
+                question.get(),
+            ) != Some(true)
+            {
                 let mut report = StatusLine::new(b"GATE REFUSED FORM ");
                 report.number_u64(count + 1);
                 report.push(b" OF ");
@@ -4962,7 +5047,15 @@ fn agents(
             // too: the judge reads it beside the picture.
             let task = intent();
             for _ in 0..4 {
-                if relay_request(evaluator, serial, &look, task) != Some(true) {
+                if relay_request(
+                    evaluator,
+                    serial,
+                    storage,
+                    filesystem.as_deref_mut(),
+                    &look,
+                    task,
+                ) != Some(true)
+                {
                     break;
                 }
                 flush_page(

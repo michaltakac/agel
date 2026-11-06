@@ -15,7 +15,9 @@ The current OSRS and runtime evolution work is tracked in
 version/diff/judge/replay/retry policy, is tested hosted and in an OS process
 by `sh scripts/test-evolution.sh`. Protected `judge-log` bytes and an opt-in
 Agel dispatch wrapper are tested by `sh scripts/test-judge-log.sh`.
-Universal judge accounting, guardian-only append authority, native activation
+Provider-wide Jev attempt accounting reaches guest storage in v0.3.5;
+`sh scripts/test-judge-bridge.sh` checks reboot, resume and full-log denial.
+Complete accounting under crash/storage failure, guardian-only append authority, native activation
 and game experiments are still open.
 
 | Line | Status | Proof and limits |

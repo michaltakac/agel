@@ -751,6 +751,7 @@ pub const OBSERVATION_OFFSET: usize = 2048;
 pub const OBSERVATION_BYTES: usize = 2048;
 const _: () = assert!(OBSERVATION_OFFSET + OBSERVATION_BYTES <= 4096);
 const _: () = assert!(crate::native::LOOK_BYTES <= OBSERVATION_BYTES);
+const _: () = assert!(crate::native::EFFECT_BYTES <= OBSERVATION_BYTES);
 /// One compositor record: the unit the display driver reads and a window holds.
 #[cfg(feature = "process")]
 pub const RECORD_BYTES: usize = 64;

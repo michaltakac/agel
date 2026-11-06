@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 use agel_core::ModelRequest;
 use agel_effects::Principal;
+use agel_model::journal::JudgeJournal;
 use agel_model::{
     ClaudeCodeProvider, CodexProvider, CommandLimits, JevProvider, JudgmentRequest, Provider,
 };
@@ -35,6 +36,7 @@ const ASCII_ROWS: usize = 25;
 const SHADES: &[u8] = b" .:-=+*#%@";
 
 struct Options {
+    resume: bool,
     image: PathBuf,
     doom: PathBuf,
     wad: PathBuf,
@@ -75,6 +77,7 @@ struct Options {
 
 fn options() -> Result<Options, String> {
     let mut options = Options {
+        resume: false,
         image: PathBuf::from("target/boot/agel-v1.img"),
         doom: PathBuf::from("boot/posix/target/c/x86_64/doom"),
         wad: PathBuf::from("target/doom1.wad"),
@@ -125,6 +128,7 @@ fn options() -> Result<Options, String> {
             "--agel" => options.agel = PathBuf::from(value()?),
             "--attach" => options.attach = Some(PathBuf::from(value()?)),
             "--agents" => options.agents = true,
+            "--resume" => options.resume = true,
             "--join" => options.joins.push(value()?),
             "--plan" => options.plan = Some(value()?),
             other => return Err(format!("unknown option {other}")),
@@ -141,6 +145,89 @@ struct Serial {
     received: Arc<Mutex<Vec<u8>>>,
     /// The other end went away: the machine stopped, or its console closed.
     closed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct NativeJudgeJournal {
+    serial: Mutex<Serial>,
+    failed: std::sync::atomic::AtomicBool,
+}
+
+impl std::fmt::Debug for NativeJudgeJournal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("NativeJudgeJournal")
+    }
+}
+
+impl NativeJudgeJournal {
+    fn new(serial: &Serial) -> Result<Arc<Self>, String> {
+        Ok(Arc::new(Self {
+            serial: Mutex::new(Serial {
+                stream: serial
+                    .stream
+                    .try_clone()
+                    .map_err(|error| error.to_string())?,
+                received: Arc::clone(&serial.received),
+                closed: Arc::clone(&serial.closed),
+            }),
+            failed: std::sync::atomic::AtomicBool::new(false),
+        }))
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if self.failed.load(std::sync::atomic::Ordering::Relaxed) {
+            Err(
+                "the OS judge log did not acknowledge storage; stopped before delivering a result"
+                    .into(),
+            )
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl JudgeJournal for NativeJudgeJournal {
+    fn append(&self, bytes: &[u8]) -> Result<(), String> {
+        self.check()?;
+        let result = (|| {
+            static CHUNKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            let mut serial = self.serial.lock().map_err(|error| error.to_string())?;
+            for chunk in bytes.chunks(128) {
+                let id = CHUNKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let hex = chunk
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                let start = serial.len();
+                serial.write_raw(&format!(":audit {id} {hex}"))?;
+                let success = format!("audit {id} ok\n");
+                let failure = format!("audit {id} error\n");
+                let deadline = Instant::now() + Duration::from_secs(30);
+                loop {
+                    let reply = {
+                        let buffer = serial.received.lock().map_err(|error| error.to_string())?;
+                        String::from_utf8_lossy(&buffer[start.min(buffer.len())..])
+                            .replace('\r', "")
+                    };
+                    if reply.contains(&success) {
+                        break;
+                    }
+                    if reply.contains(&failure) || serial.closed() {
+                        return Err("OS judge log refused bytes".to_owned());
+                    }
+                    if Instant::now() > deadline {
+                        return Err("OS judge log acknowledgement timed out".into());
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            self.failed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        result
+    }
 }
 
 impl Serial {
@@ -729,6 +816,7 @@ fn lookup_for(options: &Options) -> Lookup {
 }
 
 trait Policy {
+    fn journal(&mut self, _journal: Arc<dyn JudgeJournal>) {}
     fn name(&self) -> &str;
 
     /// The Agel program the desktop loads to run the loop.
@@ -1009,6 +1097,9 @@ impl Judge {
 }
 
 impl Policy for Judge {
+    fn journal(&mut self, journal: Arc<dyn JudgeJournal>) {
+        self.provider = self.provider.clone().with_journal(journal);
+    }
     fn name(&self) -> &str {
         "jev"
     }
@@ -1088,8 +1179,14 @@ fn main() -> Result<(), String> {
         return attach(&options, socket);
     }
     let disk = options.out.join("disk.img");
-    fs::copy(&options.image, &disk).map_err(|error| format!("copying the image: {error}"))?;
-    {
+    if options.resume {
+        if !disk.is_file() {
+            return Err("--resume requires an existing run disk".into());
+        }
+    } else if disk.exists() {
+        return Err("run disk already exists; use a new --out directory or --resume to preserve its history".into());
+    } else {
+        fs::copy(&options.image, &disk).map_err(|error| format!("copying the image: {error}"))?;
         // A blank workspace, records and filesystem region, as the tests use.
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -1291,6 +1388,8 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
             Err(error) => return Err(format!("{}: {error}", socket.display())),
         }
     };
+    let judge_log = NativeJudgeJournal::new(&serial)?;
+    policy.journal(judge_log.clone());
     // Lines on the bridge's standard input go to the serial line: the
     // operator's other keyboard, for a sentence said while agents run.
     if let Ok(mut out) = serial.stream.try_clone() {
@@ -1364,6 +1463,7 @@ fn attach(options: &Options, socket: &Path) -> Result<(), String> {
                     continue;
                 }
                 if let Some(reply) = policy.answer(&block) {
+                    judge_log.check()?;
                     serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
                     println!("agel-play: model reply {request_number}: {reply}");
                 }
@@ -1534,6 +1634,21 @@ fn run_script(arguments: &[&str]) -> Result<(), String> {
     }
 }
 
+fn failed_terminal(line: &str) -> bool {
+    if let Some(status) = line.strip_prefix("process agel exited with status ") {
+        return status.trim() != "0";
+    }
+    [
+        "DRIVE-STEP FAILED",
+        "PLAY-STEP FAILED",
+        "STEP FAILED - ",
+        "NO PROGRAM TO",
+        "NO WINDOW TO",
+    ]
+    .iter()
+    .any(|marker| line.contains(marker))
+}
+
 struct Machine {
     child: Child,
 }
@@ -1598,11 +1713,15 @@ fn play(
     policy: &mut dyn Policy,
 ) -> Result<(), String> {
     let mut serial = Serial::connect(serial_path)?;
+    let judge_log = NativeJudgeJournal::new(&serial)?;
+    policy.journal(judge_log.clone());
     let mut monitor = Monitor::connect(qmp)?;
     serial.wait_for(0, b"live-desktop> ", Duration::from_secs(120))?;
-    let formatted = serial.submit(":fs-format", Duration::from_secs(30))?;
-    if !formatted.contains("formatted") {
-        return Err(format!("the filesystem did not format: {formatted}"));
+    if !options.resume {
+        let formatted = serial.submit(":fs-format", Duration::from_secs(30))?;
+        if !formatted.contains("formatted") {
+            return Err(format!("the filesystem did not format: {formatted}"));
+        }
     }
     let desktop = options.scene == "desktop";
     let browse = options.scene == "browse";
@@ -1712,6 +1831,7 @@ fn play(
                     serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
                     println!("agel-play: lookup {request_number}: {reply}");
                 } else if let Some(reply) = policy.answer(&block) {
+                    judge_log.check()?;
                     serial.write_raw(&format!(":model-reply {request_number} {reply}"))?;
                     println!("agel-play: model reply {request_number}: {reply}");
                 } else {
@@ -1807,6 +1927,9 @@ fn play(
                     .map_err(|error| error.to_string())?;
                 println!("agel-play: step {index}: {keys} [{state_line}]");
             }
+            if failed_terminal(line) {
+                return Err(format!("the OS task failed: {line}"));
+            }
             if line.contains("PLAYED")
                 || line.contains("PROCESS ENDED")
                 || line.starts_with("DROVE ")
@@ -1837,6 +1960,15 @@ fn play(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_guest_runs_are_not_successful_completion() {
+        assert!(failed_terminal("process agel exited with status 1"));
+        assert!(failed_terminal("STEP FAILED - :LOAD THE AGENT AGAIN"));
+        assert!(failed_terminal("NO WINDOW TO PLAY"));
+        assert!(!failed_terminal("process agel exited with status 0"));
+        assert!(!failed_terminal("DRIVE DONE AFTER 1 STEPS"));
+    }
 
     #[test]
     fn a_block_carries_the_desktops_task_and_a_process_form() {

@@ -502,6 +502,12 @@ promise.
   truncation, unlink, rename and format, and an opt-in Agel judge wrapper
   that records dispatch and result. Syscall denial and reboot are tested;
   universal accounting and guardian-only append authority remain open.
+  `v0.3.5` routes Jev HTTP attempts through Agel accounting, with raw
+  request/response, usage, published-rate costs and timestamps; the native
+  bridge waits for guest log acknowledgements. Existing disks require
+  `--resume`; guest failures propagate. Native effect buffers now fit their
+  shared mapping. Scalable crash-safe canonical history and activation
+  remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

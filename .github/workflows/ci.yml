@@ -94,6 +94,7 @@ jobs:
       - run: ./scripts/test-agel-process.sh
       - run: sh ./scripts/test-evolution.sh
       - run: sh ./scripts/test-judge-log.sh
+      - run: sh ./scripts/test-judge-bridge.sh
       - run: ./scripts/test-stale.sh
       - run: ./scripts/test-play-bridge.sh
       - run: python3 scripts/test-install-program.py

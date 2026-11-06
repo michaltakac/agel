@@ -7,6 +7,7 @@ use std::path::PathBuf;
 pub use agel_effects::ProcessLimits as CommandLimits;
 pub use agel_effects::{AuditOutcome, AuditRecord};
 
+pub mod journal;
 pub mod systemone;
 pub use systemone::{Answer, JevProvider, Judgment, JudgmentRequest, Question, State};
 

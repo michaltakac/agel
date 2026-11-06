@@ -35,11 +35,16 @@
 //! reads it with nothing but text words, and the same line comes from the
 //! judge written in Agel (`agel/judgment`) as from the hosted model.
 
+use crate::journal::{FileJudgeJournal, JudgeJournal};
 use crate::{process_sandbox, CommandLimits, Provider, ProviderError};
-use agel_core::{read_all, Expr, ModelRequest};
+use agel_core::{read_all, Expr, ModelRequest, Value};
 use agel_effects::{AuditRecord, Principal, ProcessSandbox, ProcessSpec};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::time::Duration;
 
 /// The endpoint TypeSafe documents; any server that speaks the same
@@ -438,15 +443,26 @@ pub struct JevProvider {
     model: String,
     limits: CommandLimits,
     sandbox: ProcessSandbox,
+    journal: Arc<dyn JudgeJournal>,
 }
 
 /// Overloaded and rate-limited answers are retried after these pauses.
 const RETRY_PAUSES: [Duration; 2] = [Duration::from_millis(300), Duration::from_millis(900)];
 
+fn journal_time() -> Value {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|time| i64::try_from(time.as_nanos()).ok())
+        .map(Value::Int)
+        .unwrap_or(Value::Nil)
+}
+
 impl JevProvider {
     pub fn new(curl: impl Into<PathBuf>, key: impl Into<String>, limits: CommandLimits) -> Self {
         let curl = curl.into();
         Self {
+            journal: Arc::new(FileJudgeJournal::new(limits.workspace.join("judge-log"))),
             sandbox: process_sandbox("jev", &curl, &limits),
             curl,
             key: key.into(),
@@ -468,6 +484,11 @@ impl JevProvider {
 
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    pub fn with_journal(mut self, journal: Arc<dyn JudgeJournal>) -> Self {
+        self.journal = journal;
+        self
     }
 
     pub fn audit_log(&self) -> agel_effects::AuditLog {
@@ -537,38 +558,93 @@ impl JevProvider {
             self.url.clone(),
         ];
         let configuration = format!("header = \"Authorization: Bearer {}\"\n", self.key);
+        static CALLS: AtomicU64 = AtomicU64::new(1);
+        let id = format!(
+            "{}:{}:{}",
+            std::process::id(),
+            CALLS.fetch_add(1, Ordering::Relaxed),
+            operation
+        );
+        let request =
+            fs::read_to_string(file).map_err(|error| ProviderError::Io(error.to_string()))?;
         let mut attempt = 0;
         loop {
-            let output = self
-                .sandbox
-                .run(
-                    principal.clone(),
-                    operation,
-                    ProcessSpec {
-                        executable: self.curl.clone(),
-                        arguments: arguments.clone(),
-                        stdin: configuration.clone().into_bytes(),
-                    },
-                )
-                .map_err(crate::provider_effect_error)?;
-            if output.status != 0 {
-                return Err(ProviderError::Failed {
-                    code: (output.status >= 0).then_some(output.status),
-                    stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-                });
-            }
-            let text = String::from_utf8(output.stdout).map_err(|_| ProviderError::InvalidUtf8)?;
-            let (body, code) = text.rsplit_once('\n').unwrap_or(("", text.as_str()));
-            let status: i32 = code.trim().parse().map_err(|_| {
-                ProviderError::Unexpected(format!("no HTTP status after the answer: {code:?}"))
-            })?;
+            let common = vec![
+                Value::String(id.clone()),
+                Value::String(self.url.clone()),
+                Value::String(self.model.clone()),
+                Value::Int(attempt as i64),
+            ];
+            let mut start = common.clone();
+            start.push(Value::String(request.clone()));
+            start.push(journal_time());
+            let bytes =
+                crate::journal::record("judge-attempt-start", start).map_err(ProviderError::Io)?;
+            self.journal.append(&bytes).map_err(ProviderError::Io)?;
+            let outcome = self.exchange(&arguments, &configuration, principal.clone(), operation);
+            let (status, response) = match &outcome {
+                Ok((status, body)) => (Value::Int(i64::from(*status)), body.clone()),
+                Err(error) => (Value::Symbol("transport-error".into()), error.to_string()),
+            };
+            let decoded = serde_json::from_str::<serde_json::Value>(&response).unwrap_or_default();
+            let token = |name: &str| {
+                decoded["usage"][name]
+                    .as_i64()
+                    .map(Value::Int)
+                    .unwrap_or(Value::Nil)
+            };
+            let mut finish = common;
+            finish.extend([
+                status,
+                token("input_tokens"),
+                token("output_tokens"),
+                Value::String(response),
+                journal_time(),
+            ]);
+            let bytes = crate::journal::record("judge-attempt-result", finish)
+                .map_err(ProviderError::Io)?;
+            self.journal.append(&bytes).map_err(ProviderError::Io)?;
+            let (status, body) = outcome?;
             if (status == 429 || status == 529) && attempt < RETRY_PAUSES.len() {
                 std::thread::sleep(RETRY_PAUSES[attempt]);
                 attempt += 1;
                 continue;
             }
-            return Ok((status, body.to_owned()));
+            return Ok((status, body));
         }
+    }
+
+    fn exchange(
+        &self,
+        arguments: &[String],
+        configuration: &str,
+        principal: Principal,
+        operation: &str,
+    ) -> Result<(i32, String), ProviderError> {
+        let output = self
+            .sandbox
+            .run(
+                principal,
+                operation,
+                ProcessSpec {
+                    executable: self.curl.clone(),
+                    arguments: arguments.to_vec(),
+                    stdin: configuration.as_bytes().to_vec(),
+                },
+            )
+            .map_err(crate::provider_effect_error)?;
+        if output.status != 0 {
+            return Err(ProviderError::Failed {
+                code: (output.status >= 0).then_some(output.status),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            });
+        }
+        let text = String::from_utf8(output.stdout).map_err(|_| ProviderError::InvalidUtf8)?;
+        let (body, code) = text.rsplit_once('\n').unwrap_or(("", text.as_str()));
+        let status: i32 = code.trim().parse().map_err(|_| {
+            ProviderError::Unexpected(format!("no HTTP status after the answer: {code:?}"))
+        })?;
+        Ok((status, body.to_owned()))
     }
 }
 
@@ -858,6 +934,12 @@ mod tests {
             fs::read_to_string(directory.join("count")).unwrap().trim(),
             "3"
         );
+        let journal = fs::read_to_string(directory.join("judge-log")).unwrap();
+        assert_eq!(journal.lines().count(), 6);
+        assert_eq!(journal.matches("(judge-start ").count(), 3);
+        assert_eq!(journal.matches("(judge-result ").count(), 3);
+        assert!(journal.contains("cost-nanousd 21378"), "{journal}");
+        assert!(!journal.contains("Bearer"));
         fs::remove_dir_all(directory).unwrap();
 
         let (directory, curl) = fake_curl("printf 'busy\\n429'");
@@ -869,6 +951,57 @@ mod tests {
                 stderr: "busy".to_owned()
             }
         );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[derive(Debug)]
+    struct FailingJournal {
+        calls: AtomicU64,
+        fail: u64,
+    }
+    impl JudgeJournal for FailingJournal {
+        fn append(&self, _: &[u8]) -> Result<(), String> {
+            if self.calls.fetch_add(1, Ordering::Relaxed) + 1 == self.fail {
+                Err("storage refused".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn failed_journal_blocks_dispatch_or_result_delivery() {
+        for fail in [1, 2] {
+            let (directory, curl) =
+                fake_curl(&format!("printf '%s\\n200' '{}'", ANSWER.replace('\n', "")));
+            let provider =
+                JevProvider::new(&curl, "never-log-this-key", CommandLimits::new(&directory))
+                    .with_journal(Arc::new(FailingJournal {
+                        calls: AtomicU64::new(0),
+                        fail,
+                    }));
+            assert!(
+                matches!(provider.infer(&model_request(DOOM)), Err(ProviderError::Io(message)) if message == "storage refused")
+            );
+            assert_eq!(directory.join("config").exists(), fail == 2);
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn dispatch_observes_durable_start_and_unknown_usage_stays_unknown() {
+        let (directory, curl) = fake_curl("test -s judge-log || exit 9; printf 'not-json\\n200'");
+        let provider =
+            JevProvider::new(&curl, "never-log-this-key", CommandLimits::new(&directory));
+        assert!(matches!(
+            provider.infer(&model_request(DOOM)),
+            Err(ProviderError::Unexpected(_))
+        ));
+        let journal = fs::read_to_string(directory.join("judge-log")).unwrap();
+        assert_eq!(journal.lines().count(), 2);
+        assert!(journal.contains("cost-nanousd nil"));
+        assert!(journal.contains("response \"not-json\""));
+        assert!(!journal.contains("never-log-this-key"));
         fs::remove_dir_all(directory).unwrap();
     }
 }
