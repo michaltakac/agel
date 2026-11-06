@@ -530,6 +530,10 @@ promise.
   One RuneScape login survives replacement and completes a rat kill;
   actor identity, mailbox and call history survive. Repair and judging are
   scripted fixtures, so agent understanding and OS service evolution remain open.
+  `v0.3.11` adds general model-written tool repair, predicted outputs,
+  separate text judgment, held-out replay, bounded retries and retained
+  control evals. Real successful and refused trials are recorded. Full
+  model cost accounting and actual OS service replacement remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

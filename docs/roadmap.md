@@ -34,6 +34,11 @@ Hitpoints XP checks. It does not complete the maximum-combat-stats workload.
 One running actor dispatches the new version without losing its mailbox or
 history, and a live RuneScape connection survives the edit. Diagnosis and
 the judge remain scripted fixtures; this does not measure model understanding.
+v0.3.11 adds the application-neutral `agel/repair` actor. Real model-written
+tools pass separate text judgments and held-out replay before activation.
+Recorded controls, diagnoses, predictions, failures and judge costs are linked
+in [the release notes](release-v0.3.11.md). It does not yet rewrite native
+services or measure Exo task performance.
 
 | Line | Status | Proof and limits |
 |---|---|---|

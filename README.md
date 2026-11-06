@@ -5,13 +5,14 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.10.** A running Agel actor dispatches tools through
-the version store. Judged, replayed edits affect its next call while its
-identity, mailbox and call history survive. `sh scripts/test-live-tools.sh`
-tests live replacement on one RuneScape login, followed by a rat kill and
-persisted XP. The repair and judge are scripted fixtures; autonomous diagnosis
-and native OS service replacement remain unfinished.
-See the [release notes](docs/release-v0.3.10.md).
+**Current release: v0.3.11.** General Agel agents request diagnoses, code
+repairs and predictions from a model, judge their text, replay displayed and
+held-out cases, then activate or refuse the change. Two real model-written
+tools improved from 4/8 to 8/8 and 3/6 to 6/6 checks. Run
+`sh scripts/test-repair.sh`; the real-model demo is `python3 scripts/demo-repair.py`.
+RuneScape is an application adapter, not part of the repair mechanism.
+Native OS service replacement and complete cost accounting remain unfinished.
+See the [release notes and failed-run evidence](docs/release-v0.3.11.md).
 
 v0.3.8 added live RuneScape tests that log in, walk, set one
 skill and grant items through an Agel client. Agel owns RSA/XTEA/ISAAC,
