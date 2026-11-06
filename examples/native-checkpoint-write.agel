@@ -1,0 +1,10 @@
+(def initial (evolution-edit (evolution-new) 'cell 'unless nil before
+  (list (dict 'arguments '((#f 42)) 'expected '(begin #f 42))) judge))
+(def store (persist (checkpoint-new (evolution-new)) initial))
+(def repaired (runtime-edit (runtime-new initial) 'unless before after expansions behavior judge))
+(def store (persist store (get repaired 'versions)))
+(check (= (get store 'revision) 2) "two commits were not acknowledged")
+(verify store 2)
+(append-record "\nAGEL-STATE/1 999 (l (i 3)")
+(console-log "checkpoint: PASS: two durable commits; deliberately torn successor retained")
+#t

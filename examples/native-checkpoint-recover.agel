@@ -1,0 +1,17 @@
+(def store (recover))
+(check (= (get store 'revision) 2) "reboot did not select last complete commit")
+(check (= (get store 'issues) 1) "torn successor was not reported")
+(verify store 2)
+(def runtime (runtime-new (get store 'state)))
+(def unsafe (runtime-revert runtime 'unless 1
+  (list (dict 'arguments '((#f 42)) 'expected '(begin #f 42))) behavior judge))
+(check (= (evolution-current (get unsafe 'versions) 'cell 'unless) 2) "unsafe revert activated after recovery")
+(def upgraded (runtime-edit unsafe 'unless after equivalent expansions behavior judge))
+(def store (persist store (get upgraded 'versions)))
+(check (= (get store 'revision) 3) "successor was not committed")
+(def read-back (recover))
+(check (= (get read-back 'revision) 3) "append after torn tail did not recover")
+(check (= (get read-back 'issues) 1) "damaged evidence was lost")
+(verify read-back 3)
+(console-log "checkpoint: PASS: recovered version 2 after reboot; rejected unsafe revert; committed version 3 past torn evidence")
+#t

@@ -6,7 +6,7 @@
 
   (def append
     (fn (left right)
-      (if (= left nil)
+      (if (= (count left) 0)
           right
           (cons (car left) (append (cdr left) right)))))
 
@@ -16,13 +16,13 @@
 
   (def map
     (fn (function values)
-      (if (= values nil)
+      (if (= (count values) 0)
           nil
           (cons (function (car values)) (map function (cdr values))))))
 
   (def filter
     (fn (predicate values)
-      (if (= values nil)
+      (if (= (count values) 0)
           nil
           (if (predicate (car values))
               (cons (car values) (filter predicate (cdr values)))
@@ -30,13 +30,13 @@
 
   (def foldl
     (fn (function initial values)
-      (if (= values nil)
+      (if (= (count values) 0)
           initial
           (foldl function (function initial (car values)) (cdr values)))))
 
   (def each
     (fn (function values)
-      (if (= values nil)
+      (if (= (count values) 0)
           nil
           (begin (function (car values)) (each function (cdr values)))))))
 

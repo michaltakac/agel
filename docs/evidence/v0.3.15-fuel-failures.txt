@@ -1,0 +1,9 @@
+; test-checkpoint-native-fixed.log (fixture only, no paid inference)
+agel: 35 forms, 17127343 steps, revision 1
+live-desktop> agel: error: evaluation error: resource/fuel-exhausted: evaluation exhausted its deterministic fuel budget
+live-desktop> agel: error: evaluation error: resource/fuel-exhausted: evaluation exhausted its deterministic fuel budget
+; test-checkpoint-native-fast.log (fixture only, no paid inference)
+agel: 35 forms, 6437797 steps, revision 1
+agel: 42 forms, 31984286 steps, revision 1
+live-desktop> agel: error: evaluation error: resource/fuel-exhausted: evaluation exhausted its deterministic fuel budget
+live-desktop> agel: error: evaluation error: resource/fuel-exhausted: evaluation exhausted its deterministic fuel budget

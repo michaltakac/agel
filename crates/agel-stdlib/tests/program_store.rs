@@ -37,6 +37,28 @@ fn crc_matches_independent_bitwise_reference() {
         .values
         .pop();
     assert_eq!(actual, Some(Value::Int(i64::from(!expected))));
+    let singles = world
+        .evaluate_with(
+            &format!(
+                "(import agel/sequence) (reverse (foldl (fn (out byte) (cons (bytes-crc32 (list byte)) out)) nil '{arguments}))"
+            ),
+            &options,
+        )
+        .unwrap()
+        .values
+        .pop();
+    let independent = Value::List(
+        (0..=255u32)
+            .map(|byte| {
+                let mut crc = u32::MAX ^ byte;
+                for _ in 0..8 {
+                    crc = (crc >> 1) ^ if crc & 1 != 0 { 0xedb8_8320 } else { 0 };
+                }
+                Value::Int(i64::from(!crc))
+            })
+            .collect(),
+    );
+    assert_eq!(singles, Some(independent));
 }
 
 #[test]

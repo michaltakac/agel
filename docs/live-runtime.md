@@ -63,3 +63,8 @@ fixture, or add `--live` for real inference with protected OS judge accounting.
 The native example archives the final version store in protected `judge-log`
 and verifies its bytes through `file-read`; this archive is evidence, not an
 automatically restored canonical active pointer.
+
+For new durable source-store commits, v0.3.15 supplies [linked checkpoints](checkpoints.md).
+Its reboot test restores the active form and verifies behavior before use.
+The earlier printed v0.3.14 archive remains evidence; it is not itself a
+checkpoint in the new inert format.

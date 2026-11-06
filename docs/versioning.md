@@ -548,6 +548,11 @@ promise.
   equivalent versions and guarded revert run in one native controller.
   Its protected version archive is not automatic canonical recovery; the
   Rust seed, OS service evolution and Exo comparisons remain unfinished.
+  `v0.3.15` adds Agel inert data encoding, linked checkpoints and explicit
+  bounded source-store recovery across OS reboots. Torn evidence and earlier
+  versions remain available; guarded edits/reverts continue after recovery.
+  General sequence and CRC policy fixes stay in Agel. Automatic service
+  discovery, streaming recovery and domain/kernel restoration remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

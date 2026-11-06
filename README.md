@@ -5,12 +5,15 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.14.** An Agel-written evaluator now resolves versioned
-language forms at runtime. Inside Agel OS, a model repairs a form used by an
-existing closure; judgment, replay and guarded revert run without restarting
-or recreating that closure. Protected OS records retain paid attempts and
-version history. The evaluator covers a subset of Agel; the Rust seed and
-OS service migration remain unfinished. See the [release notes and evidence](docs/release-v0.3.14.md).
+**Current release: v0.3.15.** Agel now encodes and recovers source version stores
+from linked checkpoints in protected OS storage. The native test restores an
+active language form across two reboots, keeps torn evidence, continues with
+a successor and persists a guarded revert. Recovery is explicit and bounded;
+automatic service discovery and native domain/kernel recovery remain open.
+See the [release notes and evidence](docs/release-v0.3.15.md).
+
+v0.3.14 added an Agel-written subset evaluator whose language forms can change
+without recreating existing closures. See the [release notes](docs/release-v0.3.14.md).
 
 v0.3.13 connected real model repair to native compilation and activation,
 with protected judge accounting. See the [release notes](docs/release-v0.3.13.md).

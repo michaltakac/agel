@@ -1,0 +1,67 @@
+(module agel/checkpoint
+  (import agel/sequence)
+  (import agel/bytes)
+  (import agel/data-codec)
+  (export checkpoint-new checkpoint-write checkpoint-recover)
+  (def require (fn (ok reason) (if ok #t (signal 'checkpoint/invalid reason))))
+  (def checkpoint-new (fn (state) (dict 'revision 0 'digest 0 'state state 'issues 0)))
+  (def checksum
+    (fn (text)
+      (text-crc32 text)))
+  (def checkpoint-write
+    (fn (store state render validate append-record)
+      (begin
+        (require (= (validate state) #t) "state failed validation")
+        (let ((revision (+ (get store 'revision) 1)))
+          (let ((payload (data-pack (list revision (get store 'digest) state) render)))
+            (begin
+              (require (< (text-bytes payload) 65537) "checkpoint exceeds reader bound")
+              (require (= (data-read payload) (list revision (get store 'digest) state)) "renderer changed checkpoint data")
+              (let ((digest (checksum payload)))
+                (let ((record (text-concat "\nAGEL-STATE/1 "
+                        (text-concat (decimal digest) (text-concat " " (text-concat payload "\n"))))))
+                  (begin
+                    (require (= (append-record record) (text-bytes record)) "checkpoint short append")
+                    (dict 'revision revision 'digest digest 'state state 'issues (get store 'issues)))))))))))
+  (def find-byte
+    (fn (text at byte)
+      (if (= at (text-bytes text)) at
+        (if (= (text-byte text at) byte) at (find-byte text (+ at 1) byte)))))
+  (def prefix? (fn (text prefix)
+    (if (< (text-bytes text) (text-bytes prefix)) #f (= (text-slice text 0 (text-bytes prefix)) prefix))))
+  (def inspect
+    (fn (store line validate)
+      (with-handler (* problem) (assoc store 'issues (+ (get store 'issues) 1))
+        (let ((split (find-byte line 13 32)))
+          (begin
+            (require (< split (text-bytes line)) "checkpoint omitted payload")
+            (let ((digest-text (text-slice line 13 split)) (payload (text-slice line (+ split 1) (text-bytes line))))
+              (let ((digest (checksum payload)) (decoded (data-read payload)))
+                (begin
+                  (require (= digest-text (decimal digest)) "checkpoint checksum differs")
+                  (require (= (type-of decoded) 'list) "checkpoint envelope must be a list")
+                  (require (= (count decoded) 3) "checkpoint envelope requires three fields")
+                  (require (= (car decoded) (+ 1 (get store 'revision))) "checkpoint revision is stale or missing")
+                  (require (= (car (cdr decoded)) (get store 'digest)) "checkpoint predecessor differs")
+                  (let ((state (car (cdr (cdr decoded)))))
+                    (begin
+                      (require (= (validate state) #t) "recovered state failed validation")
+                      (dict 'revision (car decoded) 'digest digest 'state state 'issues (get store 'issues))))))))))))
+  (def decimal
+    (fn (n)
+      (let ((digit (- n (* 10 (/ n 10)))))
+        (text-concat (if (< n 10) "" (decimal (/ n 10))) (text-slice "0123456789" digit (+ digit 1))))))
+  (def recover-lines
+    (fn (text at store validate)
+      (if (= at (text-bytes text)) store
+        (let ((end (find-byte text at 10)))
+          (let ((line (text-slice text at end)))
+            (if (= end (text-bytes text))
+              (if (prefix? line "AGEL-STATE/1 ") (assoc store 'issues (+ (get store 'issues) 1)) store)
+              (recover-lines text (+ end 1)
+                (if (prefix? line "AGEL-STATE/1 ") (inspect store line validate) store) validate)))))))
+  (def checkpoint-recover
+    (fn (text seed validate)
+      (begin
+        (require (= (validate seed) #t) "seed failed validation")
+        (recover-lines text 0 (checkpoint-new seed) validate)))))

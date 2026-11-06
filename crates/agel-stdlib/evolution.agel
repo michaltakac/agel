@@ -3,7 +3,7 @@
   (import agel/meta)
   (export evolution-new evolution-current evolution-source evolution-edit
           evolution-revert evolution-retry evolution-replay evolution-cost
-          evolution-edit-with-activation)
+          evolution-edit-with-activation evolution-valid?)
 
   (def evolution-new
     (fn () (dict 'versions (dict) 'active (dict) 'history nil 'next 1)))
@@ -133,6 +133,61 @@
                     (evolution-retry next kind name cases judge propose (- remaining 1))
                     next))))
           state)))
+  (def ensure-state (fn (ok) (if ok #t (signal 'evolution/state "invalid version store"))))
+  (def valid-entries
+    (fn (state version)
+      (if (= version (get state 'next)) #t
+        (let ((entry (get (get state 'versions) version)))
+          (begin
+            (ensure-state (= (type-of entry) 'map))
+            (ensure-state (valid-kind? (get entry 'kind)))
+            (ensure-state (has-key? entry 'source))
+            (ensure-state (= (get entry 'source) (get entry 'after)))
+            (let ((base (get entry 'base)))
+              (if (= base nil) (ensure-state (= (get entry 'before) nil))
+                (begin
+                  (ensure-state (= (type-of base) 'int))
+                  (ensure-state (if (< 0 base) (< base version) #f))
+                  (let ((old (get (get state 'versions) base)))
+                    (ensure-state (= (get old 'kind) (get entry 'kind)))
+                    (ensure-state (= (get old 'name) (get entry 'name)))
+                    (ensure-state (= (get old 'source) (get entry 'before))))))
+            (valid-entries state (+ version 1))))))))
+  (def valid-commits
+    (fn (state events expected)
+      (if (= events nil) (ensure-state (= expected (get state 'next)))
+        (let ((event (car events)))
+          (if (= (get event 'event) 'commit)
+            (begin
+              (ensure-state (= (get event 'version) expected))
+              (let ((entry (get (get state 'versions) expected)))
+                (ensure-state (= (get event 'kind) (get entry 'kind)))
+                (ensure-state (= (get event 'name) (get entry 'name))))
+              (valid-commits state (cdr events) (+ expected 1)))
+            (valid-commits state (cdr events) expected))))))
+  (def evolution-valid?
+    (fn (state)
+      (with-handler (* problem) #f
+        (begin
+          (ensure-state (= (type-of state) 'map))
+          (ensure-state (= (type-of (get state 'versions)) 'map))
+          (ensure-state (= (type-of (get state 'active)) 'map))
+          (ensure-state (= (type-of (get state 'next)) 'int))
+          (ensure-state (< 0 (get state 'next)))
+          (ensure-state (= (count (get state 'versions)) (- (get state 'next) 1)))
+          (valid-entries state 1)
+          (valid-commits state (get state 'history) 1)
+          (foldl (fn (_ kind)
+            (begin
+              (ensure-state (valid-kind? kind))
+              (let ((objects (get (get state 'active) kind)))
+                (ensure-state (= (type-of objects) 'map))
+                (foldl (fn (_ name)
+                  (let ((entry (get (get state 'versions) (get objects name))))
+                    (ensure-state (= (get entry 'kind) kind))
+                    (ensure-state (= (get entry 'name) name)))) #t (keys objects)))))
+            #t (keys (get state 'active)))
+          #t))))
   (def evolution-cost
     (fn (state)
       (foldl

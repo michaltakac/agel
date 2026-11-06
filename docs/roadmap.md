@@ -57,6 +57,13 @@ equivalent versions and guarded revert are verified. The version store is
 archived in protected OS storage, without automatic canonical recovery.
 See [the runtime contract](live-runtime.md) and [real evidence](release-v0.3.14.md).
 
+v0.3.15 adds inert source-store checkpoints and explicit recovery in Agel.
+Three native processes across three boots preserve active forms and old
+versions, refuse a torn successor and an unsafe revert, then commit a safe
+successor and guarded revert. This bounded example does not provide automatic
+service discovery or domain/kernel recovery. See [the API](checkpoints.md) and
+[native evidence and limits](release-v0.3.15.md).
+
 | Line | Status | Proof and limits |
 |---|---|---|
 | Homoiconic reader, evaluator, atomic batches, versioned worlds with rollback | done | `cargo test --workspace`, `scripts/test-bootstrap.sh` |
