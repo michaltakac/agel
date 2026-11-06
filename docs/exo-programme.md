@@ -18,6 +18,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.6 | Recoverable and larger native storage | Agel framing, interrupted-append recovery, capacity reservation, resume beyond 64 KiB and syscall exclusion tests |
 | v0.3.7 | Private world and Agel wire client | Container-isolated OpenRune, verified baseline rates and pre-login/cache protocol against the live world |
 | v0.3.8 | Working RuneScape smoke tests | Agel password login, ciphers, movement, live stats/inventory observations, skill/item setup, normal-account isolation and persisted server state |
+| v0.3.9 | Observed-target combat | Agel NPC bit decoding, tracked indices, attack and rat removal; exactly 8 Attack XP plus Hitpoints XP saved on a fresh normal account |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: private server and Agel client | Pinned server with required content, login, observe/action protocol in Agel | Byte relay only outside Agel; tested skill/item setup commands |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
@@ -113,8 +114,12 @@ inventory coins from 0 to 100. The tests inspect live game packets and verify
 persisted server rows. This is a smoke test, not the paper's task evaluation.
 The private profile disables login proof-of-work for both experiment arms;
 password authentication and game mechanics remain active. This profile
-must remain explicit in comparison manifests. Native OS networking and
-combat/crafting/quest gameplay tests remain unfinished.
+must remain explicit in comparison manifests. Native OS networking remains
+unfinished. v0.3.9 adds a rat-combat smoke test: a fresh normal account chooses
+an NPC from decoded observations, attacks, observes removal and verifies
+exactly 8 Attack XP plus Hitpoints XP in saved state. NPC extended masks,
+full spatial observations and high-level combat training remain unfinished.
+Crafting, quests and the actual comparative workloads are not yet tested.
 See [the client setup](osrs-client.md).
 
 ## Current boundary

@@ -5,7 +5,13 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.8.** Live RuneScape tests now log in, walk, set one
+**Current release: v0.3.9.** Agel discovers nearby NPCs, attacks an observed
+rat, waits for its removal and verifies exactly 8 Attack XP on a fresh normal
+account. Run `sh scripts/test-osrs-combat.sh`. The saved server state confirms
+the XP at 1× rates. This is a combat smoke test, not Exo's maximum-stats task.
+See the [release notes](docs/release-v0.3.9.md).
+
+v0.3.8 added live RuneScape tests that log in, walk, set one
 skill and grant items through an Agel client. Agel owns RSA/XTEA/ISAAC,
 packet parsing, observations, action history and the smoke-test assertions.
 Run `sh scripts/test-osrs-game.sh` against the private world. Native transport,

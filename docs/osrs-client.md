@@ -3,6 +3,8 @@
 The hosted Agel client can log in to the private revision-241 world, decode
 its game frames, observe skills and inventories, walk, and issue administrator
 commands. The gameplay assertions are in `examples/osrs/game-tests.agel`.
+NPC discovery, tracking and attack are also Agel. The combat scenario is in
+`examples/osrs/combat-test.agel`.
 Rust supplies bounded loopback streams, entropy bytes and the existing seed
 interpreter. Packet formats, RSA/XTEA/ISAAC, snapshots, action history and
 the smoke-test logic are Agel. These optional modules are loaded by the
@@ -61,6 +63,7 @@ of complete OSRS parity.
 
 ```sh
 sh scripts/test-osrs-game.sh
+sh scripts/test-osrs-combat.sh
 ```
 
 This runs the Agel scenarios and checks authoritative persisted server state:
@@ -117,7 +120,10 @@ if no graphical image exists yet.
 
 ## Current boundary
 
-There is no combat, crafting, quest, money-making or transfer score yet.
+There is a rat-combat smoke test, but no maximum-stats, crafting, quest,
+money-making or transfer score yet. The rat test requires exactly 8 Attack
+XP, increased Hitpoints XP and removal of the selected observed NPC index,
+then checks saved XP on the server. It does not read a separate kill counter.
 The agent policies, prompts, tool selection, persisted history, guarded policy
 activation and paired cost/time evaluation remain to be connected to this
 client. The DOOM demonstration still exists until its replacement is ready.
@@ -128,6 +134,9 @@ login after a socket disconnect. RSA uses the server's exponent 65537 and
 moduli up to 1024 bits. Login strings currently require ASCII. Cache groups
 remain bounded and are not decompressed or CRC-verified. Game packet
 framing covers the pinned revision's descriptors; semantic observations
-currently cover skills and inventories. Player/NPC movement and combat
-state still need semantic decoders. The client retains its observed packets
+cover skills, inventories and NPC spawn identities/tracked indices. NPC
+movement bitcodes are retained, but coordinates are not continuously
+reconstructed. Extended masks, health/death animations, transformations and
+player movement still need semantic decoding. Combat currently uses the
+root world only. The client retains its observed packets
 and actions as Agel state; durable native OS history remains a later stage.

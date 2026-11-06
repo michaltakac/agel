@@ -3,7 +3,8 @@
   (import agel/osrs-crypto)
   (import agel/osrs-wire)
   (import agel/osrs-packets)
-  (export osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-stat osrs-inventory-count)
+  (import agel/osrs-npcs)
+  (export osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -13,7 +14,7 @@
   (def osrs-game-state
     (fn (seed) (dict 'out (isaac-new seed)
                      'in (isaac-new (map (fn (n) (rem (+ n 50) 4294967296)) seed))
-                     'stats (dict) 'inventories (dict) 'history nil)))
+                     'stats (dict) 'inventories (dict) 'active-world 0 'npc-worlds (dict) 'history nil)))
   (def full-items
     (fn (bytes capacity slot out)
       (if (= slot capacity) out
@@ -55,7 +56,21 @@
                     (let ((inv (osrs-uint (take (drop bytes 4) 2 nil))))
                       (assoc state 'inventories (assoc (get state 'inventories) inv
                         (partial-items (drop bytes 6) (map-or-empty (get (get state 'inventories) inv))))))
-                    state))))))
+                    (if (= name "SET_ACTIVE_WORLD_V2")
+                        (assoc state 'active-world (osrs-uint (take bytes 2 nil)))
+                        (if (if (= name "NPC_INFO_SMALL_V6") #t (= name "NPC_INFO_LARGE_V6"))
+                            (let ((world (get state 'active-world)))
+                              (assoc state 'npc-worlds (assoc (get state 'npc-worlds) world
+                                (npcs-decode (if (get (get state 'npc-worlds) world)
+                                                (get (get state 'npc-worlds) world) (npcs-new))
+                                             bytes (= name "NPC_INFO_LARGE_V6")))))
+                            state))))))))
+  (def osrs-nearby-npcs
+    (fn (state)
+      (let ((world (get (get state 'npc-worlds) 0)))
+        (if world
+            (if (= (get world 'npcs) (dict)) nil
+                (map (fn (index) (get (get world 'npcs) index)) (keys (get world 'npcs)))) nil))))
   (def osrs-stat (fn (state stat) (get (get state 'stats) stat)))
   (def osrs-inventory-count
     (fn (state inventory item)
@@ -139,4 +154,11 @@
       (if (if (< 0 (text-bytes text)) (< (text-bytes text) 201) #f)
           (send state 84 (text-loop text 0 nil) #t (dict 'action 'command 'text text))
           (signal 'osrs/command "command length exceeds bound"))))
+  (def osrs-attack
+    (fn (state index)
+      (let ((world (get (get state 'npc-worlds) 0)))
+        (if (if world (get (get world 'npcs) index) #f)
+            (send state 44 (list 128 128 (rem (+ (rem index 256) 128) 256) (/ index 256)) #f
+                  (dict 'action 'attack 'index index 'type (get (get (get world 'npcs) index) 'type)))
+            (signal 'osrs/npc "attack target is not currently observed")))))
   (def osrs-keepalive (fn (state) (send state 75 nil #f (dict 'action 'keepalive)))))

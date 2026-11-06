@@ -27,6 +27,9 @@ stat/inventory observations and skill/item setup. `sh scripts/test-osrs-game.sh`
 checks those live with a normal account and a separate administrator.
 Native transport, agent policies and the actual benchmark tasks are open;
 see [the setup and precise scope](osrs-client.md).
+`sh scripts/test-osrs-combat.sh` adds a live rat kill in v0.3.9, using Agel
+NPC observations and attack packets, with exact Attack XP and persisted
+Hitpoints XP checks. It does not complete the maximum-combat-stats workload.
 
 | Line | Status | Proof and limits |
 |---|---|---|

@@ -183,6 +183,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     world.evaluate_with(include_str!("../osrs-crypto.agel"), &options)?;
     world.evaluate_with(include_str!("../osrs-login.agel"), &options)?;
     world.evaluate_with(include_str!("../osrs-packets.agel"), &options)?;
+    world.evaluate_with(include_str!("../osrs-bits.agel"), &options)?;
+    world.evaluate_with(include_str!("../osrs-npcs.agel"), &options)?;
     world.evaluate_with(include_str!("../osrs-game.agel"), &options)?;
     if let Some(value) = world
         .evaluate_with(&fs::read_to_string(program)?, &options)?

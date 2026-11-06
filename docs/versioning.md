@@ -522,6 +522,10 @@ promise.
   Movement, skill/item setup, permission separation and persisted state are
   verified against the private world. Native gameplay and task benchmarks
   remain open.
+  `v0.3.9` adds Agel NPC bit-field decoding and a live combat smoke test.
+  A fresh normal account kills an observed rat and gains exactly 8 Attack
+  XP, with saved Hitpoints XP also verified. Full combat training and Exo
+  comparisons remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
