@@ -19,6 +19,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.7 | Private world and Agel wire client | Container-isolated OpenRune, verified baseline rates and pre-login/cache protocol against the live world |
 | v0.3.8 | Working RuneScape smoke tests | Agel password login, ciphers, movement, live stats/inventory observations, skill/item setup, normal-account isolation and persisted server state |
 | v0.3.9 | Observed-target combat | Agel NPC bit decoding, tracked indices, attack and rat removal; exactly 8 Attack XP plus Hitpoints XP saved on a fresh normal account |
+| v0.3.10 | Live tool dispatch | Same actor and game connection survive replay-gated replacement; retained calls, unsafe revert refusal, macro-built tools and real combat; scripted repair and judge |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: private server and Agel client | Pinned server with required content, login, observe/action protocol in Agel | Byte relay only outside Agel; tested skill/item setup commands |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |

@@ -1,0 +1,42 @@
+(module agel/live-tools
+  (import agel/sequence)
+  (import agel/meta)
+  (import agel/evolution)
+  (export live-tools live-tools-state live-tools-call)
+
+  (def live-tools-state (fn (agent) (get (agent-info agent) 'heap)))
+  (def live-tools-call
+    (fn (state name arguments)
+      (let ((versions (get state 'versions)))
+        (let ((version (evolution-current versions 'cell name)))
+          (if version
+              (dict 'version version 'value
+                (meta-apply (meta-eval (evolution-source versions version) (meta-base-env)) arguments))
+              (signal 'tool/missing "no active tool" name))))))
+
+  (def behavior
+    (fn (self state message)
+      (let ((operation (get message 'operation)))
+        (if (= operation 'call)
+            (let ((result
+                    (with-handler (* problem)
+                      (dict 'error problem)
+                      (live-tools-call state (get message 'name) (get message 'arguments)))))
+              (begin
+                (send (get message 'reply-to) result)
+                (assoc state 'calls (append (get state 'calls)
+                  (list (dict 'request message 'result result))))))
+            (if (= operation 'edit)
+                (assoc state 'versions
+                  (evolution-edit (get state 'versions) 'cell (get message 'name)
+                    (get message 'before) (get message 'after)
+                    (get message 'cases) (get state 'judge)))
+                (if (= operation 'revert)
+                    (assoc state 'versions
+                      (evolution-revert (get state 'versions) 'cell (get message 'name)
+                        (get message 'version) (get message 'cases) (get state 'judge)))
+                    (signal 'tool/message "unknown live tool operation" operation)))))))
+
+  (def live-tools
+    (fn (name judge)
+      (spawn name behavior (dict 'versions (evolution-new) 'judge judge 'calls nil) nil))))

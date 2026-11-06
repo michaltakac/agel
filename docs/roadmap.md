@@ -30,6 +30,10 @@ see [the setup and precise scope](osrs-client.md).
 `sh scripts/test-osrs-combat.sh` adds a live rat kill in v0.3.9, using Agel
 NPC observations and attack packets, with exact Attack XP and persisted
 Hitpoints XP checks. It does not complete the maximum-combat-stats workload.
+`sh scripts/test-live-tools.sh` adds replay-gated tool activation in v0.3.10.
+One running actor dispatches the new version without losing its mailbox or
+history, and a live RuneScape connection survives the edit. Diagnosis and
+the judge remain scripted fixtures; this does not measure model understanding.
 
 | Line | Status | Proof and limits |
 |---|---|---|

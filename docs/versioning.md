@@ -526,6 +526,10 @@ promise.
   A fresh normal account kills an observed rat and gains exactly 8 Attack
   XP, with saved Hitpoints XP also verified. Full combat training and Exo
   comparisons remain open.
+  `v0.3.10` connects replay-gated versions to a running Agel tool actor.
+  One RuneScape login survives replacement and completes a rat kill;
+  actor identity, mailbox and call history survive. Repair and judging are
+  scripted fixtures, so agent understanding and OS service evolution remain open.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

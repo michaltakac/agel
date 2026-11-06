@@ -1,7 +1,7 @@
 (module agel/osrs-combat-test
   (import agel/sequence)
   (import agel/osrs-game)
-  (export test-rat-combat)
+  (export test-rat-combat test-rat-combat-using)
   ; Public revision-241 cache mapping: npc.rat=2854.
   (def rats (fn (state) (filter (fn (npc) (= (get npc 'type) 2854)) (osrs-nearby-npcs state))))
   (def abs (fn (n) (if (< n 0) (- 0 n) n)))
@@ -11,9 +11,12 @@
       (foldl (fn (best npc) (if best (if (< (distance npc) (distance best)) npc best) npc)) nil candidates)))
   (def test-rat-combat
     (fn (state)
+      (test-rat-combat-using state (fn (visible) (nearest (rats visible))))))
+  (def test-rat-combat-using
+    (fn (state choose)
       (let ((ready (osrs-await state (fn (g) (if (osrs-stat g 0) (if (osrs-stat g 3) #t #f) #f)))))
         (let ((visible (osrs-await ready (fn (g) (if (= (rats g) nil) #f #t)))))
-          (let ((target (nearest (rats visible)))
+          (let ((target (choose visible))
                 (attack-before (get (osrs-stat visible 0) 'xp))
                 (hp-before (get (osrs-stat visible 3) 'xp)))
             (let ((finished

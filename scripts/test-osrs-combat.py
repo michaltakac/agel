@@ -32,11 +32,18 @@ source += '(osrs-js5-open 241 \'(1 2 3 4)) (def crcs (osrs-cache-crcs (osrs-js5-
 source += '(def context (rsa-context ' + form(modulus) + ')) (def seed (osrs-random-seed)) (def game (osrs-game-state seed)) '
 source += '(osrs-login ' + form(username) + ' ' + form(password) + ' context crcs seed (entropy-read 24)) '
 source += Path('examples/osrs/combat-test.agel').read_text() + "\n(import agel/osrs-combat-test) (get (test-rat-combat game) 'report)"
+if '--live-tools' in sys.argv:
+    source = source.rsplit("(get (test-rat-combat game) 'report)", 1)[0]
+    source += Path('crates/agel-stdlib/live-tools.agel').read_text()
+    source += Path('examples/osrs/live-tools-test.agel').read_text()
+    source += "\n(import agel/osrs-live-tools-test) (get (test-live-combat game) 'report)"
 notice('RuneScape combat: discovering a rat, attacking and waiting for XP and removal')
 result = evaluate(source, 43594)
 assert password not in result.stdout + result.stderr, 'credential output'
 assert result.returncode == 0, result.stderr
 assert 'passed #t' in result.stdout and 'target-removed #t' in result.stdout, result.stdout
+if '--live-tools' in sys.argv:
+    assert 'live-tool-version 2' in result.stdout and 'preserved-calls 3' in result.stdout, result.stdout
 print(result.stdout.strip(), flush=True)
 notice('RuneScape combat: kill observed; verifying persisted Attack and Hitpoints XP')
 
