@@ -292,20 +292,7 @@ else:
         source+='(def task-start (clock-us))\n'
     if options.optimize:
         source+=f"(def continue-after-refusal {'#t' if task_adaptation else '#f'})\n"
-    if editing and not options.combat:
-        task_label = ('native-combat' if melee is not None else 'native-economy' if options.economy
-                      else 'native-craft' if options.craft else 'native-quest' if fresh_quest else None)
-        if task_label:
-            source += f"""(with-handler (* problem)
-  (begin
-    (console-log (text-concat "{task_label}: optimizer failure " (print-form problem)))
-    (console-log (text-concat "{task_label}: task-us " (print-form (- (clock-us) task-start))))
-    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
-  (begin
-"""
-        source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
-        if task_label:
-            source+='''(def inference-packets 0)
+    observation_hooks='''(def inference-packets 0)
 (def preparation-packets 0)
 (def inference-observation-error nil)
 (def observe-inference-packets
@@ -329,6 +316,25 @@ else:
 (def preparation-observe
   (fn () (def preparation-packets (+ preparation-packets (observe-ready-packets)))))
 '''
+    observation_finish='''(def inference-observe (fn () nil))
+(check (= inference-observation-error nil) "inference observation stream failed")
+(console-log (text-concat "native-opt: packets observed during preparation " (print-form preparation-packets)))
+(console-log (text-concat "native-opt: packets observed while awaiting inference " (print-form inference-packets)))
+'''
+    if editing and not options.combat:
+        task_label = ('native-combat' if melee is not None else 'native-economy' if options.economy
+                      else 'native-craft' if options.craft else 'native-quest' if fresh_quest else None)
+        if task_label:
+            source += f"""(with-handler (* problem)
+  (begin
+    (console-log (text-concat "{task_label}: optimizer failure " (print-form problem)))
+    (console-log (text-concat "{task_label}: task-us " (print-form (- (clock-us) task-start))))
+    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+  (begin
+"""
+        source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
+        if task_label:
+            source+=observation_hooks
         if options.optimize:
             if melee is not None or options.economy or options.craft or fresh_quest:
                 source+="(def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get ready 'history)))\n"
@@ -340,11 +346,7 @@ else:
             source+=(examples / 'native-session-repair-run.agel').read_text()+'\n'
         source+='(def ready (osrs-service-stop ready))\n'
         if task_label:
-            source+='''(def inference-observe (fn () nil))
-(check (= inference-observation-error nil) "inference observation stream failed")
-(console-log (text-concat "native-opt: packets observed during preparation " (print-form preparation-packets)))
-(console-log (text-concat "native-opt: packets observed while awaiting inference " (print-form inference-packets)))
-'''
+            source+=observation_finish
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
         if task_label:
@@ -362,6 +364,7 @@ else:
   (console-log (text-concat "native-combat: target " (print-form target)))))
 '''
         if options.optimize:
+            source+=observation_hooks
             source+='''(def combat-after-attack (fn (attacking target)
   (report-target target)
   (with-handler (* problem)
@@ -369,11 +372,13 @@ else:
       (console-log (text-concat "native-combat: optimizer failure " (print-form problem)))
       (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
     (begin
-      (osrs-service-start attacking)
+      (def ready attacking)
+      (osrs-service-start ready)
       (def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get attacking 'history)))
 '''
             source+=(examples / 'native-service-optimize-run.agel').read_text()+'\n'
-            source+="(def policy-uses 0) (osrs-service-stop attacking)))))\n"
+            source+=observation_finish
+            source+="(def policy-uses 0) (osrs-service-stop ready)))))\n"
         else:
             source+="(def combat-after-attack (fn (attacking target) (report-target target) attacking))\n"
         source+='''
@@ -651,7 +656,7 @@ if editing:
             assert task_adaptation and 'native-opt: continued with fixed policy after exhausted retries' in output
             assert 'native-opt: live uses 0' in output
         assert 'native-opt: recorded workload verified in append-only log' in output
-        if options.economy or fresh_quest:
+        if options.combat or options.economy or fresh_quest:
             assert re.search(r'^native-opt: packets observed while awaiting inference [1-9]\d*$', output, re.M), (
                 'adaptive run did not exercise inference observation')
     else:

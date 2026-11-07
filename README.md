@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.187.** Native transfer stops scanning once it
-finds the latest complete donor records. See the [release notes](docs/release-v0.3.187.md).
+**Current release: v0.3.188.** Adaptive one-rat combat can consume live
+observations during inference. See the [release notes](docs/release-v0.3.188.md).
+
+v0.3.187 stops donor scans once the required complete records are found. See the [release notes](docs/release-v0.3.187.md).
 
 v0.3.186 uses numeric lookup values in Agel checksum loops. See the [release notes](docs/release-v0.3.186.md).
 
