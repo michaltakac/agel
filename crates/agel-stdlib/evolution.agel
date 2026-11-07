@@ -2,7 +2,8 @@
   (import agel/sequence)
   (import agel/meta)
   (export evolution-new evolution-current evolution-source evolution-edit
-          evolution-revert evolution-retry evolution-replay evolution-cost
+          evolution-revert evolution-revert-with-activation evolution-retry evolution-retry-with-activation
+          evolution-replay evolution-cost
           evolution-edit-with-activation evolution-valid?)
 
   (def evolution-new
@@ -98,6 +99,8 @@
   (def evolution-edit-with-activation
     (fn (state kind name before after cases judge hook)
       (if (valid-kind? kind)
+        (if (if (= kind 'kernel-slot) (= hook nil) #f)
+          (record state (dict 'event 'refused 'reason "kernel slot requires a trial activation"))
           (let ((current (evolution-current state kind name)))
             (if (= before (evolution-source state current))
                 (let ((request (dict 'kind kind 'name name 'base current
@@ -112,25 +115,31 @@
                                   (prepare-commit tested request cases hook)
                                   (record tested (dict 'event 'rollback 'reason (get replay 'reason))))))
                           (record judged (dict 'event 'refused 'reason (get receipt 'reason)))))))
-                (record state (dict 'event 'conflict 'reason "diff base is stale"))))
+                (record state (dict 'event 'conflict 'reason "diff base is stale")))))
           (signal 'evolution/kind "unknown versioned object kind" kind))))
   (def evolution-revert
     (fn (state kind name version cases judge)
+      (evolution-revert-with-activation state kind name version cases judge nil)))
+  (def evolution-revert-with-activation
+    (fn (state kind name version cases judge hook)
       (let ((old (get (get state 'versions) version)))
         (if (if old (if (= (get old 'kind) kind) (= (get old 'name) name) #f) #f)
-            (evolution-edit state kind name
+            (evolution-edit-with-activation state kind name
               (evolution-source state (evolution-current state kind name))
-              (get old 'source) cases judge)
+              (get old 'source) cases judge hook)
             (record state (dict 'event 'refused 'reason "version belongs to another object"))))))
   (def evolution-retry
     (fn (state kind name cases judge propose remaining)
+      (evolution-retry-with-activation state kind name cases judge propose remaining nil)))
+  (def evolution-retry-with-activation
+    (fn (state kind name cases judge propose remaining hook)
       (if (< 0 remaining)
           (let ((current (evolution-current state kind name)))
             (let ((after (propose state)))
-              (let ((next (evolution-edit state kind name
-                            (evolution-source state current) after cases judge)))
+              (let ((next (evolution-edit-with-activation state kind name
+                            (evolution-source state current) after cases judge hook)))
                 (if (= current (evolution-current next kind name))
-                    (evolution-retry next kind name cases judge propose (- remaining 1))
+                    (evolution-retry-with-activation next kind name cases judge propose (- remaining 1) hook)
                     next))))
           state)))
   (def ensure-state (fn (ok) (if ok #t (signal 'evolution/state "invalid version store"))))
@@ -175,6 +184,7 @@
                     (ensure-state (= (get replayed 'event) 'replay))
                     (ensure-state (= (get replay 'passed) #t))
                     (ensure-state (< 0 (get replay 'checked)))
+                    (if (= kind 'kernel-slot) (ensure-state has-activation) nil)
                     (if has-activation
                       (begin
                         (ensure-state (= (get last 'version) expected))
