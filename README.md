@@ -5,10 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.31.** The transferred policy finished one
-fresh-account combat task 50.421 seconds faster than its fixed control.
-A fresh account also completed Cook's Assistant in one session. See the
-[release notes and evidence](docs/release-v0.3.31.md).
+**Current release: v0.3.32.** A fresh account trained to Attack level 2
+across ten observed encounters, with server-verified XP. See the
+[release notes and evidence](docs/release-v0.3.32.md).
+
+v0.3.31 records the [fresh-account combat comparison](docs/release-v0.3.31.md)
+and the uninterrupted quest retry.
 
 v0.3.30 first [restored a native policy and its audit history](docs/release-v0.3.30.md)
 on a fresh account without new inference.

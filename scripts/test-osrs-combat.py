@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Run the Agel rat-combat smoke test against a fresh normal account."""
+"""Verify Agel rat combat or bounded Attack training on a fresh normal account."""
+import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 import sys
@@ -18,6 +20,14 @@ def notice(text):
         path.write_text(text)
 
 
+parser = argparse.ArgumentParser(description=__doc__)
+mode = parser.add_mutually_exclusive_group()
+mode.add_argument('--live-tools', action='store_true')
+mode.add_argument('--attack-xp', type=int, help='train against rats until this Attack XP')
+options = parser.parse_args()
+if options.attack_xp is not None and not 1 <= options.attack_xp <= 512:
+    parser.error('--attack-xp must be between 1 and 512')
+
 username = 'agel' + secrets.token_hex(4)
 password = secrets.token_hex(8)
 directory = Path('target/osrs-login-probes')
@@ -31,20 +41,31 @@ source = '(import agel/osrs-wire) (import agel/osrs-login) (import agel/osrs-cry
 source += '(osrs-js5-open 241 \'(1 2 3 4)) (def crcs (osrs-cache-crcs (osrs-js5-group 255 255))) (wire-close) '
 source += '(def context (rsa-context ' + form(modulus) + ')) (def seed (osrs-random-seed)) (def game (osrs-game-state seed)) '
 source += '(osrs-login ' + form(username) + ' ' + form(password) + ' context crcs seed (entropy-read 24)) '
-source += Path('examples/osrs/combat-test.agel').read_text() + "\n(import agel/osrs-combat-test) (get (test-rat-combat game) 'report)"
-if '--live-tools' in sys.argv:
-    source = source.rsplit("(get (test-rat-combat game) 'report)", 1)[0]
+source += Path('examples/osrs/combat-test.agel').read_text()
+if options.live_tools:
     source += Path('crates/agel-stdlib/live-tools.agel').read_text()
     source += Path('examples/osrs/live-tools-test.agel').read_text()
     source += "\n(import agel/osrs-live-tools-test) (get (test-live-combat game) 'report)"
-notice('RuneScape combat: discovering a rat, attacking and waiting for XP and removal')
-result = evaluate(source, 43594)
+elif options.attack_xp is not None:
+    source += Path('examples/osrs/combat-training.agel').read_text()
+    max_fights = min(64, (options.attack_xp + 7) // 8 + 3)
+    source += f"\n(import agel/osrs-combat-training) (train-rat-attack game {options.attack_xp} {max_fights})"
+else:
+    source += "\n(import agel/osrs-combat-test) (get (test-rat-combat game) 'report)"
+notice('RuneScape combat: discovering targets, attacking and waiting for XP and removal')
+started = time.monotonic()
+result = evaluate(source, 43594, timeout=120 if options.attack_xp is None else 30 + max_fights * 300)
 assert password not in result.stdout + result.stderr, 'credential output'
 assert result.returncode == 0, result.stderr
 assert 'passed #t' in result.stdout and 'target-removed #t' in result.stdout, result.stdout
-if '--live-tools' in sys.argv:
+if options.live_tools:
     assert 'live-tool-version 2' in result.stdout and 'preserved-calls 3' in result.stdout, result.stdout
 expected_xp = combat_xp(result.stdout)
+if options.attack_xp is not None:
+    outcome = re.search(r'test rat-training passed #t goal-attack-xp (\d+) fights (\d+) ', result.stdout)
+    assert outcome and int(outcome[1]) == options.attack_xp, result.stdout
+    fights = int(outcome[2])
+    assert 1 <= fights <= max_fights and expected_xp[0] >= options.attack_xp, result.stdout
 print(result.stdout.strip(), flush=True)
 notice('RuneScape combat: kill observed; verifying persisted Attack and Hitpoints XP')
 
@@ -66,4 +87,10 @@ else:
 identity = dict(part.split('=', 1) for part in oracle.stdout.splitlines()[0].split())
 assert identity['rights'] == '' and int(identity['xp_rate_in_hundreds']) == 100, oracle.stdout
 print('persisted:', '\n'.join(line for line in oracle.stdout.splitlines() if line.startswith(('account=', 'stat=0 ', 'stat=3 '))), flush=True)
-notice('RuneScape PASS: observed rat kill, Attack/Hitpoints XP and normal-account persistence')
+if options.attack_xp is not None:
+    level = re.search(r' attack-level (\d+) encounters ', result.stdout)
+    assert level and re.search(rf'^stat=0 base={level[1]} visible={level[1]} ', oracle.stdout, re.M), oracle.stdout
+    print(f'Training and verification elapsed seconds: {time.monotonic() - started:.3f}', flush=True)
+    notice(f'RuneScape PASS: {fights} encounters reached {expected_xp[0]} saved Attack XP at normal rights')
+else:
+    notice('RuneScape PASS: observed rat kill, Attack/Hitpoints XP and normal-account persistence')

@@ -41,6 +41,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.29 | Agel task scoring and uninterrupted quest evidence | The scorer runs inside Agel OS on the recorded native combat pair, preserves unknown costs, and checks transfer identities. A fresh normal account completes the hosted quest in one session. |
 | v0.3.30 | Live fresh-account transfer | The guest restores the accepted policy and recorded workload from its donor disk, uses that version in live combat, and saves XP on a fresh account without new inference. One historical fixed sample provides timing context. |
 | v0.3.31 | Fresh fixed control and quest retries | Agel scores two native combat runs with matching world, guest, adapter and task code. The transferred arm is faster in this sample. The updated hosted quest route passes in one session. |
+| v0.3.32 | Bounded combat progression | The hosted fixed policy trains a fresh account to Attack level 2, retaining per-encounter observations and verifying saved Attack and Hitpoints XP. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
@@ -97,6 +98,12 @@ combat $3.71, crafting $2.99, money-making approximately 332k coins/model
 dollar; transfer combat $1.92 and crafting $0.88. A different server cannot
 establish a direct win from these numbers alone. Publish Agel/control paired
 results and distinguish them from a reproduction with a matched Exo arm.
+
+For an experiment with internet access, give both policy arms the same
+search, browser, video and program-inspection capabilities and budgets.
+Report that experiment separately from an RS-SDK-style baseline. Record
+retrieval and model costs, retain the source evidence, and run proposed
+strategies through replay and live checks before activation.
 
 ## Server inspection
 

@@ -83,6 +83,7 @@ of complete OSRS parity.
 ```sh
 sh scripts/test-osrs-game.sh
 sh scripts/test-osrs-combat.sh
+sh scripts/test-osrs-combat.sh --attack-xp 83
 sh scripts/test-osrs-mining.sh
 sh scripts/test-osrs-mining.sh --bronze
 sh scripts/test-osrs-mining.sh --sell
