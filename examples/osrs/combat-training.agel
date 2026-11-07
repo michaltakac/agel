@@ -122,7 +122,7 @@
                                  (fn (g) (= (osrs-varp g 43) (if (= mode 1) 3 1))) 4)))
                     (let ((retried (observe-stance (osrs-click-interface reset 593 component) confirmed 8)))
                       (if (confirmed retried) retried
-                        (if (= (osrs-varp retried 43) nil)
+                        (if (= (osrs-varp-updates retried 43) (osrs-varp-updates reset 43))
                           (begin
                             (progress (dict 'phase 'stance-awaiting-xp 'mode mode))
                             retried)

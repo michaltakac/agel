@@ -6,7 +6,7 @@
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
   (export osrs-observe-bounded osrs-observe-ready osrs-pause-events osrs-map-route osrs-route-cleared?)
-  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-take-ground-item osrs-ground-count)
+  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-varp-updates osrs-take-ground-item osrs-ground-count)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
   (def drop (fn (xs n) (if (= n 0) xs (drop (cdr xs) (- n 1)))))
@@ -107,9 +107,14 @@
   (def signed (fn (n limit) (if (< n (/ limit 2)) n (- n limit))))
   (def osrs-varp
     (fn (state id) (get (map-or-empty (get state 'varps)) id)))
+  (def osrs-varp-updates
+    (fn (state id)
+      (let ((count (get (map-or-empty (get state 'varp-updates)) id)))
+        (if count count 0))))
   (def remember-varp
     (fn (state id value)
-      (assoc state 'varps (assoc (map-or-empty (get state 'varps)) id value))))
+      (assoc (assoc state 'varps (assoc (map-or-empty (get state 'varps)) id value))
+        'varp-updates (assoc (map-or-empty (get state 'varp-updates)) id (+ 1 (osrs-varp-updates state id))))))
   (def varp-word
     (fn (bytes at)
       (osrs-uint (list (nth bytes (+ at 1)) (nth bytes at)

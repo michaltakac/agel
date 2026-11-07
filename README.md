@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.211.** Melee scores show which stance fallbacks
-were confirmed by XP. See the [release notes](docs/release-v0.3.211.md).
+**Current release: v0.3.212.** Melee training distinguishes stale
+stance observations from fresh updates. See the [release notes](docs/release-v0.3.212.md).
+
+v0.3.211 shows which stance fallbacks were confirmed by XP.
+See the [release notes](docs/release-v0.3.211.md).
 
 v0.3.210 includes saved XP and stance for both melee arms.
 See the [release notes](docs/release-v0.3.210.md).

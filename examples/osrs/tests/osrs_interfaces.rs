@@ -392,11 +392,11 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
         (osrs-open-interface? resynced 312) talk-body invalid-talk
         choice-body continue-body invalid-resume trade-body invalid-trade sell-body buy-body invalid-offset absent-item invalid-sale
         (osrs-interface-opens opened 312) (osrs-interface-opens reopened 312)
-        (osrs-varp small 101) (osrs-varp large 29) (osrs-varp wide 29) (osrs-varp reset 29) (ground-observations original))
+        (osrs-varp small 101) (osrs-varp large 29) (osrs-varp wide 29) (osrs-varp reset 29) (osrs-varp-updates original 29) (osrs-varp-updates reset 29) (ground-observations original))
     "#, &options).unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (235 12 92 12 0 37 50 128) (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil (nil 1 3 0 0 3 nil nil))")
+        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (235 12 92 12 0 37 50 128) (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil 0 2 (nil 1 3 0 0 3 nil nil))")
     );
     let pause = world
         .evaluate(
@@ -538,7 +538,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
             r#"
       (module agel/osrs-game
         (export osrs-keepalive osrs-observe-bounded osrs-observe-ready osrs-stat osrs-nearby-npcs osrs-attack
-          osrs-walk osrs-open-interface? osrs-click-interface osrs-varp osrs-wait-ticks)
+          osrs-walk osrs-open-interface? osrs-click-interface osrs-varp osrs-varp-updates osrs-wait-ticks)
         (def rat-one (dict 'index 1 'type 2854))
         (def rat-two (dict 'index 2 'type 2854))
         (def osrs-keepalive (fn (state) state))
@@ -574,7 +574,11 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
                          (assoc clicked 'stance (get clicked 'server-stance)) clicked)
                        'npcs (list rat-one rat-two))
                 clicked))))
-        (def osrs-varp (fn (state varp) (if (get state 'missing-varp) nil (get state 'stance))))
+        (def osrs-varp
+          (fn (state varp)
+            (if (get state 'missing-varp) (get state 'cached-stance) (get state 'stance))))
+        (def osrs-varp-updates (fn (state varp) (if (if (get state 'missing-varp) (if (get state 'fresh-contradiction) #f #t) #f)
+            0 (count (get state 'clicks)))))
         (def osrs-attack
           (fn (state index)
             (let ((next (assoc state 'attempts (cons index (get state 'attempts)))))
@@ -618,11 +622,15 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
           1 0 8 nil))
       (def xp-confirmations nil)
       (def missing (train-rat-melee-with-progress
-        (dict 0 0 1 0 2 0 3 1154 'missing-varp #t 'npcs (list (dict 'index 1 'type 2854))) 8 2 nil
+        (dict 0 0 1 0 2 0 3 1154 'missing-varp #t 'cached-stance 0 'npcs (list (dict 'index 1 'type 2854))) 8 2 nil
         (fn (phase)
           (if (= (get phase 'phase) 'stance-awaiting-xp)
             (def xp-confirmations (cons (get phase 'mode) xp-confirmations)) nil))))
-      (list (get (get missing 'report) 'strength-xp) (get (get missing 'report) 'defence-xp)
+      (def contradicted (with-handler (osrs/training problem) (get (get problem 'data) 'observed)
+        (train-rat-melee-result
+          (dict 0 0 1 0 2 0 3 1154 'missing-varp #t 'cached-stance 0 'fresh-contradiction #t
+            'npcs (list (dict 'index 1 'type 2854))) 8 2 nil)))
+      (list contradicted (get (get missing 'report) 'strength-xp) (get (get missing 'report) 'defence-xp)
         (reverse xp-confirmations)
         (get (get credited 'report) 'target-index)
         (get (get credited 'state) 'attempts)
@@ -642,6 +650,6 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(8 8 (1 3) 1 (1) 2 (1 2) #t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
+        Some("(0 8 8 (1 3) 1 (1) 2 (1 2) #t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
     );
 }
