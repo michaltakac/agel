@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.153.** Agents can replay a retained tool version
-while their current tools stay active. See the [release notes](docs/release-v0.3.153.md).
+**Current release: v0.3.154.** The OSRS melee example requires an observed
+stance change before training the next skill. See the [release notes](docs/release-v0.3.154.md).
+
+v0.3.153 lets agents replay a retained tool version while their current tools stay active. See the [release notes](docs/release-v0.3.153.md).
 
 v0.3.152 verifies judge receipt order in native benchmark scoring. See the [release notes](docs/release-v0.3.152.md).
 
