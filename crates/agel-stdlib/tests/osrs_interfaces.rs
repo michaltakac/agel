@@ -543,7 +543,9 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
       (import agel/sequence)
       (def trained (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154) 8 2 nil))
       (def report (get trained 'report))
-      (def late (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154 'late #t) 8 2 nil))
+      (def phases nil)
+      (def late (train-rat-melee-with-progress (dict 0 0 1 0 2 0 3 1154 'late #t) 8 2 nil
+        (fn (phase) (def phases (cons (get phase 'phase) phases)))))
       (list (get report 'passed) (get report 'defence-xp) (get report 'stance)
         (reverse (get (get trained 'state) 'clicks))
         (reverse (get (get trained 'state) 'attempts))
@@ -551,12 +553,12 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (get (get late 'report) 'stance)
         (reverse (get (get late 'state) 'clicks))
         (next-rat (dict 'npcs (list (dict 'index 2 'type 2854))) 1)
-        (next-rat (dict 'npcs nil) 1))
+        (next-rat (dict 'npcs nil) 1) (reverse phases))
     "#,
         )
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 1 (10 18 10 18 10 18) (1 1 2 2) (1 2 2) 3 (10 18) 2 1)")
+        Some("(#t 8 1 (10 18 10 18 10 18) (1 1 2 2) (1 2 2) 3 (10 18) 2 1 (training stance-requested training stance-requested training))")
     );
 }
