@@ -118,7 +118,11 @@ def stage(image: str, kernel: bytes, signature: bytes) -> int:
     if len(signature) != 64:
         raise ValueError("a signature is 64 bytes")
     selector = read_selector(image)
-    slot = 1 - selector["trusted"]
+    trusted = selector["trusted"]
+    slot = 1 - trusted
+    if selector["candidate"] != NO_CANDIDATE:
+        # A reboot during replacement must load the trusted slot.
+        write_selector(image, {**EMPTY, "trusted": trusted})
     with open(image, "r+b") as disk:
         disk.seek(SLOT_BASE[slot] * SECTOR)
         disk.write(kernel.ljust(SLOT_SECTORS * SECTOR, b"\0"))
@@ -127,7 +131,7 @@ def stage(image: str, kernel: bytes, signature: bytes) -> int:
     write_selector(
         image,
         {
-            "trusted": selector["trusted"],
+            "trusted": trusted,
             "candidate": slot,
             "attempts": 0,
             "verified": 0,
