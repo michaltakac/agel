@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.55.** The native quest example reaches the cook
-dialogue from the castle entrance. See the [release notes](docs/release-v0.3.55.md).
+**Current release: v0.3.56.** The native quest checkpoint records dialogue
+packets and continuation actions. See the [release notes](docs/release-v0.3.56.md).
+
+v0.3.55 reaches the cook dialogue from the castle entrance.
+See the [release notes](docs/release-v0.3.55.md).
 
 v0.3.54 retries an unconfirmed combat stance.
 See the [release notes](docs/release-v0.3.54.md).

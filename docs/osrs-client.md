@@ -108,6 +108,8 @@ all three ingredients, pass its evidence directory to
 `scripts/test-native-network.py --quest --quest-resume EVIDENCE`.
 The guest rechecks the saved inventory and starts at the cook dialogue.
 The result is labeled as a checkpoint run and omits the fresh-account score.
+Its private serial log includes bounded interface packets and the continuation
+inputs issued by Agel.
 
 The native melee commands use the same fresh-account XP goal. The
 adaptive arm times the proposal, text judgment and measured replay as
