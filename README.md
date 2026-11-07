@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.188.** Adaptive one-rat combat can consume live
-observations during inference. See the [release notes](docs/release-v0.3.188.md).
+**Current release: v0.3.189.** Agel OS reports a completed fixed versus
+adaptive one-rat comparison. See the [release notes](docs/release-v0.3.189.md).
+
+v0.3.188 consumes live one-rat observations during inference. See the [release notes](docs/release-v0.3.188.md).
 
 v0.3.187 stops donor scans once the required complete records are found. See the [release notes](docs/release-v0.3.187.md).
 
