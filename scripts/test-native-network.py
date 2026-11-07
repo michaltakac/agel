@@ -401,7 +401,7 @@ else:
         source+='''(import agel/osrs-quest-test)
 (def log-quest
   (fn (phase) (console-log (text-concat "native-quest: "
-    (if (= (type-of phase) 'dict) (print-form phase) phase)))))
+    (if (= (type-of phase) 'string) phase (print-form phase))))))
 (def run-quest
   (fn (scenario)
     (with-handler (* problem)
