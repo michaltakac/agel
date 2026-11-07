@@ -151,6 +151,15 @@
                 (observe "milled wheat and collected a pot of flour")
                 (assoc (finish-cooks-assistant-using (return-to-cook supplies) observe) 'source 'gathered))))))))
 
+  (def enter-castle-kitchen
+    (fn (state)
+      (let ((front (travel (osrs-walk state 3221 3218) 5)))
+        (let ((opened (travel (osrs-use-location front 1529 3216 3218) 2)))
+          (let ((hall (travel (osrs-walk opened 3215 3221) 3)))
+            (let ((passage (travel (osrs-use-location hall 12349 3213 3221) 2)))
+              (let ((kitchen-door (travel (osrs-walk passage 3207 3218) 4)))
+                (travel (osrs-use-location kitchen-door 12348 3207 3217) 2))))))))
+
   (def start-cook-dialogue
     (fn (state approaches observe)
       (require approaches "cook did not open a dialogue after three approaches")
@@ -170,7 +179,7 @@
       (let ((stock (ready state)))
         (require (= (ingredients stock) '(1 1 1)) "expected exactly one of each quest ingredient")
         (require (= (xp stock) 0) "expected no starting Cooking XP")
-        (let ((entrance (travel (osrs-walk stock 3221 3218) 5)))
+        (let ((entrance (enter-castle-kitchen stock)))
           (let ((finished (start-cook-dialogue entrance '((3208 3216) (3207 3215) (3209 3215)) observe)))
             (require (= (ingredients finished) '(0 0 0)) "the cook did not consume all ingredients")
             (dict 'test 'cooks-assistant 'passed #t 'choices 2 'quest-points (osrs-varp finished 101)

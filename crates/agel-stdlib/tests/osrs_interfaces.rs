@@ -11,7 +11,7 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                  (export osrs-stat osrs-inventory-count osrs-await osrs-nearby-npcs
                          osrs-varp osrs-open-interface? osrs-interface-opens
                          osrs-await-bounded osrs-observe-bounded osrs-keepalive osrs-resume-dialogue
-                         osrs-talk osrs-walk osrs-wait-ticks)
+                         osrs-talk osrs-walk osrs-use-location osrs-wait-ticks)
                  (def osrs-stat (fn (state _) (dict 'xp (if (= (get state 'page) 3) 300 0))))
                  (def osrs-inventory-count (fn (state inv item) (if (= (get state 'page) 3) 0 1)))
                  (def osrs-await (fn (state ready) state))
@@ -34,6 +34,13 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                    (fn (state id) (if (= id 219) (get state 'page) 0)))
                  (def osrs-keepalive (fn (state) state))
                  (def osrs-walk (fn (state x z) (assoc state 'tile (list x z))))
+                 (def osrs-use-location
+                   (fn (state id x z)
+                     (let ((door (list id x z (get state 'tile) (get state 'door))))
+                       (if (= door '(1529 3216 3218 (3221 3218) nil)) (assoc state 'door 'castle)
+                         (if (= door '(12349 3213 3221 (3215 3221) castle)) (assoc state 'door 'passage)
+                           (if (= door '(12348 3207 3217 (3207 3218) passage)) (assoc state 'door 'kitchen)
+                             (signal 'test/route "expected the castle doors in order")))))))
                  (def osrs-wait-ticks
                    (fn (state ticks)
                      (if (= (get state 'talks) 2)
@@ -41,7 +48,7 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                  (def osrs-talk
                    (fn (state index)
                      (if (= (get state 'talks) 0)
-                       (if (= (get state 'tile) '(3208 3216)) (assoc state 'talks 1)
+                       (if (= (list (get state 'tile) (get state 'door)) '((3208 3216) kitchen)) (assoc state 'talks 1)
                          (signal 'test/talk "expected the north approach"))
                        (begin
                          (if (= (get state 'talks) 1) #t (signal 'test/talk "unexpected extra talk"))
