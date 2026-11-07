@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.154.** The OSRS melee example requires an observed
-stance change before training the next skill. See the [release notes](docs/release-v0.3.154.md).
+**Current release: v0.3.155.** The OSRS melee example reports reaching its XP
+goal separately from observing target removal. See the [release notes](docs/release-v0.3.155.md).
+
+v0.3.154 requires an observed stance change before training the next skill. See the [release notes](docs/release-v0.3.154.md).
 
 v0.3.153 lets agents replay a retained tool version while their current tools stay active. See the [release notes](docs/release-v0.3.153.md).
 
