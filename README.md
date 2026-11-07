@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.63.** Fresh-account transfer replays the retained
-workload before connecting. See the [release notes](docs/release-v0.3.63.md).
+**Current release: v0.3.64.** The native evaluation dispatches and reverts
+a macro-built tool. See the [release notes](docs/release-v0.3.64.md).
+
+v0.3.63 replays the retained workload before fresh-account transfer.
+See the [release notes](docs/release-v0.3.63.md).
 
 v0.3.62 retains signed kernel versions for restaging after slot reuse.
 See the [release notes](docs/release-v0.3.62.md).

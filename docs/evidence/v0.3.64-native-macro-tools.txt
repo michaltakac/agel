@@ -1,0 +1,6 @@
+agel: 58 forms, 6689984 steps, revision 2
+process agel exited with status 0
+agel: standard library installed, 3792 steps
+native-tools: PASS: macro-built tool dispatched and reverted
+agel: 94 forms, 40551 steps, revision 2
+process agel exited with status 0

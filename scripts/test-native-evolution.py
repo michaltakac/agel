@@ -49,6 +49,11 @@ with tempfile.TemporaryDirectory(prefix='agel-native-evolve-', dir='/tmp') as di
     source.write_text(text)
     subprocess.run(['python3', 'scripts/install-program.py', '--region', 'data', disk,
                     'native-evo.agel', str(source)], check=True, capture_output=True)
+    tools = Path(directory) / 'live-tools.agel'
+    tools.write_text(Path('crates/agel-stdlib/tests/live-tools.agel').read_text()
+                     + '\n(console-log "native-tools: PASS: macro-built tool dispatched and reverted")\n')
+    subprocess.run(['python3', 'scripts/install-program.py', '--region', 'data', disk,
+                    tools.name, str(tools)], check=True, capture_output=True)
     machine = console.Machine(disk, directory)
     try:
         assert 'formatted' in machine.submit(':fs-format')
@@ -60,6 +65,8 @@ with tempfile.TemporaryDirectory(prefix='agel-native-evolve-', dir='/tmp') as di
         assert 'native-program: PASS:' in reply and 'process agel exited with status 0' in reply, reply[-4000:]
         assert 'native-domain: PASS:' in reply, reply[-4000:]
         assert reply.count('judge-start') == 9 and reply.count('judge-result') == 9 and 'cost-microusd 0' in reply, reply
+        reply = run(machine, ':exec agel -- /data/live-tools.agel')
+        assert 'native-tools: PASS:' in reply and 'process agel exited with status 0' in reply, reply[-4000:]
         assert 'refused the effect' in machine.submit('(file-write "judge-log" "erased")')
         # After the Agel controller exits, its retained ELF versions still run.
         for name, expected in [('v1a0c0', 41), ('v2a4c0', 42)]:
