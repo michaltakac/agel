@@ -542,7 +542,9 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (def rat-one (dict 'index 1 'type 2854))
         (def rat-two (dict 'index 2 'type 2854))
         (def osrs-keepalive (fn (state) state))
-        (def osrs-observe-bounded (fn (state _ready _ticks) state))
+        (def osrs-observe-bounded
+          (fn (state _ready _ticks)
+            (if (get state 'pending-credit) (assoc (assoc state 0 8) 3 1156) state)))
         (def osrs-observe-ready
           (fn (state ready _limit)
             (if (get state 'late)
@@ -552,7 +554,9 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (def osrs-stat
           (fn (state skill) (dict 'xp (get state skill) 'level 1)))
         (def osrs-nearby-npcs (fn (state) (get state 'npcs)))
-        (def osrs-walk (fn (state x z) state))
+        (def osrs-walk
+          (fn (state x z)
+            (if (get state 'vanish) (signal 'test "walked toward a vanished target") state)))
         (def osrs-open-interface? (fn (state interface) #t))
         (def osrs-wait-ticks
           (fn (state ticks)
@@ -574,12 +578,14 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (def osrs-attack
           (fn (state index)
             (let ((next (assoc state 'attempts (cons index (get state 'attempts)))))
-              (if (= (get state 'server-stance) nil)
-                (assoc (assoc next 0 8) 3 1156)
+              (if (if (get state 'vanish) (= index 1) #f)
+                (assoc (assoc next 'npcs (list rat-two)) 'pending-credit (get state 'late-credit))
+                (if (= (get state 'server-stance) nil)
+                  (assoc (assoc next 0 8) 3 1156)
                 (if (= index 1) next
                   (assoc (assoc (assoc next 'npcs (list rat-one))
                   (if (= (get state 'server-stance) 1) 2 1) 8)
-                  3 (+ (get state 3) 2))))))))
+                  3 (+ (get state 3) 2)))))))))
       (module agel/osrs-combat-test
         (export nearest-rat)
         (def nearest-rat (fn (_) (dict 'index 1 'type 2854))))
@@ -588,7 +594,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     let training = include_str!("../combat-training.agel").replace(
         "(export train-rat-attack",
-        "(export next-rat train-rat-attack",
+        "(export fight-again next-rat train-rat-attack",
     );
     world.evaluate(&training).unwrap();
     let result = world
@@ -605,7 +611,16 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
           (begin
             (def phases (cons 'after-attack phases))
             (assoc state 'attack-at-transition (get state 0))))))
-      (list (get report 'passed) (get report 'defence-xp) (get report 'stance)
+      (def retargeted
+        (fight-again (dict 0 0 3 1154 'vanish #t 'npcs (list (dict 'index 1 'type 2854))) 1 0 8 nil))
+      (def credited
+        (fight-again (dict 0 0 3 1154 'vanish #t 'late-credit #t 'npcs (list (dict 'index 1 'type 2854)))
+          1 0 8 nil))
+      (list (get (get credited 'report) 'target-index)
+        (get (get credited 'state) 'attempts)
+        (get (get retargeted 'report) 'target-index)
+        (reverse (get (get retargeted 'state) 'attempts))
+        (get report 'passed) (get report 'defence-xp) (get report 'stance)
         (reverse (get (get trained 'state) 'clicks))
         (reverse (get (get trained 'state) 'attempts))
         (map (fn (phase) (get (car (get phase 'encounters)) 'target-index)) (get report 'phases))
@@ -619,6 +634,6 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
+        Some("(1 (1) 2 (1 2) #t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
     );
 }

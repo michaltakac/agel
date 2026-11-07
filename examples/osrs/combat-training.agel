@@ -34,11 +34,13 @@
     (fn (state index complete remaining)
       (let ((visible (wait-ticks state (fn (g) (observed-rat g index)) 8)))
         (if (observed-rat visible index)
-          (let ((attempt (wait-ticks (osrs-attack visible index) complete 8)))
-            (if (complete attempt) attempt
-              (let ((reset (wait-ticks (osrs-walk attempt 3221 3218) complete 3)))
-                (if (if (complete reset) #t (= remaining 0)) reset
-                  (attack-with-retry reset index complete (- remaining 1))))))
+          (let ((settled (fn (g) (if (complete g) #t (= (observed-rat g index) nil)))))
+            (let ((attempt (wait-ticks (osrs-attack visible index) settled 8)))
+              (if (settled attempt) (wait-ticks attempt complete 1)
+                (let ((reset (wait-ticks (osrs-walk attempt 3221 3218) settled 3)))
+                  (if (settled reset) (wait-ticks reset complete 1)
+                    (if (= remaining 0) reset
+                      (attack-with-retry reset index complete (- remaining 1))))))))
           visible))))
   (def fight-again
     (fn (state index skill goal excluded)
