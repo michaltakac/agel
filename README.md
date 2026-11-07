@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.108.** The Cook’s Assistant hand-in allows more time
-for its first actionable dialogue page. See the [release notes](docs/release-v0.3.108.md).
+**Current release: v0.3.109.** Cook’s Assistant has matched fixed and adaptive
+native benchmark arms. See the [release notes](docs/release-v0.3.109.md).
+
+v0.3.108 extends the first actionable dialogue window for Cook’s Assistant.
+See the [release notes](docs/release-v0.3.108.md).
 
 v0.3.107 pins the donor and fixed control for native transfer.
 See the [release notes](docs/release-v0.3.107.md).

@@ -17,7 +17,7 @@ import time
 import graphical_console as console
 
 sys.path.insert(0, str(Path(__file__).with_name("osrs")))
-from test_support import combat_xp, combat_xp_saved, craft_saved, craft_stock, economy_saved, melee_failure_saved, melee_levels_saved, melee_xp
+from test_support import combat_xp, combat_xp_saved, craft_saved, craft_stock, economy_saved, melee_failure_saved, melee_levels_saved, melee_xp, quest_saved, quest_unfinished
 
 parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
@@ -49,11 +49,12 @@ if options.craft_fixture is not None and not (
 melee=options.melee_xp
 if melee is not None and (not 1 <= melee <= 512 or options.combat):
     parser.error('--melee-xp requires a goal of 1..512 and is separate from --combat')
-if options.optimize and (options.challenge or options.repair or options.quest):
-    parser.error('--optimize can be combined with --combat, --melee-xp, --economy or --craft')
+if options.optimize and (options.challenge or options.repair or options.quest_resume):
+    parser.error('--optimize supports combat, melee, economy, crafting, or a fresh quest run')
 editing=options.repair or options.optimize
 combat_workload=options.combat or melee is not None
-encoder_workload=options.optimize or combat_workload or options.economy or options.craft
+fresh_quest = options.quest and not options.quest_resume
+encoder_workload=options.optimize or combat_workload or options.economy or options.craft or fresh_quest
 shared_carrier=options.repair or encoder_workload
 if options.combat and (options.challenge or options.repair or options.craft or options.economy or options.quest):parser.error('--combat can only be combined with --optimize')
 if options.transfer_from and (not combat_workload or editing):
@@ -65,7 +66,7 @@ print('Evidence:', directory, flush=True)
 proposal="(dict 'diagnosis \"fixed cadence pays for more service calls than the observed work bound requires\" 'after '(fn (limit) (* 64 (/ limit 64))) 'predictions '(64 128))" if options.optimize else None
 environment=provider_environment(directory, options.live, delay=20, proposal=proposal) if shared_carrier else dict(os.environ)
 environment['AGEL_BYTE_ENDPOINT']='127.0.0.1:43594'
-if melee is not None:
+if melee is not None or fresh_quest:
     environment['AGEL_GUEST_TIMEOUT_SECONDS']='1680'
 if shared_carrier:
     # Give the bridge time to drain an in-flight judge receipt after its deadline.
@@ -105,6 +106,8 @@ if options.quest:
     manifest['evaluation_fuel']=250_000_000
     manifest['keepalive_interval_us']=3_000_000
     manifest['guest_memory_mib']=1024
+    if fresh_quest:
+        manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
     if options.quest_resume:
         prior = options.quest_resume
         original = json.loads((prior/'world.json').read_text())
@@ -207,7 +210,7 @@ if shared_carrier:
         else:
             source+="(def retained-policy nil)\n"
         service_policy=(examples / 'native-service-optimize.agel').read_bytes()
-        if melee is not None or options.economy or options.craft:
+        if melee is not None or options.economy or options.craft or fresh_quest:
             manifest['service_policy_sha256']=hashlib.sha256(service_policy).hexdigest()
             if options.transfer_from:
                 for field in ('service_policy_sha256', 'training_policy_sha256',
@@ -269,7 +272,7 @@ else:
   (begin (osrs-login '''+json.dumps(account['username'])+' '+json.dumps(account['password'])+''' context crcs seed (entropy-read 24)) #t))
 '''
     source+='(console-log "native-network: password login accepted")\n'
-    if not options.quest:
+    if not options.quest_resume:
         source+='''(def ready (osrs-await game (fn (g) (if (osrs-stat g 13) (if (get (get g 'inventories) 93) #t #f) #f))))
 '''
         source+=f"(if (= (get (osrs-stat ready 13) 'level) {88 if options.craft else 1}) #t (signal 'native/test \"unexpected initial Smithing level\"))\n"
@@ -277,13 +280,13 @@ else:
 (console-log (text-concat "native-network: observations " (print-form
   (dict 'smithing-level (get (osrs-stat ready 13) 'level) 'coins (osrs-inventory-count ready 93 995)))))
 '''
-    if combat_workload or options.economy or options.craft:
+    if combat_workload or options.economy or options.craft or options.quest:
         source+='(def task-start (clock-us))\n'
     if options.optimize:
-        source+=f"(def continue-after-refusal {'#t' if melee is not None or options.economy or options.craft else '#f'})\n"
+        source+=f"(def continue-after-refusal {'#t' if melee is not None or options.economy or options.craft or fresh_quest else '#f'})\n"
     if editing and not options.combat:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
-        if options.economy:
+        if options.economy or fresh_quest:
             source+='''(def inference-packets 0)
 (def inference-observation-error nil)
 (def observe-inference-packets
@@ -305,7 +308,7 @@ else:
         (observe-inference-packets 4)))))
 '''
         if options.optimize:
-            if melee is not None or options.economy or options.craft:
+            if melee is not None or options.economy or options.craft or fresh_quest:
                 source+="(def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get ready 'history)))\n"
             else:
                 source+="(def recorded-field (largest-field (get ready 'history) 'bytes))\n"
@@ -314,7 +317,7 @@ else:
         else:
             source+=(examples / 'native-session-repair-run.agel').read_text()+'\n'
         source+='(def ready (osrs-service-stop ready))\n'
-        if options.economy:
+        if options.economy or fresh_quest:
             source+='''(def inference-observe (fn () nil))
 (check (= inference-observation-error nil) "inference observation stream failed")
 (console-log (text-concat "native-opt: packets observed while awaiting inference " (print-form inference-packets)))
@@ -370,15 +373,18 @@ else:
 (console-log (text-concat "native-combat: task-us " (print-form (- finish task-start))))
 '''
     elif options.quest:
+        source += "(def quest-start-state " + ("ready" if fresh_quest else "game") + ")\n"
+        source += f"(def quest-billing-complete {'#f' if editing else '#t'})\n"
         source+='''(import agel/osrs-quest-test)
 (def log-quest (fn (phase) (console-log (text-concat "native-quest: " phase))))
 (def run-quest
   (fn (scenario)
     (with-handler (* problem)
       (begin
-        (log-quest (print-form problem))
+        (log-quest (text-concat "failure " (print-form problem)))
+        (log-quest (text-concat "task-us " (print-form (- (clock-us) task-start))))
         (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
-      (scenario game log-quest))))
+      (scenario quest-start-state log-quest))))
 (def quest-trace-keys
   (dict 'talk #t 'resume-dialogue #t
         "IF_OPENSUB" #t "IF_CLOSESUB" #t "IF_RESYNC_V2" #t "IF_SETEVENTS_V2" #t "IF_SETTEXT" #t))
@@ -391,7 +397,7 @@ else:
                         (assoc record 'bytes (text-slice data 0 512)) record)))))
       nil)
     (record-chain-push history record)))
-(def game (assoc game 'history-push trace-quest-record))
+(def quest-start-state (assoc quest-start-state 'history-push trace-quest-record))
 '''
         if options.quest_resume:
             source+='''(log-quest "verifying retained ingredients and attempting hand-in")
@@ -400,14 +406,13 @@ else:
 '''
         else:
             source+='''(import agel/benchmark)
-(def started (clock-us))
 (log-quest "gathering Cook's Assistant ingredients")
 (def quest-report (run-quest gather-and-finish-cooks-assistant-using))
 (def finished (clock-us))
 (console-log (text-concat "native-quest: " (print-form quest-report)))
 (console-log (text-concat "native-quest: score " (print-form
-  (benchmark-run (dict 'correct (get quest-report 'passed) 'elapsed-us (- finished started)
-    'billing-complete #t 'charges nil)))))
+  (benchmark-run (dict 'correct (get quest-report 'passed) 'elapsed-us (- finished task-start)
+    'billing-complete quest-billing-complete 'charges nil)))))
 '''
     elif options.economy:
         source+=f"(def economy-billing-complete {'#f' if editing else '#t'})\n"
@@ -573,6 +578,8 @@ if not passed and options.economy and 'native-economy: failure ' in output:
     capture_account(lambda snapshot: economy_saved(0, snapshot), [])
 if not passed and options.craft and re.search(r'^native-craft: failure \{', output, re.M):
     capture_account(lambda snapshot: craft_stock(snapshot, at_anvil=False) == craft_before, [])
+if not passed and fresh_quest and 'native-quest: failure ' in output:
+    capture_account(quest_unfinished, ['varp.cookquest', 'varp.qp'])
 if editing:
     assert passed, 'native session failed; disk, serial log and judge records retained'
     if options.optimize:
@@ -580,12 +587,12 @@ if editing:
         if activated:
             assert re.search(r'^native-opt: live uses [1-9][0-9]*$',output,re.M)
         else:
-            assert (melee is not None or options.economy or options.craft) and 'native-opt: continued with fixed policy after exhausted retries' in output
+            assert (melee is not None or options.economy or options.craft or fresh_quest) and 'native-opt: continued with fixed policy after exhausted retries' in output
             assert 'native-opt: live uses 0' in output
         assert 'native-opt: recorded workload verified in append-only log' in output
-        if options.economy:
+        if options.economy or fresh_quest:
             assert re.search(r'^native-opt: packets observed while awaiting inference [1-9]\d*$', output, re.M), (
-                'adaptive economy run did not exercise inference observation')
+                'adaptive run did not exercise inference observation')
     else:
         assert 'native-session: tool repaired:' in output, 'live tool repair did not complete'
     assert output.count('operation open ') == 2, 'game session was reopened during repair'
@@ -639,14 +646,9 @@ if options.quest:
     if not options.quest_resume:
         assert 'native-quest: score {correct #t ' in output
     assert output.count('operation open ') == output.count('operation close ') == 2
-    assert 'inference-bridge: started job' not in output
+    if not editing:
+        assert 'inference-bridge: started job' not in output
     oracle_varps=['varp.cookquest','varp.qp','varp.cooks_assistant_ingredients']
-    def quest_saved(snapshot):
-        varps={key:int(value) for key,value in re.findall(r'^(varp\.\w+)=(-?\d+)$',snapshot,re.M)}
-        return (varps.get('varp.cookquest',0) % 4 == 2 and varps.get('varp.qp') == 1
-                and varps.get('varp.cooks_assistant_ingredients',0) % 8 == 7
-                and 'stat=7 base=4 visible=4 fine_xp=3000' in snapshot
-                and all(f'item=obj.{item} ' not in snapshot for item in ('bucket_milk','egg','pot_flour')))
 if not options.challenge and not options.craft:
     def expected_outcome(snapshot):
         if combat_workload:

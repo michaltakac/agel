@@ -56,10 +56,11 @@ def main():
     tasks = parser.add_mutually_exclusive_group()
     tasks.add_argument('--transfer', type=Path, metavar='DONOR',
                        help='compare a retained one-rat policy against a fresh fixed account')
+    tasks.add_argument('--quest', action='store_true', help='compare fresh Cook’s Assistant runs')
     tasks.add_argument('--craft', nargs=2, metavar=('FIXED_FIXTURE', 'ADAPTIVE_FIXTURE'),
                         help='use two distinct accounts staged with --prepare-only')
     args = parser.parse_args()
-    task = 'combat' if args.transfer else 'craft' if args.craft else 'economy'
+    task = 'combat' if args.transfer else 'craft' if args.craft else 'quest' if args.quest else 'economy'
     if args.craft and args.craft[0] == args.craft[1]:
         parser.error('--craft requires two distinct fixtures')
     output = Path(tempfile.mkdtemp(prefix=f'native-{task}-pair-', dir='target'))

@@ -101,6 +101,22 @@ def economy_saved(coins, snapshot):
                  'stat=14 base=1 visible=1 fine_xp=350'}.issubset(lines))
 
 
+def quest_saved(snapshot):
+    varps = {key: int(value) for key, value in re.findall(r'^(varp\.\w+)=(-?\d+)$', snapshot, re.M)}
+    return (varps.get('varp.cookquest', 0) % 4 == 2 and varps.get('varp.qp') == 1
+            and varps.get('varp.cooks_assistant_ingredients', 0) % 8 == 7
+            and 'stat=7 base=4 visible=4 fine_xp=3000' in snapshot.splitlines()
+            and all(f'item=obj.{item} ' not in snapshot for item in ('bucket_milk', 'egg', 'pot_flour')))
+
+
+def quest_unfinished(snapshot):
+    lines = snapshot.splitlines()
+    progress = re.search(r'^varp\.cookquest=(-?\d+)$', snapshot, re.M)
+    return ('stat=7 base=1 visible=1 fine_xp=0' in lines
+            and (not progress or int(progress[1]) % 4 != 2)
+            and all(line == 'varp.qp=0' for line in lines if line.startswith('varp.qp=')))
+
+
 def melee_xp(report, goal):
     """Check the guest's three completed phases against its final observation."""
     summary = re.search(
