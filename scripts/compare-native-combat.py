@@ -6,6 +6,9 @@ from pathlib import Path
 import re
 import runpy
 import sys
+import tempfile
+
+from native_provider_support import decode_judge_frames, judge_cost, judge_frames
 
 sys.path.insert(0, str(Path(__file__).with_name('osrs')))
 from test_support import combat_xp, combat_xp_saved, form, melee_levels_saved, melee_xp
@@ -39,6 +42,19 @@ def installed_client(directory, read_table):
     return source.decode()
 
 
+def installed_judge_ledger(directory):
+    frames = judge_frames(directory / 'disk.img')
+    require(frames == (directory / 'judge.frames').read_bytes(),
+            f'{directory}: judge frames differ from the guest journal')
+    with tempfile.TemporaryDirectory(prefix='agel-judge-') as scratch:
+        path = Path(scratch) / 'judge.frames'
+        path.write_bytes(frames)
+        ledger = decode_judge_frames(path)
+    require(ledger == (directory / 'judge.agel').read_text(),
+            f'{directory}: judge records differ from the guest journal')
+    return ledger
+
+
 def load_arm(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
@@ -64,7 +80,7 @@ def load_arm(directory, policy, read_table):
                 f'{directory}: no verified in-session policy decision')
         require((directory / 'mode.txt').read_text().strip() == 'live',
                 f'{directory}: adaptive scoring requires live providers')
-        ledger = (directory / 'judge.agel').read_text()
+        ledger = installed_judge_ledger(directory)
         starts = re.findall(r'^\(judge-start .*$', ledger, re.M)
         receipts = re.findall(r'^\(judge-result .*$', ledger, re.M)
         identity_pattern = re.compile(r'^\(judge-(?:start|result) id "([^"]+)".*? attempt (\d+)\b')
@@ -75,11 +91,10 @@ def load_arm(directory, policy, read_table):
         keys = [match.groups() for match in started]
         require(len(set(keys)) == len(keys) and sorted(keys) == sorted(match.groups() for match in completed),
                 f'{directory}: unmatched or duplicate judge receipts')
-        receipt_jobs = {identity.rsplit('/', 1)[-1] for identity, _ in keys}
-        require(receipt_jobs == set(dispatched), f'{directory}: judge ledger differs from bridge dispatches')
+        receipt_jobs = [identity.rsplit('/', 1)[-1] for identity, _ in keys]
+        require(sorted(receipt_jobs) == sorted(dispatched), f'{directory}: judge ledger differs from bridge dispatches')
         for receipt in receipts:
-            cost = re.search(r'\bcost-nanousd (\d+)', receipt)
-            charges.append(('judge', int(cost[1]) if cost else None))
+            charges.append(('judge', judge_cost(receipt)))
         writers = re.findall(r'^inference-bridge: started job \d+ provider codex ', trace, re.M)
         require(writers, f'{directory}: no writer dispatch')
         charges.extend(('model', None) for _ in writers)

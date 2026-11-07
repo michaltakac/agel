@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.47.** The standard research tools can search a
-configured HTTPS endpoint from Agel OS. See the [release notes](docs/release-v0.3.47.md).
+**Current release: v0.3.48.** Native combat scoring verifies judge receipts
+against the guest disk. See the [release notes](docs/release-v0.3.48.md).
+
+v0.3.47 adds configured HTTPS search to the standard research tools.
+See the [release notes](docs/release-v0.3.47.md).
 
 v0.3.46 shows native test milestones in the Agel OS graphical console.
 See the [release notes](docs/release-v0.3.46.md).

@@ -40,7 +40,7 @@ def provider_environment(directory, live, delay=0, proposal=None):
     return environment
 
 
-def decode_judge_ledger(disk, directory, secret, live, required=True):
+def judge_frames(disk):
     def head_checksum(block):
         value = 0xcbf29ce484222325
         for byte in block:
@@ -53,25 +53,46 @@ def decode_judge_ledger(disk, directory, secret, live, required=True):
             block = bytearray(source.read(512))
             digest = int.from_bytes(block[24:32], 'little')
             block[24:32] = bytes(8)
-            if block[:8] == b'AGELJNL1' and head_checksum(block) == digest:
-                heads.append((int.from_bytes(block[8:16], 'little'), int.from_bytes(block[16:20], 'little')))
-        source.seek(131074 * 512)
-        frames = source.read((max(heads)[1] if heads else 0) * 512)
+            sectors = int.from_bytes(block[16:20], 'little')
+            if (len(block) == 512 and block[:8] == b'AGELJNL1'
+                    and sectors <= 131070 and head_checksum(block) == digest):
+                heads.append((int.from_bytes(block[8:16], 'little'), sectors))
+        size = (max(reversed(heads), key=lambda head: head[0])[1] if heads else 0) * 512
+        frames = source.read(size)
+        if len(frames) != size:
+            raise ValueError('truncated guest judge ledger')
+        return frames
+
+
+def decode_judge_frames(framed):
+    decoded = subprocess.run(['target/debug/examples/journal', str(framed)], capture_output=True, text=True, check=True)
+    if decoded.stderr.strip() != 'journal health: (0 #f)':
+        raise ValueError('incomplete or corrupt guest judge journal')
+    return decoded.stdout
+
+
+def judge_cost(receipt):
+    cost = re.search(r'\bcost-nanousd (\d+) cost-microusd \d+ cost-status published-rate\b',
+                     receipt.partition(' price-basis ')[0])
+    return int(cost[1]) if cost else None
+
+
+def decode_judge_ledger(disk, directory, secret, live, required=True):
+    frames = judge_frames(disk)
     framed = directory / 'judge.frames'
     framed.write_bytes(frames)
-    decoded = subprocess.run(['target/debug/examples/journal', str(framed)], capture_output=True, text=True, check=True)
-    assert '(0 #f)' in decoded.stderr, decoded.stderr
-    records = decoded.stdout
+    records = decode_judge_frames(framed)
     assert secret not in records
     (directory / 'judge.agel').write_text(records)
-    costs = [int(n) for n in re.findall(r'cost-nanousd (\d+)', records)]
-    calls = records.count('(judge-start ')
+    receipts = re.findall(r'^\(judge-result .*$', records, re.M)
+    costs = [cost for receipt in receipts if (cost := judge_cost(receipt)) is not None]
+    calls = len(re.findall(r'^\(judge-start ', records, re.M))
     print('Durable guest judge calls:', calls, 'known real cost-nanousd:' if live else 'synthetic priced-record nanousd:', sum(costs), 'unknown receipts:', max(0, calls-len(costs)), flush=True)
     print('Codex dollar cost:', 'unknown' if live else 'fixture, no paid inference', flush=True)
     print('Ledger SHA-256:', hashlib.sha256(frames).hexdigest(), flush=True)
-    if not required and not costs:
+    if not required:
         return records
-    assert heads and costs, 'no durable judge receipts'
-    assert records.count('(judge-start ') == records.count('(judge-result '), 'unmatched judge receipt'
-    assert 'cost-status published-rate' in records and 'input-tokens' in records and 'output-tokens' in records
+    assert frames and receipts, 'no durable judge receipts'
+    assert calls == len(receipts), 'unmatched judge receipt'
+    assert all('input-tokens' in receipt and 'output-tokens' in receipt for receipt in receipts)
     return records
