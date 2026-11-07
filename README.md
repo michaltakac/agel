@@ -5,9 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.29.** Agel scores paired runs on correctness,
-time, and known cost. The fixed Cook's Assistant route also passed
-without a reconnect or admin setup. See the [release notes and evidence](docs/release-v0.3.29.md).
+**Current release: v0.3.30.** Agel OS restored an accepted encoder
+policy and its audit history, then completed combat on a fresh account
+without new model calls. See the [release notes and evidence](docs/release-v0.3.30.md).
+
+v0.3.29 adds [Agel benchmark scoring](docs/release-v0.3.29.md) and
+records an uninterrupted Cook's Assistant run.
 
 v0.3.28 first completed Cook's Assistant with ingredients earned in
 ordinary gameplay. See the [quest evidence](docs/release-v0.3.28.md).

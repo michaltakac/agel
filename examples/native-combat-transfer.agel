@@ -1,0 +1,50 @@
+(import agel/bytes)
+(import agel/native-reader)
+(import agel/benchmark)
+
+(def audit-line
+  (fn (log prefix)
+    (let ((size (text-bytes log)) (width (text-bytes prefix)))
+      (let ((line-end (fn (self at)
+                        (if (= at size) at
+                          (if (= (text-byte log at) 10) at (self self (+ at 1)))))))
+        (let ((find (fn (self start found)
+                      (if (= start size) found
+                        (let ((end (line-end line-end start)))
+                          (let ((match (if (< (- end start) width) #f
+                                         (= (text-slice log start (+ start width)) prefix))))
+                            (if (= end size) found
+                              (self self (+ end 1) (if match (text-slice log start end) found)))))))))
+          (let ((line (find find 0 nil)))
+            (check line "required record missing from retained audit log")
+            line))))))
+
+(def donor-audit (file-read "judge-log"))
+(def version-line (audit-line donor-audit "{event live-policy-versions "))
+(def workload-line (audit-line donor-audit "(recorded-workload "))
+(def profile-line (audit-line donor-audit "{event runtime-observation "))
+(def retained-policy (get (car (native-read version-line 8192 64)) 'versions))
+(def retained-profile (get (car (native-read profile-line 8192 64)) 'profile))
+(def retained-workload (car (native-read workload-line 32768 8)))
+(def retained-length (car (cdr retained-workload)))
+(def retained-hex (car (cdr (cdr retained-workload))))
+(def retained-bound (get retained-profile 'bound))
+
+(check (evolution-valid? retained-policy) "retained version store is invalid")
+(check (= (evolution-current retained-policy 'cell 'service-quantum) 2) "accepted policy missing")
+(check (= (evolution-source retained-policy 1) '(fn (limit) 64)) "frozen policy missing")
+(check (= (count retained-workload) 3) "invalid retained workload")
+(check (= (text-bytes retained-hex) (* 2 retained-length)) "retained workload length differs")
+(check (= (get retained-profile 'bytes) retained-length) "profile and workload differ")
+(check (if (< 127 retained-bound) (if (< retained-bound 513)
+  (= (* 64 (/ retained-bound 64)) retained-bound) #f) #f) "unsafe retained bound")
+(def retained-checks
+  (list (dict 'arguments '(64) 'expected 64) (dict 'arguments '(192) 'expected 192)
+    (dict 'arguments '(255) 'expected 192) (dict 'arguments '(511) 'expected 448)
+    (dict 'arguments (list retained-bound) 'expected retained-bound)))
+(check (= (get (evolution-replay (evolution-source retained-policy 2) retained-checks) 'passed) #t)
+  "retained policy failed the transfer replay")
+(def retained-lineage
+  (dict 'version 2 'version-crc32 (text-crc32 version-line)
+    'workload-crc32 (text-crc32 workload-line) 'profile-crc32 (text-crc32 profile-line)))
+(console-log (text-concat "native-transfer: recovered " (print-form retained-lineage)))

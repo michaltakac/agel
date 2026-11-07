@@ -93,6 +93,7 @@ sh scripts/test-osrs-crafting.sh
 sh scripts/test-osrs-crafting.sh --native
 sh scripts/test-native-network.sh --combat
 sh scripts/test-native-network.sh --combat --optimize --live
+sh scripts/test-native-network.sh --combat --transfer-from DONOR_EVIDENCE_DIRECTORY
 ```
 
 This runs the Agel scenarios and checks authoritative persisted server state:
