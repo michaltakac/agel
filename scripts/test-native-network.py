@@ -315,12 +315,12 @@ else:
       (scenario game log-quest))))
 '''
         if options.quest_resume:
-            source+='''(def quest-packet-names
-  (dict "IF_OPENSUB" #t "IF_CLOSESUB" #t "IF_RESYNC_V2" #t "IF_SETEVENTS_V2" #t "IF_SETTEXT" #t))
+            source+='''(def quest-trace-keys
+  (dict 'talk #t 'resume-dialogue #t
+        "IF_OPENSUB" #t "IF_CLOSESUB" #t "IF_RESYNC_V2" #t "IF_SETEVENTS_V2" #t "IF_SETTEXT" #t))
 (def trace-quest-record
   (fn (history record)
-    (if (if (= (get record 'action) 'resume-dialogue) #t
-          (get quest-packet-names (get record 'name)))
+    (if (get quest-trace-keys (if (get record 'name) (get record 'name) (get record 'action)))
       (let ((data (get (get record 'bytes) 'data)))
         (log-quest (text-concat "dialogue trace "
           (print-form (if (if data (< 512 (text-bytes data)) #f)

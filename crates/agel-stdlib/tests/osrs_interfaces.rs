@@ -27,13 +27,17 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                  (def osrs-interface-opens
                    (fn (state id) (if (= id 219) (get state 'page) 0)))
                  (def osrs-keepalive (fn (state) state))
-                 (def osrs-walk (fn (state x z) state))
+                 (def osrs-walk (fn (state x z) (assoc state 'tile (list x z))))
                  (def osrs-wait-ticks (fn (state ticks) state))
                  (def osrs-talk
                    (fn (state index)
-                     (if (= (get state 'talks) 0) (assoc state 'talks 1)
+                     (if (= (get state 'talks) 0)
+                       (if (= (get state 'tile) '(3208 3216)) (assoc state 'talks 1)
+                         (signal 'test/talk "expected the north approach"))
                        (begin
                          (if (= (get state 'talks) 1) #t (signal 'test/talk "unexpected extra talk"))
+                         (if (= (get state 'tile) '(3207 3215)) #t
+                           (signal 'test/talk "expected a different approach on retry"))
                          (assoc (assoc state 'talks 2) 'page 1)))))
                  (def osrs-resume-dialogue
                    (fn (state id component option)
