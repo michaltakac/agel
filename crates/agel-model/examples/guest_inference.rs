@@ -1,5 +1,5 @@
 use agel_core::{Digest, ModelRequest};
-use agel_effects::byte_carrier::Carrier;
+use agel_effects::byte_carrier::{trace_metadata, Carrier};
 use agel_model::{
     guest_journal::GuestJudgeJournal, journal::FileJudgeJournal, CodexProvider, CommandLimits,
     JevProvider, ProviderRegistry,
@@ -413,11 +413,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|c| c.exchange(&byte_block));
                 let reply =
                     result.unwrap_or_else(|error| format!("error {}", encode(error.as_bytes())));
+                let operation = byte_block.split_whitespace().nth(1).unwrap_or("invalid");
                 println!(
-                    "byte-bridge: request {id} operation {} at-ms {arrived} duration-ms {} status {}",
-                    byte_block.split_whitespace().nth(1).unwrap_or("invalid"),
+                    "byte-bridge: request {id} operation {operation} at-ms {arrived} duration-ms {} status {}{}",
                     started.elapsed().as_millis() - arrived,
-                    reply.split_whitespace().next().unwrap_or("invalid")
+                    reply.split_whitespace().next().unwrap_or("invalid"),
+                    trace_metadata(operation, &reply)
                 );
                 wire.raw(&format!(":byte-reply {id} {reply}"))?;
             } else if byte_number.is_some() {

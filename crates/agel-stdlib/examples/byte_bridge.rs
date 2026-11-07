@@ -1,4 +1,4 @@
-use agel_effects::byte_carrier::Carrier;
+use agel_effects::byte_carrier::{trace_metadata, Carrier};
 use std::{
     env,
     io::{BufRead, BufReader, Read, Write},
@@ -67,15 +67,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(reply) => reply,
                 Err(error) => format!("error {}", hex(error.as_bytes())),
             };
+            let operation = payload.split_whitespace().nth(1).unwrap_or("invalid");
             println!(
-                "byte-bridge: request {id} operation {} at-ms {arrived} duration-ms {} status {}",
-                payload.split_whitespace().nth(1).unwrap_or("invalid"),
+                "byte-bridge: request {id} operation {operation} at-ms {arrived} duration-ms {} status {}{}",
                 started.elapsed().as_millis() - arrived,
-                if reply.starts_with("ok") {
-                    "ok"
-                } else {
-                    "error"
-                }
+                reply.split_whitespace().next().unwrap_or("invalid"),
+                trace_metadata(operation, &reply)
             );
             writeln!(stream, "\x1d:byte-reply {id} {reply}")?;
         } else if id.is_some() {

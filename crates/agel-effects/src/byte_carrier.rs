@@ -23,6 +23,30 @@ fn unhex(text: &str) -> Result<Vec<u8>, String> {
         .map(|i| u8::from_str_radix(&text[i..i + 2], 16).map_err(|_| "invalid hex".into()))
         .collect()
 }
+/// Summarize carrier traffic without printing payloads or error text.
+pub fn trace_metadata(operation: &str, reply: &str) -> String {
+    let Some(value) = reply.strip_prefix("ok ") else {
+        return String::new();
+    };
+    match operation {
+        "read" => {
+            if value.is_empty() {
+                " bytes 0 eof".into()
+            } else {
+                format!(" bytes {}", value.len() / 2)
+            }
+        }
+        "entropy" => format!(" bytes {}", value.len() / 2),
+        "write" => value
+            .parse::<usize>()
+            .map(|count| format!(" bytes {count}"))
+            .unwrap_or_default(),
+        "read-ready" if matches!(value, "ready" | "idle" | "eof") => {
+            format!(" readiness {value}")
+        }
+        _ => String::new(),
+    }
+}
 pub struct Carrier {
     endpoint: SocketAddr,
     stream: Option<TcpStream>,
@@ -111,6 +135,16 @@ impl Carrier {
 mod tests {
     use super::*;
     use std::{net::TcpListener, thread};
+    #[test]
+    fn trace_reports_byte_counts_and_eof_without_payloads() {
+        assert_eq!(trace_metadata("read", "ok 00ff"), " bytes 2");
+        assert_eq!(trace_metadata("entropy", "ok cafe"), " bytes 2");
+        assert_eq!(trace_metadata("read", "ok "), " bytes 0 eof");
+        assert_eq!(trace_metadata("read-ready", "ok eof"), " readiness eof");
+        assert_eq!(trace_metadata("write", "ok 17"), " bytes 17");
+        assert_eq!(trace_metadata("write", "error 00ff"), "");
+    }
+
     #[test]
     fn arbitrary_bytes_and_eof_cross_the_carrier() {
         let server = TcpListener::bind("127.0.0.1:0").unwrap();
