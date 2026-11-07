@@ -578,10 +578,11 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
           (fn (state varp)
             (if (get state 'missing-varp) (get state 'cached-stance) (get state 'stance))))
         (def osrs-varp-updates (fn (state varp) (if (if (get state 'missing-varp) (if (get state 'fresh-contradiction) #f #t) #f)
-            0 (count (get state 'clicks)))))
+            0 (+ (count (get state 'clicks)) (if (get state 'fresh-contradiction) 1 0)))))
         (def osrs-attack
           (fn (state index)
             (let ((next (assoc state 'attempts (cons index (get state 'attempts)))))
+              (if (get state 'late-contradiction) (assoc next 'fresh-contradiction #t)
               (if (if (get state 'vanish) (= index 1) #f)
                 (assoc (assoc next 'npcs (list rat-two)) 'pending-credit (get state 'late-credit))
                 (if (= (get state 'server-stance) nil)
@@ -589,7 +590,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
                 (if (= index 1) next
                   (assoc (assoc (assoc next 'npcs (list rat-one))
                   (if (= (get state 'server-stance) 1) 2 1) 8)
-                  3 (+ (get state 3) 2)))))))))
+                  3 (+ (get state 3) 2))))))))))
       (module agel/osrs-combat-test
         (export nearest-rat)
         (def nearest-rat (fn (_) (dict 'index 1 'type 2854))))
@@ -630,7 +631,11 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (train-rat-melee-result
           (dict 0 0 1 0 2 0 3 1154 'missing-varp #t 'cached-stance 0 'fresh-contradiction #t
             'npcs (list (dict 'index 1 'type 2854))) 8 2 nil)))
-      (list contradicted (get (get missing 'report) 'strength-xp) (get (get missing 'report) 'defence-xp)
+      (def late-contradicted
+        (with-handler (osrs/training problem) (get (get problem 'data) 'observed)
+          (fight-again (dict 0 0 1 0 2 0 3 1154 'missing-varp #t 'cached-stance 0 'late-contradiction #t
+            'pending-stance (dict 'mode 1 'updates 0) 'npcs (list (dict 'index 1 'type 2854))) 1 2 8 nil)))
+      (list late-contradicted contradicted (get (get missing 'report) 'strength-xp) (get (get missing 'report) 'defence-xp)
         (reverse xp-confirmations)
         (get (get credited 'report) 'target-index)
         (get (get credited 'state) 'attempts)
@@ -650,6 +655,6 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(0 8 8 (1 3) 1 (1) 2 (1 2) #t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
+        Some("(0 0 8 8 (1 3) 1 (1) 2 (1 2) #t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
     );
 }

@@ -42,13 +42,26 @@
                     (if (= remaining 0) reset
                       (attack-with-retry reset index complete (- remaining 1))))))))
           visible))))
+  (def check-pending-stance
+    (fn (state)
+      (let ((pending (get state 'pending-stance)))
+        (if pending
+          (let ((observed (osrs-varp state 43)))
+            (if (if observed (< (get pending 'updates) (osrs-varp-updates state 43)) #f)
+              (if (= observed (get pending 'mode)) nil
+                (signal 'osrs/training "fresh combat stance contradicted the requested mode"
+                  (dict 'expected (get pending 'mode) 'observed observed)))
+              nil))
+          nil))))
   (def fight-again
     (fn (state index skill goal excluded)
       (let ((complete (fn (g)
-                        (if (< (xp state skill) (xp g skill))
-                          (if (< (hitpoints state) (hitpoints g))
-                            (if (< (xp g skill) goal) (= (observed-rat g index) nil) #t)
-                            #f) #f))))
+                        (begin
+                          (check-pending-stance g)
+                          (if (< (xp state skill) (xp g skill))
+                            (if (< (hitpoints state) (hitpoints g))
+                              (if (< (xp g skill) goal) (= (observed-rat g index) nil) #t)
+                              #f) #f)))))
         (let ((finished (attack-with-retry state index complete 1)))
           (if (complete finished)
             (dict 'state finished 'report
@@ -77,7 +90,8 @@
                              (fight-again visible (get (nearest-rat visible) 'index) skill goal nil)))))
           (let ((next (get encounter 'state)) (report (get encounter 'report)))
             (if observe (observe skill report) nil)
-            (train next skill goal (- remaining 1) (get report 'target-index) (cons report fights) observe)))
+            (train (if (get next 'pending-stance) (dissoc next 'pending-stance) next)
+              skill goal (- remaining 1) (get report 'target-index) (cons report fights) observe)))
         (dict 'state state 'index index 'fights (reverse fights)))))
 
   (def check-training-bound
@@ -125,7 +139,8 @@
                         (if (= (osrs-varp-updates retried 43) (osrs-varp-updates reset 43))
                           (begin
                             (progress (dict 'phase 'stance-awaiting-xp 'mode mode))
-                            retried)
+                            (assoc retried 'pending-stance
+                              (dict 'mode mode 'updates (osrs-varp-updates retried 43))))
                           (signal 'osrs/training "combat stance was not confirmed after retry"
                             (dict 'expected mode 'observed (osrs-varp retried 43)))))))))))))))
   (def phase
