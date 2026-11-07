@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.150.** The native melee trace records skill phases
-and stance retries. See the [release notes](docs/release-v0.3.150.md).
+**Current release: v0.3.151.** Native benchmark pairs support either arm
+order. See the [release notes](docs/release-v0.3.151.md).
+
+v0.3.150 records native melee skill phases and stance retries.
+See the [release notes](docs/release-v0.3.150.md).
 
 v0.3.149 selects a visible alternative when a melee target disappears.
 See the [release notes](docs/release-v0.3.149.md).

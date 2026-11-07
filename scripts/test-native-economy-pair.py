@@ -120,6 +120,8 @@ def main():
     tasks.add_argument('--quest', action='store_true', help='compare fresh Cook’s Assistant runs')
     tasks.add_argument('--craft', nargs=2, metavar=('FIXED_FIXTURE', 'ADAPTIVE_FIXTURE'),
                         help='use two distinct accounts staged with --prepare-only')
+    parser.add_argument('--order', choices=('fixed-first', 'adaptive-first'), default='fixed-first',
+                        help='choose the order of the two sequential arms')
     args = parser.parse_args()
     melee_goal = args.melee_xp
     if args.transfer:
@@ -170,8 +172,13 @@ def main():
     if args.craft:
         fixed_options.extend(['--craft-fixture', args.craft[0]])
         adaptive_options.extend(['--craft-fixture', args.craft[1]])
-    fixed = run_arm(output, runtime, 'fixed', fixed_options)
-    adaptive = run_arm(output, runtime, 'adaptive', adaptive_options)
+    arms = {'fixed': fixed_options, 'adaptive': adaptive_options}
+    order = ('fixed', 'adaptive') if args.order == 'fixed-first' else ('adaptive', 'fixed')
+    (output / 'plan.json').write_text(json.dumps({
+        'task': task, 'goal_xp': melee_goal, 'order': order,
+    }, indent=2) + '\n')
+    results = {arm: run_arm(output, runtime, arm, arms[arm]) for arm in order}
+    fixed, adaptive = results['fixed'], results['adaptive']
     scoring_options = [f'--{task}'] if task != 'combat' else []
     if donor:
         scoring_options.extend(['--donor', str(donor)])

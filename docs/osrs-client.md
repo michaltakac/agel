@@ -107,7 +107,8 @@ Run a matched fixed and adaptive melee pair with
 `python3 scripts/test-native-economy-pair.py --melee-xp 8`. To compare a
 committed donor on a new account, use `--transfer DONOR_EVIDENCE_DIRECTORY`.
 The runner reads the donor's XP goal and evaluates the verified pair in
-Agel OS.
+Agel OS. Use `--order adaptive-first` to run the other order. The pair’s
+`plan.json` records the order before either arm runs.
 
 For a hand-in diagnostic on an earlier native quest attempt that gathered
 all three ingredients, pass its evidence directory to
