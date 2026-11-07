@@ -8,8 +8,9 @@ public class SetupAccount {
     public static void main(String[] args) throws Exception {
         String account = "agelsetup";
         String rights = "ADMINISTRATOR";
-        if (args.length == 1 && (args[0].equals("craft-grant") || args[0].equals("craft-revoke"))) {
-            account = "agelcraft";
+        if ((args.length == 1 || (args.length == 2 && args[1].matches("ac[0-9a-f]{8}")))
+                && (args[0].equals("craft-grant") || args[0].equals("craft-revoke"))) {
+            account = args.length == 1 ? "agelcraft" : args[1];
             if (args[0].equals("craft-revoke")) rights = "";
         } else if (args.length == 2 && args[1].matches("aq[0-9a-f]{8}")
                 && (args[0].equals("quest-grant") || args[0].equals("quest-revoke"))) {

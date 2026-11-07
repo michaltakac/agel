@@ -26,6 +26,7 @@ scenario.add_argument('--economy', action='store_true', help='mine, smelt and se
 scenario.add_argument('--quest', action='store_true', help="gather ingredients and complete Cook's Assistant inside Agel OS")
 scenario.add_argument('--challenge', action='store_true')
 scenario.add_argument('--craft', action='store_true', help='forge staged adamant stock; use test-osrs-crafting.sh --native')
+parser.add_argument('--craft-fixture', help='dedicated staged account for --craft')
 parser.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
 scenario.add_argument('--repair', action='store_true', help='repair a general tool during the same native connection')
 parser.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
@@ -41,14 +42,18 @@ stdlib = options.source_root / 'crates/agel-stdlib'
 examples = options.source_root / 'examples'
 if options.quest_resume and not options.quest:
     parser.error('--quest-resume requires --quest')
+if options.craft_fixture is not None and not (
+    options.craft and re.fullmatch(r'agelcraft|ac[0-9a-f]{8}', options.craft_fixture)
+):
+    parser.error('--craft-fixture requires --craft and a dedicated crafting account')
 melee=options.melee_xp
 if melee is not None and (not 1 <= melee <= 512 or options.combat):
     parser.error('--melee-xp requires a goal of 1..512 and is separate from --combat')
-if options.optimize and (options.challenge or options.repair or options.craft or options.quest):
-    parser.error('--optimize can be combined with --combat, --melee-xp or --economy')
+if options.optimize and (options.challenge or options.repair or options.quest):
+    parser.error('--optimize can be combined with --combat, --melee-xp, --economy or --craft')
 editing=options.repair or options.optimize
 combat_workload=options.combat or melee is not None
-encoder_workload=options.optimize or combat_workload or options.economy
+encoder_workload=options.optimize or combat_workload or options.economy or options.craft
 shared_carrier=options.repair or encoder_workload
 if options.combat and (options.challenge or options.repair or options.craft or options.economy or options.quest):parser.error('--combat can only be combined with --optimize')
 if options.transfer_from and (not combat_workload or editing):
@@ -83,9 +88,9 @@ if melee is not None:
     manifest['keepalive_interval_us']=3_000_000
     manifest['guest_memory_mib']=1024
 
-if options.craft:manifest['scope']='native adamant platebody from staged bars on a normal account'
-if options.economy:
-    manifest['scope']='native first bronze bar sale on a fresh normal account'
+if options.economy or options.craft:
+    manifest['scope'] = ('native adamant platebody from staged bars on a normal account' if options.craft
+                         else 'native first bronze bar sale on a fresh normal account')
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
     manifest['evaluation_fuel']=250_000_000
     manifest['keepalive_interval_us']=3_000_000
@@ -126,7 +131,9 @@ if not options.challenge:
 if combat_workload or options.craft or options.economy or options.quest:
     source+=(stdlib / 'record-chain.agel').read_text()+'\n'
 if options.craft:
-    source+=(examples / 'osrs/crafting-test.agel').read_text()+'\n'
+    craft_policy = (examples / 'osrs/crafting-test.agel').read_bytes()
+    manifest['craft_policy_sha256'] = hashlib.sha256(craft_policy).hexdigest()
+    source += craft_policy.decode() + '\n'
 if options.economy or options.quest:
     economy_policy=(examples / 'osrs/mining-test.agel').read_bytes()
     manifest['economy_policy_sha256']=hashlib.sha256(economy_policy).hexdigest()
@@ -195,7 +202,7 @@ if shared_carrier:
         else:
             source+="(def retained-policy nil)\n"
         service_policy=(examples / 'native-service-optimize.agel').read_bytes()
-        if melee is not None or options.economy:
+        if melee is not None or options.economy or options.craft:
             manifest['service_policy_sha256']=hashlib.sha256(service_policy).hexdigest()
             if options.transfer_from:
                 for field in ('service_policy_sha256', 'training_policy_sha256',
@@ -220,8 +227,9 @@ else:
     if options.quest_resume:
         account=json.loads((options.quest_resume/'account.json').read_text())
     if options.craft:
-        fixture=Path('target/osrs-login-probes/agelcraft.json')
-        account={'username':'agelcraft','password':json.loads(fixture.read_text())['password']}
+        name = options.craft_fixture or 'agelcraft'
+        fixture = Path('target/osrs-login-probes') / (name + '.json')
+        account = {'username': name, 'password': json.loads(fixture.read_text())['password']}
     if options.transfer_from:
         assert account['username'] != donor_account
         source+='(def donor-account '+json.dumps(donor_account)+')\n'
@@ -242,7 +250,7 @@ else:
 '''
     if combat_workload or options.craft or options.economy or options.quest:
         source+="(import agel/record-chain) (def game (assoc game 'history-push record-chain-push))\n"
-    if melee is not None or options.economy or options.quest:
+    if melee is not None or options.economy or options.quest or options.craft:
         source+=f"""(def game (assoc game 'maintenance
   (assoc (assoc (get game 'maintenance) 'clock-us clock-us)
     'keepalive-interval-us {manifest['keepalive_interval_us']})))
@@ -256,20 +264,22 @@ else:
   (begin (osrs-login '''+json.dumps(account['username'])+' '+json.dumps(account['password'])+''' context crcs seed (entropy-read 24)) #t))
 '''
     source+='(console-log "native-network: password login accepted")\n'
-    if not (options.craft or options.quest):
+    if not options.quest:
         source+='''(def ready (osrs-await game (fn (g) (if (osrs-stat g 13) (if (get (get g 'inventories) 93) #t #f) #f))))
-(if (= (get (osrs-stat ready 13) 'level) 1) #t (signal 'native/test "unexpected initial Smithing level"))
+'''
+        source+=f"(if (= (get (osrs-stat ready 13) 'level) {88 if options.craft else 1}) #t (signal 'native/test \"unexpected initial Smithing level\"))\n"
+        source+='''\
 (console-log (text-concat "native-network: observations " (print-form
   (dict 'smithing-level (get (osrs-stat ready 13) 'level) 'coins (osrs-inventory-count ready 93 995)))))
 '''
-    if combat_workload or options.economy:
+    if combat_workload or options.economy or options.craft:
         source+='(def task-start (clock-us))\n'
     if options.optimize:
-        source+=f"(def continue-after-refusal {'#t' if melee is not None or options.economy else '#f'})\n"
+        source+=f"(def continue-after-refusal {'#t' if melee is not None or options.economy or options.craft else '#f'})\n"
     if editing and not options.combat:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
         if options.optimize:
-            if melee is not None or options.economy:
+            if melee is not None or options.economy or options.craft:
                 source+="(def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get ready 'history)))\n"
             else:
                 source+="(def recorded-field (largest-field (get ready 'history) 'bytes))\n"
@@ -390,13 +400,17 @@ else:
 '''
     elif options.craft:
         source+='''(import agel/osrs-crafting-test)
-(def started (clock-us))
-(def crafted (forge-adamant-platebody-using game
-  (fn (state predicate) (osrs-await-bounded state predicate 320))
-  (fn (phase) (console-log (text-concat "native-craft: " phase)))))
+(def crafted (with-handler (* problem)
+  (begin
+    (console-log (text-concat "native-craft: failure " (print-form problem)))
+    (console-log (text-concat "native-craft: task-us " (print-form (- (clock-us) task-start))))
+    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+  (forge-adamant-platebody-using ready
+    (fn (state predicate) (osrs-await-bounded state predicate 320))
+    (fn (phase) (console-log (text-concat "native-craft: " phase))))))
 (def completed (get crafted 'state))
 (console-log (text-concat "native-craft: " (print-form (get crafted 'report))))
-(console-log (text-concat "native-craft: task-us " (print-form (- (clock-us) started))))
+(console-log (text-concat "native-craft: task-us " (print-form (- (clock-us) task-start))))
 '''
     elif options.repair:
         source+='''(import agel/batches)
@@ -521,7 +535,7 @@ if editing:
         if activated:
             assert re.search(r'^native-opt: live uses [1-9][0-9]*$',output,re.M)
         else:
-            assert (melee is not None or options.economy) and 'native-opt: continued with fixed policy after exhausted retries' in output
+            assert (melee is not None or options.economy or options.craft) and 'native-opt: continued with fixed policy after exhausted retries' in output
             assert 'native-opt: live uses 0' in output
         assert 'native-opt: recorded workload verified in append-only log' in output
     else:
@@ -552,6 +566,21 @@ if options.combat:
 if options.craft:
     assert 'native-craft: {test adamant-platebody passed #t ' in output
     assert output.count('operation open ') == output.count('operation close ') == 2
+    if not editing:
+        assert 'inference-bridge: started job' not in output
+    observed = re.search(r'^native-craft: \{test adamant-platebody passed #t .*smithing-xp-after (\d+)\}$', output, re.M)
+    assert observed, 'missing final Smithing XP'
+
+    def craft_saved(snapshot):
+        xp = re.search(r'^stat=13 base=88 visible=88 fine_xp=(\d+)$', snapshot, re.M)
+        return (xp and int(xp[1]) // 10 == int(observed[1])
+                and 'rights= ' in snapshot and 'xp_rate_in_hundreds=100' in snapshot
+                and 'inv=inv.inv item=obj.adamant_platebody count=1' in snapshot
+                and 'inv=inv.inv item=obj.hammer count=1' in snapshot
+                and 'item=obj.adamantite_bar ' not in snapshot)
+
+    capture_account(craft_saved, [])
+    print('PASS: native adamant platebody and Smithing XP saved with normal rights and 1x XP', flush=True)
 if melee is not None:
     if not editing:
         assert 'inference-bridge: started job' not in output
@@ -603,7 +632,8 @@ if not options.challenge and not options.craft:
               if line.startswith(('stat=0 ', 'stat=1 ', 'stat=2 ', 'stat=3 ', 'varp.com_mode='))),flush=True)
     if options.economy:
         print('Persisted economy:', '\n'.join(line for line in saved.splitlines()
-              if line in economy_lines),flush=True)
+              if line.startswith(('inv=inv.inv item=obj.coins ', 'inv=inv.inv item=obj.bronze_pickaxe ',
+                                  'stat=13 ', 'stat=14 '))),flush=True)
     if options.quest:
         print('Persisted quest:', '\n'.join(line for line in saved.splitlines()
               if line.startswith(('stat=7 ', *oracle_varps))),flush=True)

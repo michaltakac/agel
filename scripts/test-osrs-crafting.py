@@ -15,12 +15,17 @@ sys.path.insert(0, str(Path(__file__).with_name("osrs")))
 from test_support import evaluate, form
 
 WORLD = "agel-osrs-world"
-ACCOUNT = "agelcraft"
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
 mode.add_argument("--native", action="store_true", help="run the crafting phase inside Agel OS")
 mode.add_argument("--smelt", action="store_true", help="smelt an adamant bar from staged ore and coal")
+mode.add_argument("--prepare-only", action="store_true", help="stage stock and verify normal rights, without crafting")
+parser.add_argument("--fixture", default="agelcraft", help="dedicated account, agelcraft or ac followed by eight hex digits")
 options = parser.parse_args()
+ACCOUNT = options.fixture
+if ACCOUNT != "agelcraft" and not re.fullmatch(r"ac[0-9a-f]{8}", ACCOUNT):
+    parser.error("fixture must be agelcraft or ac followed by eight hex digits")
+fixture_args = [] if ACCOUNT == "agelcraft" else [ACCOUNT]
 
 
 def run(*args):
@@ -119,7 +124,7 @@ except subprocess.CalledProcessError:
 
 notice("RuneScape crafting: staging ore and coal" if options.smelt else
        "RuneScape crafting: staging one hammer and five bars on the dedicated fixture")
-oracle_program("SetupAccount", "craft-grant")
+oracle_program("SetupAccount", "craft-grant", *fixture_args)
 try:
     if options.smelt:
         execute("(begin (stage-adamant-ore game) #t)")
@@ -137,10 +142,13 @@ try:
                          and inventory(s, "adamantite_bar") == 5
                          and inventory(s, "adamant_platebody") == 0)
 finally:
-    oracle_program("SetupAccount", "craft-revoke")
+    oracle_program("SetupAccount", "craft-revoke", *fixture_args)
 
 normal = oracle_program("AccountState", ACCOUNT)
 assert "rights= " in normal and "xp_rate_in_hundreds=100" in normal, normal
+if options.prepare_only:
+    notice(f"RuneScape PASS: {ACCOUNT} has five bars, a hammer, level 88 Smithing, and normal rights")
+    sys.exit(0)
 if options.smelt:
     notice("RuneScape crafting: normal-account furnace and adamant bar")
     report = execute("(smelt-adamant-bar game)")
@@ -160,7 +168,7 @@ if options.smelt:
     sys.exit(0)
 notice("RuneScape crafting: normal-account anvil and platebody button")
 if options.native:
-    command = ["sh", "scripts/test-native-network.sh", "--craft"]
+    command = ["sh", "scripts/test-native-network.sh", "--craft", "--craft-fixture", ACCOUNT]
     with subprocess.Popen(command, stdout=subprocess.PIPE, text=True) as child:
         lines = []
         for line in child.stdout:
