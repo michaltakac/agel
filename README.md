@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.51.** RuneScape client code lives in the example and
-DOOM is an opt-in desktop demo. See the [release notes](docs/release-v0.3.51.md).
+**Current release: v0.3.52.** Agel repair retries receive the judge score,
+threshold, and reported defect. See the [release notes](docs/release-v0.3.52.md).
+
+v0.3.51 keeps RuneScape client code in its example and makes DOOM opt-in.
+See the [release notes](docs/release-v0.3.51.md).
 
 v0.3.50 preserves outstanding judge receipts after the requesting process
 exits. See the [release notes](docs/release-v0.3.50.md).

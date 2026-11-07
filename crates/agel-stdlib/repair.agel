@@ -88,8 +88,9 @@
     (fn (self state report text)
       (let ((prompt (judgment-request
               (list (list "contract and observations" (get state 'context))
-                    (list "before" (get state 'before-text)) (list "proposal" text))
-              (list '(noul "patch" "Is this a legitimate, in-scope Agel change whose diagnosis addresses the observed problem? Behavioral correctness is checked separately by executable replay.")
+                    (list "before" (get state 'before-text)) (list "proposal" text)
+                    (list "reader preflight" "Agel parsed the proposal and statically analyzed its quoted after form. Judge the proposed after form as Agel source. Executable replay checks its behavior separately."))
+              (list '(noul "patch" "Does the proposed change stay within the stated contract, and does its diagnosis explain how the code addresses the observations?")
                     '(choice "reason" "Which defect is directly evident in the proposal text? Use none when no defect is directly evident."
                       ("none" "No identified defect") ("contract" "Does not implement the contract")
                       ("boundary" "Fails at valid boundaries, types or integer limits")
@@ -108,11 +109,15 @@
           (let ((result (answer answers "patch")) (reason (answer answers "reason")))
             (if (if (= (count answers) 2) (if result (if reason
                       (if (= (answer-kind result) 'noul) (= (answer-kind reason) 'choice) #f) #f) #f) #f)
-              (let ((score (answer-value result)))
+              (let ((score (answer-value result)) (minimum (get state 'threshold))
+                    (defect (answer-value reason)))
                 (if (if (< -1 score) (< score 1001) #f)
-                  (dict 'allowed (if (< score (get state 'threshold)) #f (= (answer-value reason) "none"))
-                    'reason (text-concat "text judge returned: " text) 'score score
-                    'reason-code (answer-value reason) 'cost-microusd nil)
+                  (let ((allowed (if (< score minimum) #f (= defect "none"))))
+                    (dict 'allowed allowed 'score score 'reason-code defect 'reply text 'cost-microusd nil
+                      'reason (if allowed "Text judge approved"
+                        (text-concat "Text judge refused. Score " (text-concat (int->text score)
+                          (text-concat "/1000 (minimum " (text-concat (int->text minimum)
+                            (text-concat "). Reported defect: " defect))))))))
                   (dict 'allowed #f 'reason "judge score outside 0..1000" 'cost-microusd nil)))
               (dict 'allowed #f 'reason "judge omitted the patch verdict" 'cost-microusd nil)))))))
   (def finish-judge

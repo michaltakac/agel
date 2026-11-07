@@ -38,6 +38,9 @@ const GOOD: &str = "(dict 'diagnosis \"division truncates, round positive inputs
 fn general_repair_predicts_judges_replays_and_activates() {
     let (mut world, options) = setup();
     reply(&mut world, &options, "writer", GOOD);
+    assert!(world.pending_model_requests()[0]
+        .prompt
+        .contains("Agel parsed the proposal and statically analyzed its quoted after form"));
     assert_eq!(
         world
             .evaluate("(get (repair-state worker) 'status)")
@@ -161,7 +164,7 @@ fn refusal_prevents_replay_and_provider_failure_preserves_the_tool() {
     );
     assert!(world.pending_model_requests()[0]
         .prompt
-        .contains("boundary"));
+        .contains("Text judge refused. Score 100/1000 (minimum 800). Reported defect: boundary"));
     let request = world.pending_model_requests().remove(0);
     world.claim_model_request(request.id, &options).unwrap();
     world
@@ -513,11 +516,15 @@ fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
         .unwrap()
         .to_string()
         .contains("observed work ceiling exceeded"));
+    world
+        .evaluate_with(
+            "(def canary-ok #t) (repair-agent-exchange subject candidate audit)",
+            &options,
+        )
+        .unwrap();
     let result = world
         .evaluate_with(
             r#"
-      (def canary-ok #t)
-      (repair-agent-exchange subject candidate audit)
       (repair-agent-exchange subject judge audit)
       (repair-agent-exchange subject candidate audit)
       (list (get (repair-state subject) 'status) probe-calls
