@@ -55,6 +55,8 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.43 | Native quest route | The native guest gathers the three ingredients. A dialogue retry passes its fixture, with live hand-in verification pending. |
 | v0.3.44 | Native comparison inputs | The combat scorer verifies installed client source and ties judge receipts to the bridge dispatches. |
 | v0.3.45 | Native web reads | A guest retrieves an allowlisted HTTPS document through the byte carrier and parses it in Agel. |
+| v0.3.46 | Live native milestones | The graphical guest follows a selected headless native test trace. |
+| v0.3.47 | Native web search | Agel builds queries for configured HTTPS providers and retains the response and its provenance. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
@@ -122,9 +124,9 @@ Research starts in the standard live-tool registry. Use local observations
 for cheap checks, search when a missing fact blocks progress, and verify
 source claims against the running app. A research provider supplies data.
 The agent decides what to trust, what to record and whether to propose code.
-The first release tests search and retrieval with recorded providers. Live
-browser transport, transcript discovery, frame retrieval and broader runtime
-inspection are separate capabilities to wire into the same path.
+The standard registry supports recorded providers and live HTTPS document
+reads and query endpoints through an allowlisted relay. Transcript discovery,
+frame retrieval and broader runtime inspection remain separate capabilities.
 
 ## Server inspection
 

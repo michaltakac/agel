@@ -1,7 +1,7 @@
 (module agel/research
   (import agel/browse)
   (import agel/sequence)
-  (export research-tools research-stream-fetch)
+  (export research-tools research-stream-fetch research-query-provider)
 
   (def request-bytes
     (fn (url at out)
@@ -24,7 +24,7 @@
     (fn (url response)
       (if (< (text-bytes response) 5)
         (signal 'research/fetch "incomplete research response" url)
-        (let ((kind (get (dict "html\n" 'html "text\n" 'text) (text-slice response 0 5))))
+        (let ((kind (get (dict "html\n" 'html "text\n" 'text "json\n" 'json) (text-slice response 0 5))))
           (if kind
             (dict 'kind kind 'source url 'body (text-slice response 5 (text-bytes response)))
             (signal 'research/fetch "research relay refused the URL" url))))))
@@ -55,12 +55,31 @@
           (let ((evidence (dict 'kind kind 'source source 'trust 'external)))
             (if (= kind 'html)
                 (assoc evidence 'content (browse-document body source))
-                (if (if (= kind 'text) #t (= kind 'transcript))
+                (if (if (= kind 'text) #t (if (= kind 'json) #t (= kind 'transcript)))
                     (if (= (type-of body) 'string)
                         (assoc evidence 'content body)
                         (signal 'research/input "expected text content"))
                     (signal 'research/input "unknown evidence kind" kind))))
           (signal 'research/input "expected a source locator"))))
+
+  (def query-encode
+    (fn (query at out)
+      (if (= at (text-bytes query)) (text-from-bytes (reverse out))
+        (let ((hex "0123456789ABCDEF")
+              (byte (text-byte query at)))
+          (let ((high (/ byte 16)))
+            (query-encode query (+ at 1)
+              (cons (text-byte hex (- byte (* 16 high)))
+                (cons (text-byte hex high) (cons 37 out)))))))))
+
+  (def research-query-provider
+    (fn (fetch prefix suffix)
+      (fn (query)
+        (if (if (= (type-of query) 'string)
+              (if (< 0 (text-bytes query)) (< (text-bytes query) 513) #f) #f)
+          (let ((response (fetch (text-concat prefix (text-concat (query-encode query 0 nil) suffix)))))
+            (ingest (get response 'kind) (get response 'source) (get response 'body)))
+          (signal 'research/input "expected a search query of 1 to 512 bytes")))))
 
   (def tool
     (fn (description parameters available invoke)

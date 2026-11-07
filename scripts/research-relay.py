@@ -23,11 +23,13 @@ class ResearchRequest(socketserver.StreamRequestHandler):
             if (parts.scheme != "https" or parts.netloc not in self.server.origins
                     or parts.fragment or any(ord(c) <= 32 or ord(c) >= 127 for c in url)):
                 raise ValueError("origin refused")
-            request = Request(url, headers={"User-Agent": "Agel research", "Accept": "text/html, text/plain"})
+            request = Request(url, headers={"User-Agent": "Agel research",
+                                            "Accept": "text/html, text/plain, application/json"})
             with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=10) as response:
                 if response.status != 200:
                     raise ValueError("status refused")
-                kind = {"text/html": b"html\n", "text/plain": b"text\n"}.get(response.headers.get_content_type())
+                kind = {"text/html": b"html\n", "text/plain": b"text\n",
+                        "application/json": b"json\n"}.get(response.headers.get_content_type())
                 if not kind:
                     raise ValueError("media type refused")
                 body = response.read(32764)

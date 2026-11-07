@@ -98,4 +98,13 @@
 (def refused (with-handler (* problem) (get problem 'kind) (fetch "https://a.test/\n")))
 (check (= refused 'research/input) "reject line injection before opening the relay")
 (check (= closed 1) "invalid URL does not open the stream")
+(def provider (research-query-provider
+  (fn (url) (dict 'kind 'json 'source url 'body "[]"))
+  "https://a.test/search?q=" "&limit=5"))
+(def query-result ((get (get (research-tools provider nil) 'web-search) 'invoke) "é &"))
+(def query-evidence (get query-result 'content))
+(check (= (get query-evidence 'source) "https://a.test/search?q=%C3%A9%20%26&limit=5")
+       "encode UTF-8 and protect query delimiters")
+(check (= (get query-evidence 'trust) 'external) "mark query response as external")
+(check (= (get query-evidence 'content) "[]") "retain the JSON response")
 #t

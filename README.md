@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.46.** The Agel OS graphical console can show live
-milestones from native game tests. See the [release notes](docs/release-v0.3.46.md).
+**Current release: v0.3.47.** The standard research tools can search a
+configured HTTPS endpoint from Agel OS. See the [release notes](docs/release-v0.3.47.md).
+
+v0.3.46 shows native test milestones in the Agel OS graphical console.
+See the [release notes](docs/release-v0.3.46.md).
 
 v0.3.45 reads allowlisted HTTPS documents through the byte carrier.
 See the [release notes](docs/release-v0.3.45.md).
