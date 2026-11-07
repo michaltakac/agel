@@ -401,6 +401,18 @@ def verify_transfer_donor(donor, recipient, evaluation_accounts):
     return int(clocks[0]), charges, usage
 
 
+def transfer_recovery_time(directory, read_table):
+    source = installed_client(directory, read_table)
+    if '"native-transfer: recovery-us "' not in source:
+        return None
+    trace = (directory / 'serial.log').read_text()
+    receipts = re.findall(
+        r'^native-transfer: recovered \{[^\n]+\}\n'
+        r'native-transfer: recovery-us ([1-9]\d*)$', trace, re.M)
+    require(len(receipts) == 1, f'{directory}: expected one recovery clock after lineage verification')
+    return int(receipts[0])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('fixed', type=Path)
@@ -456,6 +468,10 @@ def main():
                 f"'score (benchmark-run (dict 'correct #t 'elapsed-us {elapsed} "
                 f"'billing-complete #t 'charges (list {charge_forms(charges)}))) "
                 f"'writer-usage (benchmark-writer-usage (list {writer_forms(donor_usage)}))))")
+    if adaptive_policy == 'transferred':
+        recovery = transfer_recovery_time(args.candidate, read_table)
+        if recovery is not None:
+            pair = f"(assoc {pair} 'transfer-recovery-us {recovery})"
     print(pair)
 
 

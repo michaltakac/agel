@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.136.** Combat transfer scans the donor audit log
-once. See the [release notes](docs/release-v0.3.136.md).
+**Current release: v0.3.137.** Native transfer scores report donor
+recovery time. See the [release notes](docs/release-v0.3.137.md).
+
+v0.3.136 scans the combat donor audit log once.
+See the [release notes](docs/release-v0.3.136.md).
 
 v0.3.135 maintains the connection during melee observation.
 See the [release notes](docs/release-v0.3.135.md).

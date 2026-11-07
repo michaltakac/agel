@@ -25,6 +25,7 @@
                           (self self (+ at 1) (+ at 1) next))
                         (self self start (+ at 1) found))))))
         (scan scan 0 0 (dict))))))
+(def recovery-started (clock-us))
 (def donor-records (audit-records (file-read "judge-log")))
 (def version-line (get donor-records 'version))
 (def workload-line (get donor-records 'workload))
@@ -87,3 +88,5 @@
   (dict 'version 2 'version-crc32 (text-crc32 version-line)
     'workload-crc32 (text-crc32 workload-line) 'profile-crc32 (text-crc32 profile-line)))
 (console-log (text-concat "native-transfer: recovered " (print-form retained-lineage)))
+(console-log (text-concat "native-transfer: recovery-us "
+  (print-form (- (clock-us) recovery-started))))
