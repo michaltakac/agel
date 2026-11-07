@@ -26,7 +26,7 @@ The private OpenRune world and pre-login/cache wire client are verified
 in v0.3.7. v0.3.8 adds Agel password login, game ciphers, movement,
 stat/inventory observations and skill/item setup. `sh scripts/test-osrs-game.sh`
 checks those live with a normal account and a separate administrator.
-Native transport, agent policies and the actual benchmark tasks are open;
+A native relay arrives in v0.3.16; integrated model-control and task benchmarks remain open;
 see [the setup and precise scope](osrs-client.md).
 `sh scripts/test-osrs-combat.sh` adds a live rat kill in v0.3.9, using Agel
 NPC observations and attack packets, with exact Attack XP and persisted
@@ -63,6 +63,13 @@ versions, refuse a torn successor and an unsafe revert, then commit a safe
 successor and guarded revert. This bounded example does not provide automatic
 service discovery or domain/kernel recovery. See [the API](checkpoints.md) and
 [native evidence and limits](release-v0.3.15.md).
+
+v0.3.16 runs the Agel wire client inside its OS over a general TCP byte relay.
+A fresh normal account logs in, observes skills/inventory and saves a walk at
+1× XP. Agel owns buffering, keepalive policy and reusable standard crypto;
+Rust supplies bootstrap memory and byte transport. This is a headless scripted
+smoke, not an integrated model episode or Exo comparison. See
+[the evidence](release-v0.3.16.md) and [byte-stream API](byte-stream.md).
 
 | Line | Status | Proof and limits |
 |---|---|---|

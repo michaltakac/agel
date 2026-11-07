@@ -10,6 +10,25 @@ interpreter. Packet formats, RSA/XTEA/ISAAC, snapshots, action history and
 the smoke-test logic are Agel. These optional modules are loaded by the
 `osrs` example rather than installed into every default Agel world.
 
+## Native client
+
+`sh scripts/test-native-network.sh` runs cache negotiation, password login,
+live skills/inventory observations and a walk inside Agel OS. A separate
+server oracle checks the saved coordinates, normal rights and 1× XP.
+`--challenge` runs only cache and login challenge negotiation. The TCP relay
+and buffer/service APIs are [general byte-stream mechanisms](byte-stream.md).
+The client is headless; a native visual RuneScape renderer is not included.
+See [the native transcript and limits](release-v0.3.16.md).
+
+Reusable standard algorithms now live in `agel/crypto`; load `crypto.agel`
+before the older `osrs-crypto.agel` compatibility module. Recompute opaque RSA
+contexts when upgrading from 16-bit to 31-bit limbs. For slower transports,
+the game state can supply a `maintenance` map with `start` and `stop` service
+functions. `osrs-await` and `osrs-wait-ticks` then maintain the encrypted
+no-timeout sequence and restore its outgoing cipher position before returning.
+Low-level `osrs-next-packet` remains a direct read operation. The supplied native
+harness connects these functions to `buffered-stream`'s maintenance service.
+
 ## Start or update the private world
 
 The supplied environment targets Linux ARM64 containers, tested from macOS

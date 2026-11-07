@@ -29,6 +29,20 @@ expected.append(bytes.fromhex("dee9d4d8f7131ed9"))
 result = evaluate(source)
 assert result.returncode == 0, result.stderr
 assert result.stdout.strip() == '(' + ' '.join(form(v) if v else 'nil' for v in expected) + ')', "RSA/XTEA oracle mismatch"
+for bits in [30, 31, 32, 61, 62, 63, 95, 96]:
+    modulus = rng.getrandbits(bits) | 1 | (1 << (bits - 1))
+    encoded_modulus = modulus.to_bytes((bits + 7) // 8, "big").hex()
+    source = '(import agel/crypto) (def c (rsa-context "' + encoded_modulus + '")) (list '
+    expected = []
+    for value in [0, 1, modulus - 1, rng.randrange(modulus)]:
+        message = value.to_bytes(max(1, (value.bit_length() + 7) // 8), "big")
+        source += "(rsa-encrypt '" + form(message) + " c) "
+        encrypted = pow(value, 65537, modulus)
+        encoded = encrypted.to_bytes(max(1, (encrypted.bit_length() + 7) // 8), "big")
+        expected.append(b"\0" + encoded if encoded[0] >= 128 else encoded)
+    result = evaluate(source + ')')
+    assert result.returncode == 0 and result.stdout.strip() == '(' + ' '.join(form(v) for v in expected) + ')', result.stderr
+print("General crypto: 31-bit RSA limb boundaries match Python pow")
 for modulus in ["00", "01", "0001", "04", "ffg1"]:
     result = evaluate('(import agel/osrs-crypto) (rsa-context "' + modulus + '")')
     assert result.returncode != 0 and 'osrs/rsa' in result.stderr, result.stderr

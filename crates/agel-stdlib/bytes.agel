@@ -1,6 +1,6 @@
 (module agel/bytes
   (import agel/sequence)
-  (export bytes-from-hex bytes-crc32 text-hex text-from-hex bytes-hex-chunks bytes-crc32-feed bytes-crc32-finish text-crc32)
+  (export bytes-from-hex bytes-crc32 text-hex text-from-hex bytes-hex-chunks bytes-crc32-feed bytes-crc32-finish text-crc32 bytes-hex)
   (def byte-drop (fn (xs n) (if (= n 0) xs (byte-drop (cdr xs) (- n 1)))))
   (def byte-take
     (fn (xs n out) (if (= n 0) (reverse out) (byte-take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -72,6 +72,14 @@
   (def bytes-from-hex
     (fn (text)
       (decode text 0 nil nil)))
+  (def bytes-hex
+    (fn (bytes)
+      (foldl (fn (out byte)
+        (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
+          (text-concat out
+            (text-concat (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
+              (text-slice "0123456789abcdef" (rem byte 16) (+ 1 (rem byte 16)))))
+          (signal 'bytes/value "expected byte"))) "" bytes)))
   (def xor-table "0123456789abcdef1032547698badcfe23016745ab89efcd32107654ba98fedc45670123cdef89ab54761032dcfe98ba67452301efcdab8976543210fedcba9889abcdef0123456798badcfe10325476ab89efcd23016745ba98fedc32107654cdef89ab45670123dcfe98ba54761032efcdab8967452301fedcba9876543210")
   (def xor24
     (fn (a b place out)

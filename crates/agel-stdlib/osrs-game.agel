@@ -1,4 +1,5 @@
 (module agel/osrs-game
+  (import agel/bytes)
   (import agel/sequence)
   (import agel/osrs-crypto)
   (import agel/osrs-wire)
@@ -115,10 +116,37 @@
               (let ((next (osrs-next-packet state)))
                 (wait-ticks (get next 'state)
                   (- ticks (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0)) (- remaining 1)))))))
+  (def keepalive-codes
+    (fn (cipher remaining out)
+      (if (= remaining 0) (bytes-hex (reverse out))
+        (let ((next (isaac-next cipher)))
+          (keepalive-codes (get next 'state) (- remaining 1) (cons (rem (+ 75 (get next 'value)) 256) out))))))
+  (def keeper
+    (fn (codes)
+      (fn (used)
+        (begin
+          (if (< (* used 2) (text-bytes codes)) #t (signal 'osrs/wait "keepalive service budget exhausted"))
+          (dict 'state (+ used 1) 'bytes (bytes-from-hex (text-slice codes (* used 2) (* (+ used 1) 2))))))))
+  (def advance-cipher
+    (fn (cipher n) (if (= n 0) cipher (advance-cipher (get (isaac-next cipher) 'state) (- n 1)))))
+  (def maintained-read
+    (fn (state action)
+      (let ((maintenance (get state 'maintenance)))
+        (if maintenance
+          (begin
+            ((get maintenance 'start) (keeper (keepalive-codes (get state 'out) 512 nil)) 0)
+            (with-handler (* problem)
+              (begin (with-handler (* ignored) nil ((get maintenance 'stop)))
+                (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+              (let ((result (action state)))
+                (let ((used ((get maintenance 'stop))))
+                  (assoc (assoc result 'out (advance-cipher (get state 'out) used)) 'keepalives
+                    (+ (if (get state 'keepalives) (get state 'keepalives) 0) used))))))
+          (action state)))))
   (def osrs-wait-ticks
     (fn (state ticks)
       (if (if (= (type-of ticks) 'int) (if (< -1 ticks) (< ticks 33) #f) #f)
-          (wait-ticks state ticks 4096)
+          (maintained-read state (fn (current) (wait-ticks current ticks 4096)))
           (signal 'osrs/wait "tick count must be between zero and 32"))))
   (def await-loop
     (fn (state ready ticks remaining)
@@ -128,7 +156,7 @@
               (let ((next (osrs-next-packet state)))
                 (await-loop (get next 'state) ready
                   (- ticks (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0)) (- remaining 1)))))))
-  (def osrs-await (fn (state ready) (await-loop state ready 32 4096)))
+  (def osrs-await (fn (state ready) (maintained-read state (fn (current) (await-loop current ready 32 4096)))))
   (def send
     (fn (state opcode payload variable event)
       (let ((next (isaac-next (get state 'out))))

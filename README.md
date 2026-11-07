@@ -5,12 +5,15 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.15.** Agel now encodes and recovers source version stores
-from linked checkpoints in protected OS storage. The native test restores an
-active language form across two reboots, keeps torn evidence, continues with
-a successor and persists a guarded revert. Recovery is explicit and bounded;
-automatic service discovery and native domain/kernel recovery remain open.
-See the [release notes and evidence](docs/release-v0.3.15.md).
+**Current release: v0.3.16.** The Agel client now logs in, observes skills and
+inventory, and walks inside Agel OS over a general TCP byte relay. The server
+independently confirms the saved position, normal rights and 1× XP. Buffering,
+keepalive policy and standard crypto are Agel code. Integrated model-controlled
+native episodes and Exo comparisons remain open.
+See the [release notes and native evidence](docs/release-v0.3.16.md).
+
+v0.3.15 added bounded source-store checkpoint recovery across reboots.
+See the [release notes](docs/release-v0.3.15.md).
 
 v0.3.14 added an Agel-written subset evaluator whose language forms can change
 without recreating existing closures. See the [release notes](docs/release-v0.3.14.md).

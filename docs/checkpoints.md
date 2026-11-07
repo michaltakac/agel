@@ -73,3 +73,9 @@ refuses an unsafe revert, and commits version 3 past the damaged evidence.
 After another reboot, version 3 is restored and a guarded revert to retained
 version 2 commits as version 4. All judgment fixtures have zero costs and are
 logged on the OS; this test invokes no model provider.
+
+In v0.3.16, explicit empty lists are written with an `e` tag. The previous
+v0.3.15 decoder refuses that tag. The updated decoder also restores old empty
+`l` syntax as a distinct empty list. The earlier checkpoint round-trip guard
+refused affected values before append, so previously committed checkpoints
+remain readable. Use the updated codec for newly encoded empty-list values.

@@ -17,7 +17,7 @@
         (if (= kind 'int) (tagged "i " (render value))
         (if (= kind 'string) (tagged "s" (quoted-hex value))
         (if (= kind 'symbol) (tagged "y" (quoted-hex (render value)))
-        (if (= kind 'list) (tagged "l" (values-text value render))
+        (if (= kind 'list) (if (= (count value) 0) "(e)" (tagged "l" (values-text value render)))
         (if (= kind 'map)
           (tagged "m" (values-text (map (fn (key) (list key (get value key))) (keys value)) render))
           (signal 'data/codec "value is not inert data" kind)))))))))))
@@ -36,7 +36,8 @@
         (require (= (type-of form) 'list) "expected tagged data")
         (let ((tag (car form)) (tail (cdr form)))
           (if (= tag 'n) (begin (require (= tail nil) "nil has no payload") nil)
-            (if (= tag 'l) (if (= (count tail) 0) (list) (map decode tail))
+            (if (= tag 'e) (begin (require (= tail nil) "empty list has no payload") (keys (dict)))
+            (if (= tag 'l) (if (= (count tail) 0) (keys (dict)) (map decode tail))
               (if (= tag 'm) (decode-map (map decode tail) (dict))
                 (begin
                   (require (= (count tail) 1) "atom requires one payload")
@@ -47,7 +48,7 @@
                       (begin
                         (require (= (type-of value) 'string) "expected hex text")
                         (let ((text (text-from-hex value))) (if (= tag 'y) (text-symbol text) text)))
-                      (signal 'data/codec "unknown data tag" tag)))))))))))))
+                      (signal 'data/codec "unknown data tag" tag))))))))))))))
   (def data-read
     (fn (text)
       (let ((forms (native-read text 65536 128)))

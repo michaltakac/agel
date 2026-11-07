@@ -1,0 +1,57 @@
+; Frozen v0.3.15 codec; only module name changed for compatibility testing.
+(module agel/data-codec-v015
+  (import agel/sequence)
+  (import agel/bytes)
+  (import agel/native-reader)
+  (export data-pack data-read)
+  (def require (fn (ok reason) (if ok #t (signal 'data/codec reason))))
+  (def tagged (fn (tag body) (text-concat "(" (text-concat tag (text-concat body ")")))))
+  (def quoted-hex (fn (text) (text-concat " \"" (text-concat (text-hex text) "\""))))
+  (def values-text
+    (fn (values render)
+      (foldl (fn (out value) (text-concat out (text-concat " " (data-pack value render)))) "" values)))
+  (def data-pack
+    (fn (value render)
+      (let ((kind (type-of value)))
+        (if (= value nil) "(n)"
+        (if (= kind 'bool) (if value "(b #t)" "(b #f)")
+        (if (= kind 'int) (tagged "i " (render value))
+        (if (= kind 'string) (tagged "s" (quoted-hex value))
+        (if (= kind 'symbol) (tagged "y" (quoted-hex (render value)))
+        (if (= kind 'list) (tagged "l" (values-text value render))
+        (if (= kind 'map)
+          (tagged "m" (values-text (map (fn (key) (list key (get value key))) (keys value)) render))
+          (signal 'data/codec "value is not inert data" kind)))))))))))
+  (def decode-map
+    (fn (pairs out)
+      (if (= pairs nil) out
+        (let ((pair (car pairs)))
+          (begin
+            (require (= (type-of pair) 'list) "map entry must be a pair")
+            (require (= (count pair) 2) "map entry must be a pair")
+            (require (if (has-key? out (car pair)) #f #t) "duplicate map key")
+            (decode-map (cdr pairs) (assoc out (car pair) (car (cdr pair)))))))))
+  (def decode
+    (fn (form)
+      (begin
+        (require (= (type-of form) 'list) "expected tagged data")
+        (let ((tag (car form)) (tail (cdr form)))
+          (if (= tag 'n) (begin (require (= tail nil) "nil has no payload") nil)
+            (if (= tag 'l) (if (= (count tail) 0) (list) (map decode tail))
+              (if (= tag 'm) (decode-map (map decode tail) (dict))
+                (begin
+                  (require (= (count tail) 1) "atom requires one payload")
+                  (let ((value (car tail)))
+                    (if (= tag 'b) (begin (require (= (type-of value) 'bool) "expected boolean") value)
+                    (if (= tag 'i) (begin (require (= (type-of value) 'int) "expected integer") value)
+                    (if (if (= tag 's) #t (= tag 'y))
+                      (begin
+                        (require (= (type-of value) 'string) "expected hex text")
+                        (let ((text (text-from-hex value))) (if (= tag 'y) (text-symbol text) text)))
+                      (signal 'data/codec "unknown data tag" tag)))))))))))))
+  (def data-read
+    (fn (text)
+      (let ((forms (native-read text 65536 128)))
+        (begin
+          (require (= (count forms) 1) "expected one data record")
+          (decode (car forms)))))))

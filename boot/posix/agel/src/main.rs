@@ -26,6 +26,8 @@
 
 extern crate alloc;
 
+mod heap_runs;
+
 use agel_core::{Budget, EvaluationOptions, HostError, HostWord, Pulse, Value, World};
 use agel_process_abi as abi;
 use alloc::{format, string::String, vec::Vec};
@@ -79,16 +81,14 @@ fn map_pages(pages: u64) -> i64 {
 
 /// Pages at the break, handed out in power-of-two classes from 16 bytes to
 /// 64 KiB with a free list each, and as whole page runs for anything
-/// larger. A freed block goes back to its class; a freed run to a small
-/// table of free runs. The evaluator's churn of small nodes is therefore
-/// reused at once and never walks a list; a run a class cannot hold is
-/// rare (a long text, a large vector). Nothing here is thread-safe,
-/// because nothing here is threaded.
+/// larger. A freed block goes back to its class; free runs retain their
+/// metadata in the free pages and coalesce adjacent ranges. Small nodes
+/// reuse their class lists; large vectors and texts reuse page runs.
+/// The process is single-threaded.
 const CLASS_FIRST: u32 = 4;
 const CLASS_LAST: u32 = 16;
 const CLASSES: usize = (CLASS_LAST - CLASS_FIRST + 1) as usize;
 const PAGE: usize = 4096;
-const RUNS: usize = 64;
 
 struct Heap {
     /// The first free block of each class, or 0; a free block's first word
@@ -97,8 +97,8 @@ struct Heap {
     /// The pages not yet carved: `[bump, end)`, contiguous with the break.
     bump: usize,
     end: usize,
-    /// Free page runs: address and page count, `(0, 0)` for an empty slot.
-    runs: [(usize, usize); RUNS],
+    /// Free page runs, linked through their own mapped memory.
+    runs: heap_runs::Runs,
 }
 
 struct Allocator;
@@ -107,7 +107,7 @@ static mut HEAP: Heap = Heap {
     free: [0; CLASSES],
     bump: 0,
     end: 0,
-    runs: [(0, 0); RUNS],
+    runs: heap_runs::Runs::new(),
 };
 
 /// The class of a request, or `None` for one that needs whole pages.
@@ -131,27 +131,41 @@ unsafe fn carve(heap: &mut Heap, bytes: usize, align: usize) -> *mut u8 {
         }
         let missing = (start + bytes).saturating_sub(heap.end).max(1);
         let pieces = missing.div_ceil(PAGE * abi::BRK_PAGES as usize) as u64;
+        let process = process();
+        let before = process.brk(0);
         let mapped = map_pages(pieces * abi::BRK_PAGES);
+        let after = process.brk(0);
+        if heap.bump == 0 && before >= 0 {
+            heap.bump = before as usize;
+        }
+        if after >= 0 {
+            heap.end = after as usize;
+        }
         if mapped < 0 {
-            // The window is full: say so and end, rather than fail the
-            // allocation into a panic that names only the bytes.
-            let process = process();
+            let aligned = (heap.bump + align - 1) & !(align - 1);
+            if aligned + bytes <= heap.end {
+                continue;
+            }
+            let exact = (aligned + bytes).saturating_sub(heap.end).div_ceil(PAGE);
+            let _ = map_pages(exact as u64);
+            let after = process.brk(0);
+            if after >= 0 {
+                heap.end = after as usize;
+            }
+            if aligned + bytes <= heap.end {
+                continue;
+            }
             process.report(
                 2,
-                b"agel: out of memory: the process window is full after ",
+                b"agel: out of memory: heap growth failed after ",
                 ((heap.end - heap.bump) / PAGE) as i64,
                 b" free pages\n",
             );
             process.report(2, b"agel: allocation bytes ", bytes as i64, b"\n");
-            let cached: usize = heap.runs.iter().map(|run| run.1).sum();
+            let cached = heap.runs.cached_pages();
             process.report(2, b"agel: cached large-run pages ", cached as i64, b"\n");
             process.exit(12);
         }
-        if heap.bump == 0 {
-            heap.bump = mapped as usize;
-            heap.end = mapped as usize;
-        }
-        heap.end += pieces as usize * abi::BRK_PAGES as usize * PAGE;
     }
 }
 
@@ -165,21 +179,41 @@ unsafe impl GlobalAlloc for Allocator {
                     heap.free[class] = *(head as *const usize);
                     return head as *mut u8;
                 }
+                if let Some(address) = heap
+                    .runs
+                    .take(bytes.div_ceil(PAGE), layout.align().max(PAGE))
+                {
+                    if bytes < PAGE {
+                        let blocks = PAGE / bytes;
+                        for offset in (1..blocks).rev() {
+                            let block = address + offset * bytes;
+                            *(block as *mut usize) = heap.free[class];
+                            heap.free[class] = block;
+                        }
+                    }
+                    return address as *mut u8;
+                }
                 carve(heap, bytes, bytes.min(PAGE).max(layout.align()))
             }
             None => {
                 let pages = layout.size().div_ceil(PAGE);
-                for slot in heap.runs.iter_mut() {
-                    if slot.1 >= pages && layout.align() <= PAGE {
-                        let address = slot.0;
-                        *slot = if slot.1 == pages {
-                            (0, 0)
-                        } else {
-                            (slot.0 + pages * PAGE, slot.1 - pages)
-                        };
-                        return address as *mut u8;
+                if let Some(address) = heap.runs.take(pages, layout.align()) {
+                    return address as *mut u8;
+                }
+                for class in (PAGE.trailing_zeros() - CLASS_FIRST) as usize..CLASSES {
+                    let class_pages = (1 << (class as u32 + CLASS_FIRST)) / PAGE;
+                    let mut head = heap.free[class];
+                    heap.free[class] = 0;
+                    while head != 0 {
+                        let next = *(head as *const usize);
+                        heap.runs.insert(head, class_pages);
+                        head = next;
                     }
                 }
+                if let Some(address) = heap.runs.take(pages, layout.align()) {
+                    return address as *mut u8;
+                }
+                heap.runs.rewind(&mut heap.bump);
                 carve(heap, pages * PAGE, PAGE.max(layout.align()))
             }
         }
@@ -194,10 +228,8 @@ unsafe impl GlobalAlloc for Allocator {
             }
             None => {
                 let pages = layout.size().div_ceil(PAGE);
-                if let Some(slot) = heap.runs.iter_mut().find(|slot| slot.1 == 0) {
-                    *slot = (pointer as usize, pages);
-                }
-                // With the table full the run is left mapped and unused.
+                heap.runs.insert(pointer as usize, pages);
+                heap.runs.rewind(&mut heap.bump);
             }
         }
     }
@@ -290,7 +322,7 @@ fn pulse() {
 /// kind, an agent holds what it was spawned with — and `print-form`, the
 /// printed form of a value as text, pure, so a program can write source
 /// the reader reads.
-static HOST: [HostWord; 14] = [
+static HOST: [HostWord; 15] = [
     HostWord {
         name: "file-read",
         capability: "file/read",
@@ -332,6 +364,11 @@ static HOST: [HostWord; 14] = [
         call: model_request,
     },
     HostWord {
+        name: "byte-request",
+        capability: "byte/relay",
+        call: byte_request,
+    },
+    HostWord {
         name: "print-form",
         capability: "",
         call: print_form,
@@ -366,13 +403,14 @@ static HOST: [HostWord; 14] = [
 /// The capability kinds the words need, issued to the evaluation for
 /// every scope: the namespace `:exec` granted is the bound on what they
 /// can name, and an agent gets only what it is spawned with.
-const CAPABILITY_KINDS: [&str; 8] = [
+const CAPABILITY_KINDS: [&str; 9] = [
     "file/read",
     "file/write",
     "clock/read",
     "console/write",
     "process/run",
     "model/infer",
+    "byte/relay",
     "program/read",
     "program/write",
 ];
@@ -768,6 +806,28 @@ fn model_request(arguments: &[Value]) -> Result<Value, HostError> {
             return Ok(Value::String(String::from(
                 String::from_utf8_lossy(reply).trim(),
             )));
+        }
+    }
+}
+
+fn byte_request(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("byte-request", arguments, 1)?;
+    let text = text_argument("byte-request", arguments, 0)?;
+    let number = REQUESTS.fetch_add(1, Ordering::Relaxed) + 1;
+    say(
+        1,
+        &format!("byte-request {number}:\n{text}\nbyte-request end\n"),
+    );
+    let prefix = format!(":byte-reply {number} ");
+    loop {
+        let Some(line) = console_line() else {
+            return Err(fail(
+                "byte/unavailable",
+                "console ended before byte reply".into(),
+            ));
+        };
+        if let Some(reply) = line.strip_prefix(prefix.as_bytes()) {
+            return Ok(Value::String(String::from_utf8_lossy(reply).trim().into()));
         }
     }
 }

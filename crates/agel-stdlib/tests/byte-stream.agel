@@ -1,0 +1,67 @@
+(import agel/byte-stream)
+(def check (fn (ok label) (if ok #t (signal 'test/stream label))))
+(def stream (byte-stream (fn (request)
+  (if (= request "AGEL-BYTES/1 open") "ok"
+  (if (= request "AGEL-BYTES/1 close") "ok"
+  (if (= request "AGEL-BYTES/1 read 256") "ok 00ff"
+  (if (= request "AGEL-BYTES/1 entropy 3") "ok 000102"
+  (if (= request "AGEL-BYTES/1 write 00ff0a80") "ok 4"
+    (signal 'test/request "unexpected byte request")))))))))
+(check ((get stream 'open)) "open")
+(check (= ((get stream 'read) 65536) '(0 255)) "bounded read")
+(check (= ((get stream 'entropy) 3) '(0 1 2)) "entropy")
+(check (= ((get stream 'write) '(0 255 10 128)) 4) "raw write")
+(check (= ((get stream 'write) nil) 0) "empty write")
+(check ((get stream 'close)) "close")
+(check (with-handler (* problem) #t (begin ((get stream 'write) '(256)) #f)) "invalid byte")
+(check (with-handler (* problem) #t (begin ((get stream 'read) 0) #f)) "zero count")
+(def short (byte-stream (fn (request) "ok 00")))
+(check (with-handler (* problem) #t (begin ((get short 'entropy) 2) #f)) "short entropy")
+(def broken (byte-stream (fn (request) "garbage")))
+(check (with-handler (* problem) #t (begin ((get broken 'open)) #f)) "malformed reply")
+#t
+(def zeros (fn (self n out) (if (= n 0) out (self self (- n 1) (cons 0 out)))))
+(def never-write (byte-stream (fn (request) (signal 'test/io "must not send invalid input"))))
+(check (= (with-handler (* problem) (get problem 'message)
+  ((get never-write 'write) (zeros zeros 256 '(256)))) "expected byte") "validate full write before sending")
+#t
+
+(import agel/buffered-stream)
+(def buffered (buffered-stream (dict
+  'open (fn () #t) 'close (fn () #t) 'read (fn (n) '(1 2 3 4 5 6))
+  'write (fn (bytes) (count bytes)) 'entropy (fn (n) nil)) 6 nil))
+((get buffered 'open))
+(check (= ((get buffered 'read) 1) '(1)) "first buffered byte")
+(check (= ((get buffered 'read) 2) '(2 3)) "buffer preserved across calls")
+(check (= ((get buffered 'read) 8) '(4 5 6)) "partial buffered read")
+(check (= (get (get (agent-info (get buffered 'agent)) 'heap) 'reads) 1) "one underlying read")
+(check (= ((get buffered 'read) 1) '(1)) "buffer refilled")
+((get buffered 'close))
+((get buffered 'open))
+(check (= ((get buffered 'read) 1) '(1)) "new connection resets old bytes")
+#t
+((get buffered 'close))
+((get buffered 'open))
+((get buffered 'start-service) (fn (n) (dict 'state (+ n 1) 'bytes '(9))) 0)
+((get buffered 'read) 1)
+((get buffered 'read) 1)
+((get buffered 'read) 8)
+((get buffered 'read) 1)
+(check (= ((get buffered 'stop-service)) 2) "service runs only before physical refills")
+#t
+(def ended (buffered-stream (dict 'open (fn () #t) 'close (fn () #t)
+  'write (fn (bytes) (count bytes)) 'read (fn (n) nil)) 6 nil))
+((get ended 'open))
+(check (= ((get ended 'read) 1) nil) "buffered EOF")
+(check (= ((get ended 'read) 1) nil) "EOF stays latched")
+(check (= (get (get (agent-info (get ended 'agent)) 'heap) 'reads) 1) "EOF does not refetch")
+(def failing (buffered-stream (dict 'open (fn () #t) 'close (fn () #t)
+  'write (fn (bytes) (count bytes)) 'read (fn (n) (signal 'test/io "read failed"))) 6 nil))
+((get failing 'open))
+((get failing 'start-service) (fn (n) (dict 'state (+ n 1) 'bytes '(9))) 0)
+(check (= (with-handler (* problem) (get problem 'message) ((get failing 'read) 1)) "read failed") "read error surfaced")
+(check (= ((get failing 'stop-service)) 1) "acknowledged service state survives read failure")
+(check (= (with-handler (* problem) (get problem 'kind) ((get failing 'read) 1)) 'stream/failed) "failed stream cannot silently retry")
+((get failing 'close))
+((get failing 'open))
+#t

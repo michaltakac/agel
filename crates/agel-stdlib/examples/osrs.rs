@@ -179,7 +179,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..EvaluationOptions::default()
     };
     agel_stdlib::install(&mut world, &options)?;
+    world.evaluate_with(include_str!("../bytes.agel"), &options)?;
     world.evaluate_with(include_str!("../osrs-wire.agel"), &options)?;
+    world.evaluate_with(include_str!("../crypto.agel"), &options)?;
     world.evaluate_with(include_str!("../osrs-crypto.agel"), &options)?;
     world.evaluate_with(include_str!("../osrs-login.agel"), &options)?;
     world.evaluate_with(include_str!("../osrs-packets.agel"), &options)?;

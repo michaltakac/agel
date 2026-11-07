@@ -1,0 +1,56 @@
+(module agel/byte-stream
+  (import agel/sequence)
+  (import agel/bytes)
+  (export byte-stream)
+  (def require (fn (ok reason) (if ok #t (signal 'stream/protocol reason))))
+  (def call
+    (fn (ask operation)
+      (let ((reply (ask (text-concat "AGEL-BYTES/1 " operation))))
+        (if (= reply "ok") ""
+          (if (if (< 2 (text-bytes reply)) (= (text-slice reply 0 3) "ok ") #f)
+            (text-slice reply 3 (text-bytes reply))
+            (if (if (< 5 (text-bytes reply)) (= (text-slice reply 0 6) "error ") #f)
+              (signal 'stream/io (text-from-hex (text-slice reply 6 (text-bytes reply))))
+              (signal 'stream/protocol "invalid byte reply")))))))
+  (def bounded
+    (fn (n limit)
+      (require (if (= (type-of n) 'int) (if (< 0 n) (< n (+ limit 1)) #f) #f) "invalid byte count")))
+  (def decimal
+    (fn (n)
+      (let ((digit (- n (* 10 (/ n 10)))))
+        (text-concat (if (< n 10) "" (decimal (/ n 10))) (text-slice "0123456789" digit (+ digit 1))))))
+  (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
+  (def drop (fn (xs n) (if (= n 0) xs (drop (cdr xs) (- n 1)))))
+  (def valid-byte (fn (byte)
+    (require (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f) "expected byte")))
+  (def byte-hex
+    (fn (byte)
+      (begin
+        (text-concat (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
+          (text-slice "0123456789abcdef" (- byte (* 16 (/ byte 16))) (+ 1 (- byte (* 16 (/ byte 16)))))))))
+  (def write-loop
+    (fn (ask bytes total)
+      (if (= (count bytes) 0) total
+        (let ((size (if (< (count bytes) 256) (count bytes) 256)))
+          (let ((payload (foldl (fn (out byte) (text-concat out (byte-hex byte))) "" (take bytes size nil))))
+            (begin
+              (require (= (call ask (text-concat "write " payload)) (decimal size)) "short byte write")
+              (write-loop ask (drop bytes size) (+ total size))))))))
+  (def byte-stream
+    (fn (ask)
+      (dict
+        'open (fn () (begin (require (= (call ask "open") "") "invalid open reply") #t))
+        'close (fn () (begin (require (= (call ask "close") "") "invalid close reply") #t))
+        'read (fn (n) (begin (bounded n 65536)
+          (let ((size (if (< n 256) n 256)))
+            (let ((bytes (bytes-from-hex (call ask (text-concat "read " (decimal size))))))
+              (begin (require (< (count bytes) (+ size 1)) "oversized byte reply") bytes)))))
+        'write (fn (bytes)
+          (begin
+            (require (if (= bytes nil) #t (= (type-of bytes) 'list)) "expected byte list")
+            (require (< (count bytes) 65537) "write exceeds byte bound")
+            (foldl (fn (_ byte) (valid-byte byte)) #t bytes)
+            (write-loop ask bytes 0)))
+        'entropy (fn (n) (begin (bounded n 256)
+          (let ((bytes (bytes-from-hex (call ask (text-concat "entropy " (decimal n))))))
+            (begin (require (= (count bytes) n) "short entropy reply") bytes))))))))

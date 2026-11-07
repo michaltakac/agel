@@ -6039,6 +6039,10 @@ fn interactive(
         .unwrap_or_else(|reason| failed(reason));
     let mut line = [0; INPUT_BYTES];
     let mut length = 0;
+    let mut byte_frame = [0; 4096];
+    let mut byte_frame_length = 0;
+    let mut byte_frame_active = false;
+    let mut byte_frame_overflow = false;
     let mut keyboard = Keyboard::new();
     let mut pointer = crate::pointer::Pointer::new(
         crate::world::SCENE_WIDTH as i32,
@@ -6166,6 +6170,7 @@ fn interactive(
                     .focus
                     .and_then(|slot| current.windows[usize::from(slot)].as_mut())
                     .filter(|window| window.listens() && running.is_some())
+                    .filter(|_| !byte_frame_active && byte != 0x1d)
                     .filter(|_| length == 0 && byte != b':' || length > 0 && line[0] != b':')
                 {
                     window.queue(crate::world::process::EVENT_KEY | u64::from(byte));
@@ -6553,6 +6558,32 @@ fn interactive(
                 }
             }
         };
+        if byte == 0x1d {
+            byte_frame_active = true;
+            byte_frame_length = 0;
+            byte_frame_overflow = false;
+            continue;
+        }
+        if byte_frame_active {
+            if byte == b'\n' {
+                let payload = &byte_frame[..byte_frame_length];
+                let accepted = !byte_frame_overflow
+                    && core::str::from_utf8(payload).is_ok()
+                    && running
+                        .as_mut()
+                        .is_some_and(|run| run.feed_console(payload));
+                if !accepted {
+                    console::write("byte-input refused\n");
+                }
+                byte_frame_active = false;
+            } else if byte_frame_length < byte_frame.len() {
+                byte_frame[byte_frame_length] = byte;
+                byte_frame_length += 1;
+            } else {
+                byte_frame_overflow = true;
+            }
+            continue;
+        }
         let mut prompt_pending = false;
         match byte {
             b'\t' if workspace.find(b"wb-0").is_none() => {

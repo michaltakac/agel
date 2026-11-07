@@ -1,0 +1,76 @@
+(module agel/buffered-stream
+  (import agel/bytes)
+  (export buffered-stream)
+  (def require (fn (ok reason) (if ok #t (signal 'stream/buffer reason))))
+  (def service
+    (fn (state)
+      (if (get state 'service-fn)
+        (let ((effect ((get state 'service-fn) (get state 'service-state))))
+          (begin
+            (require (has-key? effect 'state) "service omitted its state")
+            (let ((bytes (get effect 'bytes)))
+              (require (= ((get state 'write) bytes) (count bytes)) "short service write"))
+            (assoc state 'service-state (get effect 'state)))) state)))
+  (def failed
+    (fn (state problem)
+      (begin (send (get state 'receiver) (dict 'error problem)) (assoc state 'failed problem))))
+  (def read-step
+    (fn (state message)
+      (let ((refill (if (= (text-bytes (get state 'buffer)) 0) (if (get state 'ended) #f #t) #f)))
+        (let ((prepared (if refill (service state) state)))
+          (with-handler (* problem) (failed prepared problem)
+            (let ((bytes (if refill (bytes-hex ((get prepared 'read) (get prepared 'size))) (get prepared 'buffer))))
+              (let ((n (if (< (/ (text-bytes bytes) 2) (get message 'count)) (/ (text-bytes bytes) 2) (get message 'count))))
+                (begin
+                  (send (get prepared 'receiver) (dict 'bytes (bytes-from-hex (text-slice bytes 0 (* n 2)))))
+                  (assoc (assoc (assoc prepared 'buffer (text-slice bytes (* n 2) (text-bytes bytes))) 'ended (= (text-bytes bytes) 0))
+                    'reads (+ (get prepared 'reads) (if refill 1 0)))))))))))
+  (def behavior
+    (fn (self state message)
+      (with-handler (* problem) (failed state problem)
+        (if (= (get message 'operation) 'reset)
+          (begin (send (get state 'receiver) (dict 'ok #t))
+            (assoc (assoc (assoc (assoc (assoc state 'buffer "") 'ended #f) 'service-fn nil) 'service-state nil) 'failed nil))
+          (if (= (get message 'operation) 'stop-service)
+            (begin (send (get state 'receiver) (dict 'state (get state 'service-state)))
+              (assoc (assoc state 'service-fn nil) 'service-state nil))
+            (begin
+              (if (get state 'failed) (signal 'stream/failed "stream failed; close and reopen before reuse") nil)
+              (if (= (get message 'operation) 'start-service)
+                (begin (send (get state 'receiver) (dict 'ok #t))
+                  (assoc (assoc state 'service-fn (get message 'function)) 'service-state (get message 'state)))
+                (begin (require (= (get message 'operation) 'read) "unknown buffer operation")
+                  (read-step state message)))))))))
+  (def wait
+    (fn (receiver worker remaining)
+      (let ((reply (recv receiver)))
+        (if reply
+          (if (get reply 'error)
+            (let ((problem (get reply 'error))) (signal (get problem 'kind) (get problem 'message))) reply)
+          (begin
+            (require (< 0 remaining) "buffer scheduler did not complete")
+            (require (= (get (agent-info worker) 'status) 'running) "buffer worker stopped")
+            (run 1)
+            (wait receiver worker (- remaining 1)))))))
+  (def buffered-stream
+    (fn (stream size capabilities)
+      (begin
+        (require (if (= (type-of size) 'int) (if (< 0 size) (< size 257) #f) #f) "invalid buffer size")
+        (let ((receiver (spawn "stream-results")))
+          (let ((heap (dict 'read (get stream 'read) 'write (get stream 'write) 'receiver receiver
+                       'buffer "" 'ended #f 'reads 0 'size size 'service-fn nil 'service-state nil 'failed nil)))
+            (let ((worker (if (= (count capabilities) 0)
+                           (spawn "stream-buffer" behavior heap nil)
+                           (spawn "stream-buffer" behavior heap nil nil 'stop 0 capabilities))))
+              (let ((call (fn (message) (begin (send worker message) (wait receiver worker 8192)))))
+                (dict 'agent worker
+                  'open (fn () (let ((result ((get stream 'open)))) (call (dict 'operation 'reset)) result))
+                  'close (fn () (let ((result ((get stream 'close)))) (call (dict 'operation 'reset)) result))
+                  'write (get stream 'write) 'entropy (get stream 'entropy)
+                  'start-service (fn (function state) (call (dict 'operation 'start-service 'function function 'state state)))
+                  'stop-service (fn () (get (call (dict 'operation 'stop-service)) 'state))
+                  'read (fn (n)
+                    (begin
+                      (require (if (= (type-of n) 'int) (if (< 0 n) (< n 65537) #f) #f) "invalid read count")
+                      (get (call (dict 'operation 'read 'count n)) 'bytes))))))))))
+))

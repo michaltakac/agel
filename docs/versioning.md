@@ -553,6 +553,12 @@ promise.
   versions remain available; guarded edits/reverts continue after recovery.
   General sequence and CRC policy fixes stay in Agel. Automatic service
   discovery, streaming recovery and domain/kernel restoration remain open.
+  `v0.3.16` adds a general native byte relay and Agel buffering/maintenance
+  agent. The Agel client logs in, observes and walks inside its OS, with a
+  saved-state oracle and unchanged normal rates. Reusable crypto uses 31-bit
+  RSA limbs; bootstrap allocation/framing fixes support the path. The codec
+  adds an explicit empty-list tag refused by older readers. Model-controlled
+  native episodes, visual rendering and Exo comparisons remain unfinished.
   Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.

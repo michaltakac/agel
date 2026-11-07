@@ -1,0 +1,49 @@
+16-bit RSA; EOF during login (unpaid development trial)
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+agel: error: evaluation error: osrs/eof: connection ended inside packet
+process agel exited with status 1
+
+31-bit RSA logged in; fragmented allocation failed (unpaid development trial)
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+agel: out of memory: the process window is full after 40 free pages
+agel: allocation bytes 192512
+agel: cached large-run pages 911
+process agel exited with status 12
+
+buffered reader retained byte vectors; allocation failed (unpaid development trial)
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+agel: out of memory: the process window is full after 61 free pages
+agel: allocation bytes 335872
+agel: cached large-run pages 691
+process agel exited with status 12
+
+coalesced runs alone did not prevent allocation failure (unpaid development trial)
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+agel: out of memory: the process window is full after 52 free pages
+agel: allocation bytes 335872
+agel: cached large-run pages 1846
+process agel exited with status 12
+
+compact buffer completed client; independent movement oracle failed (unpaid development trial)
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-network: live skills and inventory decoded
+native-network: PASS: login, live observations and walking performed by Agel inside its OS
+process agel exited with status 0
+
+Independent oracle for trial 1794011351918911000: FAILED; walking state was not saved at expected coordinates. The client completion line above was provisional.
+
+Unbuffered trial 1794010353354880000 was deliberately canceled while live after login; no final gameplay result is claimed.

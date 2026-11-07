@@ -25,6 +25,7 @@ fn inert_codec_and_checkpoint_chain_recover_only_complete_valid_commits() {
         include_str!("../data-codec.agel"),
         include_str!("../checkpoint.agel"),
         include_str!("../live-runtime.agel"),
+        include_str!("fixtures/data-codec-v015.agel"),
     ] {
         world.evaluate_with(source, &options).unwrap();
     }
