@@ -3,18 +3,27 @@
 (def recorded-hex (get (get recorded-field 'bytes) 'data))
 (def observed-length (/ (text-bytes recorded-hex) 2))
 (check (if (< 1023 observed-length) (< observed-length 8193) #f) "no suitably sized recorded workload")
-((get stream 'pulse))
+(def next-preparation-observation optimizer-started)
+(def prepare-service
+  (fn ()
+    ((get stream 'pulse))
+    (let ((now (clock-us)))
+      (if (< now next-preparation-observation) nil
+        (begin
+          (preparation-observe)
+          (def next-preparation-observation (+ (clock-us) 3000000)))))))
+(prepare-service)
 (def replay-chunks
   (fn (at chunks)
     (if (= at (text-bytes recorded-hex)) chunks
       (let ((end (+ at (if (< 256 (- (text-bytes recorded-hex) at))
                           256 (- (text-bytes recorded-hex) at)))))
         (let ((chunk (bytes-from-hex (text-slice recorded-hex at end))))
-          ((get stream 'pulse))
+          (prepare-service)
           (replay-chunks end (cons chunk chunks)))))))
 (def replay-bytes
   (foldl (fn (body chunk)
-           ((get stream 'pulse))
+           (prepare-service)
            (append chunk body))
     nil (replay-chunks 0 nil)))
 (def run-profile
@@ -28,6 +37,7 @@
       (check (= (get measurement 'value) recorded-hex) "control bytes differ from recorded input")
       (get measurement 'metrics))))
 (def baseline (run-control))
+(prepare-service)
 (def work-budget 3000000)
 (def gap-budget 6000000)
 (def policy-bound (profile-limit baseline 64 work-budget 4 512))
@@ -43,7 +53,7 @@
     (if (= at (text-bytes replay-tape)) #t
       (let ((end (if (< (+ at 2048) (text-bytes replay-tape)) (+ at 2048) (text-bytes replay-tape))))
         (begin
-          ((get stream 'pulse))
+          (prepare-service)
           (file-append "judge-log" (text-slice replay-tape at end))
           (append-tape end))))))
 (append-tape 0)

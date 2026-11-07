@@ -295,16 +295,16 @@ else:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
         if options.economy or fresh_quest:
             source+='''(def inference-packets 0)
+(def preparation-packets 0)
 (def inference-observation-error nil)
 (def observe-inference-packets
-  (fn (remaining)
+  (fn (remaining observed)
     (if (if (< 0 remaining) ((get stream 'read-ready)) #f)
       (begin
         (def ready (get (osrs-next-packet ready) 'state))
-        (def inference-packets (+ inference-packets 1))
-        (observe-inference-packets (- remaining 1)))
-      nil)))
-(def inference-observe
+        (observe-inference-packets (- remaining 1) (+ observed 1)))
+      observed)))
+(def observe-ready-packets
   (fn ()
     (if inference-observation-error
       (signal 'native/observation "inference observation stream failed")
@@ -312,7 +312,11 @@ else:
         (begin
           (def inference-observation-error problem)
           (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
-        (observe-inference-packets 4)))))
+        (observe-inference-packets 4 0)))))
+(def inference-observe
+  (fn () (def inference-packets (+ inference-packets (observe-ready-packets)))))
+(def preparation-observe
+  (fn () (def preparation-packets (+ preparation-packets (observe-ready-packets)))))
 '''
         if options.optimize:
             if melee is not None or options.economy or options.craft or fresh_quest:
@@ -327,6 +331,7 @@ else:
         if options.economy or fresh_quest:
             source+='''(def inference-observe (fn () nil))
 (check (= inference-observation-error nil) "inference observation stream failed")
+(console-log (text-concat "native-opt: packets observed during preparation " (print-form preparation-packets)))
 (console-log (text-concat "native-opt: packets observed while awaiting inference " (print-form inference-packets)))
 '''
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '

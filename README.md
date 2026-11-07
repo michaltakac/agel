@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.124.** Agel reduces the work needed to prepare an
-RSA public context. See the [release notes](docs/release-v0.3.124.md).
+**Current release: v0.3.125.** The native optimizer keeps observing while
+preparing replay input. See the [release notes](docs/release-v0.3.125.md).
+
+v0.3.124 reduces the work needed to prepare an RSA public context.
+See the [release notes](docs/release-v0.3.124.md).
 
 v0.3.123 waits for a tutor response after a route change.
 See the [release notes](docs/release-v0.3.123.md).
