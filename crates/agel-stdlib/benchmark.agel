@@ -64,6 +64,18 @@
                 (if (= coins nil) nil (dict 'coins coins 'nanousd cost))
                 nil)))))))
 
+  (def pair-outcome
+    (fn (control candidate time cost)
+      (if (get control 'correct)
+        (if (get candidate 'correct)
+          (if (= cost nil) 'cost-unknown
+            (if (= time 0)
+              (if (= cost 0) 'tie (if (< cost 0) 'adaptive-dominates 'fixed-dominates))
+              (if (< time 0)
+                (if (< 0 cost) 'trade-off 'adaptive-dominates)
+                (if (< cost 0) 'trade-off 'fixed-dominates))))
+          'fixed-only-correct)
+        (if (get candidate 'correct) 'adaptive-only-correct 'both-failed))))
   (def benchmark-pair
     (fn (fixed adaptive)
       (require (if (= (get fixed 'arm) 'fixed) (= (get adaptive 'arm) 'adaptive) #f)
@@ -75,9 +87,11 @@
         "arms require distinct accounts")
       (let ((control (benchmark-run fixed)) (candidate (benchmark-run adaptive)))
         (let ((a (get candidate 'cost-nanousd)) (b (get control 'cost-nanousd)))
-          (dict 'comparison (get fixed 'comparison) 'fixed control 'adaptive candidate
-            'elapsed-delta-us (- (get candidate 'elapsed-us) (get control 'elapsed-us))
-            'cost-delta-nanousd (if (if a b #f) (- a b) nil))))))
+          (let ((time (- (get candidate 'elapsed-us) (get control 'elapsed-us)))
+                (cost (if (if a b #f) (- a b) nil)))
+            (dict 'comparison (get fixed 'comparison) 'fixed control 'adaptive candidate
+              'elapsed-delta-us time 'cost-delta-nanousd cost
+              'cost-time-outcome (pair-outcome control candidate time cost)))))))
 
   (def benchmark-transfer
     (fn (prior fresh)

@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.169.** The OSRS quest example recovers from a
-reopened mining tutor menu. See the [release notes](docs/release-v0.3.169.md).
+**Current release: v0.3.170.** Agel reports whether a benchmark comparison
+shows a cost and time advantage, a trade-off, or insufficient evidence. See the [release notes](docs/release-v0.3.170.md).
+
+v0.3.169 recovers from a reopened mining tutor menu. See the [release notes](docs/release-v0.3.169.md).
 
 v0.3.168 sends single-byte carrier writes without chunk assembly. See the [release notes](docs/release-v0.3.168.md).
 
