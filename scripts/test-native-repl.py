@@ -603,7 +603,9 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
             "kernel: running slot B; trusted slot A; candidate slot B (verified, boots 0)",
             1,
         )
-        second.send(":kernel-promote", "selected kernel slot B; slot A retained for rollback", 1)
+        second.send(":kernel-promote",
+                    "candidate passed isolated Agel kernel replay\r\n"
+                    "selected kernel slot B; slot A retained for rollback", 1)
         second.send(":kernel-status", "kernel: running slot B; trusted slot B; no candidate", 1)
         shutdown(second)
     finally:
@@ -619,6 +621,33 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
         shutdown(third)
     finally:
         third.close()
+
+    # A signed, interactive candidate can still fail semantic replay.
+    trial = (Path(__file__).resolve().parent.parent / "boot/kernel/agel/kernel-trial.agel").read_bytes()
+    assert good_kernel.count(trial) == 1
+    wrong_trial = trial.replace(b"21) 42 0)", b"21) 41 0)")
+    assert wrong_trial != trial and len(wrong_trial) == len(trial)
+    wrong_kernel = good_kernel.replace(trial, wrong_trial)
+    assert stage_kernel.stage(image, wrong_kernel, stage_kernel.sign(wrong_kernel)) == 0
+    admission_boot("A", "B", "B")
+    wrong = Harness(image, persistent=True)
+    try:
+        wrong.expect_until(b"kernel: running slot A; trusted slot B; candidate slot A (unverified, boots 1)")
+        wrong.expect_until(b"agel-native[0]> ")
+        send_kernel_healthy(wrong, "(+ 1 1)", "2", "A", 1)
+        wrong.send(":kernel-promote", "denied: candidate failed Agel kernel replay", 1)
+        shutdown(wrong)
+    finally:
+        wrong.close()
+    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0, "admitted": 1}, selector()
+    replay_rollback = Harness(image, persistent=True)
+    try:
+        replay_rollback.expect_until(b"kernel: running slot B; trusted slot B; candidate slot A (unverified, boots 3)")
+        replay_rollback.expect_until(b"agel-native[0]> ")
+        shutdown(replay_rollback)
+    finally:
+        replay_rollback.close()
+    print("PASS: failed Agel replay refused promotion and returned to the trusted kernel")
 
     # A candidate without a valid signature is refused by the running kernel
     # and cleared, so the stage never loads it.

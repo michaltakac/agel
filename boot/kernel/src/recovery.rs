@@ -292,14 +292,25 @@ impl KernelRecovery {
         Ok(Some(self.selector.candidate))
     }
 
-    /// Make the verified candidate slot the one the stage loads by default.
+    /// Replay on the verified candidate before making it the default slot.
     #[cfg(feature = "isolated-repl")]
-    pub fn promote(&mut self, storage: &mut ServiceDomain) -> Result<(u8, u8), &'static str> {
+    pub fn promote(
+        &mut self,
+        storage: &mut ServiceDomain,
+        replay: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<(u8, u8), &'static str> {
         if self.selector.candidate == NO_CANDIDATE {
             return Err("denied: no candidate kernel slot");
         }
         if !self.selector.verified {
             return Err("denied: the candidate kernel has not completed a healthy boot");
+        }
+        if self.booted != Some(self.selector.candidate) {
+            return Err("denied: promotion must replay on the running candidate");
+        }
+        if let Err(reason) = replay() {
+            self.fault(storage)?;
+            return Err(reason);
         }
         let previous = self.selector.trusted;
         self.selector.trusted = self.selector.candidate;
