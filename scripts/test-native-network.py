@@ -383,7 +383,9 @@ else:
         source += "(def quest-start-state " + ("ready" if fresh_quest else "game") + ")\n"
         source += f"(def quest-billing-complete {'#f' if editing else '#t'})\n"
         source+='''(import agel/osrs-quest-test)
-(def log-quest (fn (phase) (console-log (text-concat "native-quest: " phase))))
+(def log-quest
+  (fn (phase) (console-log (text-concat "native-quest: "
+    (if (= (type-of phase) 'dict) (print-form phase) phase)))))
 (def run-quest
   (fn (scenario)
     (with-handler (* problem)

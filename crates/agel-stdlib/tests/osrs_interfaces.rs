@@ -267,6 +267,25 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
         pause.values.last().map(Value::to_string).as_deref(),
         Some("(#t 1 0 1 1 0)")
     );
+    let mining = include_str!("../../../examples/osrs/mining-test.agel").replace(
+        "(export mine-first-copper",
+        "(export fresh-tutor-menu? mine-first-copper",
+    );
+    world.evaluate(&mining).unwrap();
+    let tutor_trace = world
+        .evaluate(
+            "(import agel/osrs-mining-test)
+             (def menu (decode original 93 '(162 0 56 2 0 91 128)))
+             (def actionable (decode menu 75 '(0 1 0 0 132 0 1 0 0 219 0 1 0 0 0 0)))
+             (def dismissed (decode actionable 45 '(0 162 2 56)))
+             (list (fresh-tutor-menu? menu original) (fresh-tutor-menu? actionable original)
+                   (fresh-tutor-menu? dismissed original))",
+        )
+        .unwrap();
+    assert_eq!(
+        tutor_trace.values.last().map(Value::to_string).as_deref(),
+        Some("(#f #t #f)")
+    );
     let route = world
         .evaluate(
             r#"(def route-packet

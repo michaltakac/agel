@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.120.** Agel decodes adjacent hex pairs in fewer
-evaluation steps. See the [release notes](docs/release-v0.3.120.md).
+**Current release: v0.3.121.** The native quest reports pot and tutor
+observations. See the [release notes](docs/release-v0.3.121.md).
+
+v0.3.120 decodes adjacent hex pairs in fewer evaluation steps.
+See the [release notes](docs/release-v0.3.120.md).
 
 v0.3.119 loads optional desktop application registrations from disk.
 See the [release notes](docs/release-v0.3.119.md).
