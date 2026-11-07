@@ -1,0 +1,6 @@
+$ sh scripts/test-osrs-crafting.sh --smelt
+RuneScape crafting: staging ore and coal
+RuneScape crafting: normal-account furnace and adamant bar
+{test adamant-bar passed #t ore-before 1 ore-after 0 coal-before 6 coal-after 0 bars-before 0 bars-after 1 smithing-xp-before 4385776 smithing-xp-after 4385813}
+Saved Smithing fine XP: 43857760 -> 43858135
+RuneScape PASS: one ore and six coal consumed, one adamant bar saved at normal rights and 1x XP

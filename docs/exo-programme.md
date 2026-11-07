@@ -46,6 +46,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.34 | Melee progression | A fixed Agel policy switches combat stances and trains Attack, Strength and Defence on one fresh account. |
 | v0.3.35 | Faster native carrier | The desktop forwards carrier frames without painting them. A QEMU loopback run verifies the bytes and records the timing. |
 | v0.3.36 | Native melee control | A fresh account reaches level 2 in Attack, Strength and Defence in one native guest session with persisted server evidence. |
+| v0.3.37 | Adamant smelting | A normal account turns staged adamantite ore and coal into a bar through the furnace interface, with saved inventory and XP verification. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |

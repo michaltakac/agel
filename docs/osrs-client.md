@@ -92,6 +92,7 @@ sh scripts/test-osrs-quest.sh
 sh scripts/test-osrs-quest.sh --containers
 sh scripts/test-osrs-quest.sh --gather
 sh scripts/test-osrs-crafting.sh
+sh scripts/test-osrs-crafting.sh --smelt
 sh scripts/test-osrs-crafting.sh --native
 sh scripts/test-native-network.sh --combat
 sh scripts/test-native-network.sh --combat --optimize --live

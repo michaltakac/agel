@@ -17,7 +17,9 @@ from test_support import evaluate, form
 WORLD = "agel-osrs-world"
 ACCOUNT = "agelcraft"
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--native", action="store_true", help="run the crafting phase inside Agel OS")
+mode = parser.add_mutually_exclusive_group()
+mode.add_argument("--native", action="store_true", help="run the crafting phase inside Agel OS")
+mode.add_argument("--smelt", action="store_true", help="smelt an adamant bar from staged ore and coal")
 options = parser.parse_args()
 
 
@@ -115,11 +117,21 @@ except subprocess.CalledProcessError:
     execute()
     await_saved(lambda _: True)
 
-notice("RuneScape crafting: staging one hammer and five bars on the dedicated fixture")
+notice("RuneScape crafting: staging ore and coal" if options.smelt else
+       "RuneScape crafting: staging one hammer and five bars on the dedicated fixture")
 oracle_program("SetupAccount", "craft-grant")
 try:
-    execute("(begin (stage-adamant-stock game) #t)")
-    before = await_saved(lambda s: "x=3187 z=3425 level=0" in s
+    if options.smelt:
+        execute("(begin (stage-adamant-ore game) #t)")
+        before = await_saved(lambda s: "x=3226 z=3255 level=0" in s
+                             and "stat=13 base=88 visible=88" in s
+                             and inventory(s, "adamantite_ore") == 1
+                             and inventory(s, "coal") == 6
+                             and inventory(s, "adamantite_bar") == 0
+                             and inventory(s, "adamant_platebody") == 0)
+    else:
+        execute("(begin (stage-adamant-stock game) #t)")
+        before = await_saved(lambda s: "x=3187 z=3425 level=0" in s
                          and "stat=13 base=88 visible=88" in s
                          and inventory(s, "hammer") == 1
                          and inventory(s, "adamantite_bar") == 5
@@ -129,6 +141,23 @@ finally:
 
 normal = oracle_program("AccountState", ACCOUNT)
 assert "rights= " in normal and "xp_rate_in_hundreds=100" in normal, normal
+if options.smelt:
+    notice("RuneScape crafting: normal-account furnace and adamant bar")
+    report = execute("(smelt-adamant-bar game)")
+    print(report)
+    assert "test adamant-bar passed #t" in report, report
+    after = await_saved(lambda s: inventory(s, "adamantite_bar") == 1
+                        and inventory(s, "adamantite_ore") == 0
+                        and inventory(s, "coal") == 0
+                        and inventory(s, "adamant_platebody") == 0)
+    assert "rights= " in after and "xp_rate_in_hundreds=100" in after, after
+    saved_before, saved_after = xp(before), xp(after)
+    assert saved_after - saved_before == 375, (saved_before, saved_after)
+    observed = re.search(r"smithing-xp-before (\d+) smithing-xp-after (\d+)", report)
+    assert observed and tuple(map(int, observed.groups())) == (saved_before // 10, saved_after // 10), report
+    print(f"Saved Smithing fine XP: {saved_before} -> {saved_after}")
+    notice("RuneScape PASS: one ore and six coal consumed, one adamant bar saved at normal rights and 1x XP")
+    sys.exit(0)
 notice("RuneScape crafting: normal-account anvil and platebody button")
 if options.native:
     command = ["sh", "scripts/test-native-network.sh", "--craft"]

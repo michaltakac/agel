@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.36.** A fresh account reached level 2 in three
+**Current release: v0.3.37.** Agel smelted an adamant bar from ore and coal.
+See the [release notes](docs/release-v0.3.37.md).
+
+In v0.3.36, a fresh account reached level 2 in three
 melee skills inside Agel OS. See the [release notes](docs/release-v0.3.36.md).
 
 v0.3.35 moved byte carrier frames off the desktop terminal.
