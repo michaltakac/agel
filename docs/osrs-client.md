@@ -157,10 +157,18 @@ python3 scripts/osrs/watch.py VIEWER_URL
 
 The viewer shows the real QEMU framebuffer. The watcher copies the gameplay
 runner's status text into a `runescape-status` binding evaluated by the guest.
-It does not render RuneScape and does not move the hosted client into the OS.
-Native client tests run in a separate headless VM. The full game scene renderer remains unfinished. The current
-OS image can be built with `scripts/build-boot.sh --features native-graphics`
-if no graphical image exists yet.
+For a native test running in a separate headless VM, point the watcher at the
+serial log in the runner's printed evidence directory:
+
+```sh
+python3 scripts/osrs/watch.py VIEWER_URL --native-log RUN_DIRECTORY/serial.log
+```
+
+The console shows guest-observed milestones, including combat XP, quest and
+economy progress, and policy activation or fallback. The native runner
+independently verifies saved game outcomes. Full game-scene rendering remains
+unfinished. If needed, build the graphical image with
+`scripts/build-boot.sh --features native-graphics`.
 
 ## Current boundary
 
