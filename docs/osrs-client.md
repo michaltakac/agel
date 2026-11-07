@@ -96,7 +96,16 @@ sh scripts/test-osrs-crafting.sh --native
 sh scripts/test-native-network.sh --combat
 sh scripts/test-native-network.sh --combat --optimize --live
 sh scripts/test-native-network.sh --combat --transfer-from DONOR_EVIDENCE_DIRECTORY
+sh scripts/test-native-network.sh --melee-xp 83
+sh scripts/test-native-network.sh --melee-xp 83 --optimize --live
 ```
+
+The native melee commands use the same fresh-account XP goal. The
+adaptive arm times the proposal, text judgment and measured replay as
+part of the task. After both runs pass, give their evidence directories
+to `scripts/compare-native-combat.py --melee FIXED ADAPTIVE` and evaluate
+its output with `agel/benchmark`. The score includes known judge charges
+and leaves total cost unknown when the writer's bill is missing.
 
 This runs the Agel scenarios and checks authoritative persisted server state:
 

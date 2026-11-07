@@ -113,4 +113,105 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
         result.values.last().map(Value::to_string).as_deref(),
         Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (235 12 92 12 0 37 50 128) (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil (nil 1 3 0 0 3 nil nil))")
     );
+
+    let cadence = world
+        .evaluate_with(
+            r#"
+      (def now 0)
+      (def start-service
+        (fn (step initial)
+          (def run-step step)
+          (def progress initial)))
+      (def stop-service (fn () progress))
+      (def paced (assoc original 'maintenance (dict
+        'start start-service 'stop stop-service 'clock-us (fn () now)
+        'keepalive-interval-us 3000000)))
+      (osrs-service-start paced)
+      (def first-pulse (run-step progress))
+      (def progress (get first-pulse 'state))
+      (def now 2999999)
+      (def skipped (run-step progress))
+      (def now 3000000)
+      (def second-pulse (run-step (get skipped 'state)))
+      (def progress (get second-pulse 'state))
+      (def stopped (osrs-service-stop paced))
+      (def direct (osrs-keepalive original))
+      (def first-byte sent)
+      (def direct (osrs-keepalive direct))
+      (list (= (get first-pulse 'bytes) first-byte)
+        (= (get skipped 'bytes) nil)
+        (= (get second-pulse 'bytes) sent)
+        (= (get stopped 'out) (get direct 'out))
+        (get stopped 'keepalives))
+    "#,
+            &options,
+        )
+        .unwrap();
+    assert_eq!(
+        cadence.values.last().map(Value::to_string).as_deref(),
+        Some("(#t #t #t #t 2)")
+    );
+}
+
+#[test]
+fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world
+        .evaluate(
+            r#"
+      (module agel/osrs-game
+        (export osrs-keepalive osrs-next-packet osrs-stat osrs-nearby-npcs osrs-attack
+          osrs-walk osrs-open-interface? osrs-click-interface osrs-varp)
+        (def rat-one (dict 'index 1 'type 2854))
+        (def rat-two (dict 'index 2 'type 2854))
+        (def osrs-keepalive (fn (state) state))
+        (def osrs-next-packet
+          (fn (state) (dict 'state state 'packet (dict 'name "PLAYER_INFO"))))
+        (def osrs-stat
+          (fn (state skill) (dict 'xp (get state skill) 'level 1)))
+        (def osrs-nearby-npcs (fn (state) (get state 'npcs)))
+        (def osrs-walk (fn (state x z) state))
+        (def osrs-open-interface? (fn (state interface) #t))
+        (def osrs-click-interface
+          (fn (state interface component)
+            (assoc (assoc state 'stance (if (= component 10) 1 3))
+                   'npcs (list rat-one rat-two))))
+        (def osrs-varp (fn (state varp) (get state 'stance)))
+        (def osrs-attack
+          (fn (state index)
+            (let ((next (assoc state 'attempts (cons index (get state 'attempts)))))
+              (if (= index 1) next
+                (assoc (assoc (assoc next 'npcs (list rat-one))
+                  (if (= (get state 'stance) 1) 2 1) 8)
+                  3 (+ (get state 3) 2)))))))
+      (module agel/osrs-combat-test
+        (export test-rat-combat-bounded)
+        (def test-rat-combat-bounded
+          (fn (state await after-attack)
+            (dict 'state (assoc (assoc state 0 8) 3 1156)
+                  'report (dict 'target-index 1)))))
+    "#,
+        )
+        .unwrap();
+    world
+        .evaluate(include_str!("../../../examples/osrs/combat-training.agel"))
+        .unwrap();
+    let result = world
+        .evaluate(
+            r#"
+      (import agel/osrs-combat-training)
+      (import agel/sequence)
+      (def trained (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154) 8 2 nil))
+      (def report (get trained 'report))
+      (list (get report 'passed) (get report 'defence-xp) (get report 'stance)
+        (reverse (get (get trained 'state) 'attempts))
+        (map (fn (phase) (get (car (get phase 'encounters)) 'target-index)) (get report 'phases)))
+    "#,
+        )
+        .unwrap();
+    assert_eq!(
+        result.values.last().map(Value::to_string).as_deref(),
+        Some("(#t 8 3 (1 1 2 2) (1 2 2))")
+    );
 }

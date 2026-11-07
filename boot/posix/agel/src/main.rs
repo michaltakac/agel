@@ -43,6 +43,7 @@ const PULSE_STEPS: u64 = 4096;
 /// Fuel for one file: the standard library alone takes tens of thousands
 /// of steps, and a program is expected to do real work after it.
 const FUEL: u64 = 50_000_000;
+const MAX_FUEL: u64 = 500_000_000;
 /// The most bytes read from the source file: the filesystem's files are
 /// smaller, and the runtime's own source limit is larger.
 const SOURCE_BYTES: usize = 256 * 1024;
@@ -970,12 +971,25 @@ extern "C" fn main() -> ! {
     let process = process();
     let arguments = arguments();
     let mut stdlib = true;
+    let mut fuel = FUEL;
     let mut file = None;
     let mut world_file: Option<Vec<u8>> = None;
     let mut arguments = arguments.into_iter().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.as_slice() {
             b"--no-stdlib" => stdlib = false,
+            b"--fuel" => {
+                let limit = arguments
+                    .next()
+                    .and_then(|value| core::str::from_utf8(&value).ok()?.parse::<u64>().ok());
+                match limit {
+                    Some(limit) if (1..=MAX_FUEL).contains(&limit) => fuel = limit,
+                    _ => {
+                        say(2, "agel: --fuel needs a limit from 1 to 500000000\n");
+                        process.exit(2);
+                    }
+                }
+            }
             b"--world" => match arguments.next() {
                 Some(name) => world_file = Some(name),
                 None => {
@@ -1021,7 +1035,7 @@ extern "C" fn main() -> ! {
     }
     let options = EvaluationOptions {
         budget: Budget {
-            fuel: FUEL,
+            fuel,
             ..Budget::default()
         },
         capabilities,

@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.35.** Byte carrier frames bypass the desktop terminal.
+**Current release: v0.3.36.** A fresh account reached level 2 in three
+melee skills inside Agel OS. See the [release notes](docs/release-v0.3.36.md).
+
+v0.3.35 moved byte carrier frames off the desktop terminal.
 See the [release notes](docs/release-v0.3.35.md).
 
 v0.3.34 trained Attack, Strength and Defence

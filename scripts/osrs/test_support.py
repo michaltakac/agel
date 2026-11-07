@@ -64,3 +64,31 @@ def combat_xp_saved(expected, oracle):
     stats = {int(stat): int(xp) for stat, xp in re.findall(
         r'^stat=(\d+) base=\d+ visible=\d+ fine_xp=(\d+)$', oracle, re.M)}
     return all(stats.get(stat, -1) // 10 == xp for stat, xp in expected.items())
+
+
+def melee_xp(report, goal):
+    """Check the guest's three completed phases against its final observation."""
+    summary = re.search(
+        r'\{test rat-melee passed #t goal-xp (\d+) stance 3 attack-xp (\d+) '
+        r'strength-xp (\d+) defence-xp (\d+) hitpoints-xp (\d+)(?: phases |\})', report)
+    if not summary or int(summary[1]) != goal:
+        raise ValueError('missing melee result at the requested XP goal')
+    expected = {0: int(summary[2]), 2: int(summary[3]), 1: int(summary[4]), 3: int(summary[5])}
+    phases = re.findall(
+        r'\{skill (\d+) xp-before 0 xp-after (\d+) level (\d+) fights (\d+) encounters ', report)
+    if len(phases) != 3 or {int(skill) for skill, *_ in phases} != {0, 1, 2}:
+        raise ValueError('missing or duplicate fresh melee phase')
+    if expected[3] <= 1154 or any(
+        int(xp) != expected[int(skill)] or int(xp) < goal
+        or not 1 <= int(fights) <= min(64, (goal + 7) // 8 + 3)
+        for skill, xp, _, fights in phases
+    ):
+        raise ValueError('melee phase disagrees with the final observation')
+    return expected, {int(skill): int(level) for skill, _, level, _ in phases}
+
+
+def melee_levels_saved(levels, oracle):
+    return 'varp.com_mode=3' in oracle.splitlines() and all(
+        re.search(rf'^stat={skill} base={level} visible={level} ', oracle, re.M)
+        for skill, level in levels.items()
+    )

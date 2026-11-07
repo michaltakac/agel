@@ -290,12 +290,23 @@
   (def keepalive-service
     (fn (progress)
       (let ((next (isaac-next (get progress 'cipher))))
-        (dict 'state (dict 'cipher (get next 'state) 'used (+ 1 (get progress 'used)))
+        (dict 'state (assoc (assoc progress 'cipher (get next 'state)) 'used (+ 1 (get progress 'used)))
               'bytes (list (rem (+ 75 (get next 'value)) 256))))))
+  (def paced-keepalive
+    (fn (clock interval)
+      (fn (progress)
+        (let ((now (clock)) (last (get progress 'last-write)))
+          (if (if last (< (- now last) interval) #f)
+              (dict 'state progress 'bytes nil)
+              (keepalive-service (assoc progress 'last-write now)))))))
   (def osrs-service-start
     (fn (state)
       (let ((maintenance (get state 'maintenance)))
-        (if maintenance ((get maintenance 'start) keepalive-service (dict 'cipher (get state 'out) 'used 0))
+        (if maintenance
+          (let ((clock (get maintenance 'clock-us)))
+            ((get maintenance 'start)
+              (if clock (paced-keepalive clock (get maintenance 'keepalive-interval-us)) keepalive-service)
+              (dict 'cipher (get state 'out) 'used 0)))
           (signal 'osrs/wait "no maintenance service configured")))))
   (def osrs-service-stop
     (fn (state)

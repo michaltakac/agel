@@ -15,20 +15,27 @@ import time
 import graphical_console as console
 
 sys.path.insert(0, str(Path(__file__).with_name("osrs")))
-from test_support import combat_xp, combat_xp_saved
+from test_support import combat_xp, combat_xp_saved, melee_levels_saved, melee_xp
 
 parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
+scenario.add_argument('--melee-xp', type=int, help='train three melee skills inside Agel OS')
 scenario.add_argument('--challenge', action='store_true')
 scenario.add_argument('--craft', action='store_true', help='forge staged adamant stock; use test-osrs-crafting.sh --native')
 parser.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
 scenario.add_argument('--repair', action='store_true', help='repair a general tool during the same native connection')
-scenario.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
+parser.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
 parser.add_argument('--transfer-from', type=Path, help='resume a verified native combat policy on a fresh account from a donor evidence directory')
 parser.add_argument('--live', action='store_true', help='use real providers for --repair or --optimize')
 options=parser.parse_args()
+melee=options.melee_xp
+if melee is not None and (not 1 <= melee <= 512 or options.combat):
+    parser.error('--melee-xp requires a goal of 1..512 and is separate from --combat')
+if options.optimize and (options.challenge or options.repair or options.craft):
+    parser.error('--optimize can be combined with --combat or --melee-xp')
 editing=options.repair or options.optimize
-shared_carrier=editing or options.combat
+combat_workload=options.combat or melee is not None
+shared_carrier=editing or combat_workload
 if options.combat and (options.challenge or options.repair or options.craft):parser.error('--combat can only be combined with --optimize')
 if options.transfer_from and (not options.combat or editing):
     parser.error('--transfer-from requires --combat without --optimize or --repair')
@@ -47,6 +54,13 @@ if options.combat:
     manifest['scope']='native one-rat combat on a fresh normal account'
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
 
+if melee is not None:
+    manifest['scope']='native three-skill melee training on a fresh normal account'
+    manifest['goal_xp']=melee
+    manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
+    manifest['evaluation_fuel']=250_000_000
+    manifest['keepalive_interval_us']=3_000_000
+
 if options.craft:manifest['scope']='native adamant platebody from staged bars on a normal account'
 
 catalog=Path('crates/agel-stdlib/stdlib.agel').read_text()
@@ -62,14 +76,18 @@ source+='''(import agel/byte-stream)
 '''
 modules=['osrs-wire'] if options.challenge else ['osrs-wire','crypto','osrs-crypto','osrs-login','osrs-packets','osrs-bits','osrs-npcs','osrs-game']
 source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in modules)
-if options.combat or options.craft:
+if options.combat or options.craft or melee is not None:
     source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
 if options.craft:
     source+=Path('examples/osrs/crafting-test.agel').read_text()+'\n'
-if options.combat:
+if options.combat or melee is not None:
     combat_module=Path('examples/osrs/combat-test.agel').read_bytes()
     manifest['combat_policy_sha256']=hashlib.sha256(combat_module).hexdigest()
     source+=combat_module.decode()+'\n'
+if melee is not None:
+    training_module=Path('examples/osrs/combat-training.agel').read_bytes()
+    manifest['training_policy_sha256']=hashlib.sha256(training_module).hexdigest()
+    source+=training_module.decode()+'\n'
 if options.transfer_from:
     donor = options.transfer_from
     previous = json.loads((donor/'world.json').read_text())
@@ -96,14 +114,17 @@ if shared_carrier:
     source+='(module agel/native-reader (export native-read) (def native-read '+Path('crates/agel-stdlib/native-reader.agel').read_text()+'))\n'
     source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in ['evolution','judge-log','repair','inference','research','live-tools','batches'])
     source+=Path('examples/native-session-support.agel').read_text()+'\n'
-    if options.optimize or options.combat:
+    if options.optimize or combat_workload:
         source+=Path('crates/agel-stdlib/work-profile.agel').read_text()+'\n'
         if options.transfer_from:
             source+=Path('crates/agel-stdlib/benchmark.agel').read_text()+'\n'
             source+=Path('examples/native-combat-transfer.agel').read_text()+'\n'
         else:
             source+="(def retained-policy nil)\n"
-        source+=Path('examples/native-service-optimize.agel').read_text()+'\n'
+        service_policy=Path('examples/native-service-optimize.agel').read_bytes()
+        if melee is not None:
+            manifest['service_policy_sha256']=hashlib.sha256(service_policy).hexdigest()
+        source+=service_policy.decode()+'\n'
     else:
         source+=Path('examples/native-session-repair.agel').read_text()+'\n'
 source+='''(import agel/osrs-wire)
@@ -139,9 +160,14 @@ else:
   (dict 'start (get stream 'start-service) 'stop (get stream 'stop-service) 'pulse (get stream 'pulse))))
 (console-log "native-network: cipher state initialized inside Agel OS")
 '''
-    if options.combat or options.craft:
+    if options.combat or options.craft or melee is not None:
         source+="(import agel/record-chain) (def game (assoc game 'history-push record-chain-push))\n"
-    if options.optimize or options.combat:
+    if melee is not None:
+        source+=f"""(def game (assoc game 'maintenance
+  (assoc (assoc (get game 'maintenance) 'clock-us clock-us)
+    'keepalive-interval-us {manifest['keepalive_interval_us']})))
+"""
+    if options.optimize or combat_workload:
         source+="(def game (assoc game 'maintenance (assoc (get game 'maintenance) 'quantum retained-quantum)))\n"
     source+='(begin (osrs-login '+json.dumps(account['username'])+' '+json.dumps(account['password'])+' context crcs seed (entropy-read 24)) #t)\n'
     source+='(console-log "native-network: password login accepted")\n'
@@ -151,12 +177,15 @@ else:
 (console-log (text-concat "native-network: observations " (print-form
   (dict 'smithing-level (get (osrs-stat ready 13) 'level) 'coins (osrs-inventory-count ready 93 995)))))
 '''
-    if options.combat:
+    if combat_workload:
         source+='(def task-start (clock-us))\n'
     if editing and not options.combat:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
         if options.optimize:
-            source+="(def recorded-field (largest-field (get ready 'history) 'bytes))\n"
+            if melee is not None:
+                source+="(def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get ready 'history)))\n"
+            else:
+                source+="(def recorded-field (largest-field (get ready 'history) 'bytes))\n"
             source+=Path('examples/native-service-optimize-run.agel').read_text()+'\n'
             source+='(def policy-uses 0)\n'
         else:
@@ -193,6 +222,19 @@ else:
 (console-log (text-concat "native-combat: task-us " (print-form (- finish task-start))))
 (def retained-count (record-chain-fold (fn (n _) (+ n 1)) 0 (get completed 'history)))
 (console-log (text-concat "native-combat: history-records " (print-form retained-count)))
+'''
+    elif melee is not None:
+        source+=f'''(import agel/osrs-combat-training)
+(console-log "native-combat: training three melee skills")
+(def log-encounter (fn (skill report)
+  (console-log (text-concat "native-combat: encounter " (print-form (list skill report))))))
+(def trained (train-rat-melee-result ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter))
+(def finish (clock-us))
+(def completed (get trained 'state))
+(def report (get trained 'report))
+(console-log (text-concat "native-combat: " (print-form (dissoc report 'phases))))
+(map (fn (phase) (console-log (text-concat "native-combat: " (print-form phase)))) (get report 'phases))
+(console-log (text-concat "native-combat: task-us " (print-form (- finish task-start))))
 '''
     elif options.craft:
         source+='''(import agel/osrs-crafting-test)
@@ -242,6 +284,7 @@ else:
 (console-log "native-opt: recorded workload verified in append-only log")
 '''
     completion = 'login, observations and rat combat' if options.combat else 'login, observations, walking packet and tick consumption'
+    if melee is not None:completion='login, observations and melee training'
     if options.craft:completion='login, observations and adamant platebody'
     source+='(console-log "native-network: client completed: '+completion+' inside Agel OS")\n#t\n'
 (directory/'world.json').write_text(json.dumps(manifest,indent=2)+'\n')
@@ -270,8 +313,11 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
             time.sleep(.05)
         with (directory/'serial.log').open('w') as log:
             setup=[] if options.transfer_from else [':fs-format']
-            command=['target/release/examples/guest_inference',str(serial),str(directory.resolve()),'process agel exited with status',*setup,':exec agel -- --no-stdlib /data/client'] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',':exec agel -- --no-stdlib /data/client']
-            result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=960)
+            guest_command=':exec agel -- --no-stdlib /data/client'
+            if melee is not None:
+                guest_command=f":exec agel -- --no-stdlib --fuel {manifest['evaluation_fuel']} /data/client"
+            command=['target/release/examples/guest_inference',str(serial),str(directory.resolve()),'process agel exited with status',*setup,guest_command] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',guest_command]
+            result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=1800 if melee is not None else 960)
     finally:
         machine.terminate();machine.wait(timeout=10)
 output=(directory/'serial.log').read_text()
@@ -312,6 +358,11 @@ if options.combat:
 if options.craft:
     assert 'native-craft: {test adamant-platebody passed #t ' in output
     assert output.count('operation open ') == output.count('operation close ') == 2
+if melee is not None:
+    if not editing:
+        assert 'inference-bridge: started job' not in output
+    assert output.count('operation open ') == output.count('operation close ') == 2
+    expected_xp, melee_levels=melee_xp(output,melee)
 if not options.challenge and not options.craft:
     compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
     build=directory/'oracle';build.mkdir()
@@ -320,18 +371,24 @@ if not options.challenge and not options.craft:
     deadline=time.monotonic()+45
     while True:
         saved=subprocess.run(['docker','exec','agel-osrs-world','sh','-c',
-            'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$1"','probe',account['username']],capture_output=True,text=True)
+            'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$@"','probe',account['username'],
+            *(['varp.com_mode'] if melee is not None else [])],capture_output=True,text=True)
         if saved.returncode==0:
-            if options.combat:
+            if options.combat or melee is not None:
                 if combat_xp_saved(expected_xp,saved.stdout):break
             elif 'x=3223 z=3218 level=0' in saved.stdout:break
         if time.monotonic()>deadline:raise AssertionError('expected state was not saved: '+saved.stdout+saved.stderr)
         time.sleep(1)
     assert 'rights= ' in saved.stdout and 'xp_rate_in_hundreds=100' in saved.stdout,saved.stdout
+    if melee is not None:
+        assert melee_levels_saved(melee_levels,saved.stdout),saved.stdout
     (directory/'saved-account.txt').write_text(saved.stdout)
     print('Persisted native client:',saved.stdout.splitlines()[0],flush=True)
     if options.combat:
         print('Persisted combat XP:', '\n'.join(line for line in saved.stdout.splitlines() if line.startswith(('stat=0 ', 'stat=3 '))),flush=True)
-    print('PASS: native client '+('combat XP' if options.combat else 'movement')+' saved with normal rights and 1x XP',flush=True)
+    if melee is not None:
+        print('Persisted melee XP:', '\n'.join(line for line in saved.stdout.splitlines()
+              if line.startswith(('stat=0 ', 'stat=1 ', 'stat=2 ', 'stat=3 ', 'varp.com_mode='))),flush=True)
+    print('PASS: native client '+('combat XP' if options.combat or melee is not None else 'movement')+' saved with normal rights and 1x XP',flush=True)
 
 print('Elapsed seconds:',round(time.monotonic()-run_started,3),flush=True)
