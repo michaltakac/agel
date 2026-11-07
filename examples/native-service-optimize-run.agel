@@ -35,7 +35,7 @@
   (fn (quantum)
     (profile-work (fn (service) (bytes-hex-quantum replay-bytes service quantum))
       (get stream 'pulse) clock-us)))
-(def control-quantum (retained-quantum observed-length))
+(def control-quantum (encoder-quantum observed-length))
 (def run-control
   (fn ()
     (let ((measurement (run-profile control-quantum)))
@@ -132,7 +132,7 @@
 (if policy-activated
   (begin
     (check (= (evolution-current policy-versions 'cell 'service-quantum) 2) "policy version did not change")
-    (check (< 64 (retained-quantum observed-length)) "retained encoder did not use the changed policy")
+    (check (< 64 (encoder-quantum observed-length)) "retained encoder did not use the changed policy")
     (console-log (text-concat "native-opt: candidate " (print-form (get session 'candidate))))
     (console-log "native-opt: policy committed after text judgment and measured replay")
     (let ((probe (get (get (get (get policy-versions 'versions) 2) 'activation) 'probe)))
@@ -147,5 +147,5 @@
     (check (if continue-after-refusal (= (get session 'status) 'exhausted) #f)
       "policy optimization did not activate")
     (check (= (evolution-current policy-versions 'cell 'service-quantum) 1) "refusal changed the active policy")
-    (check (= (retained-quantum observed-length) 64) "refusal changed the encoder cadence")
+    (check (= (encoder-quantum observed-length) 64) "refusal changed the encoder cadence")
     (console-log "native-opt: continued with fixed policy after exhausted retries")))

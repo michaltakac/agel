@@ -10,6 +10,7 @@
 (def policy-bound (if retained-policy retained-bound 64))
 (def observed-length (if retained-policy retained-length 0))
 (def policy-uses 0)
+(def policy-service-calls-avoided 0)
 (def active-encoder-version nil)
 (def active-encoder nil)
 (def refresh-encoder
@@ -23,15 +24,22 @@
       (check (if (= (type-of quantum) 'int)
         (if (< 63 quantum) (if (< limit quantum) #f (= (* 64 (/ quantum 64)) quantum)) #f) #f)
         "policy exceeded the trusted work bound or returned an invalid quantum") quantum)))
-(def retained-quantum
+(def encoder-quantum
   (fn (length)
     (if (< length 65) 64
       (let ((limit (if (< observed-length length) 64 policy-bound)))
         (if (= limit 64) 64
-          (let ((quantum (check-quantum (meta-apply active-encoder (list limit)) limit)))
-            (if (if (= active-encoder-version 2) (< 64 quantum) #f)
-              (def policy-uses (+ policy-uses 1)) nil)
-            quantum))))))
+          (check-quantum (meta-apply active-encoder (list limit)) limit))))))
+(def retained-quantum
+  (fn (length)
+    (let ((quantum (encoder-quantum length)))
+      (if (if (= active-encoder-version 2) (< 64 quantum) #f)
+        (begin
+          (def policy-uses (+ policy-uses 1))
+          (def policy-service-calls-avoided
+            (+ policy-service-calls-avoided (- (/ (- length 1) 64) (/ (- length 1) quantum)))))
+        nil)
+      quantum)))
 (def replay-size?
   (fn (size) (if (< 1023 size) (< size 8193) #f)))
 (def replay-field-size

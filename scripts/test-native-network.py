@@ -221,6 +221,7 @@ if shared_carrier:
         else:
             source+="(def retained-policy nil)\n"
         service_policy=(examples / 'native-service-optimize.agel').read_bytes()
+        reports_encoder_savings = b'(def policy-service-calls-avoided ' in service_policy
         if melee is not None or options.economy or options.craft or fresh_quest:
             manifest['service_policy_sha256']=hashlib.sha256(service_policy).hexdigest()
             if options.transfer_from:
@@ -373,8 +374,14 @@ else:
         source += "(def after-attack-phase (fn (state) state))\n"
     if options.optimize:
         source+='''(def report-policy-use
-  (fn () (console-log (text-concat "native-opt: live uses " (print-form policy-uses)))))
+  (fn ()
+    (console-log (text-concat "native-opt: live uses " (print-form policy-uses)))
 '''
+        if reports_encoder_savings:
+            source+='''    (console-log (text-concat "native-opt: live encoder service calls avoided "
+      (print-form policy-service-calls-avoided)))
+'''
+        source+='))\n'
     else:
         source+="(def report-policy-use (fn () nil))\n"
     if options.combat:
@@ -583,6 +590,10 @@ else:
       'billing-complete #t 'charges nil)))
 (console-log (text-concat "native-transfer: score " (print-form transfer-score)))
 (console-log (text-concat "native-transfer: retained policy uses " (print-form policy-uses)))
+'''
+        if reports_encoder_savings:
+            source+='''(console-log (text-concat "native-transfer: live encoder service calls avoided "
+  (print-form policy-service-calls-avoided)))
 '''
     if options.optimize:
         if task_adaptation:
