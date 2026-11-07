@@ -67,7 +67,7 @@
     (fn (state predicate batches)
       (if (predicate state) state
         (if (= batches 0) (signal 'osrs/quest-test "live observation timed out")
-          (wait-live (osrs-wait-ticks (osrs-keepalive state) 5) predicate (- batches 1))))))
+          (wait-live (osrs-observe-bounded (osrs-keepalive state) predicate 5) predicate (- batches 1))))))
   (def wait-item
     (fn (state item)
       (with-handler (* problem) (signal 'osrs/quest-test "waiting for gathered item" (list item problem))
@@ -86,8 +86,7 @@
           (observe "observed the castle pot on the ground")
           (let ((pot (with-handler (* problem)
                        (signal 'osrs/quest-test "waiting for the castle pot pickup" problem)
-                       (wait-live (osrs-take-ground-item visible 1931 3209 3214)
-                         (fn (g) (if (= (inventory g 1931) 1) (= (castle-pot g) 0) #f)) 24))))
+                       (wait-item (osrs-take-ground-item visible 1931 3209 3214) 1931))))
             (observe "picked up the castle pot")
             (let ((sold (get (first-bronze-sale-using pot observe) 'state)))
               (let ((bucket (wait-item (osrs-click-inventory-item-offset sold 300 16 3 1925 2 1) 1925)))

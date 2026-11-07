@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.131.** Agel’s hex encoder checks input length
-once. See the [release notes](docs/release-v0.3.131.md).
+**Current release: v0.3.132.** The RuneScape quest verifies the pot pickup
+from inventory. See the [release notes](docs/release-v0.3.132.md).
+
+v0.3.131 checks hex encoder input length once.
+See the [release notes](docs/release-v0.3.131.md).
 
 v0.3.130 formats structured tutor observations in the native quest.
 See the [release notes](docs/release-v0.3.130.md).

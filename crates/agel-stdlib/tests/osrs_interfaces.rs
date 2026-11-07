@@ -155,6 +155,42 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
 }
 
 #[test]
+fn quest_wait_can_stop_before_a_transient_observation_disappears() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world
+        .evaluate(
+            r#"
+      (module agel/osrs-mining-test)
+      (module agel/osrs-game
+        (export osrs-keepalive osrs-observe-bounded osrs-wait-ticks)
+        (def osrs-keepalive (fn (state) state))
+        (def osrs-wait-ticks (fn (state _) (assoc state 'visible #f)))
+        (def osrs-observe-bounded
+          (fn (state ready _)
+            (let ((visible (assoc state 'visible #t)))
+              (if (ready visible) visible (assoc visible 'visible #f))))))
+    "#,
+        )
+        .unwrap();
+    world
+        .evaluate(
+            &include_str!("../../../examples/osrs/quest-test.agel").replace(
+                "(export stage-cook-ingredients",
+                "(export wait-live stage-cook-ingredients",
+            ),
+        )
+        .unwrap();
+    let result = world
+        .evaluate(
+            "(import agel/osrs-quest-test)
+      (get (wait-live (dict 'visible #f) (fn (state) (get state 'visible)) 1) 'visible)",
+        )
+        .unwrap();
+    assert_eq!(result.values.last(), Some(&Value::Bool(true)));
+}
+
+#[test]
 fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     let mut world = World::default();
     agel_stdlib::install(&mut world, &Default::default()).unwrap();
