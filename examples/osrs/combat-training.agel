@@ -4,17 +4,11 @@
   (import agel/osrs-combat-test)
   (export train-rat-attack train-rat-melee train-rat-melee-result)
 
-  (def read-until
-    (fn (state ready ticks service packets)
-      (if (if (ready state) #t (= ticks 0)) state
-        (if (= packets 0) (signal 'osrs/training "combat packet bound exceeded")
-          (if (= service 0)
-            (read-until (osrs-keepalive state) ready ticks 5 packets)
-            (let ((next (osrs-next-packet state)))
-              (let ((tick (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0)))
-                (read-until (get next 'state) ready (- ticks tick) (- service tick) (- packets 1)))))))))
   (def wait-ticks
-    (fn (state ready batches) (read-until state ready (* batches 5) 0 16384)))
+    (fn (state ready batches)
+      (if (if (ready state) #t (= batches 0)) state
+        (wait-ticks (osrs-observe-bounded (osrs-keepalive state) ready 5)
+          ready (- batches 1)))))
   (def await-combat
     (fn (state ready)
       (let ((observed (wait-ticks state ready 48)))

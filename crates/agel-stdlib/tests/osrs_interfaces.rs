@@ -438,13 +438,12 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .evaluate(
             r#"
       (module agel/osrs-game
-        (export osrs-keepalive osrs-next-packet osrs-stat osrs-nearby-npcs osrs-attack
+        (export osrs-keepalive osrs-observe-bounded osrs-stat osrs-nearby-npcs osrs-attack
           osrs-walk osrs-open-interface? osrs-click-interface osrs-varp)
         (def rat-one (dict 'index 1 'type 2854))
         (def rat-two (dict 'index 2 'type 2854))
         (def osrs-keepalive (fn (state) state))
-        (def osrs-next-packet
-          (fn (state) (dict 'state state 'packet (dict 'name "PLAYER_INFO"))))
+        (def osrs-observe-bounded (fn (state _ready _ticks) state))
         (def osrs-stat
           (fn (state skill) (dict 'xp (get state skill) 'level 1)))
         (def osrs-nearby-npcs (fn (state) (get state 'npcs)))
