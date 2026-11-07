@@ -56,6 +56,11 @@ mining = Path("examples/osrs/mining-test.agel").read_text()
 chain = Path("crates/agel-stdlib/record-chain.agel").read_text()
 
 
+def show_progress(message):
+    assert password not in message, "credential output"
+    notice("RuneScape quest: " + message)
+
+
 def execute(action=None):
     source = f"""(begin
       (import agel/osrs-wire) (import agel/osrs-login)
@@ -71,10 +76,12 @@ def execute(action=None):
       {mining}
       {scenario}
       (import agel/osrs-quest-test)
+      (def log-quest (fn (phase) (console-log phase)))
       {action or '#t'}
     )"""
     for _ in range(12):
-        result = evaluate(source, 43594, timeout=650 if options.gather else 300 if options.containers else 120)
+        result = evaluate(source, 43594, timeout=650 if options.gather else 300 if options.containers else 120,
+                          progress=show_progress)
         assert password not in result.stdout + result.stderr
         if result.returncode == 0:
             return result.stdout.strip()
@@ -145,11 +152,11 @@ if options.containers:
 
 if options.gather:
     notice("RuneScape quest: gathering all ingredients and completing Cook's Assistant without admin setup")
-    report = execute("(gather-and-finish-cooks-assistant game)")
+    report = execute("(gather-and-finish-cooks-assistant-using game log-quest)")
     assert "source gathered" in report, report
 else:
     notice("RuneScape quest: accepting and finishing Cook's Assistant under normal rights")
-    report = execute("(finish-cooks-assistant game)")
+    report = execute("(finish-cooks-assistant-using game log-quest)")
 assert "test cooks-assistant passed #t" in report, report
 after = await_saved(lambda s: varp(s, "varp.cookquest") % 4 == 2
                     and varp(s, "varp.qp") == 1

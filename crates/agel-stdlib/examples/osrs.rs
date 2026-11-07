@@ -125,7 +125,21 @@ fn entropy(arguments: &[Value]) -> Result<Value, HostError> {
     ))
 }
 
-static HOST: [HostWord; 5] = [
+fn console_log(arguments: &[Value]) -> Result<Value, HostError> {
+    match arguments {
+        [Value::String(message)] => eprintln!("agel-progress: {message}"),
+        [value] => eprintln!("agel-progress: {value}"),
+        _ => return Err(error("console-log takes one argument")),
+    }
+    Ok(Value::Nil)
+}
+
+static HOST: [HostWord; 6] = [
+    HostWord {
+        name: "console-log",
+        capability: "console/write",
+        call: console_log,
+    },
     HostWord {
         name: "entropy-read",
         capability: "entropy/read",
@@ -174,6 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         capabilities: vec![
             world.issue_capability("network/stream", "*")?,
             world.issue_capability("entropy/read", "*")?,
+            world.issue_capability("console/write", "*")?,
         ],
         host: &HOST,
         ..EvaluationOptions::default()

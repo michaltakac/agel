@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 
 CLIENT = "target/release/examples/osrs"
 
@@ -17,13 +18,38 @@ def form(value):
     return str(value)
 
 
-def evaluate(source, port=1, timeout=120):
+def evaluate(source, port=1, timeout=120, *, progress=None):
     with tempfile.TemporaryDirectory(prefix="agel-login-", dir="target") as directory:
         path = Path(directory) / "probe.agel"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w") as output:
             output.write(source)
-        return subprocess.run([CLIENT, str(port), str(path)], capture_output=True, text=True, timeout=timeout)
+        command = [CLIENT, str(port), str(path)]
+        if progress is None:
+            return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        stderr_path = Path(directory) / "stderr.log"
+        with stderr_path.open("w") as stderr, stderr_path.open() as reader, subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=stderr, text=True
+        ) as child:
+            deadline = time.monotonic() + timeout
+            errors = []
+            try:
+                while True:
+                    output = None
+                    try:
+                        output, _ = child.communicate(timeout=max(0, min(1, deadline - time.monotonic())))
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline:
+                            raise
+                    for line in reader:
+                        errors.append(line)
+                        if line.startswith("agel-progress: "):
+                            progress(line.removeprefix("agel-progress: ").rstrip("\n"))
+                    if output is not None:
+                        return subprocess.CompletedProcess(command, child.returncode, output, "".join(errors))
+            finally:
+                if child.poll() is None:
+                    child.kill()
 
 
 def xtea(data, key, decrypt=False):
