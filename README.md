@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.151.** Native benchmark pairs support either arm
-order. See the [release notes](docs/release-v0.3.151.md).
+**Current release: v0.3.152.** Native benchmark scoring verifies judge
+receipt order. See the [release notes](docs/release-v0.3.152.md).
+
+v0.3.151 supports either native benchmark arm order.
+See the [release notes](docs/release-v0.3.151.md).
 
 v0.3.150 records native melee skill phases and stance retries.
 See the [release notes](docs/release-v0.3.150.md).

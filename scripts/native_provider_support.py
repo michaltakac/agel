@@ -93,19 +93,35 @@ def verified_judge_ledger(directory):
 
 
 def judge_receipts_for_trace(ledger, trace):
-    starts = re.findall(r'^\(judge-start .*$', ledger, re.M)
-    receipts = re.findall(r'^\(judge-result .*$', ledger, re.M)
-    identity = re.compile(r'^\(judge-(?:start|result) id "([^"]+)".*? attempt (\d+)\b')
-    started = [identity.match(line) for line in starts]
-    completed = [identity.match(line) for line in receipts]
-    if not all(started) or not all(completed):
-        raise ValueError('missing judge call identity')
-    keys = [match.groups() for match in started]
-    if len(set(keys)) != len(keys) or sorted(keys) != sorted(match.groups() for match in completed):
-        raise ValueError('unmatched or duplicate judge receipts')
+    identity = re.compile(r'^\(judge-(start|result) id "([^"]+)".*? attempt (\d+)\b')
+    jobs = {}
+    next_attempt = {}
+    pending = {}
+    receipts = []
+    for line in ledger.splitlines():
+        if not line.startswith(('(judge-start ', '(judge-result ')):
+            continue
+        match = identity.match(line)
+        if not match:
+            raise ValueError('missing judge call identity')
+        phase, name, number = match.groups()
+        attempt = int(number)
+        if phase == 'start':
+            job = name.rsplit('/', 1)[-1]
+            if jobs.setdefault(job, name) != name:
+                raise ValueError('multiple judge identities for one dispatch')
+            if name in pending or attempt != next_attempt.get(name, 0):
+                raise ValueError('unexpected judge attempt order')
+            pending[name] = attempt
+        else:
+            if pending.pop(name, None) != attempt:
+                raise ValueError('judge result has no preceding matching start')
+            next_attempt[name] = attempt + 1
+            receipts.append(line)
+    if pending:
+        raise ValueError('judge attempts have no results')
     dispatched = re.findall(r'^inference-bridge: started job (\d+) provider jev ', trace, re.M)
-    jobs = {name.rsplit('/', 1)[-1] for name, _ in keys}
-    if len(set(dispatched)) != len(dispatched) or jobs != set(dispatched):
+    if len(set(dispatched)) != len(dispatched) or set(jobs) != set(dispatched):
         raise ValueError('judge ledger differs from bridge dispatches')
     return receipts
 
