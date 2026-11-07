@@ -1,12 +1,26 @@
 # Roadmap
 
-What Agel has, what it is in the middle of, and what it has not begun. No
-dates and no ordering beyond dependence: an item is **done** only when the
-code exists on every surface the line names and a test in this repository
-proves it; **partial** names exactly what is missing; **open** means no
-code. Each release moves lines here; the release-by-release history is in
-[`versioning.md`](versioning.md) and the trust story in
-[`threat-model.md`](threat-model.md).
+An item is **done** when the code exists on every surface the row names
+and a repository test proves it. **Partial** identifies the remaining work,
+and **open** marks work yet to start. The release history and trust model
+are maintained separately. [Versioning](versioning.md) · [Threat model](threat-model.md)
+
+## Exo evaluation and OS evolution
+
+The [progress report](exo-progress-report.md) records the benchmark results
+through v0.3.218. The work below is ordered by what the next measured run
+depends on.
+
+| Work | Status | Evidence required to close |
+| --- | --- | --- |
+| Reconcile live observations with saved outcomes | Partial | Replay the missing melee updates from the wire, then complete both matched 16 XP arms with agreement between guest observations and server saves. Record failures and timeouts in the score. |
+| Measure useful in-session adaptation | Partial | Compare the same starting model, policy and tools with editing enabled or disabled. Require the edit to serve subsequent work and report task-level correctness, elapsed time and cost including retries. Record replay gains separately from live gains. |
+| Complete adamant production from a fresh account | Partial | Verify staged ore smelting and the bank round trip live, then join banking, transport, smelting and anvil work. Add normal-account resource acquisition and Smithing progression. Verify the finished item's provenance in both arms. |
+| Scale combat, currency and quests to the Exo workloads | Partial | Train all required combat stats to the objective, measure coin accumulation over a matched active-time window, and run a multi-quest campaign with quest points and cost recorded for both arms. |
+| Verify retained-policy transfer at task scale | Partial | Repeat completed tasks on distinct fresh accounts using verified donor lineage. Charge donor learning separately and include recipient recovery in elapsed time. |
+| Complete model accounting | Partial | Reconcile provider dispatches, token usage, cached input, prices, retries and interrupted attempts against the protected guest journal. Publish coins per dollar only when the denominator is known and positive. |
+| Expand the Agel-owned runtime | Partial | Extend the Agel evaluator and native backend beyond their demonstrated subsets. Verify guarded activation and reboot recovery for cells, programs, domains and kernel slots, then reduce the Rust runtime to the bootstrap and byte boundary. Keep game-specific policies in examples. |
+| Compare directly with Exo | Open | Run a matched Exo arm with equivalent objectives, server access, tools, model settings and budgets. Repeat with recorded run order and report correctness, time, total cost and uncertainty. |
 
 ## The language and the hosted runtime
 
