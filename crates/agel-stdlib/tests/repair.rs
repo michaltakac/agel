@@ -131,6 +131,20 @@ fn malformed_reports_and_refused_judges_never_activate() {
 }
 
 #[test]
+fn malformed_candidate_syntax_returns_to_writer_without_a_judge_call() {
+    let (mut world, options) = setup();
+    let malformed = "(dict 'diagnosis \"round up\" 'after '(fn (n size) (let (q (/ n size)) q)) 'predictions '(2 0))";
+    reply(&mut world, &options, "writer", malformed);
+    let pending = world.pending_model_requests();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].provider, "writer");
+    assert!(pending[0]
+        .prompt
+        .contains("analyzed let binding must be a pair"));
+    assert!(pending[0].prompt.contains(malformed));
+}
+
+#[test]
 fn refusal_prevents_replay_and_provider_failure_preserves_the_tool() {
     let (mut world, options) = setup();
     reply(

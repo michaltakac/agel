@@ -78,6 +78,7 @@
                         (if (if (= predictions nil) #t (= (type-of predictions) 'list))
                           (begin
                             (prediction-cases (get state 'examples) predictions)
+                            (meta-analyze (get report 'after))
                             report)
                           (dict 'error "predictions must be a list")))
                       (dict 'error "diagnosis is empty"))
@@ -155,9 +156,10 @@
           (if (= (car message) 'system/model-error)
               (retry self next (nth message 4))
               (if (= (get state 'status) 'proposing)
-                  (let ((report (parse-report state (nth message 3))))
-                    (if (get report 'error) (retry self next (get report 'error))
-                        (ask-judge self (assoc next 'previous-report (nth message 3)) report (nth message 3))))
+                  (let ((report (parse-report state (nth message 3)))
+                        (reported (assoc next 'previous-report (nth message 3))))
+                    (if (get report 'error) (retry self reported (get report 'error))
+                        (ask-judge self reported report (nth message 3))))
                   (if (= (get state 'status) 'judging) (finish-judge self next (nth message 3)) next))))
         state)))
   (def behavior
