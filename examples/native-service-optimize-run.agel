@@ -77,10 +77,14 @@
                                  'active (evolution-current policy-versions 'cell 'service-quantum))))
                   (console-log (text-concat "native-opt: probe " (print-form receipt)))
                   receipt)))))))))
+(def max-measured-quantum (* 64 (/ policy-bound 64)))
+(def projection
+  (dict 'max-quantum-at-measured-bound max-measured-quantum
+        'calls-at-max-quantum (/ (+ observed-length (- max-measured-quantum 1)) max-measured-quantum)))
 (def worker (make-repair-agent "service-optimizer"
   (dict 'versions policy-versions 'tool 'service-quantum 'before-text "(fn (limit) 64)"
-    'context (text-concat "The tool is a pure function from an integer limit (64 through 4096) to an integer cadence. The result must be a multiple of 64 between 64 and limit inclusive. The old policy always returns 64 and makes one acknowledged service call per 64 bytes. For this optimization, use the largest multiple of 64 at or below limit, optionally clamped to a constant cap that is a multiple of 64 and at least 128. The cap is a design choice; a cap above a particular input is valid because the result is still at most that input. The two displayed prediction inputs are 64 and 128, in that order. Return exactly two predictions. Other inputs must follow the same rounding contract. Use the observation below to explain your choice. Replay, after text approval, measures exact byte preservation, work and gap budgets, and whether the candidate beats both neighboring controls in elapsed time and makes fewer calls. If replay refused a prior candidate, revise the cadence using its measured refusal. Observed timings are in microseconds: "
-      (print-form observation))
+    'context (text-concat "The tool is a pure function from an integer limit (64 through 4096) to an integer cadence. The result must be a multiple of 64 between 64 and limit inclusive. The old policy always returns 64 and makes one acknowledged service call per 64 bytes. For this optimization, use the largest multiple of 64 at or below limit, optionally clamped to a constant cap that is a multiple of 64 and at least 128. If you choose a cap, pick one between 128 and max-quantum-at-measured-bound inclusive. The two displayed prediction inputs are 64 and 128, in that order. Return exactly two predictions. In the diagnosis, state what the function returns at the observed bound and the projected call count for that cadence on the recorded byte length. Use ceiling(bytes / cadence). The projection below is for the maximum cadence at the measured bound, so recompute if you choose a smaller one. Replay, after text approval, measures exact byte preservation, work and gap budgets, and whether the candidate beats both neighboring controls in elapsed time and makes fewer calls. If replay refused a prior candidate, revise the cadence using its measured refusal. Observed timings are in microseconds: "
+      (text-concat (print-form observation) (text-concat "\nCadence projection: " (print-form projection))))
     'examples (list (dict 'arguments '(64) 'expected 64) (dict 'arguments '(128) 'expected 128))
     'held-out (list (dict 'arguments '(65) 'expected 64) (dict 'arguments '(191) 'expected 128))
     'max-attempts 2 'threshold 800 'proposal-provider 'writer 'judge-provider 'judge
@@ -88,6 +92,12 @@
 (def retained-owner (get stream 'owner))
 (send worker '(repair/start)) (run 1)
 (def session (repair-agent-drive worker infer audit 6))
+(map (fn (event)
+  (if (= (get event 'event) 'refused)
+    (begin
+      (audit (assoc event 'event 'optimizer-refusal))
+      (console-log (text-concat "native-opt: attempt refused: " (get event 'reason))))
+    nil)) (get session 'history))
 (def policy-activated (= (get session 'status) 'done))
 (def policy-versions (get session 'versions))
 (refresh-encoder)

@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.100.** Benchmark results distinguish known,
-unpriced, and incomplete costs. See the [release notes](docs/release-v0.3.100.md).
+**Current release: v0.3.101.** The live optimizer records each refusal and
+reports the cadence implied by its measured bound. See the [release notes](docs/release-v0.3.101.md).
+
+v0.3.100 distinguishes known, unpriced, and incomplete benchmark costs.
+See the [release notes](docs/release-v0.3.100.md).
 
 v0.3.99 adds a mining waypoint and a bounded copper retry.
 See the [release notes](docs/release-v0.3.99.md).
