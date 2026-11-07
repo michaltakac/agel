@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.203.** The native optimizer selects a replay
-workload within its supported size. See the [release notes](docs/release-v0.3.203.md).
+**Current release: v0.3.204.** Optimizer retries receive measured cadence
+and service-call evidence. See the [release notes](docs/release-v0.3.204.md).
+
+v0.3.203 selects a replay workload within the optimizer's supported size.
+See the [release notes](docs/release-v0.3.203.md).
 
 v0.3.202 verifies the timing of native melee adaptation.
 See the [release notes](docs/release-v0.3.202.md).
