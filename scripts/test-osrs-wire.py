@@ -74,6 +74,19 @@ with tempfile.TemporaryDirectory(prefix="agel-osrs-wire-") as directory:
     compressed_header = b"\xff\0\xff\2" + (1096).to_bytes(4, "big")
     fixture(program, [(HELLO, b"\0"), (b"\1\xff\0\xff", compressed_header + packet[8:])],
             f"(1096 1100 {sum(body)})")
+    serviced = Path(directory) / "serviced.agel"
+    serviced.write_text("""
+      (import agel/osrs-wire)
+      (def chunks '((1 2) (3) (4 5) (6)))
+      (def pulses 0)
+      (def wire-read (fn (_) (let ((head (car chunks))) (def chunks (cdr chunks)) head)))
+      (def pulse (fn () (def pulses (+ 1 pulses))))
+      (def fragmented (osrs-read-exact-serviced 5 pulse))
+      (def complete (osrs-read-exact-serviced 1 pulse))
+      (list fragmented complete pulses)
+    """)
+    result = call(1, serviced)
+    assert result.returncode == 0 and result.stdout.strip() == "((1 2 3 4 5) (6) 2)", result
 print("OSRS wire: fragmented handshake, unsigned challenge, revision refusal, EOF and cache blocks passed")
 
 if "--live" in sys.argv:
