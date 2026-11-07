@@ -48,6 +48,19 @@ def installed_client(directory, read_table):
     return source.decode()
 
 
+def verify_combat_source(directory, source, manifest):
+    modules = [('osrs-combat-test', 'combat_policy_sha256')]
+    if manifest.get('goal_xp') is not None:
+        modules.append(('osrs-combat-training', 'training_policy_sha256'))
+    for name, digest_field in modules:
+        start = source.find(f'(module agel/{name}\n')
+        stop = source.find('\n(module ', start + 1)
+        require(start >= 0 and stop > start, f'{directory}: missing installed {name} module')
+        actual = hashlib.sha256(source[start:stop].encode()).hexdigest()
+        require(actual == manifest.get(digest_field),
+                f'{directory}: installed {name} differs from the world manifest')
+
+
 def verify_optimizer_approval(directory, trace, receipts):
     commits = list(re.finditer(r'^native-opt: policy committed after text judgment and measured replay$', trace, re.M))
     probes = list(re.finditer(r'^native-opt: probe \{passed #t .* active 1\}$', trace, re.M))
@@ -176,6 +189,7 @@ def load_arm(directory, policy, read_table):
     timings = re.findall(r'^native-combat: task-us (\d+)$', trace, re.M)
     require(len(timings) == 1, f'{directory}: expected one task clock')
     source = installed_client(directory, read_table)
+    verify_combat_source(directory, source, manifest)
     if policy == 'transferred' and 'native-transfer: tape replay ' in source:
         require(re.search(r'^(?:live-desktop> )?native-transfer: tape replay \{bytes \d+ quantum \d+ calls \d+\}$',
                           trace, re.M),
@@ -407,6 +421,8 @@ def verify_transfer_donor(donor, recipient, evaluation_accounts):
     _, frames = verified_judge_ledger(donor)
     require(frames and frames == judge_frames(recipient / 'disk.img'),
             'recipient does not retain the donor judge journal')
+    read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
+    verify_combat_source(donor, installed_client(donor, read_table), origin)
     trace = (donor / 'serial.log').read_text()
     saved = saved_outcome(donor)
     identity = re.search(r'^account=(\d+) character=\d+ rights= x=\d+ z=\d+ level=0 xp_rate_in_hundreds=100$',

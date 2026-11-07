@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.192.** Native one-rat combat skips inference when
-queued packets confirm the task is complete. See the [release notes](docs/release-v0.3.192.md).
+**Current release: v0.3.193.** Native combat scoring checks installed
+policy source against each run manifest. See the [release notes](docs/release-v0.3.193.md).
+
+v0.3.192 skips one-rat inference when queued packets confirm completion. See the [release notes](docs/release-v0.3.192.md).
 
 v0.3.191 reports the replay count needed to recover optimizer setup time. See the [release notes](docs/release-v0.3.191.md).
 
