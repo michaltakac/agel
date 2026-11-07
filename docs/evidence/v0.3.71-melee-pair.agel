@@ -1,0 +1,5 @@
+(import agel/benchmark)
+(def comparison (dict 'task 'three-skill-melee 'phase 'in-session-adaptation 'contract "d89b6b51b96a1e4c3a97ce6e873516f0ef8e9b0f0242e1b99d2f64b5f75f7c17" 'randomness 'uncontrolled))
+(def fixed (dict 'arm 'fixed 'comparison comparison 'account 'fixed-account 'correct #t 'elapsed-us 1087386943 'billing-complete #t 'charges (list )))
+(def adaptive (dict 'arm 'adaptive 'comparison comparison 'account 'adaptive-account 'correct #f 'elapsed-us 1025570536 'billing-complete #t 'charges (list (dict 'kind 'judge 'cost-nanousd 39564) (dict 'kind 'judge 'cost-nanousd 41286) (dict 'kind 'model 'cost-nanousd nil) (dict 'kind 'model 'cost-nanousd nil))))
+(assoc (benchmark-pair fixed adaptive) 'policy-outcomes (dict 'fixed 'fixed 'adaptive 'refused-retained-fixed))

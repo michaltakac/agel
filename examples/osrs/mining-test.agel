@@ -8,15 +8,15 @@
     (fn (state)
       (let ((matches (filter (fn (npc) (= (get npc 'type) 3222)) (osrs-nearby-npcs state))))
         (if matches (car matches) nil))))
-  (def look-for-tutor
-    (fn (state batches)
-      (if (if (tutor state) #t (= batches 0)) state
-        (look-for-tutor (osrs-observe-bounded (osrs-keepalive state) tutor 5) (- batches 1)))))
+  (def observe-live
+    (fn (state predicate batches)
+      (if (if (predicate state) #t (= batches 0)) state
+        (observe-live (osrs-observe-bounded (osrs-keepalive state) predicate 5) predicate (- batches 1)))))
   (def approach-tutor
     (fn (state)
-      (let ((first (look-for-tutor (osrs-walk state 3227 3149) 18)))
+      (let ((first (observe-live (osrs-walk state 3227 3149) tutor 18)))
         (if (tutor first) first
-          (let ((second (look-for-tutor (osrs-walk first 3229 3149) 12)))
+          (let ((second (observe-live (osrs-walk first 3229 3149) tutor 12)))
             (if (tutor second) second
               (signal 'osrs/mining-test "mining tutor was not visible after two approaches"
                 (dict 'nearby-types (map (fn (npc) (get npc 'type)) (osrs-nearby-npcs second))
@@ -31,26 +31,41 @@
   (def mining-xp (fn (g) (get (osrs-stat g 14) 'xp)))
   (def await-interface
     (fn (state interface)
-      (with-handler (* problem) (signal 'osrs/mining-test "expected tutor dialogue" (list interface problem))
-        (wait-live state (fn (g) (osrs-open-interface? g interface)) 12))))
+      (let ((observed (observe-live state (fn (g) (osrs-open-interface? g interface)) 12)))
+        (if (osrs-open-interface? observed interface) observed
+          (signal 'osrs/mining-test "expected tutor dialogue" interface)))))
+  (def talk-to-tutor
+    (fn (state)
+      (if (osrs-open-interface? state 219) state
+        (begin
+          (require (tutor state) "mining tutor left before dialogue")
+          (observe-live (osrs-talk state (get (tutor state) 'index))
+            (fn (g) (osrs-open-interface? g 219)) 6)))))
+  (def tutor-menu
+    (fn (state)
+      (let ((first (talk-to-tutor (approach-tutor state))))
+        (if (osrs-open-interface? first 219) first
+          (let ((nearby (observe-live (osrs-wait-ticks (osrs-walk first 3229 3149) 5) tutor 6)))
+            (let ((second (talk-to-tutor nearby)))
+              (if (osrs-open-interface? second 219) second
+                (signal 'osrs/mining-test "mining tutor did not open a menu after two talks"))))))))
   (def first-copper-state
     (fn (state)
       (let ((ready (osrs-await state (fn (g) (if (osrs-stat g 14) (has-key? (get g 'inventories) 93) #f)))))
         (require (= (list (mining-xp ready) (pickaxes ready) (ores ready)) '(0 0 0))
           "expected a fresh account without a pickaxe or ore")
-        (let ((arrived (approach-tutor ready)))
-          (let ((menu (await-interface (osrs-talk arrived (get (tutor arrived) 'index)) 219)))
-            (let ((player (await-interface (osrs-resume-dialogue menu 219 1 1) 217)))
-              (let ((object (await-interface (osrs-resume-dialogue player 217 5 -1) 193)))
-                (let ((gift (await-interface (osrs-resume-dialogue object 193 0 0) 231)))
-                  (require (= (pickaxes gift) 1) "the mining tutor did not provide a bronze pickaxe")
-                  (let ((continued (osrs-resume-dialogue gift 231 5 -1)))
-                    (let ((mined (with-handler (* problem) (signal 'osrs/mining-test "waiting for copper ore and Mining XP" problem)
-                                   (wait-live (osrs-use-location continued 10943 3230 3147)
-                                     (fn (g) (if (= (ores g) 1) (< 0 (mining-xp g)) #f)) 18))))
-                      (require (= (list (pickaxes mined) (ores mined) (mining-xp mined)) '(1 1 17))
-                        "unexpected mining outcome")
-                      mined))))))))))
+        (let ((menu (tutor-menu ready)))
+          (let ((player (await-interface (osrs-resume-dialogue menu 219 1 1) 217)))
+            (let ((object (await-interface (osrs-resume-dialogue player 217 5 -1) 193)))
+              (let ((gift (await-interface (osrs-resume-dialogue object 193 0 0) 231)))
+                (require (= (pickaxes gift) 1) "the mining tutor did not provide a bronze pickaxe")
+                (let ((continued (osrs-resume-dialogue gift 231 5 -1)))
+                  (let ((mined (with-handler (* problem) (signal 'osrs/mining-test "waiting for copper ore and Mining XP" problem)
+                                 (wait-live (osrs-use-location continued 10943 3230 3147)
+                                   (fn (g) (if (= (ores g) 1) (< 0 (mining-xp g)) #f)) 18))))
+                    (require (= (list (pickaxes mined) (ores mined) (mining-xp mined)) '(1 1 17))
+                      "unexpected mining outcome")
+                    mined)))))))))
   (def mine-first-copper
     (fn (state)
       (let ((mined (first-copper-state state)))
