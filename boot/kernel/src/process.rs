@@ -141,7 +141,7 @@ pub(crate) const REGION: Region = Region {
 pub const NAME_BYTES: usize = crate::region::NAME_BYTES;
 const MAX_SEGMENTS: usize = 8;
 /// Pages a process may be built from, code, data and zero fill together:
-/// 8 MiB of the 64 MiB window, the rest for the heap and the canvas. A
+/// At most 8 MiB of the process window, the rest for the heap and the canvas. A
 /// game with its tables is about 730 KiB.
 const MAX_PAGES: usize = 2048;
 const PAGE: u64 = 4096;

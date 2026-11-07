@@ -47,7 +47,7 @@ fn window_access(rights: agel_kernel_abi::Rights) -> Access {
     }
 }
 
-/// Where a loaded process's segments live: a 64 MiB window well above the
+/// Where a loaded process's segments live: a 192 MiB window well above the
 /// stack, shared page and frame window, inside the domain's private region.
 #[cfg(feature = "process")]
 pub const PROCESS_BASE: u64 = DOMAIN_BASE + 0x1000_0000;
@@ -63,7 +63,7 @@ pub const ASSET_SLOT_BYTES: u64 = 0x0020_0000;
 pub const CANVAS_BASE: u64 =
     ASSET_BASE + crate::world::shared::ASSET_SLOTS as u64 * ASSET_SLOT_BYTES;
 #[cfg(feature = "process")]
-pub const PROCESS_BYTES: u64 = 0x0400_0000;
+pub const PROCESS_BYTES: u64 = 0x0c00_0000;
 
 /// A process's x87 and SSE state, as `fxsave` lays it out: 512 bytes,
 /// 16-byte aligned, saved when the domain leaves and restored when it
