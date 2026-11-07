@@ -19,6 +19,12 @@
 (check (with-handler (* problem) #t (begin ((get stream 'read) 0) #f)) "zero count")
 (def short (byte-stream (fn (request) "ok 00")))
 (check (with-handler (* problem) #t (begin ((get short 'entropy) 2) #f)) "short entropy")
+(def oversized (byte-stream (fn (_) "ok 001122")))
+(check (= (with-handler (* problem) (get problem 'message) ((get oversized 'read) 2))
+  "oversized byte reply") "bound carrier payload before decoding")
+(def malformed-hex (byte-stream (fn (_) "ok 0 ")))
+(check (= (with-handler (* problem) (get problem 'kind) ((get malformed-hex 'read) 2))
+  'bytes/hex) "carrier replies require compact hex")
 (def broken (byte-stream (fn (request) "garbage")))
 (check (with-handler (* problem) #t (begin ((get broken 'open)) #f)) "malformed reply")
 #t
