@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.92.** The legacy DOOM port lives under examples.
+**Current release: v0.3.93.** Native crafting comparisons verify matching
+starting stock and Smithing XP. See the [release notes](docs/release-v0.3.93.md).
+
+v0.3.92 moves the legacy DOOM port under examples.
 See the [release notes](docs/release-v0.3.92.md).
 
 v0.3.91 supports separate staged accounts for fixed and adaptive native crafting.

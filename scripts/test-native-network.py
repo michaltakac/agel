@@ -17,7 +17,7 @@ import time
 import graphical_console as console
 
 sys.path.insert(0, str(Path(__file__).with_name("osrs")))
-from test_support import combat_xp, combat_xp_saved, economy_saved, melee_failure_saved, melee_levels_saved, melee_xp
+from test_support import combat_xp, combat_xp_saved, craft_saved, craft_stock, economy_saved, melee_failure_saved, melee_levels_saved, melee_xp
 
 parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
@@ -474,6 +474,27 @@ else:
 for cmd in [['python3','scripts/install-program.py',disk,'agel',str(options.agel_executable)],
             ['python3','scripts/install-program.py','--region','data',disk,'client',str(script)]]:
     subprocess.run(cmd,check=True,capture_output=True)
+
+def capture_account(predicate, varps, filename='saved-account.txt'):
+    compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
+    build=directory/'oracle';build.mkdir(exist_ok=True)
+    subprocess.run([str(compiler) if compiler.is_file() else 'javac','-d',str(build),'scripts/osrs/AccountState.java'],check=True,capture_output=True)
+    subprocess.run(['docker','cp',str(build/'AccountState.class'),'agel-osrs-world:/tmp/AccountState.class'],check=True,capture_output=True)
+    deadline=time.monotonic()+45
+    while True:
+        saved=subprocess.run(['docker','exec','agel-osrs-world','sh','-c',
+            'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$@"','probe',account['username'],
+            *varps],capture_output=True,text=True)
+        if saved.returncode==0 and predicate(saved.stdout):
+            (directory/filename).write_text(saved.stdout)
+            return saved.stdout
+        if time.monotonic()>deadline:raise AssertionError('expected state was not saved: '+saved.stdout+saved.stderr)
+        time.sleep(1)
+
+
+if options.craft:
+    craft_before = craft_stock(capture_account(craft_stock, [], 'before-account.txt'))
+
 run_started=time.monotonic()
 with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as sockets:
     serial=Path(sockets)/'serial'
@@ -500,23 +521,6 @@ if not options.challenge:assert account['password'] not in output,'credential ap
 print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'native-transfer:' in line or 'native-craft:' in line or 'native-economy:' in line or 'native-quest:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
 marker='native-network: PASS:' if options.challenge else 'native-network: client completed:'
 passed=result.returncode==0 and marker in output and 'process agel exited with status 0' in output
-
-
-def capture_account(predicate, varps):
-    compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
-    build=directory/'oracle';build.mkdir()
-    subprocess.run([str(compiler) if compiler.is_file() else 'javac','-d',str(build),'scripts/osrs/AccountState.java'],check=True,capture_output=True)
-    subprocess.run(['docker','cp',str(build/'AccountState.class'),'agel-osrs-world:/tmp/AccountState.class'],check=True,capture_output=True)
-    deadline=time.monotonic()+45
-    while True:
-        saved=subprocess.run(['docker','exec','agel-osrs-world','sh','-c',
-            'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$@"','probe',account['username'],
-            *varps],capture_output=True,text=True)
-        if saved.returncode==0 and predicate(saved.stdout):
-            (directory/'saved-account.txt').write_text(saved.stdout)
-            return saved.stdout
-        if time.monotonic()>deadline:raise AssertionError('expected state was not saved: '+saved.stdout+saved.stderr)
-        time.sleep(1)
 
 
 if editing:
@@ -568,18 +572,8 @@ if options.craft:
     assert output.count('operation open ') == output.count('operation close ') == 2
     if not editing:
         assert 'inference-bridge: started job' not in output
-    observed = re.search(r'^native-craft: \{test adamant-platebody passed #t .*smithing-xp-after (\d+)\}$', output, re.M)
-    assert observed, 'missing final Smithing XP'
-
-    def craft_saved(snapshot):
-        xp = re.search(r'^stat=13 base=88 visible=88 fine_xp=(\d+)$', snapshot, re.M)
-        return (xp and int(xp[1]) // 10 == int(observed[1])
-                and 'rights= ' in snapshot and 'xp_rate_in_hundreds=100' in snapshot
-                and 'inv=inv.inv item=obj.adamant_platebody count=1' in snapshot
-                and 'inv=inv.inv item=obj.hammer count=1' in snapshot
-                and 'item=obj.adamantite_bar ' not in snapshot)
-
-    capture_account(craft_saved, [])
+    capture_account(
+        lambda snapshot: craft_saved(output, craft_before, craft_stock(snapshot, finished=True)), [])
     print('PASS: native adamant platebody and Smithing XP saved with normal rights and 1x XP', flush=True)
 if melee is not None:
     if not editing:

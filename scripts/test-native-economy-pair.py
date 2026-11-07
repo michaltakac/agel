@@ -1,4 +1,6 @@
-"""Run fixed and live adaptive economy arms with the same runtime artifacts."""
+"""Run fixed and live adaptive arms with the same runtime artifacts."""
+
+import argparse
 
 import hashlib
 import json
@@ -10,7 +12,7 @@ import tempfile
 
 
 def run_arm(output, runtime, name, options):
-    command = [sys.executable, 'scripts/test-native-network.py', *runtime, '--economy', *options]
+    command = [sys.executable, 'scripts/test-native-network.py', *runtime, *options]
     evidence = None
     with (output / f'{name}.log').open('w', buffering=1) as log, subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -27,7 +29,14 @@ def run_arm(output, runtime, name, options):
 
 
 def main():
-    output = Path(tempfile.mkdtemp(prefix='native-economy-pair-', dir='target'))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--craft', nargs=2, metavar=('FIXED_FIXTURE', 'ADAPTIVE_FIXTURE'),
+                        help='use two distinct accounts staged with --prepare-only')
+    args = parser.parse_args()
+    task = 'craft' if args.craft else 'economy'
+    if args.craft and args.craft[0] == args.craft[1]:
+        parser.error('--craft requires two distinct fixtures')
+    output = Path(tempfile.mkdtemp(prefix=f'native-{task}-pair-', dir='target'))
     print('Pair evidence:', output, flush=True)
     runtime = []
     digests = {}
@@ -49,10 +58,14 @@ def main():
         for source in area.glob('*.agel'):
             shutil.copy2(source, destination / source.name)
     runtime.extend(['--source-root', str(sources)])
-    fixed = run_arm(output, runtime, 'fixed', [])
-    adaptive = run_arm(output, runtime, 'adaptive', ['--optimize', '--live'])
+    fixed_options, adaptive_options = [f'--{task}'], [f'--{task}', '--optimize', '--live']
+    if args.craft:
+        fixed_options.extend(['--craft-fixture', args.craft[0]])
+        adaptive_options.extend(['--craft-fixture', args.craft[1]])
+    fixed = run_arm(output, runtime, 'fixed', fixed_options)
+    adaptive = run_arm(output, runtime, 'adaptive', adaptive_options)
     score = subprocess.check_output([sys.executable, 'scripts/compare-native-combat.py',
-                                     '--economy', fixed, adaptive])
+                                     f'--{task}', fixed, adaptive])
     (output / 'score.agel').write_bytes(score)
     print('Agel score input:', output / 'score.agel', flush=True)
 

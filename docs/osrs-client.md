@@ -121,6 +121,15 @@ judge charges and leaves total cost unknown when the writer's bill is missing.
 A measured melee failure can be scored when its saved XP confirms the
 incomplete outcome.
 
+For a native crafting comparison, stage two distinct named fixtures with
+`python3 scripts/test-osrs-crafting.py --prepare-only --fixture NAME`.
+Names use `ac` followed by eight lowercase hexadecimal digits. Pass the
+two names to `python3 scripts/test-native-economy-pair.py --craft FIXED ADAPTIVE`
+to run them in order with one copy of the runtime artifacts and sources.
+The scorer requires two completed runs, matching starting stock and
+Smithing XP, and an independently verified platebody and XP gain from
+each account. Evaluate the generated `score.agel` with `agel/benchmark`.
+
 This runs the Agel scenarios and checks authoritative persisted server state:
 
 - The dedicated `agelsetup` account clears its inventory, changes Smithing

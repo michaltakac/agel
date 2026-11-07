@@ -68,6 +68,28 @@ def combat_xp_saved(expected, oracle, *, minimum=False):
     return all(stats.get(stat, -1) // 10 == xp for stat, xp in expected.items())
 
 
+def craft_stock(snapshot, *, finished=False):
+    header = re.search(
+        r'^account=(\d+) character=\d+ rights= x=(\d+) z=(\d+) level=0 xp_rate_in_hundreds=100$',
+        snapshot, re.M)
+    xp = re.search(r'^stat=13 base=88 visible=88 fine_xp=(\d+)$', snapshot, re.M)
+    inventory = sorted(line for line in snapshot.splitlines() if line.startswith('inv='))
+    product = 'adamant_platebody count=1' if finished else 'adamantite_bar count=5'
+    if header and xp and inventory == [f'inv=inv.inv item=obj.{product}', 'inv=inv.inv item=obj.hammer count=1']:
+        if finished or header.groups()[1:] == ('3187', '3425'):
+            return int(header[1]), int(xp[1])
+    return None
+
+
+def craft_saved(report, before, after):
+    observed = re.search(
+        r'^native-craft: \{test adamant-platebody passed #t bars-before 5 bars-after 0 '
+        r'platebody-before 0 platebody-after 1 smithing-xp-before (\d+) smithing-xp-after (\d+)\}$',
+        report, re.M)
+    return (before is not None and after is not None and observed is not None
+            and before[0] == after[0] and after[1] - before[1] == 3125
+            and tuple(map(int, observed.groups())) == (before[1] // 10, after[1] // 10))
+
 def economy_saved(coins, snapshot):
     if coins == 0:
         return 'item=obj.coins ' not in snapshot

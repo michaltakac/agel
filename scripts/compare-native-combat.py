@@ -11,7 +11,7 @@ from native_provider_support import (
 )
 
 sys.path.insert(0, str(Path(__file__).with_name('osrs')))
-from test_support import combat_xp, combat_xp_saved, economy_saved, form, melee_failure_saved, melee_levels_saved, melee_xp
+from test_support import combat_xp, combat_xp_saved, craft_saved, craft_stock, economy_saved, form, melee_failure_saved, melee_levels_saved, melee_xp
 
 
 def require(condition, message):
@@ -193,6 +193,42 @@ def load_economy(directory, policy, read_table):
     return contract, identity[1], int(clocks[0]), charges, correct, decision, usage, coins
 
 
+def load_craft(directory, policy, read_table):
+    manifest = json.loads((directory / 'world.json').read_text())
+    trace = (directory / 'serial.log').read_text()
+    require(manifest['encoder_policy'] == policy, f'{directory}: unexpected crafting policy')
+    require(re.findall(r'^process agel exited with status (\d+)$', trace, re.M) == ['0']
+            and 'native-network: client completed: login, observations and adamant platebody' in trace,
+            f'{directory}: crafting did not complete')
+    before = craft_stock((directory / 'before-account.txt').read_text())
+    after = craft_stock((directory / 'saved-account.txt').read_text(), finished=True)
+    clocks = re.findall(r'^native-craft: task-us ([1-9]\d*)$', trace, re.M)
+    require(len(clocks) == 1 and craft_saved(trace, before, after),
+            f'{directory}: crafting clock or saved evidence differs')
+
+    charges, decision, usage = [], policy, []
+    if policy == 'adaptive':
+        charges, decision, usage = adaptation_evidence(directory, trace, True)
+    else:
+        require('inference-bridge: started job' not in trace, f'{directory}: fixed crafting incurred inference')
+    source = installed_client(directory, read_table)
+    common = source[:source.index('(def task-start (clock-us))')]
+    common, logins = re.subn(r'^  \(begin \(osrs-login "[^"]+" "[^"]+" context ',
+                             '  (begin (osrs-login <fixture> context ', common, flags=re.M)
+    require(logins == 1, f'{directory}: expected one fixture login in installed program')
+    start = source.index('(import agel/osrs-crafting-test)')
+    end = source.index('\n(if (< 0 (get completed', start)
+    task = source[start:end].split('\n(if policy-activated', 1)[0].strip()
+    contract = {key: manifest[key] for key in (
+        'image', 'manifest', 'scope', 'guest_memory_mib', 'evaluation_fuel',
+        'keepalive_interval_us', 'craft_policy_sha256', 'service_policy_sha256')}
+    contract.update(boot_identity(directory, read_table))
+    contract['initial_smithing_fine_xp'] = before[1]
+    contract['common_setup'] = hashlib.sha256(common.encode()).hexdigest()
+    contract['task'] = hashlib.sha256(task.encode()).hexdigest()
+    return contract, before[0], int(clocks[0]), charges, True, decision, usage
+
+
 def charge_forms(charges):
     return ' '.join(f"(dict 'kind '{kind} 'cost-nanousd {cost if cost is not None else 'nil'})"
                     for kind, cost in charges)
@@ -243,6 +279,7 @@ def main():
     tasks = parser.add_mutually_exclusive_group()
     tasks.add_argument('--melee', action='store_true', help='compare in-session adaptation on three-skill melee')
     tasks.add_argument('--economy', action='store_true', help='compare in-session adaptation on the first bronze sale')
+    tasks.add_argument('--craft', action='store_true', help='compare completed adamant platebody runs')
     tasks.add_argument('--optimizer', action='store_true', help='score the optimizer decision independently of the game')
     parser.add_argument('--transfer', action='store_true', help='score a melee run using a retained policy')
     args = parser.parse_args()
@@ -256,16 +293,16 @@ def main():
     if args.candidate is None:
         parser.error('paired scoring requires two run directories')
     read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
-    load = load_economy if args.economy else load_arm
+    load = load_economy if args.economy else load_craft if args.craft else load_arm
     fixed, fixed_account, fixed_time, fixed_charges, fixed_correct, fixed_decision, _, *fixed_coins = load(args.fixed, 'fixed', read_table)
-    adaptive_policy = 'adaptive' if (args.economy or args.melee) and not args.transfer else 'transferred'
+    adaptive_policy = 'adaptive' if (args.economy or args.melee or args.craft) and not args.transfer else 'transferred'
     transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct, adaptive_decision, usage, *adaptive_coins = load(
         args.candidate, adaptive_policy, read_table)
-    require(fixed == transfer, 'world, boot image, Agel executable, game adapter, or task source differs')
+    require(fixed == transfer, 'world, runtime, game adapter, task source, or starting state differs')
     require(fixed_account != transfer_account, 'task accounts must differ')
     digest = hashlib.sha256(json.dumps(fixed, sort_keys=True).encode()).hexdigest()
     print("(import agel/benchmark)")
-    task = 'first-bronze-sale' if args.economy else 'three-skill-melee' if args.melee else 'one-rat'
+    task = 'first-bronze-sale' if args.economy else 'adamant-platebody' if args.craft else 'three-skill-melee' if args.melee else 'one-rat'
     phase = 'in-session-adaptation' if adaptive_policy == 'adaptive' else 'fresh-account-evaluation'
     print(f"(def comparison (dict 'task '{task} 'phase '{phase} "
           f"'contract {form(digest)} 'randomness 'uncontrolled))")
