@@ -1,0 +1,17 @@
+First verified fresh account
+RuneScape mining: fresh account walking to the tutor for a pickaxe and first copper ore
+{test first-copper passed #t tutor 3222 pickaxes 1 copper 1 mining-xp 17}
+stat=14 base=1 visible=1 fine_xp=175
+inv=inv.inv item=obj.bronze_pickaxe count=1
+inv=inv.inv item=obj.copper_ore count=1
+Elapsed seconds: 51.817
+RuneScape PASS: fresh normal account earned a tutor pickaxe and mined copper with 17.5 XP saved
+
+Release wrapper on another fresh account
+RuneScape mining: fresh account walking to the tutor for a pickaxe and first copper ore
+{test first-copper passed #t tutor 3222 pickaxes 1 copper 1 mining-xp 17}
+stat=14 base=1 visible=1 fine_xp=175
+inv=inv.inv item=obj.bronze_pickaxe count=1
+inv=inv.inv item=obj.copper_ore count=1
+Elapsed seconds: 58.032
+RuneScape PASS: fresh normal account earned a tutor pickaxe and mined copper with 17.5 XP saved

@@ -83,6 +83,7 @@ of complete OSRS parity.
 ```sh
 sh scripts/test-osrs-game.sh
 sh scripts/test-osrs-combat.sh
+sh scripts/test-osrs-mining.sh
 sh scripts/test-osrs-crafting.sh
 sh scripts/test-osrs-crafting.sh --native
 sh scripts/test-native-network.sh --combat
@@ -148,8 +149,10 @@ removal of the selected NPC index. The server oracle independently checks that
 saved XP matches the protocol observations at whole-XP precision. NPC removal
 and XP are the outcome signals used here. The crafting test verifies normal
 anvil manufacture from five staged bars and checks saved inventory and Smithing
-XP. Maximum stats, material acquisition and training, quests, money-making
-and transfer still need their own scores.
+XP. The mining test walks a fresh normal account to the tutor, gets a pickaxe
+through dialogue, and verifies its first copper ore and Mining XP.
+Maximum stats, training and material acquisition for the adamant recipe,
+quests, money-making and transfer still need their own scores.
 v0.3.17 connects a retained repair actor to polling inference and the native
 client. It repairs a seeded planner and executes five queued game actions on
 the same connection. Full gameplay policy, durable episode history and paired

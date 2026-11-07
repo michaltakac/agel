@@ -45,13 +45,24 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
       (def closed (decode moved 45 '(6 5 8 7)))
       (def refused (with-handler (* problem) (get problem 'kind) (osrs-click-interface closed 312 22)))
       (def resynced (decode opened 116 '(0 11 0 42 0 1 0 1 0 3 1 57 0)))
+      (def tutor-state (assoc original 'npc-worlds (dict 0 (dict 'npcs (dict 500 (dict 'type 3222))))))
+      (def talked (osrs-talk tutor-state 500))
+      (def talk-body (cdr sent))
+      (def invalid-talk (with-handler (* problem) (get problem 'kind) (osrs-talk original 500)))
+      (def choice (osrs-resume-dialogue opened 312 22 2))
+      (def choice-body (cdr sent))
+      (def continued (osrs-resume-dialogue opened 312 22 -1))
+      (def continue-body (cdr sent))
+      (def invalid-resume (with-handler (* problem) (get problem 'kind)
+        (osrs-resume-dialogue closed 312 22 -1)))
       (list location-body (osrs-open-interface? opened 312) button-body
         (osrs-open-interface? moved 312) (osrs-open-interface? closed 312) refused
         (osrs-open-interface? resynced 42) (osrs-open-interface? resynced 313)
-        (osrs-open-interface? resynced 312))
+        (osrs-open-interface? resynced 312) talk-body invalid-talk
+        choice-body continue-body invalid-resume)
     "#, &options).unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("((96 13 177 8 0 12 116 0) #t (1 56 0 22) #t #f osrs/interface #t #t #f)")
+        Some("((96 13 177 8 0 12 116 0) #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface)")
     );
 }
