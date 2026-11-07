@@ -1,6 +1,41 @@
 use agel_core::{Value, World};
 
 #[test]
+fn encoder_refresh_switches_the_callable_with_the_active_version() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    for source in [
+        include_str!("../bytes.agel"),
+        include_str!("../services.agel"),
+        include_str!("../work-profile.agel"),
+        "(import agel/evolution) (import agel/judge-log)
+         (def check (fn (ok reason) (if ok #t (signal 'test/failure reason))))
+         (def audit (fn (_) #t)) (def retained-policy nil)",
+        include_str!("../../../examples/native-service-optimize.agel"),
+    ] {
+        world.evaluate(source).unwrap();
+    }
+    let result = world
+        .evaluate(
+            r#"(def before (retained-quantum 256))
+              (def new '(fn (limit) (* 64 (/ limit 64))))
+              (def policy-versions
+                (evolution-edit policy-versions 'cell 'service-quantum initial-policy new
+                  (list (dict 'arguments '(327) 'expected 320))
+                  (fn (_) (dict 'allowed #t 'reason "fixture"))))
+              (def observed-length 512)
+              (def policy-bound 327)
+              (refresh-encoder)
+              (list before (retained-quantum 256) (retained-quantum 513) policy-uses)"#,
+        )
+        .unwrap();
+    assert_eq!(
+        result.values.last().map(Value::to_string).as_deref(),
+        Some("(64 320 64 1)")
+    );
+}
+
+#[test]
 fn paired_scores_keep_unknown_cost_and_check_transfer_provenance() {
     let mut world = World::default();
     agel_stdlib::install(&mut world, &Default::default()).unwrap();

@@ -50,6 +50,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.38 | Repair syntax feedback | The metacircular analyzer detects malformed candidate forms and returns the source and error to the writer before text judgment. |
 | v0.3.39 | Native guest memory | The x86 frame allocator admits more contiguous RAM on QEMU. A process writes and checks 80 MiB in the 1 GiB guest. |
 | v0.3.40 | Native economy control | A fresh normal account mines, smelts and sells a bronze bar inside Agel OS. The server verifies the three-coin proceeds and both skills' XP. |
+| v0.3.41 | Encoder policy activation | The encoder reuses its active Agel callable until the controller resolves an edit and refreshes the callable. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |

@@ -10,6 +10,13 @@
 (def policy-bound (if retained-policy retained-bound 64))
 (def observed-length (if retained-policy retained-length 0))
 (def policy-uses 0)
+(def active-encoder-version nil)
+(def active-encoder nil)
+(def refresh-encoder
+  (fn ()
+    (def active-encoder-version (evolution-current policy-versions 'cell 'service-quantum))
+    (def active-encoder (meta-eval (evolution-source policy-versions active-encoder-version) (meta-base-env)))))
+(refresh-encoder)
 (def check-quantum
   (fn (quantum limit)
     (begin
@@ -19,11 +26,11 @@
 (def retained-quantum
   (fn (length)
     (let ((limit (if (< observed-length length) 64 policy-bound)))
-      (let ((active (live-tools-call (dict 'versions policy-versions) 'service-quantum (list limit))))
+      (let ((quantum (meta-apply active-encoder (list limit))))
         (begin
-          (if (if (= (get active 'version) 2) (if (< 64 (get active 'value)) (< 64 length) #f) #f)
+          (if (if (= active-encoder-version 2) (if (< 64 quantum) (< 64 length) #f) #f)
             (def policy-uses (+ policy-uses 1)) nil)
-          (check-quantum (get active 'value) limit))))))
+          (check-quantum quantum limit))))))
 (def largest-field-step
   (fn (field)
     (fn (largest record)

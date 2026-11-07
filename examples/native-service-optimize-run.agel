@@ -70,6 +70,7 @@
 (def session (repair-state worker))
 (def policy-activated (= (get session 'status) 'done))
 (def policy-versions (get session 'versions))
+(refresh-encoder)
 (check (= (evolution-source policy-versions 1) initial-policy) "frozen policy source was lost")
 (check (= retained-owner (get stream 'owner)) "stream owner changed")
 (audit (dict 'event 'live-policy-versions 'versions policy-versions))
