@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.176.** The OSRS melee example waits for a tick
-between its stance reset and retry. See the [release notes](docs/release-v0.3.176.md).
+**Current release: v0.3.177.** The OSRS bronze example observes its
+furnace approach and retries the route if needed. See the [release notes](docs/release-v0.3.177.md).
+
+v0.3.176 waits for a tick between stance reset and retry. See the [release notes](docs/release-v0.3.176.md).
 
 v0.3.175 shows native melee stance and quest milestones in the viewer. See the [release notes](docs/release-v0.3.175.md).
 

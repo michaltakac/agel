@@ -57,7 +57,8 @@ fn mining_advice_retries_only_after_a_fresh_menu() {
     world.evaluate(r#"
       (module agel/osrs-game
         (export osrs-open-interface? osrs-interface-opens osrs-pause-events osrs-map-route
-          osrs-nearby-npcs osrs-talk osrs-resume-dialogue osrs-keepalive osrs-observe-bounded osrs-observe-ready)
+          osrs-nearby-npcs osrs-talk osrs-resume-dialogue osrs-keepalive osrs-observe-bounded
+          osrs-observe-ready osrs-walk osrs-route-cleared? osrs-use-location-option)
         (def osrs-open-interface? (fn (state id) (= id (get state 'active))))
         (def osrs-interface-opens (fn (state id) (get state id)))
         (def osrs-pause-events (fn (state id _) (get state id)))
@@ -77,12 +78,25 @@ fn mining_advice_retries_only_after_a_fresh_menu() {
                     (if (= choices 2) (assoc (assoc next 'active 217) 217 (+ 1 (get state 217))) next))
                   (signal 'test "choice reused an old menu"))))))
         (def osrs-keepalive (fn (state) state))
-        (def osrs-observe-bounded (fn (state _ready _ticks) state))
+        (def osrs-walk
+          (fn (state x z) (assoc (assoc state 'walks (+ 1 (get state 'walks))) 'arrived #f)))
+        (def osrs-route-cleared?
+          (fn (state prior x z)
+            (if (= (list x z) '(3226 3255))
+              (if (< (get prior 'walks) (get state 'walks)) (get state 'arrived) #f) #f)))
+        (def osrs-use-location-option
+          (fn (state id x z option)
+            (if (get state 'arrived)
+              (if (= (get state 'walks) 2) (assoc state 'active 270) state)
+              (signal 'test "interaction before arrival"))))
+        (def osrs-observe-bounded
+          (fn (state _ready _ticks)
+            (if (has-key? state 'walks) (assoc state 'arrived #t) state)))
         (def osrs-observe-ready (fn (state _ready _limit) state)))
     "#).unwrap();
     let mining = include_str!("../../../examples/osrs/mining-test.agel").replace(
         "(export mine-first-copper",
-        "(export advice-page advice-object mine-first-copper",
+        "(export advice-page advice-object open-furnace mine-first-copper",
     );
     world.evaluate(&mining).unwrap();
     let result = world
@@ -91,13 +105,15 @@ fn mining_advice_retries_only_after_a_fresh_menu() {
          (def page (advice-page (dict 'active 219 219 1 217 0 'choices 0 'talks 0) (fn (_) nil)))
          (def object (advice-object (dict 'active 217 217 1 219 1 193 0 'choices 1 'talks 0)
            (fn (_) nil) #t))
+         (def furnace (open-furnace (dict 'walks 0)))
          (list (get page 'active) (get page 'talks) (get page 'choices)
-               (get object 'active) (get object 'talks) (get object 'choices))",
+               (get object 'active) (get object 'talks) (get object 'choices)
+               (get furnace 'active) (get furnace 'walks))",
         )
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(217 1 2 193 0 2)")
+        Some("(217 1 2 193 0 2 270 2)")
     );
 }
 

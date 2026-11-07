@@ -171,14 +171,22 @@
           (if (ready attempt) attempt
             (wait-live (osrs-use-location attempt 11360 3224 3146) ready 18))))))
   (def furnace-open? (fn (state) (osrs-open-interface? state 270)))
+  (def approach-furnace
+    (fn (state)
+      (observe-live (osrs-walk state 3226 3255)
+        (fn (g) (osrs-route-cleared? g state 3226 3255)) 10)))
+  (def try-furnace
+    (fn (state)
+      (if (furnace-open? state) state
+        (observe-live (osrs-use-location-option state 24009 3226 3256 2) furnace-open? 6))))
   (def open-furnace
     (fn (state)
-      (let ((nearby (walk-ticks (osrs-walk state 3226 3255) 10)))
-        (let ((first (observe-live (osrs-use-location-option nearby 24009 3226 3256 2) furnace-open? 6)))
-          (if (furnace-open? first) first
-            (let ((second (observe-live (osrs-use-location-option first 24009 3226 3256 2) furnace-open? 6)))
-              (require (furnace-open? second) "furnace did not open after two interactions")
-              second))))))
+      (let ((first (try-furnace (approach-furnace state))))
+        (if (furnace-open? first) first
+          (let ((second (try-furnace (approach-furnace first))))
+            (if (furnace-open? second) second
+              (signal 'osrs/mining-test "furnace did not open after two approaches"
+                (dict 'route (osrs-map-route second)))))))))
   (def first-bronze
     (fn (state observe)
       (let ((copper (first-copper-state state observe)))
