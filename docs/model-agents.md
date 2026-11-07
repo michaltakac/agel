@@ -198,7 +198,13 @@ After its `repair/start` turn, a top-level controller calls
 invokes the caller's inference adapter, delivers the completion to the same
 actor, and schedules until that actor changes state. Other actors can run
 between those turns. With deferred activation the judge result leaves the
-actor `approved`; a following exchange executes the separately queued
-activation turn. Existing implicit hosted model dispatch remains the default.
+actor `approved`. A following exchange advances activation, or first runs the
+optional top-level `probe` callback. The callback receives the pending change
+and returns a receipt with `passed` and `reason`. The controller logs and
+delivers the receipt for that pending ID. A failed receipt retries with its
+reason; a passing receipt allows the remaining recorded replay before commit.
+A plain advance cannot bypass a configured probe. The controller is trusted;
+the mailbox is not an authentication boundary. Existing implicit hosted
+model dispatch remains the default.
 The repair actor can have no effect capabilities; the controller owns provider
 and audit I/O. Nested scheduler calls from inside a behavior remain refused.

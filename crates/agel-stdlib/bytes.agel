@@ -1,6 +1,6 @@
 (module agel/bytes
   (import agel/sequence)
-  (export bytes-from-hex bytes-crc32 text-hex text-from-hex bytes-hex-chunks bytes-crc32-feed bytes-crc32-finish text-crc32 bytes-hex bytes-pack-field bytes-unpack-field bytes-hex-serviced bytes-pack-field-serviced)
+  (export bytes-from-hex bytes-crc32 text-hex text-from-hex bytes-hex-chunks bytes-crc32-feed bytes-crc32-finish text-crc32 bytes-hex bytes-pack-field bytes-unpack-field bytes-hex-serviced bytes-pack-field-serviced bytes-hex-quantum bytes-pack-field-quantum)
   (def byte-drop (fn (xs n) (if (= n 0) xs (byte-drop (cdr xs) (- n 1)))))
   (def byte-take
     (fn (xs n out) (if (= n 0) (reverse out) (byte-take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -82,31 +82,40 @@
       (if (= (count pieces) 0) ""
         (if (= (count pieces) 1) (car pieces) (hex-join (hex-pairs pieces nil))))))
   (def encode-bytes
-    (fn (bytes part size pieces service)
+    (fn (bytes part size pieces service quantum since)
       (if (= (count bytes) 0) (hex-join (reverse (if (= size 0) pieces (cons part pieces))))
-        (if (= size 64) (begin (service) (encode-bytes bytes "" 0 (cons part pieces) service))
+        (if (= size 64)
+          (begin
+            (if (= since quantum) (service) nil)
+            (encode-bytes bytes "" 0 (cons part pieces) service quantum (if (= since quantum) 0 since)))
           (let ((byte (car bytes)))
             (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
               (encode-bytes (cdr bytes)
                 (text-concat part (text-concat
                   (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
                   (text-slice "0123456789abcdef" (rem byte 16) (+ 1 (rem byte 16)))))
-                (+ size 1) pieces service)
+                (+ size 1) pieces service quantum (+ since 1))
               (signal 'bytes/value "expected byte")))))))
-  (def bytes-hex-serviced
-    (fn (bytes service)
-      (begin (if (< (count bytes) 64) nil (service))
-        (encode-bytes bytes "" 0 nil service))))
+  (def bytes-hex-quantum
+    (fn (bytes service quantum)
+      (begin
+        (if (if (= (type-of quantum) 'int)
+              (if (< 63 quantum) (if (< quantum 4097) (= (* 64 (/ quantum 64)) quantum) #f) #f) #f)
+          #t (signal 'bytes/quantum "quantum must be a multiple of 64 between 64 and 4096"))
+        (if (< (count bytes) 64) nil (service))
+        (encode-bytes bytes "" 0 nil service quantum 0))))
+  (def bytes-hex-serviced (fn (bytes service) (bytes-hex-quantum bytes service 64)))
   (def bytes-hex (fn (bytes) (bytes-hex-serviced bytes (fn () #t))))
   (def field-require (fn (ok reason) (if ok #t (signal 'bytes/field reason))))
-  (def bytes-pack-field-serviced
-    (fn (record key service)
+  (def bytes-pack-field-quantum
+    (fn (record key service quantum)
       (begin
         (field-require (has-key? record key) "missing byte field")
         (let ((values (get record key)))
           (begin
             (field-require (if (= values nil) #t (= (type-of values) 'list)) "expected byte list")
-            (assoc record key (dict 'encoding 'hex 'nil? (= values nil) 'data (bytes-hex-serviced values service))))))))
+            (assoc record key (dict 'encoding 'hex 'nil? (= values nil) 'data (bytes-hex-quantum values service quantum))))))))
+  (def bytes-pack-field-serviced (fn (record key service) (bytes-pack-field-quantum record key service 64)))
   (def bytes-pack-field (fn (record key) (bytes-pack-field-serviced record key (fn () #t))))
   (def bytes-unpack-field
     (fn (record key)

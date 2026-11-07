@@ -179,3 +179,10 @@ uses `agel/services` and `agel/service-stream` for serialized I/O state.
 The repair actor still uses the bootstrap actor mechanism. Real providers
 require the existing Codex login and `TYPESAFEAI_API_KEY`. The server-saved
 position, normal rights and 1× XP remain mandatory completion checks.
+
+Use `sh scripts/test-native-network.sh --optimize` to profile byte encoding
+during a live native game session, or add `--live` for real model providers.
+The private run directory retains the recorded input and judge ledger. The
+generic profiler and repair gate take Agel callbacks; game code provides
+recorded bytes and independently checked actions. See
+[the native optimization evidence](release-v0.3.18.md).

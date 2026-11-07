@@ -88,7 +88,7 @@
       (let ((prompt (judgment-request
               (list (list "contract and observations" (get state 'context))
                     (list "before" (get state 'before-text)) (list "proposal" text))
-              (list '(noul "patch" "Is this a legitimate, in-scope Agel repair proposal whose diagnosis addresses the observed failure? Behavioral correctness is checked separately by executable replay.")
+              (list '(noul "patch" "Is this a legitimate, in-scope Agel change whose diagnosis addresses the observed problem? Behavioral correctness is checked separately by executable replay.")
                     '(choice "reason" "Which defect is directly evident in the proposal text? Use none when no defect is directly evident."
                       ("none" "No identified defect") ("contract" "Does not implement the contract")
                       ("boundary" "Fails at valid boundaries, types or integer limits")
@@ -119,7 +119,7 @@
       (let ((receipt (verdict state text)))
         (if (if (= (get receipt 'allowed) #t) (get state 'defer-activation) #f)
           (begin
-            (if self (send self '(repair/advance)) nil)
+            (if self (if (= (get state 'model-dispatch) 'external) nil (send self '(repair/advance))) nil)
             (assoc (assoc state 'approved-receipt receipt) 'status 'approved))
           (apply-judgment self state receipt)))))
   (def apply-judgment
@@ -136,7 +136,17 @@
                 (assoc next 'status 'done)))))))
   (def advance
     (fn (self state)
-      (if (= (get state 'status) 'approved) (apply-judgment self state (get state 'approved-receipt)) state)))
+      (if (if (= (get state 'status) 'approved) (if (get state 'probe) #f #t) #f)
+        (apply-judgment self state (get state 'approved-receipt)) state)))
+  (def probe-result
+    (fn (self state message)
+      (if (if (= (get state 'status) 'approved)
+            (if (get state 'probe) (= (nth message 1) (get state 'pending)) #f) #f)
+        (let ((result (nth message 2)))
+          (if (= (type-of (get result 'reason)) 'string)
+            (let ((next (note state (dict 'event 'activation-probe 'result result))))
+              (if (= (get result 'passed) #t) (apply-judgment self next (get state 'approved-receipt))
+                (retry self next (get result 'reason)))) state)) state)))
   (def result
     (fn (self state message)
       (if (if (= (nth message 1) (get state 'pending))
@@ -155,17 +165,22 @@
       (if (= (car message) 'repair/start)
           (if (= (get state 'status) 'idle) (propose self state) state)
           (if (= (car message) 'repair/advance) (advance self state)
+          (if (= (car message) 'repair/probe-result) (probe-result self state message)
           (if (= (car message) 'system/model-result) (result self state message)
               (if (= (car message) 'system/model-error) (result self state message)
-                  (signal 'repair/message "unknown repair message")))))))
+                  (signal 'repair/message "unknown repair message"))))))))
   (def repair-new
     (fn (options)
       (let ((before (read-one (get options 'before-text)))
             (versions (get options 'versions)) (threshold (get options 'threshold)))
         (if (if (= (type-of threshold) 'int) (if (< -1 threshold) (< threshold 1001) #f) #f)
           (if (= before (evolution-source versions (evolution-current versions (object-kind options) (get options 'tool))))
-              (assoc (assoc (assoc (assoc (assoc options 'status 'idle) 'history nil) 'reason "")
-                'previous-report "") 'remaining (get options 'max-attempts))
+              (begin
+                (if (get options 'probe)
+                  (if (if (= (get options 'model-dispatch) 'external) (get options 'defer-activation) #f) #t
+                    (signal 'repair/dispatch "probe requires deferred external dispatch")) nil)
+                (assoc (assoc (assoc (assoc (assoc options 'status 'idle) 'history nil) 'reason "")
+                  'previous-report "") 'remaining (get options 'max-attempts)))
             (signal 'repair/base "source text does not match the active tool"))
           (signal 'repair/threshold "threshold must be in 0..1000")))))
   (def make-repair-agent
@@ -193,6 +208,19 @@
               (if (< 0 remaining) #t (signal 'repair/scheduler "repair actor did not complete"))
               (run 1) (wait-agent-change agent before (- remaining 1))) (get info 'heap))
           (signal 'repair/agent "repair actor stopped")))))
+  (def external-advance
+    (fn (agent state append-record)
+      (begin
+        (if (get state 'probe)
+          (let ((result (with-handler (* problem) (dict 'passed #f 'reason (get problem 'message))
+                          (let ((receipt ((get state 'probe) state)))
+                            (if (= (type-of (get receipt 'reason)) 'string) receipt
+                              (dict 'passed #f 'reason "activation probe omitted its reason"))))))
+            (begin
+              (append-record (dict 'event 'activation-probe 'id (get state 'pending) 'result result))
+              (send agent (list 'repair/probe-result (get state 'pending) result))))
+          (send agent '(repair/advance)))
+        (wait-agent-change agent state 8192))))
   (def repair-agent-exchange
     (fn (agent infer append-record)
       (let ((state (repair-state agent)))
@@ -211,7 +239,7 @@
                       (list 'system/model-error (get request 'id) (get request 'provider) 'provider/error (get answer 'error))
                       (list 'system/model-result (get request 'id) (get request 'provider) (get answer 'text))))
                     (wait-agent-change agent state 8192))))
-              (if (= (get state 'status) 'approved) (wait-agent-change agent state 8192) state)))))))
+              (if (= (get state 'status) 'approved) (external-advance agent state append-record) state)))))))
   (def repair-exchange
     (fn (state infer append-record)
       (let ((request (repair-pending state)))

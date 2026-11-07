@@ -1,0 +1,79 @@
+(check recorded-field "no recorded byte field")
+(def recorded-hex (get (get recorded-field 'bytes) 'data))
+(def observed-length (/ (text-bytes recorded-hex) 2))
+(check (if (< 1023 observed-length) (< observed-length 8193) #f) "no suitably sized recorded workload")
+((get stream 'pulse))
+(def replay-bytes (bytes-from-hex recorded-hex))
+(def run-profile
+  (fn (quantum)
+    (profile-work (fn (service) (bytes-hex-quantum replay-bytes service quantum))
+      (get stream 'pulse) clock-us)))
+(def baseline
+  (let ((measurement (run-profile (retained-quantum observed-length))))
+    (begin (check (= (get measurement 'value) recorded-hex) "control bytes differ from recorded input")
+      (get measurement 'metrics))))
+(def work-budget 3000000)
+(def gap-budget 6000000)
+(def policy-bound (profile-limit baseline 64 work-budget 4 512))
+(def observation (dict 'bytes observed-length 'baseline baseline 'bound policy-bound
+  'work-budget-us work-budget 'gap-budget-us gap-budget 'margin 4 'record (get recorded-field 'name)))
+(audit (dict 'event 'runtime-observation 'profile observation))
+(console-log (text-concat "native-opt: observation " (print-form observation)))
+(check (< 127 policy-bound) "recorded work profile does not justify a larger quantum")
+(def replay-tape (text-concat (print-form (list 'recorded-workload observed-length recorded-hex)) "\n"))
+(def tape-offset (text-bytes (file-read "judge-log")))
+(def append-tape
+  (fn (at)
+    (if (= at (text-bytes replay-tape)) #t
+      (let ((end (if (< (+ at 2048) (text-bytes replay-tape)) (+ at 2048) (text-bytes replay-tape))))
+        (begin
+          ((get stream 'pulse))
+          (file-append "judge-log" (text-slice replay-tape at end))
+          (append-tape end))))))
+(append-tape 0)
+(def probe
+  (fn (state)
+    (let ((candidate (meta-eval (get (get state 'candidate) 'after) (meta-base-env))))
+      (let ((quantum (check-quantum (meta-apply candidate (list policy-bound)) policy-bound)))
+        (check (< 64 quantum) "candidate selected the frozen cadence")
+        (let ((measurement (run-profile quantum)))
+          (let ((metrics (get measurement 'metrics)))
+            (let ((reason
+                    (if (= (get measurement 'value) recorded-hex)
+                      (if (< work-budget (get metrics 'work-max-us)) "candidate exceeded the measured work budget"
+                        (if (< gap-budget (get metrics 'gap-max-us)) "candidate exceeded the measured service gap budget"
+                          (if (< (get metrics 'calls) (get baseline 'calls))
+                            (if (< (get metrics 'elapsed-us) (get baseline 'elapsed-us)) "recorded bytes match; fewer service calls and lower elapsed time"
+                              "candidate replay did not improve elapsed time") "candidate replay did not reduce service calls")))
+                      "candidate replay changed recorded bytes")))
+              (let ((receipt (dict 'passed (= reason "recorded bytes match; fewer service calls and lower elapsed time")
+                               'reason reason 'quantum quantum 'metrics metrics
+                               'active (evolution-current policy-versions 'cell 'service-quantum))))
+                (begin (console-log (text-concat "native-opt: probe " (print-form receipt))) receipt)))))))))
+(def worker (make-repair-agent "service-optimizer"
+  (dict 'versions policy-versions 'tool 'service-quantum 'before-text "(fn (limit) 64)"
+    'context (text-concat "Optimize the live encoder's service cadence. The existing fixed 64-byte policy is correct but incurs extra acknowledged calls. This is an actual measured replay of a recorded field on the live stream; timings are microseconds. The trusted controller computes the maximum safe work quantum independently. Write a pure function of one integer limit (64..4096) returning the largest multiple of 64 that does not exceed limit. The controller will replay the same bytes with the proposed quantum before activating it, check exact output, work budget, fewer calls and lower elapsed time. Displayed probes: (64) -> 64, (192) -> 192. Measured observation: "
+      (print-form observation))
+    'examples (list (dict 'arguments '(64) 'expected 64) (dict 'arguments '(192) 'expected 192))
+    'held-out (list (dict 'arguments '(65) 'expected 64) (dict 'arguments '(255) 'expected 192)
+      (dict 'arguments '(511) 'expected 448) (dict 'arguments '(4096) 'expected 4096))
+    'max-attempts 2 'threshold 800 'proposal-provider 'writer 'judge-provider 'judge
+    'model-dispatch 'external 'defer-activation #t 'probe probe) nil))
+(def retained-owner (get stream 'owner))
+(send worker '(repair/start)) (run 1)
+(begin (repair-agent-exchange worker infer audit) #t)
+(begin (repair-agent-exchange worker infer audit) #t)
+(begin (repair-agent-exchange worker infer audit) #t)
+(begin (repair-agent-exchange worker infer audit) #t)
+(begin (repair-agent-exchange worker infer audit) #t)
+(begin (repair-agent-exchange worker infer audit) #t)
+(def session (repair-state worker))
+(check (= (get session 'status) 'done) "policy optimization did not activate")
+(def policy-versions (get session 'versions))
+(check (= (evolution-current policy-versions 'cell 'service-quantum) 2) "policy version did not change")
+(check (= (evolution-source policy-versions 1) initial-policy) "frozen policy source was lost")
+(check (< 64 (retained-quantum observed-length)) "retained encoder did not use the changed policy")
+(check (= retained-owner (get stream 'owner)) "stream owner changed")
+(audit (dict 'event 'live-policy-versions 'versions policy-versions))
+(console-log (text-concat "native-opt: candidate " (print-form (get session 'candidate))))
+(console-log "native-opt: policy committed after text judgment and measured replay")

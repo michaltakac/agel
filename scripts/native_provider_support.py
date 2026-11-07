@@ -8,7 +8,7 @@ import shlex
 import subprocess
 
 
-def provider_environment(directory, live, delay=0):
+def provider_environment(directory, live, delay=0, proposal=None):
     environment = dict(os.environ)
     if live:
         if Path('.env').is_file():
@@ -24,7 +24,8 @@ def provider_environment(directory, live, delay=0):
     else:
         environment['TYPESAFEAI_API_KEY'] = 'fixture-secret-never-a-model-name'
         writer = directory / 'codex-fixture'
-        proposal = "(dict 'diagnosis \"division truncates partial batches\" 'after '(fn (n size) (/ (+ n (- size 1)) size)) 'predictions '(2 0))"
+        if proposal is None:
+            proposal = "(dict 'diagnosis \"division truncates partial batches\" 'after '(fn (n size) (/ (+ n (- size 1)) size)) 'predictions '(2 0))"
         writer.write_text("#!/bin/sh\ncat >/dev/null\nsleep " + str(int(delay)) + "\nprintf '%s\\n' " + shlex.quote(proposal) + "\n")
         judge = directory / 'curl-fixture'
         response = {'model': 'native-session-fixture', 'answers': {

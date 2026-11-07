@@ -92,7 +92,10 @@
     (fn (state packet)
       (let ((maintenance (get state 'maintenance)))
         (if (if maintenance (get maintenance 'pulse) nil)
-          (bytes-pack-field-serviced packet 'bytes (get maintenance 'pulse))
+          (if (get maintenance 'quantum)
+            (bytes-pack-field-quantum packet 'bytes (get maintenance 'pulse)
+              ((get maintenance 'quantum) (count (get packet 'bytes))))
+            (bytes-pack-field-serviced packet 'bytes (get maintenance 'pulse)))
           (bytes-pack-field packet 'bytes)))))
   (def read-payload
     (fn (state opcode cipher)

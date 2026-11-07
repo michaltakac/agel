@@ -1,0 +1,18 @@
+(import agel/repair)
+(import agel/inference)
+(import agel/live-tools)
+(import agel/evolution)
+(import agel/judge-log)
+(def check (fn (ok label) (if ok #t (signal 'session/repair-test label))))
+(def audit (fn (record) (file-append "judge-log" (text-concat (print-form record) "\n"))))
+(def routes (dict 'writer "codex" 'judge "jev"))
+(def infer
+  (fn (provider prompt)
+    (let ((result (inference-serviced routes model-request provider prompt
+                    (fn (n) (begin ((get stream 'pulse)) (+ n 1))) 0 1024)))
+      (begin
+        (console-log (text-concat "native-session: serviced inference polls " (print-form (get result 'polls))))
+        (if (get result 'error)
+          (let ((problem (get result 'error))) (signal (get problem 'kind) (get problem 'message)))
+          (if (= (get (get result 'reply) 'status) 'done) (get (get result 'reply) 'text)
+            (signal 'inference/pending "poll budget exhausted; outstanding job retained")))))))

@@ -565,7 +565,11 @@ promise.
   same connection. Packet history uses lossless tagged byte fields, readable
   through `bytes-unpack-field`; direct packet returns remain raw lists. Load
   `stream-buffer.agel` before either buffer adapter. Full self-hosting and
-  paired Exo tasks remain open. Minor releases may make
+  paired Exo tasks remain open. `v0.3.18` adds a generic profiler and optional
+  precommit probe to externally dispatched repair. The existing fixed byte
+  codec APIs keep their 64-byte callback interval; a separate API accepts a
+  validated interval. A retained native client reads the active policy
+  after the judge and measured replay approve it. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

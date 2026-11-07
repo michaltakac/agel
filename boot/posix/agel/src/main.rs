@@ -338,7 +338,7 @@ fn pulse() {
 /// kind, an agent holds what it was spawned with — and `print-form`, the
 /// printed form of a value as text, pure, so a program can write source
 /// the reader reads.
-static HOST: [HostWord; 15] = [
+static HOST: [HostWord; 16] = [
     HostWord {
         name: "file-read",
         capability: "file/read",
@@ -363,6 +363,11 @@ static HOST: [HostWord; 15] = [
         name: "clock",
         capability: "clock/read",
         call: clock,
+    },
+    HostWord {
+        name: "clock-us",
+        capability: "clock/read",
+        call: clock_us,
     },
     HostWord {
         name: "console-log",
@@ -601,6 +606,11 @@ fn file_list(arguments: &[Value]) -> Result<Value, HostError> {
 fn clock(arguments: &[Value]) -> Result<Value, HostError> {
     expect_arguments("clock", arguments, 0)?;
     Ok(Value::Int((process().clock() / 1_000_000) as i64))
+}
+
+fn clock_us(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("clock-us", arguments, 0)?;
+    Ok(Value::Int(process().clock() as i64))
 }
 
 fn console_log(arguments: &[Value]) -> Result<Value, HostError> {

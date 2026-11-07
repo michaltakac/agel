@@ -1,0 +1,54 @@
+Development fixture before tape read-back and explicit service-gap gate.
+
+running 2 tests
+test tests::alignment_splits_preserve_prefix_suffix_and_live_gap ... ok
+test tests::coalesces_both_sides_and_reuses_more_than_64_runs ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.97s
+
+
+running 13 tests
+.............
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+info: component rust-std for target x86_64-unknown-none is up to date
+info: component rust-std for target x86_64-unknown-none is up to date
+    Finished `release` profile [optimized] target(s) in 0.00s
+Evidence: target/native-network-1794020594004054000
+Providers: fixtures; writer delayed 20 seconds
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-network: observations {smithing-level 1 coins 0}
+native-opt: observation {bytes 4614 baseline {elapsed-us 51475368 service-us 46108389 work-max-us 135935 gap-max-us 765264 calls 73} bound 353 work-budget-us 3000000 margin 4 record "REBUILD_NORMAL_V2"}
+inference-bridge: started job 226 provider codex at-ms 229605
+inference-bridge: completed job 226 at-ms 250036 status ok
+native-session: serviced inference polls 16
+inference-bridge: started job 259 provider jev at-ms 251461
+inference-bridge: completed job 259 at-ms 264508 status ok
+native-session: serviced inference polls 10
+native-opt: probe {passed #t reason "recorded bytes match; fewer service calls and lower elapsed time" quantum 320 metrics {elapsed-us 14686021 service-us 9477038 work-max-us 639922 gap-max-us 1271474 calls 15} active 1}
+native-opt: candidate {diagnosis "fixed cadence pays for more service calls than the observed work bound requires" after (fn (limit) (* 64 (/ limit 64))) predictions (64 192)}
+native-opt: policy committed after text judgment and measured replay
+native-session: model-wait service writes 115
+native-opt: live uses 2
+native-network: keepalives 229
+native-network: client completed: login, observations, walking packet and tick consumption inside Agel OS
+process agel exited with status 0
+Durable guest judge calls: 1 synthetic priced-record nanousd: 4200 unknown receipts: 0
+Codex dollar cost: fixture, no paid inference
+Ledger SHA-256: af1fd9d209ddd1850f01b0174bf0159b10e4f02df4608323f1bfa1de08bf7558
+Persisted native client: account=[omitted] character=[omitted] rights= x=3223 z=3218 level=0 xp_rate_in_hundreds=100
+PASS: native client movement saved with normal rights and 1x XP
+Elapsed seconds: 299.969

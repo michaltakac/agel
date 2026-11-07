@@ -1,0 +1,35 @@
+Evidence: target/native-network-1794021004132759000
+Providers: real
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-network: observations {smithing-level 1 coins 0}
+native-opt: observation {bytes 4614 baseline {elapsed-us 52530299 service-us 46396007 work-max-us 156348 gap-max-us 824689 calls 73} bound 307 work-budget-us 3000000 gap-budget-us 6000000 margin 4 record "REBUILD_NORMAL_V2"}
+inference-bridge: started job 231 provider codex at-ms 248956
+inference-bridge: completed job 231 at-ms 255485 status ok
+native-session: serviced inference polls 5
+inference-bridge: started job 242 provider jev at-ms 257895
+inference-bridge: completed job 242 at-ms 269619 status ok
+native-session: serviced inference polls 9
+native-opt: probe {passed #t reason "recorded bytes match; fewer service calls and lower elapsed time" quantum 256 metrics {elapsed-us 18196484 service-us 12086618 work-max-us 596508 gap-max-us 1229590 calls 19} active 1}
+native-opt: candidate {diagnosis "The encoder always returns 64, causing 73 calls for 4614 bytes even when the controller permits a larger quantum." after (fn (limit) (* (/ limit 64) 64)) predictions (64 192)}
+native-opt: policy committed after text judgment and measured replay
+native-opt: optimization-stage service writes 112
+native-opt: live uses 2
+native-network: keepalives 226
+native-opt: recorded workload verified in append-only log
+native-network: client completed: login, observations, walking packet and tick consumption inside Agel OS
+process agel exited with status 0
+Durable guest judge calls: 1 known real cost-nanousd: 31710 unknown receipts: 0
+Codex dollar cost: unknown
+Ledger SHA-256: 0e8412093a6213dfa15349ef058dc7dc1a36124a141cef788ecaf69c53280e2f
+Persisted native client: account=[omitted] character=[omitted] rights= x=3223 z=3218 level=0 xp_rate_in_hundreds=100
+PASS: native client movement saved with normal rights and 1x XP
+Elapsed seconds: 307.384
+
+byte-bridge: request 1 operation open at-ms 339 duration-ms 0 status ok
+byte-bridge: request 6 operation close at-ms 3803 duration-ms 0 status ok
+byte-bridge: request 9 operation open at-ms 37296 duration-ms 1 status ok
+byte-bridge: request 289 operation close at-ms 298253 duration-ms 0 status ok
+agel: 1 forms, 30812652 steps, revision 1

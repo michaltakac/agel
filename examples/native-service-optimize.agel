@@ -1,0 +1,34 @@
+(import agel/bytes)
+(import agel/meta)
+(import agel/sequence)
+(import agel/work-profile)
+(def initial-policy '(fn (limit) 64))
+(def policy-versions (evolution-edit (evolution-new) 'cell 'service-quantum nil initial-policy
+  (list (dict 'arguments '(64) 'expected 64))
+  (fn (request) (judge-with-log 'bootstrap request
+    (fn (diff) (dict 'allowed #t 'reason "existing fixed encoder cadence" 'cost-microusd 0)) audit))))
+(def policy-bound 64)
+(def observed-length 0)
+(def policy-uses 0)
+(def check-quantum
+  (fn (quantum limit)
+    (begin
+      (check (if (= (type-of quantum) 'int)
+        (if (< 63 quantum) (if (< limit quantum) #f (= (* 64 (/ quantum 64)) quantum)) #f) #f)
+        "policy exceeded the trusted work bound or returned an invalid quantum") quantum)))
+(def retained-quantum
+  (fn (length)
+    (let ((limit (if (< observed-length length) 64 policy-bound)))
+      (let ((active (live-tools-call (dict 'versions policy-versions) 'service-quantum (list limit))))
+        (begin
+          (if (if (= (get active 'version) 2) (if (< 64 (get active 'value)) (< 64 length) #f) #f)
+            (def policy-uses (+ policy-uses 1)) nil)
+          (check-quantum (get active 'value) limit))))))
+(def largest-field
+  (fn (records field)
+    (foldl (fn (largest record)
+      (let ((packed (get record field)))
+        (if packed
+          (if largest
+            (if (< (text-bytes (get (get largest field) 'data)) (text-bytes (get packed 'data))) record largest)
+            record) largest))) nil records)))

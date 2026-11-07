@@ -114,3 +114,18 @@ callback before the first 64-byte chunk and between later chunks. Shorter
 inputs need no callback. Native clients use this to service a connection during
 CPU work, in addition to servicing between inference polls. A callback's external
 effects remain acknowledged even if later validation or encoding fails.
+
+`bytes-hex-quantum(bytes, service, quantum)` and
+`bytes-pack-field-quantum(record, key, service, quantum)` allow callers to
+choose the callback interval. The interval must be a multiple of 64 in
+64–4096; the 64-byte internal chunks and output representation stay fixed.
+
+The optional `agel/work-profile` module exposes
+`profile-work(operation, service, now)`: the operation receives a metered
+service callback, and `now` supplies monotonic microseconds. The result holds
+the operation value, elapsed time, callback time and count, maximum work
+interval, and maximum gap between acknowledged service calls. Native
+`clock-us` uses the existing clock read capability. `profile-limit` estimates
+a conservative upper bound from the measured work, budget and margin; a
+candidate still needs replay and measurements. The estimate is not a deadline
+guarantee for new workloads.

@@ -106,3 +106,67 @@ fn packed_large_observations_fit_a_bounded_encoding_budget() {
         "(#t #t 64)"
     );
 }
+
+#[test]
+fn profiling_separates_service_time_and_calibrates_a_conservative_limit() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    for source in [
+        include_str!("../services.agel"),
+        include_str!("../work-profile.agel"),
+    ] {
+        world.evaluate(source).unwrap();
+    }
+    let result = world.evaluate(r#"(import agel/work-profile)
+      (def t 0)
+      (def work (profile-work
+        (fn (pulse) (begin (def t (+ t 10)) (pulse) (def t (+ t 20)) (pulse) (def t (+ t 30)) 'done))
+        (fn () (def t (+ t 100))) (fn () t)))
+      (def stats (get work 'metrics))
+      (list (get work 'value) (get stats 'calls) (get stats 'elapsed-us) (get stats 'service-us)
+        (get stats 'work-max-us) (get stats 'gap-max-us) (profile-limit stats 64 300 2 512))"#).unwrap();
+    assert_eq!(
+        result.values.last().unwrap().to_string(),
+        "(done 2 260 200 30 120 320)"
+    );
+    assert!(world
+        .evaluate("(profile-limit (dict 'calls 1 'work-max-us 0) 64 300 2 512)")
+        .is_err());
+    assert!(world
+        .evaluate(
+            "(profile-work (fn (pulse) (pulse)) (fn () #t) (fn () (begin (def t (- t 1)) t)))"
+        )
+        .is_err());
+}
+
+#[test]
+fn a_larger_quantum_preserves_bytes_and_validates_before_service() {
+    let mut world = World::default();
+    let options = EvaluationOptions {
+        budget: agel_core::Budget {
+            fuel: 2_000_000,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    agel_stdlib::install(&mut world, &options).unwrap();
+    world
+        .evaluate_with(include_str!("../bytes.agel"), &options)
+        .unwrap();
+    let result = world.evaluate_with(r#"(import agel/bytes)
+      (def sample-bytes (fn (n out) (if (= n 0) out
+        (sample-bytes (- n 1) (cons (- n (* 256 (/ n 256))) out)))))
+      (def sample (sample-bytes 769 nil))
+      (def pulses 0)
+      (def service (fn () (def pulses (+ pulses 1))))
+      (def before (bytes-hex-quantum sample service 64))
+      (def old-count pulses) (def pulses 0)
+      (def after (bytes-hex-quantum sample service 256))
+      (def new-count pulses) (def pulses 0)
+      (def invalid (with-handler (* e) (get e 'kind) (bytes-hex-quantum sample service 255)))
+      (list (= before after) (= (bytes-from-hex after) sample) old-count new-count pulses invalid)"#, &options).unwrap();
+    assert_eq!(
+        result.values.last().unwrap().to_string(),
+        "(#t #t 13 4 0 bytes/quantum)"
+    );
+}

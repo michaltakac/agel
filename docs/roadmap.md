@@ -30,6 +30,10 @@ A native relay arrives in v0.3.16. v0.3.17 combines polling inference,
 Agel stream services and a retained repair actor during a live connection.
 The seeded planner probe has real-provider evidence; full task benchmarks remain open;
 see [the setup and precise scope](osrs-client.md).
+v0.3.18 adds a generic work profiler and a precommit probe for an agent-written
+service cadence. The same Agel process records, measures and replays packet
+bytes before an existing client uses the new policy. See the
+[measured scope](release-v0.3.18.md).
 `sh scripts/test-osrs-combat.sh` adds a live rat kill in v0.3.9, using Agel
 NPC observations and attack packets, with exact Attack XP and persisted
 Hitpoints XP checks. It does not complete the maximum-combat-stats workload.

@@ -409,6 +409,12 @@ fn native_session_example_retains_its_repair_actor_and_controller() {
         .unwrap();
     world
         .evaluate_with(
+            include_str!("../../../examples/native-session-support.agel"),
+            &options,
+        )
+        .unwrap();
+    world
+        .evaluate_with(
             include_str!("../../../examples/native-session-repair.agel"),
             &options,
         )
@@ -451,4 +457,63 @@ fn batches_report_unexecuted_work_and_use_the_repaired_plan() {
             .to_string(),
         "0"
     );
+}
+
+#[test]
+fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
+    let (mut world, options) = setup();
+    let source = format!(
+        r#"
+      (def canary-ok #f)
+      (def probe-calls 0)
+      (def candidate (fn (provider prompt) {}))
+      (def judge (fn (provider prompt) "patch noul 950 reason choice 5 none 900 900 25 25 25 25"))
+      (def audit (fn (record) #t))
+      (def subject (make-repair-agent "measured-repair"
+        (assoc (assoc (assoc (repair-state worker) 'model-dispatch 'external) 'defer-activation #t)
+          'probe (fn (state) (begin (def probe-calls (+ probe-calls 1))
+            (dict 'passed canary-ok 'reason (if canary-ok "measured replay passed" "observed work ceiling exceeded"))))) nil))
+      (send subject '(repair/start)) (run)
+      (repair-agent-exchange subject candidate audit)
+      (repair-agent-exchange subject judge audit)
+      (send subject '(repair/advance)) (run)
+      (send subject (list 'repair/probe-result -1 (dict 'passed #t 'reason "stale receipt"))) (run)
+      (list (get (repair-state subject) 'status) probe-calls
+        (evolution-current (get (repair-state subject) 'versions) 'cell 'batches))"#,
+        agel_core::Value::String(GOOD.into())
+    );
+    assert_eq!(
+        world
+            .evaluate_with(&source, &options)
+            .unwrap()
+            .values
+            .last()
+            .unwrap()
+            .to_string(),
+        "(approved 0 1)"
+    );
+    world
+        .evaluate_with("(repair-agent-exchange subject candidate audit)", &options)
+        .unwrap();
+    assert!(world
+        .evaluate("(repair-prompt (repair-state subject))")
+        .unwrap()
+        .values
+        .last()
+        .unwrap()
+        .to_string()
+        .contains("observed work ceiling exceeded"));
+    let result = world
+        .evaluate_with(
+            r#"
+      (def canary-ok #t)
+      (repair-agent-exchange subject candidate audit)
+      (repair-agent-exchange subject judge audit)
+      (repair-agent-exchange subject candidate audit)
+      (list (get (repair-state subject) 'status) probe-calls
+        (evolution-current (get (repair-state subject) 'versions) 'cell 'batches))"#,
+            &options,
+        )
+        .unwrap();
+    assert_eq!(result.values.last().unwrap().to_string(), "(done 2 2)");
 }

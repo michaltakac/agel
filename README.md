@@ -5,12 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.17.** An Agel actor repairs a seeded planner through
-real inference, text judgment and replay, then uses it for game actions during
-the same native OS session. The server confirms the saved result at normal
-rights and 1× XP. Serialized services, buffering, cooperative byte encoding and
-repair policy are general Agel code. Exo task comparisons and full self-hosting
-remain open. See the [release notes and native evidence](docs/release-v0.3.17.md).
+**Current release: v0.3.18.** A running Agel process profiles a recorded
+byte workload and uses an agent-written service policy after text judgment
+and live replay. An existing client uses the new version on the same connection.
+RuneScape supplies the workload; profiling, replay and activation are general
+Agel code. See the [release notes and native evidence](docs/release-v0.3.18.md).
 
 v0.3.15 added bounded source-store checkpoint recovery across reboots.
 See the [release notes](docs/release-v0.3.15.md).
