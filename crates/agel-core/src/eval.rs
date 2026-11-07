@@ -1086,13 +1086,13 @@ fn car(arguments: Vec<Value>) -> Result<Value, Signal> {
 
 fn cdr(arguments: Vec<Value>) -> Result<Value, Signal> {
     expect_arity("cdr", arguments.len(), 1)?;
-    match &arguments[0] {
-        Value::List(values) => {
-            let tail = values.iter().skip(1).cloned().collect::<Vec<_>>();
-            if tail.is_empty() {
+    match arguments.into_iter().next().expect("arity checked") {
+        Value::List(mut values) => {
+            if values.len() <= 1 {
                 Ok(Value::Nil)
             } else {
-                Ok(Value::List(tail))
+                values.remove(0);
+                Ok(Value::List(values))
             }
         }
         Value::Nil => Ok(Value::Nil),

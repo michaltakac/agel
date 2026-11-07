@@ -39,7 +39,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 /// call-depth budget.
 const STACK_PAGES: u64 = 1024;
 /// Evaluation steps between two yields to the supervisor.
-const PULSE_STEPS: u64 = 4096;
+const PULSE_STEPS: u64 = 1024;
 /// Fuel for one file: the standard library alone takes tens of thousands
 /// of steps, and a program is expected to do real work after it.
 const FUEL: u64 = 50_000_000;
