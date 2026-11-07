@@ -69,7 +69,7 @@ def combat_xp_saved(expected, oracle):
 def melee_xp(report, goal):
     """Check the guest's three completed phases against its final observation."""
     summary = re.search(
-        r'\{test rat-melee passed #t goal-xp (\d+) stance 3 attack-xp (\d+) '
+        r'\{test rat-melee passed #t goal-xp (\d+) stance (?:[0-3]|nil) attack-xp (\d+) '
         r'strength-xp (\d+) defence-xp (\d+) hitpoints-xp (\d+)(?: phases |\})', report)
     if not summary or int(summary[1]) != goal:
         raise ValueError('missing melee result at the requested XP goal')

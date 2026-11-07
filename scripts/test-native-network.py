@@ -56,7 +56,10 @@ if melee is not None:
 if editing:print('Providers:', 'real' if options.live else 'fixtures; writer delayed 20 seconds', flush=True)
 manifest=json.loads(subprocess.run(['python3','scripts/osrs/world_manifest.py'],capture_output=True,text=True,check=True).stdout)
 manifest['scope']='native OS login, live observations, seeded general tool repair and saved movement; no Exo task score' if options.repair else 'native OS login, live observations and movement smoke test; no Exo task score'
-if options.optimize:manifest['scope']='native measured byte policy optimization, recorded byte replay and saved movement; no Exo task score'
+if options.optimize:
+    manifest['scope']='native measured byte policy optimization, recorded byte replay and saved movement; no Exo task score'
+    manifest['evaluation_fuel']=250_000_000
+    manifest['guest_memory_mib']=1024
 if options.combat:
     manifest['scope']='native one-rat combat on a fresh normal account'
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
@@ -446,7 +449,7 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
         with (directory/'serial.log').open('w') as log:
             setup=[] if options.transfer_from else [':fs-format']
             guest_command=':exec agel -- --no-stdlib /data/client'
-            if melee is not None or options.economy or options.quest:
+            if 'evaluation_fuel' in manifest:
                 guest_command=f":exec agel -- --no-stdlib --fuel {manifest['evaluation_fuel']} /data/client"
             command=['target/release/examples/guest_inference',str(serial),str(directory.resolve()),'process agel exited with status',*setup,guest_command] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',guest_command]
             result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=1800 if melee is not None or options.quest else 960)

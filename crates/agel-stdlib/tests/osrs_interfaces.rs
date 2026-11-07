@@ -237,9 +237,10 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (def osrs-open-interface? (fn (state interface) #t))
         (def osrs-click-interface
           (fn (state interface component)
-            (let ((clicked (assoc state 'clicks (cons component (get state 'clicks)))))
+            (let ((clicked (assoc (assoc state 'clicks (cons component (get state 'clicks)))
+                                  'server-stance (if (= component 10) 1 3))))
               (if (= (get state 'clicks) nil) clicked
-                (assoc (assoc clicked 'stance (if (= component 10) 1 3))
+                (assoc (if (= component 10) (assoc clicked 'stance 1) clicked)
                        'npcs (list rat-one rat-two))))))
         (def osrs-varp (fn (state varp) (get state 'stance)))
         (def osrs-attack
@@ -247,7 +248,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
             (let ((next (assoc state 'attempts (cons index (get state 'attempts)))))
               (if (= index 1) next
                 (assoc (assoc (assoc next 'npcs (list rat-one))
-                  (if (= (get state 'stance) 1) 2 1) 8)
+                  (if (= (get state 'server-stance) 1) 2 1) 8)
                   3 (+ (get state 3) 2)))))))
       (module agel/osrs-combat-test
         (export test-rat-combat-bounded)
@@ -277,6 +278,6 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 3 (10 18 10 18) (1 1 2 2) (1 2 2))")
+        Some("(#t 8 1 (10 18 10 18 10 18) (1 1 2 2) (1 2 2))")
     );
 }

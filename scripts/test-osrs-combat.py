@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 sys.path.insert(0, "scripts/osrs")
-from test_support import combat_xp, combat_xp_saved, evaluate, form
+from test_support import combat_xp, combat_xp_saved, evaluate, form, melee_xp
 
 
 def notice(text):
@@ -67,11 +67,7 @@ assert 'passed #t' in result.stdout and 'target-removed #t' in result.stdout, re
 if options.live_tools:
     assert 'live-tool-version 2' in result.stdout and 'preserved-calls 3' in result.stdout, result.stdout
 if options.melee_xp is not None:
-    outcome = re.search(r'test rat-melee passed #t goal-xp (\d+) stance 3 attack-xp (\d+) strength-xp (\d+) defence-xp (\d+) hitpoints-xp (\d+)', result.stdout)
-    assert outcome and int(outcome[1]) == goal, result.stdout
-    expected_xp = {0: int(outcome[2]), 2: int(outcome[3]), 1: int(outcome[4]), 3: int(outcome[5])}
-    assert all(expected_xp[skill] >= goal for skill in (0, 1, 2)), result.stdout
-    assert expected_xp[3] > 1154, result.stdout
+    expected_xp, _ = melee_xp(result.stdout, goal)
 else:
     expected_xp = combat_xp(result.stdout)
 if options.attack_xp is not None:
