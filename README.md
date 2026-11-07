@@ -5,14 +5,17 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.80.** Agel scores verified native economy pairs.
-See the [release notes](docs/release-v0.3.80.md).
+**Current release: v0.3.81.** The bronze route approaches the furnace
+before interacting. See the [release notes](docs/release-v0.3.81.md).
 
 RuneScape and DOOM are example workloads. Keep game protocols, commands,
 agent prompts, task definitions and scoring in the examples or their test
 harnesses. The language, standard library and default OS expose shared
 capabilities such as transport, inspection, replay and live versioning.
 The optional legacy DOOM build still has kernel launch and display hooks.
+
+v0.3.80 scores verified native economy pairs.
+See the [release notes](docs/release-v0.3.80.md).
 
 v0.3.79 adds fixed and adaptive arms to the native economy task.
 See the [release notes](docs/release-v0.3.79.md).

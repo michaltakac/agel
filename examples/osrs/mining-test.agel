@@ -84,6 +84,15 @@
         (let ((attempt (walk-ticks (osrs-use-location state 11360 3225 3148) 6)))
           (if (ready attempt) attempt
             (wait-live (osrs-use-location attempt 11360 3224 3146) ready 18))))))
+  (def furnace-open? (fn (state) (osrs-open-interface? state 270)))
+  (def open-furnace
+    (fn (state)
+      (let ((nearby (walk-ticks (osrs-walk state 3226 3255) 10)))
+        (let ((first (observe-live (osrs-use-location-option nearby 24009 3226 3256 2) furnace-open? 6)))
+          (if (furnace-open? first) first
+            (let ((second (observe-live (osrs-use-location-option first 24009 3226 3256 2) furnace-open? 6)))
+              (require (furnace-open? second) "furnace did not open after two interactions")
+              second))))))
   (def first-bronze
     (fn (state observe)
       (let ((copper (first-copper-state state)))
@@ -95,9 +104,7 @@
           (observe "mined tin, returning to the furnace")
           (require (= (list (ores stock) (tin stock) (bronze stock)) '(1 1 0)) "unexpected furnace stock")
           (let ((returned (walk-ticks (osrs-walk (walk-ticks stock 1) 3221 3218) 15)))
-            (let ((menu (with-handler (* problem) (signal 'osrs/mining-test "waiting for furnace interface" problem)
-                          (wait-live (osrs-use-location-option returned 24009 3226 3256 2)
-                            (fn (g) (osrs-open-interface? g 270)) 18))))
+            (let ((menu (open-furnace returned)))
               (let ((smelted (with-handler (* problem) (signal 'osrs/mining-test "waiting for bronze bar and Smithing XP" problem)
                                (wait-live (osrs-resume-dialogue menu 270 15 1)
                                  (fn (g) (if (= (bronze g) 1) (< 0 (smithing-xp g)) #f)) 12))))
