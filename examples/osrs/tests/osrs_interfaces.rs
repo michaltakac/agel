@@ -574,7 +574,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
                          (assoc clicked 'stance (get clicked 'server-stance)) clicked)
                        'npcs (list rat-one rat-two))
                 clicked))))
-        (def osrs-varp (fn (state varp) (get state 'stance)))
+        (def osrs-varp (fn (state varp) (if (get state 'missing-varp) nil (get state 'stance))))
         (def osrs-attack
           (fn (state index)
             (let ((next (assoc state 'attempts (cons index (get state 'attempts)))))
@@ -616,7 +616,15 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
       (def credited
         (fight-again (dict 0 0 3 1154 'vanish #t 'late-credit #t 'npcs (list (dict 'index 1 'type 2854)))
           1 0 8 nil))
-      (list (get (get credited 'report) 'target-index)
+      (def xp-confirmations nil)
+      (def missing (train-rat-melee-with-progress
+        (dict 0 0 1 0 2 0 3 1154 'missing-varp #t 'npcs (list (dict 'index 1 'type 2854))) 8 2 nil
+        (fn (phase)
+          (if (= (get phase 'phase) 'stance-awaiting-xp)
+            (def xp-confirmations (cons (get phase 'mode) xp-confirmations)) nil))))
+      (list (get (get missing 'report) 'strength-xp) (get (get missing 'report) 'defence-xp)
+        (reverse xp-confirmations)
+        (get (get credited 'report) 'target-index)
         (get (get credited 'state) 'attempts)
         (get (get retargeted 'report) 'target-index)
         (reverse (get (get retargeted 'state) 'attempts))
@@ -634,6 +642,6 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(1 (1) 2 (1 2) #t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
+        Some("(8 8 (1 3) 1 (1) 2 (1 2) #t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
     );
 }
