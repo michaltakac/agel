@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.34.** Agel can train Attack, Strength and Defence
+**Current release: v0.3.35.** Byte carrier frames bypass the desktop terminal.
+See the [release notes](docs/release-v0.3.35.md).
+
+v0.3.34 trained Attack, Strength and Defence
 on one fresh account. See the [release notes](docs/release-v0.3.34.md).
 
 v0.3.33 added research and source inspection to the standard live-tool registry.

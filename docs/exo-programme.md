@@ -44,6 +44,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.32 | Bounded combat progression | The hosted fixed policy trains a fresh account to Attack level 2, retaining per-encounter observations and verifying saved Attack and Hitpoints XP. |
 | v0.3.33 | Standard research tools | The live-tool registry exposes research and Agel source inspection. A recorded page read feeds replay for a new tool in the same actor. |
 | v0.3.34 | Melee progression | A fixed Agel policy switches combat stances and trains Attack, Strength and Defence on one fresh account. |
+| v0.3.35 | Faster native carrier | The desktop forwards carrier frames without painting them. A QEMU loopback run verifies the bytes and records the timing. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |

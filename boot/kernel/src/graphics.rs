@@ -1154,6 +1154,8 @@ struct Terminal {
     line_ended: bool,
     /// Written since the panel was last painted.
     dirty: bool,
+    /// Lines remaining in a byte carrier frame sent to serial.
+    carrier_lines: u8,
     /// The line being written and the last one finished, whole where the
     /// panel would wrap them: what the language looks at.
     line: [u8; LOOK_LINE_BYTES],
@@ -1174,6 +1176,7 @@ impl Terminal {
         used: 0,
         line_ended: false,
         dirty: false,
+        carrier_lines: 0,
         line: [0; LOOK_LINE_BYTES],
         line_length: 0,
         last: [0; LOOK_LINE_BYTES],
@@ -1243,6 +1246,33 @@ impl Terminal {
             }
         }
     }
+
+    fn push_process_output(&mut self, mut bytes: &[u8]) {
+        if self.carrier_lines == 0 {
+            if let Some(header) = bytes.strip_prefix(b"byte-request ") {
+                if let Some(end) = header.iter().position(|byte| *byte == b'\n') {
+                    if let Some(id) = header[..end].strip_suffix(b":\r") {
+                        if !id.is_empty()
+                            && id.iter().all(u8::is_ascii_digit)
+                            && header[end + 1..].starts_with(b"AGEL-BYTES/1 ")
+                        {
+                            self.carrier_lines = 3;
+                        }
+                    }
+                }
+            }
+        }
+        while self.carrier_lines > 0 {
+            let Some(end) = bytes.iter().position(|byte| *byte == b'\n') else {
+                return;
+            };
+            bytes = &bytes[end + 1..];
+            self.carrier_lines -= 1;
+        }
+        if !bytes.is_empty() {
+            self.push(bytes);
+        }
+    }
 }
 
 /// A console that writes to the serial console driver and to the terminal
@@ -1256,7 +1286,7 @@ impl crate::process::Console for Tee<'_> {
     #[inline(never)]
     fn write(&mut self, bytes: &[u8]) {
         crate::process::Console::write(self.serial, bytes);
-        self.terminal.push(bytes);
+        self.terminal.push_process_output(bytes);
     }
 
     fn lines(&self) -> u32 {

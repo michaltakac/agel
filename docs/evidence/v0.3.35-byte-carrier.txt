@@ -1,0 +1,49 @@
+Loopback TCP echo from an Agel OS guest under QEMU TCG.
+Each boot ran the same Agel program: open, eight 256-byte writes paired with byte-for-byte reads, close.
+
+before 18 verified requests, median inter-request ms 644
+after 18 verified requests, median inter-request ms 12
+
+before
+byte-bridge: request 1 operation open at-ms 184 duration-ms 1 status ok
+byte-bridge: request 2 operation write at-ms 1727 duration-ms 0 status ok
+byte-bridge: request 3 operation read at-ms 2357 duration-ms 0 status ok
+byte-bridge: request 4 operation write at-ms 3002 duration-ms 0 status ok
+byte-bridge: request 5 operation read at-ms 3635 duration-ms 0 status ok
+byte-bridge: request 6 operation write at-ms 4280 duration-ms 0 status ok
+byte-bridge: request 7 operation read at-ms 4922 duration-ms 0 status ok
+byte-bridge: request 8 operation write at-ms 5568 duration-ms 0 status ok
+byte-bridge: request 9 operation read at-ms 6196 duration-ms 0 status ok
+byte-bridge: request 10 operation write at-ms 6840 duration-ms 0 status ok
+byte-bridge: request 11 operation read at-ms 7468 duration-ms 0 status ok
+byte-bridge: request 12 operation write at-ms 8115 duration-ms 0 status ok
+byte-bridge: request 13 operation read at-ms 8741 duration-ms 0 status ok
+byte-bridge: request 14 operation write at-ms 9386 duration-ms 0 status ok
+byte-bridge: request 15 operation read at-ms 10013 duration-ms 0 status ok
+byte-bridge: request 16 operation write at-ms 10665 duration-ms 0 status ok
+byte-bridge: request 17 operation read at-ms 11294 duration-ms 0 status ok
+byte-bridge: request 18 operation close at-ms 11938 duration-ms 0 status ok
+native-byte-terminal: verified
+process agel exited with status 0
+
+after
+byte-bridge: request 1 operation open at-ms 185 duration-ms 0 status ok
+byte-bridge: request 2 operation write at-ms 1727 duration-ms 0 status ok
+byte-bridge: request 3 operation read at-ms 1728 duration-ms 0 status ok
+byte-bridge: request 4 operation write at-ms 1744 duration-ms 0 status ok
+byte-bridge: request 5 operation read at-ms 1745 duration-ms 0 status ok
+byte-bridge: request 6 operation write at-ms 1760 duration-ms 0 status ok
+byte-bridge: request 7 operation read at-ms 1761 duration-ms 0 status ok
+byte-bridge: request 8 operation write at-ms 1773 duration-ms 0 status ok
+byte-bridge: request 9 operation read at-ms 1774 duration-ms 0 status ok
+byte-bridge: request 10 operation write at-ms 1787 duration-ms 0 status ok
+byte-bridge: request 11 operation read at-ms 1787 duration-ms 0 status ok
+byte-bridge: request 12 operation write at-ms 1801 duration-ms 0 status ok
+byte-bridge: request 13 operation read at-ms 1802 duration-ms 0 status ok
+byte-bridge: request 14 operation write at-ms 1818 duration-ms 0 status ok
+byte-bridge: request 15 operation read at-ms 1819 duration-ms 0 status ok
+byte-bridge: request 16 operation write at-ms 1836 duration-ms 0 status ok
+byte-bridge: request 17 operation read at-ms 1837 duration-ms 0 status ok
+byte-bridge: request 18 operation close at-ms 1852 duration-ms 0 status ok
+native-byte-terminal: verified
+process agel exited with status 0
