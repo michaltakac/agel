@@ -302,8 +302,10 @@
                     (let ((body (if (get spec 'encrypted) (encrypted-body raw cipher nil)
                                     (dict 'bytes raw 'cipher cipher))))
                       (let ((packet (dict 'opcode opcode 'name (get spec 'name) 'bytes (get body 'bytes))))
-                        (let ((retained (retain-packet state packet)))
-                          (dict 'state (remember (observe (assoc state 'in (get body 'cipher)) packet retained) retained)
+                        (let ((retained (retain-packet state packet))
+                              (decoded (assoc state 'in (get body 'cipher))))
+                          (dict 'state (remember (if (= (get spec 'name) "PLAYER_INFO") decoded
+                                                   (observe decoded packet retained)) retained)
                             'packet packet))))))))
             (signal 'osrs/opcode "unknown revision-241 server packet" opcode)))))
   (def osrs-next-packet

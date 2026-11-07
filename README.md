@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.166.** Native transfer pairs verify donor source
-compatibility before either arm starts. See the [release notes](docs/release-v0.3.166.md).
+**Current release: v0.3.167.** The OSRS client retains player tick packets
+without running unrelated state observers. See the [release notes](docs/release-v0.3.167.md).
+
+v0.3.166 verifies donor source compatibility before either transfer arm starts. See the [release notes](docs/release-v0.3.166.md).
 
 v0.3.165 bounds carrier replies before decoding. See the [release notes](docs/release-v0.3.165.md).
 
