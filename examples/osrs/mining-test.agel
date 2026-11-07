@@ -25,13 +25,16 @@
           arrived))))
   (def approach-tutor
     (fn (state observe)
-      (let ((first (walk-to-tutor state 3227 3149 19 observe)))
-        (if (tutor first) first
-          (let ((second (walk-to-tutor first 3229 3149 19 observe)))
-            (if (tutor second) second
-              (signal 'osrs/mining-test "mining tutor was not visible after two approaches"
-                (dict 'nearby-types (map (fn (npc) (get npc 'type)) (osrs-nearby-npcs second))
-                      'observation (tutor-state second)))))))))
+      (let ((waypoint (observe-live (osrs-walk state 3227 3176)
+                        (fn (g) (osrs-route-cleared? g state 3227 3176)) 13)))
+        (observe (assoc (tutor-state waypoint) 'phase 'tutor-waypoint))
+        (let ((first (walk-to-tutor waypoint 3229 3149 13 observe)))
+          (if (tutor first) first
+            (let ((second (walk-to-tutor first 3227 3149 13 observe)))
+              (if (tutor second) second
+                (signal 'osrs/mining-test "mining tutor was not visible after two approaches"
+                  (dict 'nearby-types (map (fn (npc) (get npc 'type)) (osrs-nearby-npcs second))
+                        'observation (tutor-state second))))))))))
   (def wait-live
     (fn (state predicate batches)
       (if (predicate state) state
@@ -66,6 +69,16 @@
               (if (tutor-menu-open? second) second
                 (signal 'osrs/mining-test "mining tutor did not open a menu after two talks"
                   (tutor-state second)))))))))
+  (def copper-ready? (fn (g) (if (= (ores g) 1) (< 0 (mining-xp g)) #f)))
+  (def mine-copper-rock
+    (fn (state observe)
+      (let ((first (observe-live (osrs-use-location state 10943 3230 3147) copper-ready? 12)))
+        (if (copper-ready? first) first
+          (begin
+            (require (= (list (ores first) (mining-xp first)) '(0 0))
+              "first copper interaction left inconsistent mining state")
+            (observe "retrying copper rock after no ore or XP")
+            (wait-live (osrs-use-location first 10943 3230 3147) copper-ready? 18))))))
   (def first-copper-state
     (fn (state observe)
       (let ((ready (osrs-await state (fn (g) (if (osrs-stat g 14) (has-key? (get g 'inventories) 93) #f)))))
@@ -73,13 +86,15 @@
           "expected a fresh account without a pickaxe or ore")
         (let ((menu (tutor-menu ready observe)))
           (let ((player (await-interface (osrs-resume-dialogue menu 219 1 1) 217)))
+            (observe "mining tutor accepted the advice choice")
             (let ((object (await-interface (osrs-resume-dialogue player 217 5 -1) 193)))
+              (observe "mining tutor showed the mining site icon")
               (let ((gift (await-interface (osrs-resume-dialogue object 193 0 0) 231)))
                 (require (= (pickaxes gift) 1) "the mining tutor did not provide a bronze pickaxe")
+                (observe "mining tutor gave the bronze pickaxe")
                 (let ((continued (osrs-resume-dialogue gift 231 5 -1)))
                   (let ((mined (with-handler (* problem) (signal 'osrs/mining-test "waiting for copper ore and Mining XP" problem)
-                                 (wait-live (osrs-use-location continued 10943 3230 3147)
-                                   (fn (g) (if (= (ores g) 1) (< 0 (mining-xp g)) #f)) 18))))
+                                 (mine-copper-rock continued observe))))
                     (require (= (list (pickaxes mined) (ores mined) (mining-xp mined)) '(1 1 17))
                       "unexpected mining outcome")
                     mined)))))))))

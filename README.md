@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.98.** Agel can replay a retained version against
-its original cases. See the [release notes](docs/release-v0.3.98.md).
+**Current release: v0.3.99.** The RuneScape mining route uses a waypoint
+and a bounded copper retry. See the [release notes](docs/release-v0.3.99.md).
+
+v0.3.98 retains the replay cases for committed Agel versions.
+See the [release notes](docs/release-v0.3.98.md).
 
 v0.3.97 records mining tutor approaches and dialogue in native first-sale runs.
 See the [release notes](docs/release-v0.3.97.md).
