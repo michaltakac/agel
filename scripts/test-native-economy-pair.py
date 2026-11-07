@@ -114,12 +114,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     tasks = parser.add_mutually_exclusive_group()
     tasks.add_argument('--transfer', type=Path, metavar='DONOR',
-                       help='compare a retained one-rat policy against a fresh fixed account')
+                       help='compare a retained combat policy against a fresh fixed account')
+    tasks.add_argument('--melee-xp', type=int, metavar='GOAL',
+                       help='compare fixed and adaptive three-skill melee training')
     tasks.add_argument('--quest', action='store_true', help='compare fresh Cook’s Assistant runs')
     tasks.add_argument('--craft', nargs=2, metavar=('FIXED_FIXTURE', 'ADAPTIVE_FIXTURE'),
                         help='use two distinct accounts staged with --prepare-only')
     args = parser.parse_args()
-    task = 'combat' if args.transfer else 'craft' if args.craft else 'quest' if args.quest else 'economy'
+    melee_goal = args.melee_xp
+    if args.transfer:
+        melee_goal = json.loads((args.transfer / 'world.json').read_text()).get('goal_xp')
+    if melee_goal is not None and (type(melee_goal) is not int or not 1 <= melee_goal <= 512):
+        parser.error('melee goal must be between 1 and 512 XP')
+    task = ('melee' if melee_goal is not None else 'combat' if args.transfer else
+            'craft' if args.craft else 'quest' if args.quest else 'economy')
     if args.craft and args.craft[0] == args.craft[1]:
         parser.error('--craft requires two distinct fixtures')
     output = Path(tempfile.mkdtemp(prefix=f'native-{task}-pair-', dir='target'))
@@ -154,16 +162,21 @@ def main():
             digests[str(copy.relative_to(output))] = hashlib.sha256(copy.read_bytes()).hexdigest()
     (output / 'runtime.json').write_text(json.dumps(digests, indent=2) + '\n')
     runtime.extend(['--source-root', str(sources)])
-    fixed_options, adaptive_options = [f'--{task}'], [f'--{task}', '--optimize', '--live']
-    if donor:
-        fixed_options.append('--pace-combat')
-        adaptive_options = ['--combat', '--pace-combat', '--transfer-from', str(donor)]
+    scenario = ['--melee-xp', str(melee_goal)] if task == 'melee' else [f'--{task}']
+    if task == 'combat':
+        scenario.append('--pace-combat')
+    fixed_options = list(scenario)
+    adaptive_options = [*scenario, '--transfer-from', str(donor)] if donor else [*scenario, '--optimize', '--live']
     if args.craft:
         fixed_options.extend(['--craft-fixture', args.craft[0]])
         adaptive_options.extend(['--craft-fixture', args.craft[1]])
     fixed = run_arm(output, runtime, 'fixed', fixed_options)
     adaptive = run_arm(output, runtime, 'adaptive', adaptive_options)
-    scoring_options = ['--donor', str(donor)] if donor else [f'--{task}']
+    scoring_options = [f'--{task}'] if task != 'combat' else []
+    if donor:
+        scoring_options.extend(['--donor', str(donor)])
+        if task == 'melee':
+            scoring_options.append('--transfer')
     score = subprocess.check_output([sys.executable, str(output / 'harness/compare-native-combat.py'),
                                      *scoring_options, fixed, adaptive])
     (output / 'score.agel').write_bytes(score)

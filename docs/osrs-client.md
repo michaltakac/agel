@@ -103,6 +103,12 @@ sh scripts/test-native-network.sh --economy
 sh scripts/test-native-network.sh --quest
 ```
 
+Run a matched fixed and adaptive melee pair with
+`python3 scripts/test-native-economy-pair.py --melee-xp 8`. To compare a
+committed donor on a new account, use `--transfer DONOR_EVIDENCE_DIRECTORY`.
+The runner reads the donor's XP goal and evaluates the verified pair in
+Agel OS.
+
 For a hand-in diagnostic on an earlier native quest attempt that gathered
 all three ingredients, pass its evidence directory to
 `scripts/test-native-network.py --quest --quest-resume EVIDENCE`.
