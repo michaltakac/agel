@@ -1,0 +1,17 @@
+(import agel/benchmark)
+
+(def comparison
+  (dict 'task 'one-rat 'environment "OpenRune c4cd45ef, revision 241, native Agel OS"
+    'initial-policy "64-byte cadence; 84ca72637f91953146643243458ce47e5bb7bbecd88842bd5d567327d34e9ffd"
+    'setup 'fresh-normal-1x 'randomness 'uncontrolled))
+
+(def fixed
+  (dict 'arm 'fixed 'comparison comparison 'account 'fixed-trace 'correct #t
+    'elapsed-us 146764675 'billing-complete #t 'charges nil))
+(def adaptive
+  (dict 'arm 'adaptive 'comparison comparison 'account 'adaptive-trace 'correct #t
+    'elapsed-us 273137589 'billing-complete #t
+    'charges (list (dict 'kind 'model 'cost-nanousd nil)
+                   (dict 'kind 'judge 'cost-nanousd 32130))))
+
+(benchmark-pair fixed adaptive)

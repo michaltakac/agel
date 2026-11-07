@@ -1,0 +1,19 @@
+Native Agel scorer on the recorded v0.3.20 combat pair
+=> {comparison {task one-rat environment "OpenRune c4cd45ef, revision 241, native Agel OS" initial-policy "64-byte cadence; 84ca72637f91953146643243458ce47e5bb7bbecd88842bd5d567327d34e9ffd" setup fresh-normal-1x randomness uncontrolled} fixed {correct #t elapsed-us 146764675 charges {calls 0 judge-calls 0 known-nanousd 0 judge-nanousd 0 unknown 0} cost-nanousd 0 coins nil coins-per-dollar nil} adaptive {correct #t elapsed-us 273137589 charges {calls 2 judge-calls 1 known-nanousd 32130 judge-nanousd 32130 unknown 1} cost-nanousd nil coins nil coins-per-dollar nil} elapsed-delta-us 126372914 cost-delta-nanousd nil}
+agel: 1 forms, 4945 steps, revision 2
+process agel exited with status 0
+
+Uninterrupted fresh account, west-side route before the explicit mill-exit step
+RuneScape quest: gathering all ingredients and completing Cook's Assistant without admin setup
+{test cooks-assistant passed #t choices 2 quest-points 1 cooking-xp 300 ingredients-after (0 0 0) source gathered}
+stat=7 base=4 visible=4 fine_xp=3000
+varp.cookquest=2
+varp.qp=1
+varp.cooks_assistant_ingredients=7
+Saved Cook's Assistant state: stage 2, all three hand-ins, one quest point and 300 Cooking XP
+Quest and verification elapsed seconds: 554.394
+RuneScape PASS: Cook's Assistant completion and reward saved at normal rights
+
+Later uninterrupted run with the explicit mill-exit step
+Saved near the cook with one milk bucket, one egg, one pot of flour, and unstarted quest.
+AssertionError: Error: Eval(EvalError { condition: Condition { kind: "osrs/quest-test", message: "waiting for the next cook dialogue", data: Map([(Symbol("choices"), Int(0)), (Symbol("pages-left"), Int(40)), (Symbol("problem"), Map([(Symbol("kind"), Symbol("osrs/wait")), (Symbol("message"), String("observation did not arrive within the bound")), (Symbol("data"), Nil)]))]) } })

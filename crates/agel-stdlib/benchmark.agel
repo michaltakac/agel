@@ -1,0 +1,69 @@
+(module agel/benchmark
+  (import agel/sequence)
+  (export benchmark-run benchmark-pair benchmark-transfer)
+
+  (def require
+    (fn (ok reason) (if ok #t (signal 'benchmark/invalid reason))))
+  (def natural?
+    (fn (value) (if (= (type-of value) 'int) (< -1 value) #f)))
+
+  (def add-charge
+    (fn (totals charge)
+      (let ((cost (get charge 'cost-nanousd)) (kind (get charge 'kind)))
+        (require (if (= kind 'judge) #t (= kind 'model)) "invalid charge kind")
+        (require (if (= cost nil) #t (natural? cost)) "invalid charge cost")
+        (let ((next (assoc (assoc totals 'calls (+ (get totals 'calls) 1))
+                      'judge-calls (+ (get totals 'judge-calls) (if (= kind 'judge) 1 0)))))
+          (if (= cost nil)
+            (assoc next 'unknown (+ (get next 'unknown) 1))
+            (assoc (assoc next 'known-nanousd (+ (get next 'known-nanousd) cost))
+              'judge-nanousd (+ (get next 'judge-nanousd) (if (= kind 'judge) cost 0))))))))
+
+  (def benchmark-run
+    (fn (record)
+      (let ((elapsed (get record 'elapsed-us))
+            (correct (get record 'correct))
+            (complete (get record 'billing-complete))
+            (before (get record 'coins-before))
+            (after (get record 'coins-after)))
+        (require (natural? elapsed) "elapsed time must be a nonnegative integer")
+        (require (= (type-of correct) 'bool) "a task needs a correctness verdict")
+        (require (has-key? record 'charges) "charge observations must be explicit")
+        (require (= (type-of complete) 'bool) "billing coverage must be explicit")
+        (require (if (= before nil) (= after nil) (if (natural? before) (natural? after) #f))
+          "coin observations must be both present or both absent")
+        (let ((charges (foldl add-charge (dict 'calls 0 'judge-calls 0 'known-nanousd 0 'judge-nanousd 0 'unknown 0)
+                         (get record 'charges))))
+          (let ((cost (if (if complete (= (get charges 'unknown) 0) #f) (get charges 'known-nanousd) nil))
+                (coins (if (= before nil) nil (- after before))))
+            (dict 'correct correct 'elapsed-us elapsed 'charges charges 'cost-nanousd cost 'coins coins
+              'coins-per-dollar
+              (if (if correct (if cost (< 0 cost) #f) #f)
+                (if (= coins nil) nil (dict 'coins coins 'nanousd cost))
+                nil)))))))
+
+  (def benchmark-pair
+    (fn (fixed adaptive)
+      (require (if (= (get fixed 'arm) 'fixed) (= (get adaptive 'arm) 'adaptive) #f)
+        "pair must contain a fixed and an adaptive arm")
+      (require (if (get fixed 'comparison) (= (get fixed 'comparison) (get adaptive 'comparison)) #f)
+        "arms differ in task, starting policy or environment")
+      (require (if (get fixed 'account) (if (get adaptive 'account)
+        (if (= (get fixed 'account) (get adaptive 'account)) #f #t) #f) #f)
+        "arms require distinct accounts")
+      (let ((control (benchmark-run fixed)) (candidate (benchmark-run adaptive)))
+        (let ((a (get candidate 'cost-nanousd)) (b (get control 'cost-nanousd)))
+          (dict 'comparison (get fixed 'comparison) 'fixed control 'adaptive candidate
+            'elapsed-delta-us (- (get candidate 'elapsed-us) (get control 'elapsed-us))
+            'cost-delta-nanousd (if (if a b #f) (- a b) nil))))))
+
+  (def benchmark-transfer
+    (fn (prior fresh)
+      (require (if (get prior 'account) (if (get fresh 'account)
+        (if (= (get prior 'account) (get fresh 'account)) #f #t) #f) #f)
+        "transfer requires a distinct account")
+      (require (= (get fresh 'fresh-account) #t) "transfer requires an independent fresh-account check")
+      (require (if (get prior 'retained-state)
+        (= (get prior 'retained-state) (get fresh 'initial-state)) #f)
+        "transfer did not retain the recorded policy and history")
+      (benchmark-run fresh))))

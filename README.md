@@ -5,9 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.28.** A fresh normal account completed Cook's
-Assistant with ingredients acquired through gameplay, after reconnecting
-to recover a stalled route. See the [release notes and evidence](docs/release-v0.3.28.md).
+**Current release: v0.3.29.** Agel scores paired runs on correctness,
+time, and known cost. The fixed Cook's Assistant route also passed
+without a reconnect or admin setup. See the [release notes and evidence](docs/release-v0.3.29.md).
+
+v0.3.28 first completed Cook's Assistant with ingredients earned in
+ordinary gameplay. See the [quest evidence](docs/release-v0.3.28.md).
 
 v0.3.27 verifies ground-item observations before and after a live pickup.
 See the [observation evidence](docs/release-v0.3.27.md).

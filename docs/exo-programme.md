@@ -38,6 +38,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.26 | Quest containers from gameplay | A fresh normal account picks up a pot and buys a bucket with its bronze-bar earnings. The hosted test verifies the saved containers, remaining coin, and unstarted quest. |
 | v0.3.27 | Ground-item observations | Agel distinguishes unseen tiles from observed absence and verifies the castle pot disappears from the ground and enters inventory. |
 | v0.3.28 | Cook's Assistant with earned ingredients | One fresh normal account completes the hosted quest without admin setup across a route recovery. The server verifies all three hand-ins, one quest point, and 300 Cooking XP. |
+| v0.3.29 | Agel task scoring and uninterrupted quest evidence | The scorer runs inside Agel OS on the recorded native combat pair, preserves unknown costs, and checks transfer identities. A fresh normal account completes the hosted quest in one session. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
