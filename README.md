@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.217.** The crafting harness can verify a bank
-deposit and withdrawal on the private world. See the [release notes](docs/release-v0.3.217.md).
+**Current release: v0.3.218.** Agel waits for both bank interfaces to
+close before continuing. See the [release notes](docs/release-v0.3.218.md).
+
+v0.3.217 adds a private-world bank round-trip scenario.
+See the [release notes](docs/release-v0.3.217.md).
 
 v0.3.216 adds observed bank deposits and withdrawals.
 See the [release notes](docs/release-v0.3.216.md).

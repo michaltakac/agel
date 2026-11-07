@@ -166,7 +166,8 @@ if options.bank:
       (def bank (osrs-bank-open game osrs-bank-layout-241 10583 3186 3438))
       (def stored (osrs-bank-deposit bank osrs-bank-layout-241 449 1))
       (def returned (osrs-bank-withdraw stored osrs-bank-layout-241 449 1))
-      (list (osrs-inventory-count stored 95 449) (osrs-inventory-count returned 93 449)))""")
+      (def closed (osrs-bank-close returned osrs-bank-layout-241))
+      (list (osrs-inventory-count stored 95 449) (osrs-inventory-count closed 93 449)))""")
     assert report == "(1 1)", report
     await_saved(lambda s: smelt_stock(s, 1, at_furnace=False) == before_stock)
     notice("RuneScape PASS: deposited and withdrew adamantite ore with normal rights")

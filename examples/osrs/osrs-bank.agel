@@ -1,6 +1,6 @@
 (module agel/osrs-bank
   (import agel/osrs-game)
-  (export osrs-bank-layout-241 osrs-bank-open osrs-bank-withdraw osrs-bank-deposit)
+  (export osrs-bank-layout-241 osrs-bank-open osrs-bank-close osrs-bank-withdraw osrs-bank-deposit)
   (def osrs-bank-layout-241
     (dict 'main-interface 12 'main-component 12 'side-interface 15 'side-component 3
           'bank-inventory 95))
@@ -17,6 +17,14 @@
                 (if (< opens (osrs-interface-opens g interface))
                   (< updates (osrs-inventory-updates g inventory)) #f)
                 #f)))))))
+  (def osrs-bank-close
+    (fn (state layout)
+      (let ((main (get layout 'main-interface)) (side (get layout 'side-interface)))
+        (let ((closed (fn (g)
+                        (if (osrs-open-interface? g main) #f
+                          (if (osrs-open-interface? g side) #f #t)))))
+          (if (closed state) state
+            (osrs-await (osrs-close-modal state) closed))))))
   (def transfer
     (fn (state interface component from to item amount option)
       (let ((before-from (osrs-inventory-count state from item))

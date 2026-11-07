@@ -415,6 +415,18 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
             .as_deref(),
         Some("(0 1 2 0)")
     );
+    let modal_close = world
+        .evaluate(
+            "(def encoded (+ 41 (get (isaac-bytes-next (get opened 'out)) 'value)))
+             (def closing (osrs-close-modal opened))
+             (list (= sent (list (- encoded (* 256 (/ encoded 256)))))
+                   (osrs-open-interface? closing 312))",
+        )
+        .unwrap();
+    assert_eq!(
+        modal_close.values.last().map(Value::to_string).as_deref(),
+        Some("(#t #t)")
+    );
     let pause = world
         .evaluate(
             "(def cook-opened (decode original 93 '(162 0 56 2 0 103 128)))
