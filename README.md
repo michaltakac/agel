@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.214.** The crafting example can smelt batches
-from raw ore and coal. See the [release notes](docs/release-v0.3.214.md).
+**Current release: v0.3.215.** Smelting checks the exact saved inventory
+and XP before and after a batch. See the [release notes](docs/release-v0.3.215.md).
+
+v0.3.214 smelts batches from raw ore and coal.
+See the [release notes](docs/release-v0.3.214.md).
 
 v0.3.213 checks for late stance contradictions during XP confirmation.
 See the [release notes](docs/release-v0.3.213.md).

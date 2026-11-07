@@ -107,6 +107,33 @@ def craft_stock(snapshot, *, finished=False, at_anvil=True):
     return None
 
 
+def smelt_stock(snapshot, count, *, finished=False):
+    header = re.search(
+        r'^account=(\d+) character=\d+ rights= x=(\d+) z=(\d+) level=0 xp_rate_in_hundreds=100$',
+        snapshot, re.M)
+    xp = re.search(r'^stat=13 base=88 visible=88 fine_xp=(\d+)$', snapshot, re.M)
+    items = re.findall(r'^inv=inv\.inv item=obj\.([a-z0-9_]+) count=(\d+)$', snapshot, re.M)
+    if not header or not xp or len(items) != sum(line.startswith('inv=') for line in snapshot.splitlines()):
+        return None
+    amounts = {}
+    for name, quantity in items:
+        amounts[name] = amounts.get(name, 0) + int(quantity)
+    expected = {'adamantite_bar': count} if finished else {'adamantite_ore': count, 'coal': 6 * count}
+    if amounts == expected and (finished or header.groups()[1:] == ('3226', '3255')):
+        return int(header[1]), int(xp[1])
+    return None
+
+
+def smelt_saved(report, count, before, after):
+    observed = re.search(
+        rf'\{{test adamant-bar passed #t ore-before {count} ore-after 0 coal-before {6 * count} coal-after 0 '
+        rf'bars-before 0 bars-after {count} smithing-xp-before (\d+) smithing-xp-after (\d+)\}}',
+        report)
+    return (before is not None and after is not None and observed is not None
+            and before[0] == after[0] and after[1] - before[1] == 375 * count
+            and tuple(map(int, observed.groups())) == (before[1] // 10, after[1] // 10))
+
+
 def craft_saved(report, before, after):
     observed = re.search(
         r'^native-craft: \{test adamant-platebody passed #t bars-before 5 bars-after 0 '

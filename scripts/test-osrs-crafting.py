@@ -12,7 +12,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).with_name("osrs")))
-from test_support import evaluate, form
+from test_support import evaluate, form, smelt_saved, smelt_stock
 
 WORLD = "agel-osrs-world"
 parser = argparse.ArgumentParser(description=__doc__)
@@ -132,12 +132,8 @@ oracle_program("SetupAccount", "craft-grant", *fixture_args)
 try:
     if options.smelt:
         execute(f"(begin (stage-adamant-ore-batch game {COUNT}) #t)")
-        before = await_saved(lambda s: "x=3226 z=3255 level=0" in s
-                             and "stat=13 base=88 visible=88" in s
-                             and inventory(s, "adamantite_ore") == COUNT
-                             and inventory(s, "coal") == 6 * COUNT
-                             and inventory(s, "adamantite_bar") == 0
-                             and inventory(s, "adamant_platebody") == 0)
+        await_saved(lambda s: "x=3226 z=3255 level=0" in s
+                    and inventory(s, "adamantite_ore") == COUNT and inventory(s, "coal") == 6 * COUNT)
     else:
         execute("(begin (stage-adamant-stock game) #t)")
         before = await_saved(lambda s: "x=3187 z=3425 level=0" in s
@@ -155,19 +151,14 @@ if options.prepare_only:
     sys.exit(0)
 if options.smelt:
     notice("RuneScape crafting: normal-account furnace and adamant bar")
+    before_stock = smelt_stock(normal, COUNT)
+    assert before_stock is not None, normal
     report = execute(f"(get (smelt-adamant-bars game {COUNT}) 'report)")
     print(report)
-    assert "test adamant-bar passed #t" in report, report
-    after = await_saved(lambda s: inventory(s, "adamantite_bar") == COUNT
-                        and inventory(s, "adamantite_ore") == 0
-                        and inventory(s, "coal") == 0
-                        and inventory(s, "adamant_platebody") == 0)
-    assert "rights= " in after and "xp_rate_in_hundreds=100" in after, after
-    saved_before, saved_after = xp(before), xp(after)
-    assert saved_after - saved_before == 375 * COUNT, (saved_before, saved_after)
-    observed = re.search(r"smithing-xp-before (\d+) smithing-xp-after (\d+)", report)
-    assert observed and tuple(map(int, observed.groups())) == (saved_before // 10, saved_after // 10), report
-    print(f"Saved Smithing fine XP: {saved_before} -> {saved_after}")
+    after = await_saved(lambda s: smelt_stock(s, COUNT, finished=True) is not None)
+    after_stock = smelt_stock(after, COUNT, finished=True)
+    assert smelt_saved(report, COUNT, before_stock, after_stock), (report, before_stock, after_stock)
+    print(f"Saved Smithing fine XP: {before_stock[1]} -> {after_stock[1]}")
     notice(f"RuneScape PASS: {COUNT} ore and {6 * COUNT} coal consumed, {COUNT} adamant bars saved at normal rights and 1x XP")
     sys.exit(0)
 notice("RuneScape crafting: normal-account anvil and platebody button")
