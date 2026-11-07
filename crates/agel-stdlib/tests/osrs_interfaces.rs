@@ -9,7 +9,7 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
             r#"(module agel/osrs-mining-test)
                (module agel/osrs-game
                  (export osrs-stat osrs-inventory-count osrs-await osrs-nearby-npcs
-                         osrs-varp osrs-open-interface? osrs-interface-opens
+                         osrs-varp osrs-open-interface? osrs-interface-opens osrs-pause-events
                          osrs-await-bounded osrs-observe-bounded osrs-keepalive osrs-resume-dialogue
                          osrs-talk osrs-walk osrs-use-location osrs-wait-ticks)
                  (def osrs-stat (fn (state _) (dict 'xp (if (= (get state 'page) 3) 300 0))))
@@ -21,7 +21,9 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                    (fn (state ready ticks)
                      (if (= (get state 'talks) 2)
                        (let ((opened (assoc state 'page 1)))
-                         (if (ready opened) opened (signal 'test/wait "first page was missed")))
+                         (if (ready opened) (signal 'test/wait "page was used before its pause event")
+                           (let ((enabled (assoc opened 'enabled #t)))
+                             (if (ready enabled) enabled (signal 'test/wait "pause event was missed")))))
                        state)))
                  (def osrs-nearby-npcs (fn (state) (list (dict 'type 4626 'index 7))))
                  (def osrs-varp (fn (state varp) (if (= (get state 'page) 3) 1 0)))
@@ -32,6 +34,9 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                        (if (= id 153) (= (get state 'page) 3) #f))))
                  (def osrs-interface-opens
                    (fn (state id) (if (= id 219) (get state 'page) 0)))
+                 (def osrs-pause-events
+                   (fn (state id component)
+                     (if (get state 'enabled) (osrs-interface-opens state id) 0)))
                  (def osrs-keepalive (fn (state) state))
                  (def osrs-walk (fn (state x z) (assoc state 'tile (list x z))))
                  (def osrs-use-location
@@ -190,6 +195,18 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
         Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (235 12 92 12 0 37 50 128) (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil (nil 1 3 0 0 3 nil nil))")
+    );
+    let pause = world
+        .evaluate(
+            "(def advertised (decode original 75 '(0 1 0 0 127 255 255 255 0 231 0 5 0 0 0 0)))
+             (def unrelated (decode advertised 75 '(0 0 0 128 127 255 255 255 0 231 0 5 0 0 0 0)))
+             (list (osrs-pause-events original 231 5) (osrs-pause-events advertised 231 5)
+                   (osrs-pause-events unrelated 231 5) (osrs-pause-events unrelated 231 6))",
+        )
+        .unwrap();
+    assert_eq!(
+        pause.values.last().map(Value::to_string).as_deref(),
+        Some("(0 1 1 0)")
     );
 
     let cadence = world

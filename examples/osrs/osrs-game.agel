@@ -5,7 +5,7 @@
   (import agel/osrs-wire)
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
-  (export osrs-observe-bounded)
+  (export osrs-observe-bounded osrs-pause-events)
   (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-take-ground-item osrs-ground-count)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -64,6 +64,19 @@
       (assoc (assoc state 'interfaces (assoc (map-or-empty (get state 'interfaces)) parent id))
         'interface-opens (assoc (map-or-empty (get state 'interface-opens)) id
           (+ 1 (osrs-interface-opens state id))))))
+  (def osrs-pause-events
+    (fn (state interface component)
+      (let ((count (get (map-or-empty (get state 'pause-events)) (+ (* interface 65536) component))))
+        (if count count 0))))
+  (def remember-pause-event
+    (fn (state bytes)
+      ; The low mask byte is second on the wire. Bit zero enables pause input.
+      (if (= (rem (nth bytes 1) 2) 1)
+        (let ((key (osrs-uint (take (drop bytes 8) 4 nil))))
+          (assoc state 'pause-events
+            (assoc (map-or-empty (get state 'pause-events)) key
+              (+ 1 (osrs-pause-events state (/ key 65536) (rem key 65536))))))
+        state)))
   (def observe-interface
     (fn (state name bytes)
       (if (= name "IF_OPENSUB")
@@ -84,7 +97,7 @@
               (assoc (assoc state 'top-interface (read-interface-id bytes)) 'interfaces (dict))
               (if (= name "IF_RESYNC_V2")
                 (resync-interfaces state bytes)
-                state)))))))
+                (if (= name "IF_SETEVENTS_V2") (remember-pause-event state bytes) state))))))))
   (def osrs-open-interface?
     (fn (state interface)
       (if (if (has-key? state 'top-interface) (= (get state 'top-interface) interface) #f) #t

@@ -25,12 +25,16 @@
     (fn (state)
       (if (= (xp state) 300)
         (if (= (osrs-varp state 101) 1) (osrs-open-interface? state 153) #f) #f)))
+  (def page-components (dict 219 1 217 5 231 5 11 4))
   (def page
     (fn (state previous)
       (foldl (fn (found id)
         (if found found
           (if (osrs-open-interface? state id)
-            (if (< (osrs-interface-opens previous id) (osrs-interface-opens state id)) id nil)
+            (let ((component (get page-components id)))
+              (if (< (osrs-interface-opens previous id) (osrs-interface-opens state id))
+                (if (< (osrs-pause-events previous id component) (osrs-pause-events state id component)) id nil)
+                nil))
             nil))) nil '(219 217 231 11))))
   (def page-names (dict 219 "219" 217 "217" 231 "231" 11 "11"))
   (def run-dialogue
@@ -47,8 +51,8 @@
             (if (= id 219)
               (begin
                 (require (< choices 2) "unexpected cook dialogue menu")
-                (run-dialogue (osrs-resume-dialogue next id 1 1) next (+ choices 1) (- pages 1) observe))
-              (run-dialogue (osrs-resume-dialogue next id (if (= id 11) 4 5) -1)
+                (run-dialogue (osrs-resume-dialogue next id (get page-components id) 1) next (+ choices 1) (- pages 1) observe))
+              (run-dialogue (osrs-resume-dialogue next id (get page-components id) -1)
                 next choices (- pages 1) observe)))))))
   (def inventory (fn (state item) (osrs-inventory-count state 93 item)))
   (def wait-live
