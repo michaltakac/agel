@@ -498,7 +498,23 @@ def melee_progress_form(directory):
         fields.append(f"'{label} {int(values[0])}")
     stance = re.findall(r'^varp\.com_mode=(\d+)$', saved, re.M)
     require(len(stance) <= 1, f'{directory}: ambiguous saved combat stance')
-    return f"(dict 'xp-tenths (dict {' '.join(fields)}) 'saved-stance {int(stance[0]) if stance else 'nil'})"
+    trace = (directory / 'serial.log').read_text()
+    fallback = []
+    transitions = list(re.finditer(
+        r'^native-combat: progress \{phase stance-awaiting-xp mode ([13])\}$', trace, re.M))
+    for index, marker in enumerate(transitions):
+        mode = int(marker[1])
+        skill = 2 if mode == 1 else 1
+        end = transitions[index + 1].start() if index + 1 < len(transitions) else len(trace)
+        phases = re.split(r'^native-combat: progress \{phase training skill ([012]) ', trace[marker.end():end], flags=re.M)
+        phase = phases[2] if len(phases) > 2 and int(phases[1]) == skill else ''
+        encounter = re.search(
+            rf'^native-combat: encounter \({skill} \{{[^\n]*? xp-before (\d+) xp-after (\d+) ', phase, re.M)
+        confirmed = encounter is not None and int(encounter[2]) > int(encounter[1])
+        fallback.append(f"(dict 'mode {mode} 'confirmed {'#t' if confirmed else '#f'})")
+    evidence = f"(list {' '.join(fallback)})" if fallback else 'nil'
+    return (f"(dict 'xp-tenths (dict {' '.join(fields)}) 'saved-stance {int(stance[0]) if stance else 'nil'} "
+            f"'stance-xp-evidence {evidence})")
 
 
 def transfer_recovery_time(directory, read_table):
