@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 sys.path.insert(0, "scripts/osrs")
-from test_support import evaluate, form
+from test_support import combat_xp, combat_xp_saved, evaluate, form
 
 
 def notice(text):
@@ -44,6 +44,7 @@ assert result.returncode == 0, result.stderr
 assert 'passed #t' in result.stdout and 'target-removed #t' in result.stdout, result.stdout
 if '--live-tools' in sys.argv:
     assert 'live-tool-version 2' in result.stdout and 'preserved-calls 3' in result.stdout, result.stdout
+expected_xp = combat_xp(result.stdout)
 print(result.stdout.strip(), flush=True)
 notice('RuneScape combat: kill observed; verifying persisted Attack and Hitpoints XP')
 
@@ -57,14 +58,8 @@ subprocess.run(['docker', 'cp', 'target/osrs-admin/AccountState.class', 'agel-os
 for _ in range(45):
     oracle = subprocess.run(['docker', 'exec', 'agel-osrs-world', 'sh', '-c',
         'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$1"', 'probe', username], capture_output=True, text=True)
-    if oracle.returncode == 0:
-        stats = {}
-        for line in oracle.stdout.splitlines():
-            if line.startswith('stat='):
-                fields = dict(part.split('=', 1) for part in line.split())
-                stats[int(fields['stat'])] = int(fields['fine_xp'])
-        if stats.get(0, 0) == 80 and stats.get(3, 0) > 11540:
-            break
+    if oracle.returncode == 0 and combat_xp_saved(expected_xp, oracle.stdout):
+        break
     time.sleep(1)
 else:
     raise AssertionError('combat XP did not persist: ' + oracle.stdout + oracle.stderr)

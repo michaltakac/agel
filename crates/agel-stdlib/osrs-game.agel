@@ -5,7 +5,7 @@
   (import agel/osrs-wire)
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
-  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack)
+  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -97,6 +97,10 @@
               ((get maintenance 'quantum) (count (get packet 'bytes))))
             (bytes-pack-field-serviced packet 'bytes (get maintenance 'pulse)))
           (bytes-pack-field packet 'bytes)))))
+  (def remember
+    (fn (state event)
+      (let ((push (get state 'history-push)) (history (get state 'history)))
+        (assoc state 'history (if push (push history event) (cons event history))))))
   (def read-payload
     (fn (state opcode cipher)
       (let ((spec (osrs-server-packet opcode)))
@@ -108,8 +112,7 @@
                   (let ((body (if (get spec 'encrypted) (encrypted-body raw cipher nil)
                                   (dict 'bytes raw 'cipher cipher))))
                     (let ((packet (dict 'opcode opcode 'name (get spec 'name) 'bytes (get body 'bytes))))
-                      (dict 'state (assoc (observe (assoc state 'in (get body 'cipher)) packet) 'history
-                                          (cons (retain-packet state packet) (get state 'history))) 'packet packet))))))
+                      (dict 'state (remember (observe (assoc state 'in (get body 'cipher)) packet) (retain-packet state packet)) 'packet packet))))))
             (signal 'osrs/opcode "unknown revision-241 server packet" opcode)))))
   (def osrs-next-packet
     (fn (state)
@@ -163,13 +166,18 @@
               (let ((next (osrs-next-packet state)))
                 (await-loop (get next 'state) ready
                   (- ticks (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0)) (- remaining 1)))))))
-  (def osrs-await (fn (state ready) (maintained-read state (fn (current) (await-loop current ready 32 4096)))))
+  (def osrs-await-bounded
+    (fn (state ready ticks)
+      (if (if (= (type-of ticks) 'int) (if (< 0 ticks) (< ticks 513) #f) #f)
+          (maintained-read state (fn (current) (await-loop current ready ticks 4096)))
+          (signal 'osrs/wait "observation tick bound must be between one and 512"))))
+  (def osrs-await (fn (state ready) (osrs-await-bounded state ready 32)))
   (def send
     (fn (state opcode payload variable event)
       (let ((next (isaac-next (get state 'out))))
         (let ((encoded (rem (+ opcode (get next 'value)) 256)))
           (wire-write (cons encoded (if variable (cons (count payload) payload) payload)))
-          (assoc (assoc state 'out (get next 'state)) 'history (cons event (get state 'history)))))))
+          (remember (assoc state 'out (get next 'state)) event)))))
   (def u16-alt2 (fn (n) (list (/ n 256) (rem (+ (rem n 256) 128) 256))))
   (def coordinate? (fn (n) (if (= (type-of n) 'int) (if (< -1 n) (< n 16384) #f) #f)))
   (def osrs-walk

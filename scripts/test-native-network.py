@@ -1,5 +1,6 @@
 """Run the Agel game client in the native OS over the general byte carrier."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,18 +8,23 @@ import secrets
 import re
 from native_provider_support import provider_environment, decode_judge_ledger
 import subprocess
+import sys
 import tempfile
 import time
 import graphical_console as console
 
+sys.path.insert(0, str(Path(__file__).with_name("osrs")))
+from test_support import combat_xp, combat_xp_saved
+
 parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--challenge', action='store_true')
-parser.add_argument('--repair', action='store_true', help='repair a general tool during the same native connection')
-parser.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
+scenario=parser.add_mutually_exclusive_group()
+scenario.add_argument('--challenge', action='store_true')
+scenario.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
+scenario.add_argument('--repair', action='store_true', help='repair a general tool during the same native connection')
+scenario.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
 parser.add_argument('--live', action='store_true', help='use real providers for --repair or --optimize')
 options=parser.parse_args()
 editing=options.repair or options.optimize
-if sum([options.challenge,options.repair,options.optimize])>1:parser.error('--challenge, --repair and --optimize are exclusive')
 if options.live and not editing:parser.error('--live requires --repair or --optimize')
 directory=Path('target')/('native-network-'+str(time.time_ns()))
 directory.mkdir(mode=0o700)
@@ -30,7 +36,8 @@ if editing:print('Providers:', 'real' if options.live else 'fixtures; writer del
 manifest=json.loads(subprocess.run(['python3','scripts/osrs/world_manifest.py'],capture_output=True,text=True,check=True).stdout)
 manifest['scope']='native OS login, live observations, seeded general tool repair and saved movement; no Exo task score' if options.repair else 'native OS login, live observations and movement smoke test; no Exo task score'
 if options.optimize:manifest['scope']='native measured byte policy optimization, recorded byte replay and saved movement; no Exo task score'
-(directory/'world.json').write_text(json.dumps(manifest,indent=2)+'\n')
+if options.combat:manifest['scope']='native one-rat combat on a fresh normal account with fixed encoder cadence'
+
 catalog=Path('crates/agel-stdlib/stdlib.agel').read_text()
 a=catalog.index('(module agel/sequence\n');b=catalog.find('\n(module ',a+1)
 source=catalog[a:b]+'\n'
@@ -44,6 +51,11 @@ source+='''(import agel/byte-stream)
 '''
 modules=['osrs-wire'] if options.challenge else ['osrs-wire','crypto','osrs-crypto','osrs-login','osrs-packets','osrs-bits','osrs-npcs','osrs-game']
 source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in modules)
+if options.combat:
+    combat_module=Path('examples/osrs/combat-test.agel').read_bytes()
+    manifest['combat_policy_sha256']=hashlib.sha256(combat_module).hexdigest()
+    source+=combat_module.decode()+'\n'
+    source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
 if editing:
     for name in ['meta','judgment']:
         a=catalog.index('(module agel/'+name+'\n');b=catalog.find('\n(module ',a+1)
@@ -82,6 +94,8 @@ else:
   (dict 'start (get stream 'start-service) 'stop (get stream 'stop-service) 'pulse (get stream 'pulse))))
 (console-log "native-network: cipher state initialized inside Agel OS")
 '''
+    if options.combat:
+        source+="(import agel/record-chain) (def game (assoc game 'history-push record-chain-push))\n"
     if options.optimize:
         source+="(def game (assoc game 'maintenance (assoc (get game 'maintenance) 'quantum retained-quantum)))\n"
     source+='(begin (osrs-login '+json.dumps(account['username'])+' '+json.dumps(account['password'])+' context crcs seed (entropy-read 24)) #t)\n'
@@ -91,6 +105,8 @@ else:
 (console-log (text-concat "native-network: observations " (print-form
   (dict 'smithing-level (get (osrs-stat ready 13) 'level) 'coins (osrs-inventory-count ready 93 995)))))
 '''
+    if options.combat:
+        source+='(def task-start (clock-us))\n'
     if editing:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
         if options.optimize:
@@ -102,22 +118,37 @@ else:
         source+='(def ready (osrs-service-stop ready))\n'
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
-    if options.repair:
+    if options.combat:
+        source+='''(import agel/osrs-combat-test)
+(def started (clock-us))
+(console-log "native-combat: searching for a rat")
+(def combat (test-rat-combat-bounded ready
+  (fn (state predicate) (osrs-await-bounded state predicate 320))
+  (fn (target) (console-log (text-concat "native-combat: target " (print-form target))))))
+(def finish (clock-us))
+(def completed (get combat 'state))
+(console-log (text-concat "native-combat: " (print-form (get combat 'report))))
+(console-log (text-concat "native-combat: action-us " (print-form (- finish started))))
+(console-log (text-concat "native-combat: task-us " (print-form (- finish task-start))))
+(def retained-count (record-chain-fold (fn (n _) (+ n 1)) 0 (get completed 'history)))
+(console-log (text-concat "native-combat: history-records " (print-form retained-count)))
+'''
+    elif options.repair:
         source+='''(import agel/batches)
 (def execution (run-batches retained-plan (fn (state x) (osrs-walk state x 3218)) ready '(3221 3221 3221 3222 3223) 3))
 (check (= (count (get execution 'remaining)) 0) "planner left game actions unexecuted")
 (console-log (text-concat "native-session: executed batches " (print-form (get execution 'completed))))
-(def walked (osrs-wait-ticks (get execution 'state) 3))
+(def completed (osrs-wait-ticks (get execution 'state) 3))
 '''
     else:
-        source+='(def walked (osrs-wait-ticks (osrs-walk ready 3223 3218) 3))\n'
+        source+='(def completed (osrs-wait-ticks (osrs-walk ready 3223 3218) 3))\n'
     if options.optimize:
         source+='''(check (< 0 policy-uses) "no live packet used the changed cadence")
 (console-log (text-concat "native-opt: live uses " (print-form policy-uses)))
 '''
     source+='''
-(if (< 0 (get walked 'keepalives)) #t (signal 'native/test "keepalive path was not exercised"))
-(console-log (text-concat "native-network: keepalives " (print-form (get walked 'keepalives))))
+(if (< 0 (get completed 'keepalives)) #t (signal 'native/test "keepalive path was not exercised"))
+(console-log (text-concat "native-network: keepalives " (print-form (get completed 'keepalives))))
 (wire-close)
 '''
     if options.optimize:
@@ -125,10 +156,9 @@ else:
   "recorded workload differed in protected storage")
 (console-log "native-opt: recorded workload verified in append-only log")
 '''
-    source+='''
-(console-log "native-network: client completed: login, observations, walking packet and tick consumption inside Agel OS")
-#t
-'''
+    completion = 'login, observations and rat combat' if options.combat else 'login, observations, walking packet and tick consumption'
+    source+='(console-log "native-network: client completed: '+completion+' inside Agel OS")\n#t\n'
+(directory/'world.json').write_text(json.dumps(manifest,indent=2)+'\n')
 source='(begin\n'+source+'\n#t)\n'
 script=directory/'client.agel';script.write_text(source);os.chmod(script,0o600)
 disk=console.prepared_image('target/boot/agel-v1.img',directory,blank_sectors=1024)
@@ -153,7 +183,7 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
         machine.terminate();machine.wait(timeout=10)
 output=(directory/'serial.log').read_text()
 if not options.challenge:assert account['password'] not in output,'credential appeared in serial output'
-print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'inference-bridge:' in line or 'agel: error' in line or 'exited with status' in line),flush=True)
+print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
 marker='native-network: PASS:' if options.challenge else 'native-network: client completed:'
 passed=result.returncode==0 and marker in output and 'process agel exited with status 0' in output
 if editing:
@@ -174,6 +204,11 @@ if editing:
     if not options.live:assert max(durations)>=20000, 'delayed-provider coverage was not exercised'
 
 assert passed,'native network scenario failed; evidence retained'
+if options.combat:
+    assert re.search(r'native-combat: \{test rat-combat passed #t .*target-removed #t\}',output)
+    assert output.count('operation open ') == output.count('operation close ') == 2
+    expected_xp=combat_xp(output)
+    print('Model calls: 0; judge calls: 0; model cost: $0 (fixed scripted policy)',flush=True)
 if not options.challenge:
     compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
     build=directory/'oracle';build.mkdir()
@@ -183,12 +218,17 @@ if not options.challenge:
     while True:
         saved=subprocess.run(['docker','exec','agel-osrs-world','sh','-c',
             'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$1"','probe',account['username']],capture_output=True,text=True)
-        if saved.returncode==0 and 'x=3223 z=3218 level=0' in saved.stdout:break
-        if time.monotonic()>deadline:raise AssertionError('walking state was not saved at expected coordinates')
+        if saved.returncode==0:
+            if options.combat:
+                if combat_xp_saved(expected_xp,saved.stdout):break
+            elif 'x=3223 z=3218 level=0' in saved.stdout:break
+        if time.monotonic()>deadline:raise AssertionError('expected state was not saved: '+saved.stdout+saved.stderr)
         time.sleep(1)
     assert 'rights= ' in saved.stdout and 'xp_rate_in_hundreds=100' in saved.stdout,saved.stdout
     (directory/'saved-account.txt').write_text(saved.stdout)
     print('Persisted native client:',saved.stdout.splitlines()[0],flush=True)
-    print('PASS: native client movement saved with normal rights and 1x XP',flush=True)
+    if options.combat:
+        print('Persisted combat XP:', '\n'.join(line for line in saved.stdout.splitlines() if line.startswith(('stat=0 ', 'stat=3 '))),flush=True)
+    print('PASS: native client '+('combat XP' if options.combat else 'movement')+' saved with normal rights and 1x XP',flush=True)
 
 print('Elapsed seconds:',round(time.monotonic()-run_started,3),flush=True)

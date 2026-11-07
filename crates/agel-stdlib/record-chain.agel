@@ -1,0 +1,25 @@
+(module agel/record-chain
+  (import agel/sequence)
+  (export record-chain-push record-chain-fold)
+  (def seal
+    (fn (records previous)
+      (fn () (dict 'records records 'previous previous))))
+  (def record-chain-push
+    (fn (chain record)
+      (if chain
+        (let ((size (get chain 'size)) (records (get chain 'records)) (previous (get chain 'previous)))
+          (if (= size 32)
+            (dict 'size 1 'records (list record) 'previous (seal records previous))
+            (dict 'size (+ size 1) 'records (cons record records) 'previous previous)))
+        (dict 'size 1 'records (list record) 'previous nil))))
+  (def fold-sealed
+    (fn (step result previous)
+      (if previous
+        (let ((chunk (previous)))
+          (fold-sealed step (foldl step result (get chunk 'records)) (get chunk 'previous)))
+        result)))
+  (def record-chain-fold
+    (fn (step initial chain)
+      (if chain
+        (fold-sealed step (foldl step initial (get chain 'records)) (get chain 'previous))
+        initial))))

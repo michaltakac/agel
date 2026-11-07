@@ -5,11 +5,14 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.18.** A running Agel process profiles a recorded
-byte workload and uses an agent-written service policy after text judgment
-and live replay. An existing client uses the new version on the same connection.
-RuneScape supplies the workload; profiling, replay and activation are general
-Agel code. See the [release notes and native evidence](docs/release-v0.3.18.md).
+**Current release: v0.3.19.** The fixed combat policy completed a native
+RuneScape encounter in Agel OS. The server confirmed the saved XP and the
+guest retained the packet and action history using general Agel code.
+See the [release notes and evidence](docs/release-v0.3.19.md).
+
+v0.3.18 installed an agent-written service policy on a live connection
+after text judgment and recorded replay. See the
+[optimization evidence](docs/release-v0.3.18.md).
 
 v0.3.15 added bounded source-store checkpoint recovery across reboots.
 See the [release notes](docs/release-v0.3.15.md).

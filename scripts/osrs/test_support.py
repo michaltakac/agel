@@ -1,6 +1,7 @@
 """Independent protocol-test helpers, not the game client or agent policy."""
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -43,3 +44,23 @@ def xtea(data, key, decrypt=False):
                 b = (b + (((((a << 4) ^ (a >> 5)) + a) & mask) ^ ((total + key[(total >> 11) & 3]) & mask))) & mask
         data[at:at + 8] = a.to_bytes(4, "big") + b.to_bytes(4, "big")
     return bytes(data)
+
+
+def combat_xp(report):
+    """Return whole XP from the Agel combat report and require fresh stats."""
+    match = re.search(
+        r'attack-before (\d+) attack-after (\d+) hitpoints-before (\d+) hitpoints-after (\d+)',
+        report,
+    )
+    assert match, report
+    before_attack, after_attack, before_hp, after_hp = map(int, match.groups())
+    assert before_attack == 0 and before_hp == 1154, report
+    assert after_attack > before_attack and after_hp > before_hp, report
+    return {0: after_attack, 3: after_hp}
+
+
+def combat_xp_saved(expected, oracle):
+    """The protocol reports whole XP and the oracle reports tenths."""
+    stats = {int(stat): int(xp) for stat, xp in re.findall(
+        r'^stat=(\d+) base=\d+ visible=\d+ fine_xp=(\d+)$', oracle, re.M)}
+    return all(stats.get(stat, -1) // 10 == xp for stat, xp in expected.items())

@@ -129,3 +129,12 @@ interval, and maximum gap between acknowledged service calls. Native
 a conservative upper bound from the measured work, budget and margin; a
 candidate still needs replay and measurements. The estimate is not a deadline
 guarantee for new workloads.
+
+Load `record-chain.agel` to keep a history in shareable chunks.
+`record-chain-push(chain, record)` accepts nil for an empty history and
+returns an updated history. Each history holds at most 32 records directly
+and refers to earlier chunks through Agel closures. Older snapshots remain
+valid after an append. `record-chain-fold(step, initial, chain)` visits every
+record from newest to oldest without flattening the history. This is an
+in-process representation. Callers can fold over it to write inert records
+to durable storage.

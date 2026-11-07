@@ -83,6 +83,7 @@ of complete OSRS parity.
 ```sh
 sh scripts/test-osrs-game.sh
 sh scripts/test-osrs-combat.sh
+sh scripts/test-native-network.sh --combat
 ```
 
 This runs the Agel scenarios and checks authoritative persisted server state:
@@ -139,10 +140,11 @@ if no graphical image exists yet.
 
 ## Current boundary
 
-There is a rat-combat smoke test, but no maximum-stats, crafting, quest,
-money-making or transfer score yet. The rat test requires exactly 8 Attack
-XP, increased Hitpoints XP and removal of the selected observed NPC index,
-then checks saved XP on the server. It does not read a separate kill counter.
+The rat-combat smoke test requires increased Attack and Hitpoints XP and
+removal of the selected NPC index. The server oracle independently checks that
+saved XP matches the protocol observations at whole-XP precision. NPC removal
+and XP are the outcome signals used here. Maximum stats, crafting, quests,
+money-making and transfer still need their own scores.
 v0.3.17 connects a retained repair actor to polling inference and the native
 client. It repairs a seeded planner and executes five queued game actions on
 the same connection. Full gameplay policy, durable episode history and paired

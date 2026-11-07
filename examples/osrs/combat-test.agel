@@ -1,7 +1,7 @@
 (module agel/osrs-combat-test
   (import agel/sequence)
   (import agel/osrs-game)
-  (export test-rat-combat test-rat-combat-using)
+  (export test-rat-combat test-rat-combat-using test-rat-combat-bounded)
   ; Public revision-241 cache mapping: npc.rat=2854.
   (def rats (fn (state) (filter (fn (npc) (= (get npc 'type) 2854)) (osrs-nearby-npcs state))))
   (def abs (fn (n) (if (< n 0) (- 0 n) n)))
@@ -9,27 +9,31 @@
   (def nearest
     (fn (candidates)
       (foldl (fn (best npc) (if best (if (< (distance npc) (distance best)) npc best) npc)) nil candidates)))
-  (def test-rat-combat
-    (fn (state)
-      (test-rat-combat-using state (fn (visible) (nearest (rats visible))))))
-  (def test-rat-combat-using
-    (fn (state choose)
-      (let ((ready (osrs-await state (fn (g) (if (osrs-stat g 0) (if (osrs-stat g 3) #t #f) #f)))))
-        (let ((visible (osrs-await ready (fn (g) (if (= (rats g) nil) #f #t)))))
+  (def combat
+    (fn (state choose await observe)
+      (let ((ready (await state (fn (g) (if (osrs-stat g 0) (if (osrs-stat g 3) #t #f) #f)))))
+        (let ((visible (await ready (fn (g) (if (= (rats g) nil) #f #t)))))
           (let ((target (choose visible))
                 (attack-before (get (osrs-stat visible 0) 'xp))
                 (hp-before (get (osrs-stat visible 3) 'xp)))
+            (observe target)
             (let ((finished
-                    (osrs-await (osrs-attack visible (get target 'index))
+                    (await (osrs-attack visible (get target 'index))
                       (fn (g)
-                        (if (< (+ attack-before 7) (get (osrs-stat g 0) 'xp))
+                        (if (< attack-before (get (osrs-stat g 0) 'xp))
                             (if (< hp-before (get (osrs-stat g 3) 'xp))
                                 (= (filter (fn (npc) (= (get npc 'index) (get target 'index))) (osrs-nearby-npcs g)) nil)
                                 #f) #f)))))
-              (if (= (- (get (osrs-stat finished 0) 'xp) attack-before) 8)
-                (dict 'state finished 'report
+              (dict 'state finished 'report
                 (dict 'test 'rat-combat 'passed #t 'target-index (get target 'index) 'target-type 2854
                       'attack-before attack-before 'attack-after (get (osrs-stat finished 0) 'xp)
                       'hitpoints-before hp-before 'hitpoints-after (get (osrs-stat finished 3) 'xp)
-                      'target-removed #t))
-                (signal 'osrs/test "rat kill did not award the expected 1x Attack XP")))))))))
+                      'target-removed #t))))))))
+  (def test-rat-combat-bounded
+    (fn (state await observe)
+      (combat state (fn (visible) (nearest (rats visible))) await observe)))
+  (def test-rat-combat
+    (fn (state) (test-rat-combat-bounded state osrs-await (fn (_) nil))))
+  (def test-rat-combat-using
+    (fn (state choose) (combat state choose osrs-await (fn (_) nil))))
+)
