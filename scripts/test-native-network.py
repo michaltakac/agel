@@ -325,9 +325,7 @@ else:
         (log-quest (print-form problem))
         (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
       (scenario game log-quest))))
-'''
-        if options.quest_resume:
-            source+='''(def quest-trace-keys
+(def quest-trace-keys
   (dict 'talk #t 'resume-dialogue #t
         "IF_OPENSUB" #t "IF_CLOSESUB" #t "IF_RESYNC_V2" #t "IF_SETEVENTS_V2" #t "IF_SETTEXT" #t))
 (def trace-quest-record
@@ -340,7 +338,9 @@ else:
       nil)
     (record-chain-push history record)))
 (def game (assoc game 'history-push trace-quest-record))
-(log-quest "verifying retained ingredients and attempting hand-in")
+'''
+        if options.quest_resume:
+            source+='''(log-quest "verifying retained ingredients and attempting hand-in")
 (def quest-report (assoc (run-quest finish-cooks-assistant-using) 'source 'checkpoint))
 (console-log (text-concat "native-quest: " (print-form quest-report)))
 '''

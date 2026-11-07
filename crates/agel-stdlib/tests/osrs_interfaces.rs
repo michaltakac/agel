@@ -10,13 +10,19 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                (module agel/osrs-game
                  (export osrs-stat osrs-inventory-count osrs-await osrs-nearby-npcs
                          osrs-varp osrs-open-interface? osrs-interface-opens
-                         osrs-await-bounded osrs-keepalive osrs-resume-dialogue
+                         osrs-await-bounded osrs-observe-bounded osrs-keepalive osrs-resume-dialogue
                          osrs-talk osrs-walk osrs-wait-ticks)
                  (def osrs-stat (fn (state _) (dict 'xp (if (= (get state 'page) 3) 300 0))))
                  (def osrs-inventory-count (fn (state inv item) (if (= (get state 'page) 3) 0 1)))
                  (def osrs-await (fn (state ready) state))
                  (def osrs-await-bounded
                    (fn (state ready ticks) (if (ready state) state (signal 'test/wait "missing page"))))
+                 (def osrs-observe-bounded
+                   (fn (state ready ticks)
+                     (if (= (get state 'talks) 2)
+                       (let ((opened (assoc state 'page 1)))
+                         (if (ready opened) opened (signal 'test/wait "first page was missed")))
+                       state)))
                  (def osrs-nearby-npcs (fn (state) (list (dict 'type 4626 'index 7))))
                  (def osrs-varp (fn (state varp) (if (= (get state 'page) 3) 1 0)))
                  (def osrs-open-interface?
@@ -28,7 +34,10 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                    (fn (state id) (if (= id 219) (get state 'page) 0)))
                  (def osrs-keepalive (fn (state) state))
                  (def osrs-walk (fn (state x z) (assoc state 'tile (list x z))))
-                 (def osrs-wait-ticks (fn (state ticks) state))
+                 (def osrs-wait-ticks
+                   (fn (state ticks)
+                     (if (= (get state 'talks) 2)
+                       (signal 'test/wait "draining ticks would lose the first page") state)))
                  (def osrs-talk
                    (fn (state index)
                      (if (= (get state 'talks) 0)
@@ -38,7 +47,7 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                          (if (= (get state 'talks) 1) #t (signal 'test/talk "unexpected extra talk"))
                          (if (= (get state 'tile) '(3207 3215)) #t
                            (signal 'test/talk "expected a different approach on retry"))
-                         (assoc (assoc state 'talks 2) 'page 1)))))
+                         (assoc state 'talks 2)))))
                  (def osrs-resume-dialogue
                    (fn (state id component option)
                      (if (= (list id component option) '(219 1 1))

@@ -5,8 +5,8 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.66.** Checkpoint recovery verifies the gate history
-behind every active version. See the [release notes](docs/release-v0.3.66.md).
+**Current release: v0.3.67.** The RuneScape quest example responds to the
+first observed dialogue page. See the [release notes](docs/release-v0.3.67.md).
 
 RuneScape and DOOM are example workloads. Keep game protocols, commands,
 agent prompts, task definitions and scoring in the examples or their test
@@ -14,8 +14,11 @@ harnesses. The language, standard library and default OS expose shared
 capabilities such as transport, inspection, replay and live versioning.
 The optional legacy DOOM build still has kernel launch and display hooks.
 
-v0.3.65 verifies the donor’s
-judge journal. See the [release notes](docs/release-v0.3.65.md).
+v0.3.66 verifies checkpoint gate history.
+See the [release notes](docs/release-v0.3.66.md).
+
+v0.3.65 verifies the donor’s judge journal.
+See the [release notes](docs/release-v0.3.65.md).
 
 v0.3.64 dispatches and reverts a macro-built tool in the native evaluation.
 See the [release notes](docs/release-v0.3.64.md).

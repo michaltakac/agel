@@ -157,10 +157,11 @@
       (let ((tile (car approaches)))
         (let ((nearby (wait-live (travel (osrs-walk state (car tile) (car (cdr tile))) 4) cook 4)))
           (observe "talking to the observed cook")
-          (let ((attempt (travel (osrs-talk nearby (get (cook nearby) 'index)) 4)))
-            (if (page attempt nearby)
-              (run-dialogue attempt nearby 0 40 observe)
-              (start-cook-dialogue attempt (cdr approaches) observe)))))))
+          (let ((asked (osrs-talk nearby (get (cook nearby) 'index))))
+            (let ((attempt (osrs-observe-bounded asked (fn (g) (page g nearby)) 20)))
+              (if (page attempt nearby)
+                (run-dialogue attempt nearby 0 40 observe)
+                (start-cook-dialogue attempt (cdr approaches) observe))))))))
 
   (def finish-cooks-assistant
     (fn (state) (finish-cooks-assistant-using state (fn (_) nil))))
