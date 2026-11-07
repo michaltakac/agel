@@ -93,10 +93,12 @@ def craft_saved(report, before, after):
 def economy_saved(coins, snapshot):
     if coins == 0:
         return 'item=obj.coins ' not in snapshot
-    return {f'inv=inv.inv item=obj.coins count={coins}',
-            'inv=inv.inv item=obj.bronze_pickaxe count=1',
-            'stat=13 base=1 visible=1 fine_xp=62',
-            'stat=14 base=1 visible=1 fine_xp=350'}.issubset(snapshot.splitlines())
+    lines = snapshot.splitlines()
+    inventory = {line for line in lines if line.startswith('inv=')}
+    return (inventory == {f'inv=inv.inv item=obj.coins count={coins}',
+                          'inv=inv.inv item=obj.bronze_pickaxe count=1'}
+            and {'stat=13 base=1 visible=1 fine_xp=62',
+                 'stat=14 base=1 visible=1 fine_xp=350'}.issubset(lines))
 
 
 def melee_xp(report, goal):

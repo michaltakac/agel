@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.99.** The RuneScape mining route uses a waypoint
-and a bounded copper retry. See the [release notes](docs/release-v0.3.99.md).
+**Current release: v0.3.100.** Benchmark results distinguish known,
+unpriced, and incomplete costs. See the [release notes](docs/release-v0.3.100.md).
+
+v0.3.99 adds a mining waypoint and a bounded copper retry.
+See the [release notes](docs/release-v0.3.99.md).
 
 v0.3.98 retains the replay cases for committed Agel versions.
 See the [release notes](docs/release-v0.3.98.md).

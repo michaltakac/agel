@@ -56,7 +56,9 @@
                          (get record 'charges))))
           (let ((cost (if (if complete (= (get charges 'unknown) 0) #f) (get charges 'known-nanousd) nil))
                 (coins (if (= before nil) nil (- after before))))
-            (dict 'correct correct 'elapsed-us elapsed 'charges charges 'cost-nanousd cost 'coins coins
+            (dict 'correct correct 'elapsed-us elapsed 'charges charges
+              'cost-status (if complete (if (= cost nil) 'unpriced 'known) 'incomplete)
+              'cost-nanousd cost 'coins coins
               'coins-per-dollar
               (if (if correct (if cost (< 0 cost) #f) #f)
                 (if (= coins nil) nil (dict 'coins coins 'nanousd cost))

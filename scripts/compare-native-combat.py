@@ -160,8 +160,10 @@ def load_economy(directory, policy, read_table):
         require(len(sales) == 1 and 'native-network: client completed:' in trace,
                 f'{directory}: missing verified sale')
         coins = int(sales[0])
-        clocks = re.findall(r'^native-economy: score \{correct #t elapsed-us (\d+) .* coins ' +
-                            str(coins) + r' coins-per-dollar nil\}$', trace, re.M)
+        guest_cost = '0' if policy == 'fixed' else 'nil'
+        clocks = re.findall(
+            rf'^native-economy: score \{{correct #t elapsed-us ([1-9]\d*) .* '
+            rf'cost-nanousd {guest_cost} coins {coins} coins-per-dollar nil\}}$', trace, re.M)
     else:
         require(not sales and re.search(r'^native-economy: failure \{', trace, re.M),
                 f'{directory}: no measured sale failure')
