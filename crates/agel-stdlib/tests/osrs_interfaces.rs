@@ -1,6 +1,64 @@
 use agel_core::{Value, World};
 
 #[test]
+fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world
+        .evaluate(
+            r#"(module agel/osrs-mining-test)
+               (module agel/osrs-game
+                 (export osrs-stat osrs-inventory-count osrs-await osrs-nearby-npcs
+                         osrs-varp osrs-open-interface? osrs-interface-opens
+                         osrs-await-bounded osrs-keepalive osrs-resume-dialogue
+                         osrs-talk osrs-walk osrs-wait-ticks)
+                 (def osrs-stat (fn (state _) (dict 'xp (if (= (get state 'page) 3) 300 0))))
+                 (def osrs-inventory-count (fn (state inv item) (if (= (get state 'page) 3) 0 1)))
+                 (def osrs-await (fn (state ready) state))
+                 (def osrs-await-bounded
+                   (fn (state ready ticks) (if (ready state) state (signal 'test/wait "missing page"))))
+                 (def osrs-nearby-npcs (fn (state) (list (dict 'type 4626 'index 7))))
+                 (def osrs-varp (fn (state varp) (if (= (get state 'page) 3) 1 0)))
+                 (def osrs-open-interface?
+                   (fn (state id)
+                     (if (= id 219)
+                       (if (= (get state 'page) 1) #t (= (get state 'page) 2))
+                       (if (= id 153) (= (get state 'page) 3) #f))))
+                 (def osrs-interface-opens
+                   (fn (state id) (if (= id 219) (get state 'page) 0)))
+                 (def osrs-keepalive (fn (state) state))
+                 (def osrs-walk (fn (state x z) state))
+                 (def osrs-wait-ticks (fn (state ticks) state))
+                 (def osrs-talk
+                   (fn (state index)
+                     (if (= (get state 'talks) 0) (assoc state 'talks 1)
+                       (begin
+                         (if (= (get state 'talks) 1) #t (signal 'test/talk "unexpected extra talk"))
+                         (assoc (assoc state 'talks 2) 'page 1)))))
+                 (def osrs-resume-dialogue
+                   (fn (state id component option)
+                     (if (= (list id component option) '(219 1 1))
+                         (assoc state 'page (+ 1 (get state 'page)))
+                         (signal 'test/dialogue "unexpected dialogue action")))))"#,
+        )
+        .unwrap();
+    world
+        .evaluate(include_str!("../../../examples/osrs/quest-test.agel"))
+        .unwrap();
+    let result = world
+        .evaluate(
+            "(import agel/osrs-quest-test)
+             (def report (finish-cooks-assistant (dict 'page 0 'talks 0)))
+             (list (get report 'passed) (get report 'choices) (get report 'quest-points))",
+        )
+        .unwrap();
+    assert_eq!(
+        result.values.last().map(Value::to_string).as_deref(),
+        Some("(#t 2 1)")
+    );
+}
+
+#[test]
 fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     let mut world = World::default();
     agel_stdlib::install(&mut world, &Default::default()).unwrap();

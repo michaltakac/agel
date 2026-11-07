@@ -21,6 +21,7 @@ parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
 scenario.add_argument('--melee-xp', type=int, help='train three melee skills inside Agel OS')
 scenario.add_argument('--economy', action='store_true', help='mine, smelt and sell a bar inside Agel OS')
+scenario.add_argument('--quest', action='store_true', help="gather ingredients and complete Cook's Assistant inside Agel OS")
 scenario.add_argument('--challenge', action='store_true')
 scenario.add_argument('--craft', action='store_true', help='forge staged adamant stock; use test-osrs-crafting.sh --native')
 parser.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
@@ -32,12 +33,12 @@ options=parser.parse_args()
 melee=options.melee_xp
 if melee is not None and (not 1 <= melee <= 512 or options.combat):
     parser.error('--melee-xp requires a goal of 1..512 and is separate from --combat')
-if options.optimize and (options.challenge or options.repair or options.craft or options.economy):
+if options.optimize and (options.challenge or options.repair or options.craft or options.economy or options.quest):
     parser.error('--optimize can be combined with --combat or --melee-xp')
 editing=options.repair or options.optimize
 combat_workload=options.combat or melee is not None
 shared_carrier=editing or combat_workload
-if options.combat and (options.challenge or options.repair or options.craft or options.economy):parser.error('--combat can only be combined with --optimize')
+if options.combat and (options.challenge or options.repair or options.craft or options.economy or options.quest):parser.error('--combat can only be combined with --optimize')
 if options.transfer_from and (not combat_workload or editing):
     parser.error('--transfer-from requires --combat or --melee-xp without editing')
 if options.live and not editing:parser.error('--live requires --repair or --optimize')
@@ -47,6 +48,8 @@ print('Evidence:', directory, flush=True)
 proposal="(dict 'diagnosis \"fixed cadence pays for more service calls than the observed work bound requires\" 'after '(fn (limit) (* 64 (/ limit 64))) 'predictions '(64 192))" if options.optimize else None
 environment=provider_environment(directory, options.live, delay=20, proposal=proposal) if shared_carrier else dict(os.environ)
 environment['AGEL_BYTE_ENDPOINT']='127.0.0.1:43594'
+if melee is not None:
+    environment['AGEL_GUEST_TIMEOUT_SECONDS']='1680'
 if editing:print('Providers:', 'real' if options.live else 'fixtures; writer delayed 20 seconds', flush=True)
 manifest=json.loads(subprocess.run(['python3','scripts/osrs/world_manifest.py'],capture_output=True,text=True,check=True).stdout)
 manifest['scope']='native OS login, live observations, seeded general tool repair and saved movement; no Exo task score' if options.repair else 'native OS login, live observations and movement smoke test; no Exo task score'
@@ -69,6 +72,11 @@ if options.economy:
     manifest['encoder_policy']='fixed'
     manifest['evaluation_fuel']=250_000_000
     manifest['keepalive_interval_us']=3_000_000
+if options.quest:
+    manifest['scope']="native Cook's Assistant with gathered ingredients on a fresh normal account"
+    manifest['evaluation_fuel']=250_000_000
+    manifest['keepalive_interval_us']=3_000_000
+    manifest['guest_memory_mib']=1024
 
 catalog=Path('crates/agel-stdlib/stdlib.agel').read_text()
 a=catalog.index('(module agel/sequence\n');b=catalog.find('\n(module ',a+1)
@@ -83,15 +91,19 @@ source+='''(import agel/byte-stream)
 '''
 modules=['osrs-wire'] if options.challenge else ['osrs-wire','crypto','osrs-crypto','osrs-login','osrs-packets','osrs-bits','osrs-npcs','osrs-game']
 source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in modules)
-if combat_workload or options.craft or options.economy:
+if combat_workload or options.craft or options.economy or options.quest:
     source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
 if options.craft:
     source+=Path('examples/osrs/crafting-test.agel').read_text()+'\n'
-if options.economy:
+if options.economy or options.quest:
     economy_policy=Path('examples/osrs/mining-test.agel').read_bytes()
     manifest['economy_policy_sha256']=hashlib.sha256(economy_policy).hexdigest()
     source+=economy_policy.decode()+'\n'
     source+=Path('crates/agel-stdlib/benchmark.agel').read_text()+'\n'
+if options.quest:
+    quest_policy=Path('examples/osrs/quest-test.agel').read_bytes()
+    manifest['quest_policy_sha256']=hashlib.sha256(quest_policy).hexdigest()
+    source+=quest_policy.decode()+'\n'
 if options.combat or melee is not None:
     combat_module=Path('examples/osrs/combat-test.agel').read_bytes()
     manifest['combat_policy_sha256']=hashlib.sha256(combat_module).hexdigest()
@@ -190,9 +202,9 @@ else:
   (dict 'start (get stream 'start-service) 'stop (get stream 'stop-service) 'pulse (get stream 'pulse))))
 (console-log "native-network: cipher state initialized inside Agel OS")
 '''
-    if combat_workload or options.craft or options.economy:
+    if combat_workload or options.craft or options.economy or options.quest:
         source+="(import agel/record-chain) (def game (assoc game 'history-push record-chain-push))\n"
-    if melee is not None or options.economy:
+    if melee is not None or options.economy or options.quest:
         source+=f"""(def game (assoc game 'maintenance
   (assoc (assoc (get game 'maintenance) 'clock-us clock-us)
     'keepalive-interval-us {manifest['keepalive_interval_us']})))
@@ -201,7 +213,7 @@ else:
         source+="(def game (assoc game 'maintenance (assoc (get game 'maintenance) 'quantum retained-quantum)))\n"
     source+='(begin (osrs-login '+json.dumps(account['username'])+' '+json.dumps(account['password'])+' context crcs seed (entropy-read 24)) #t)\n'
     source+='(console-log "native-network: password login accepted")\n'
-    if not options.craft and not options.economy:
+    if not (options.craft or options.economy or options.quest):
         source+='''(def ready (osrs-await game (fn (g) (if (osrs-stat g 13) (if (get (get g 'inventories) 93) #t #f) #f))))
 (if (= (get (osrs-stat ready 13) 'level) 1) #t (signal 'native/test "unexpected initial Smithing level"))
 (console-log (text-concat "native-network: observations " (print-form
@@ -268,6 +280,18 @@ else:
 (map (fn (phase) (console-log (text-concat "native-combat: " (print-form phase)))) (get report 'phases))
 (console-log (text-concat "native-combat: task-us " (print-form (- finish task-start))))
 '''
+    elif options.quest:
+        source+='''(import agel/osrs-quest-test) (import agel/benchmark)
+(def started (clock-us))
+(console-log "native-quest: gathering Cook's Assistant ingredients")
+(def quest-report (gather-and-finish-cooks-assistant-using game
+  (fn (phase) (console-log (text-concat "native-quest: " phase)))))
+(def finished (clock-us))
+(console-log (text-concat "native-quest: " (print-form quest-report)))
+(console-log (text-concat "native-quest: score " (print-form
+  (benchmark-run (dict 'correct (get quest-report 'passed) 'elapsed-us (- finished started)
+    'billing-complete #t 'charges nil)))))
+'''
     elif options.economy:
         source+='''(import agel/osrs-mining-test) (import agel/benchmark)
 (def started (clock-us))
@@ -325,11 +349,12 @@ else:
   (check (= policy-uses 0) "refused policy served live packets"))
 (console-log (text-concat "native-opt: live uses " (print-form policy-uses)))
 '''
-    source+='''
+    if not options.quest:
+        source+='''
 (if (< 0 (get completed 'keepalives)) #t (signal 'native/test "keepalive path was not exercised"))
 (console-log (text-concat "native-network: keepalives " (print-form (get completed 'keepalives))))
-(wire-close)
 '''
+    source+='(wire-close)\n'
     if options.optimize:
         source+='''(check (= (text-slice (file-read "judge-log") tape-offset (+ tape-offset (text-bytes replay-tape))) replay-tape)
   "recorded workload differed in protected storage")
@@ -339,6 +364,7 @@ else:
     if melee is not None:completion='login, observations and melee training'
     if options.craft:completion='login, observations and adamant platebody'
     if options.economy:completion='login, mining, smelting and first bronze sale'
+    if options.quest:completion="login, gathered ingredients and Cook's Assistant"
     source+='(console-log "native-network: client completed: '+completion+' inside Agel OS")\n#t\n'
 (directory/'world.json').write_text(json.dumps(manifest,indent=2)+'\n')
 source='(begin\n'+source+'\n#t)\n'
@@ -368,15 +394,15 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
         with (directory/'serial.log').open('w') as log:
             setup=[] if options.transfer_from else [':fs-format']
             guest_command=':exec agel -- --no-stdlib /data/client'
-            if melee is not None or options.economy:
+            if melee is not None or options.economy or options.quest:
                 guest_command=f":exec agel -- --no-stdlib --fuel {manifest['evaluation_fuel']} /data/client"
             command=['target/release/examples/guest_inference',str(serial),str(directory.resolve()),'process agel exited with status',*setup,guest_command] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',guest_command]
-            result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=1800 if melee is not None else 960)
+            result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=1800 if melee is not None or options.quest else 960)
     finally:
         machine.terminate();machine.wait(timeout=10)
 output=(directory/'serial.log').read_text()
 if not options.challenge:assert account['password'] not in output,'credential appeared in serial output'
-print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'native-transfer:' in line or 'native-craft:' in line or 'native-economy:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
+print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'native-transfer:' in line or 'native-craft:' in line or 'native-economy:' in line or 'native-quest:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
 marker='native-network: PASS:' if options.challenge else 'native-network: client completed:'
 passed=result.returncode==0 and marker in output and 'process agel exited with status 0' in output
 if editing:
@@ -431,6 +457,19 @@ if options.economy:
     assert 'inference-bridge: started job' not in output
     economy_lines={f'inv=inv.inv item=obj.coins count={sale[1]}','inv=inv.inv item=obj.bronze_pickaxe count=1',
                    'stat=13 base=1 visible=1 fine_xp=62','stat=14 base=1 visible=1 fine_xp=350'}
+oracle_varps=['varp.com_mode'] if melee is not None else []
+if options.quest:
+    assert 'native-quest: {test cooks-assistant passed #t choices 2 quest-points 1 cooking-xp 300 ingredients-after (0 0 0) source gathered}' in output
+    assert 'native-quest: score {correct #t ' in output
+    assert output.count('operation open ') == output.count('operation close ') == 2
+    assert 'inference-bridge: started job' not in output
+    oracle_varps=['varp.cookquest','varp.qp','varp.cooks_assistant_ingredients']
+    def quest_saved(snapshot):
+        varps={key:int(value) for key,value in re.findall(r'^(varp\.\w+)=(-?\d+)$',snapshot,re.M)}
+        return (varps.get('varp.cookquest',0) % 4 == 2 and varps.get('varp.qp') == 1
+                and varps.get('varp.cooks_assistant_ingredients',0) % 8 == 7
+                and 'stat=7 base=4 visible=4 fine_xp=3000' in snapshot
+                and all(f'item=obj.{item} ' not in snapshot for item in ('bucket_milk','egg','pot_flour')))
 if not options.challenge and not options.craft:
     compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
     build=directory/'oracle';build.mkdir()
@@ -440,12 +479,14 @@ if not options.challenge and not options.craft:
     while True:
         saved=subprocess.run(['docker','exec','agel-osrs-world','sh','-c',
             'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$@"','probe',account['username'],
-            *(['varp.com_mode'] if melee is not None else [])],capture_output=True,text=True)
+            *oracle_varps],capture_output=True,text=True)
         if saved.returncode==0:
             if options.combat or melee is not None:
                 if combat_xp_saved(expected_xp,saved.stdout):break
             elif options.economy:
                 if economy_lines.issubset(saved.stdout.splitlines()):break
+            elif options.quest:
+                if quest_saved(saved.stdout):break
             elif 'x=3223 z=3218 level=0' in saved.stdout:break
         if time.monotonic()>deadline:raise AssertionError('expected state was not saved: '+saved.stdout+saved.stderr)
         time.sleep(1)
@@ -464,7 +505,10 @@ if not options.challenge and not options.craft:
     if options.economy:
         print('Persisted economy:', '\n'.join(line for line in saved.stdout.splitlines()
               if line in economy_lines),flush=True)
-    saved_outcome='combat XP' if combat_workload else 'sale proceeds and XP' if options.economy else 'movement'
+    if options.quest:
+        print('Persisted quest:', '\n'.join(line for line in saved.stdout.splitlines()
+              if line.startswith(('stat=7 ', *oracle_varps))),flush=True)
+    saved_outcome='combat XP' if combat_workload else 'sale proceeds and XP' if options.economy else 'quest and reward' if options.quest else 'movement'
     print('PASS: native client '+saved_outcome+' saved with normal rights and 1x XP',flush=True)
 
 print('Elapsed seconds:',round(time.monotonic()-run_started,3),flush=True)

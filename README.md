@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.42.** The native bridge retains boot output and
+**Current release: v0.3.43.** The native quest runner retries a missing
+cook dialogue and records the pages it observes. See the [release notes](docs/release-v0.3.43.md).
+
+v0.3.42 retains boot output and
 supports a bounded deadline. See the [release notes](docs/release-v0.3.42.md).
 
 v0.3.41 reuses the active Agel

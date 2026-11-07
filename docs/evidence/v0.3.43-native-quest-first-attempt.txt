@@ -1,0 +1,16 @@
+$ python3 scripts/test-native-network.py --quest
+native-quest: gathering Cook's Assistant ingredients
+native-quest: obtained pot and bucket through gameplay
+native-quest: picked up an egg
+native-quest: filled the bucket with milk
+native-quest: milled wheat and collected a pot of flour
+agel: error: evaluation error: osrs/quest-test: waiting for the next cook dialogue
+process agel exited with status 1
+
+Persisted account after the first attempt
+account=[omitted] character=[omitted] rights= x=3206 z=3216 level=0 xp_rate_in_hundreds=100
+stat=7 base=1 visible=1 fine_xp=0
+inv=inv.inv item=obj.bucket_milk count=1
+inv=inv.inv item=obj.egg count=1
+inv=inv.inv item=obj.pot_flour count=1
+varp.cookquest=0
