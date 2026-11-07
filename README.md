@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.222.** Melee scores distinguish the saved goal
-from the guest verdict. See the [release notes](docs/release-v0.3.222.md).
+**Current release: v0.3.223.** The latest melee pair records separate
+guest and server outcomes. See the [release notes](docs/release-v0.3.223.md).
+
+v0.3.222 distinguishes the saved melee goal from the guest verdict.
+See the [release notes](docs/release-v0.3.222.md).
 
 v0.3.221 restores the native reader and compiler self-rebuild.
 See the [release notes](docs/release-v0.3.221.md).

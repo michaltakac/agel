@@ -1,6 +1,6 @@
 # Agel OS and the Exo benchmark
 
-Status through v0.3.218, 7 November 2026.
+Status through v0.3.223, 7 November 2026.
 
 Agel can run a RuneScape client in a native guest, revise a byte-service policy on the live connection, and preserve a rejected edit and its costs. The strongest result is a verified edit lifecycle. The matched runs so far do not establish a task-level advantage over Agel's fixed control or a head-to-head win against Exo. [Experiment programme](exo-programme.md) · [Exo evaluation](https://arxiv.org/html/2611.00463v1#S5)
 
@@ -25,7 +25,7 @@ Times are guest task times from individual pairs with uncontrolled game randomne
 
 Two other one-rat pairs passed in both arms. Each adaptive edit cut replay service calls from 73 to 25, then served zero live packets. The measured replay savings implied 212 and 95 comparable replays to recover optimization time in those runs. The fixed arm was faster in both. [First score](evidence/v0.3.197-native-one-rat-score.txt) · [Second score](evidence/v0.3.200-native-one-rat-score.txt)
 
-Cook's Assistant has a fresh-account hosted completion with earned ingredients. Native quest evidence covers narrower phases, and a matched multi-quest campaign is still open. The smelting and bank examples have component fixtures, with live three-bar smelting and bank round-trip runs queued. In the newer melee pair, the fixed guest reported failure despite the server saving 32 Defence XP against a 16 XP target. The adaptive arm is running on a pinned build, so the pair has no final verdict yet. [Quest evidence](release-v0.3.29.md) · [Smelting](release-v0.3.215.md) · [Banking](release-v0.3.218.md)
+Cook's Assistant has a fresh-account hosted completion with earned ingredients. Native quest evidence covers narrower phases, and a matched multi-quest campaign is still open. The smelting and bank examples have component fixtures, with live three-bar smelting and bank round-trip runs queued. The newer 16 XP melee pair failed in both guests. The fixed save met the full goal, including 32 Defence XP and the expected stance. The adaptive save reached Attack and Strength only. Its accepted edit reduced replay callbacks from 73 to 19 and served zero live packets. [Quest evidence](release-v0.3.29.md) · [Smelting](release-v0.3.215.md) · [Banking](release-v0.3.218.md) · [Newer melee pair](evidence/v0.3.223-native-melee-score.txt)
 
 ## What would establish a win
 

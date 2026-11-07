@@ -8,7 +8,7 @@ are maintained separately. [Versioning](versioning.md) · [Threat model](threat-
 ## Exo evaluation and OS evolution
 
 The [progress report](exo-progress-report.md) records the benchmark results
-through v0.3.218. Subsequent releases check queued XP before switching
+through v0.3.223. Recent releases check queued XP before switching
 targets, read game updates between replay measurements, restore the
 native reader self-rebuild, and score saved goals separately from guest
 verdicts. A live fixed guest reported a stalled encounter while its server
