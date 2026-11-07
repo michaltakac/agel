@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.161.** The OSRS training example can reach its first
-XP target while the rat is still visible. See the [release notes](docs/release-v0.3.161.md).
+**Current release: v0.3.162.** Native one-rat comparisons retain timed
+combat failures and the server save. See the [release notes](docs/release-v0.3.162.md).
+
+v0.3.161 can reach the first training XP target while the rat remains visible. See the [release notes](docs/release-v0.3.161.md).
 
 v0.3.160 separates native guest outcomes, saved progress and live policy use. See the [release notes](docs/release-v0.3.160.md).
 

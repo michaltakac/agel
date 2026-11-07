@@ -367,9 +367,14 @@ else:
         source+='''
 (def started (clock-us))
 (console-log "native-combat: searching for a rat")
-(def combat (test-rat-combat-bounded ready
-  (fn (state predicate) (osrs-await-bounded state predicate 320))
-  combat-after-attack))
+(def combat (with-handler (* problem)
+  (begin
+    (console-log (text-concat "native-combat: failure " (print-form problem)))
+    (console-log (text-concat "native-combat: task-us " (print-form (- (clock-us) task-start))))
+    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+  (test-rat-combat-bounded ready
+    (fn (state predicate) (osrs-await-bounded state predicate 320))
+    combat-after-attack)))
 (def finish (clock-us))
 (def completed (get combat 'state))
 (console-log (text-concat "native-combat: " (print-form (get combat 'report))))
@@ -606,6 +611,8 @@ if editing:
     judge_dispatched=bool(re.search(r'^inference-bridge: started job \d+ provider jev ',output,re.M))
     decode_judge_ledger(disk,directory,environment['TYPESAFEAI_API_KEY'],options.live,
         required=judge_dispatched and passed)
+if not passed and options.combat and re.search(r'^native-combat: failure \{', output, re.M):
+    capture_account(lambda snapshot: combat_xp_saved({0: 0, 3: 1154}, snapshot, minimum=True), [])
 if not passed and melee is not None and re.search(r'^native-combat: (?:optimizer )?failure \{', output, re.M):
     capture_account(lambda snapshot: melee_failure_saved(output, snapshot),
                     ['varp.com_mode'])

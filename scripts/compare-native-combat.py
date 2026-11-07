@@ -119,11 +119,14 @@ def load_arm(directory, policy, read_table):
     usage = []
     decision = policy
     if not correct:
-        require(goal is not None and policy != 'transferred'
-                and re.search(r'^native-combat: (?:optimizer )?failure \{', trace, re.M),
-                f'{directory}: no measured melee task failure')
-        require(melee_failure_saved(trace, saved),
-                f'{directory}: saved account does not corroborate observed training progress')
+        require(re.search(r'^native-combat: (?:optimizer )?failure \{', trace, re.M),
+                f'{directory}: no measured combat task failure')
+        if goal is None:
+            require(combat_xp_saved({0: 0, 3: 1154}, saved, minimum=True),
+                    f'{directory}: no saved combat stats')
+        else:
+            require(policy != 'transferred' and melee_failure_saved(trace, saved),
+                    f'{directory}: saved account does not corroborate observed training progress')
     elif goal is None:
         expected = combat_xp(trace)
         require(re.search(r'^native-combat: \{test rat-combat passed #t .*target-removed #t\}', trace, re.M),
@@ -146,9 +149,14 @@ def load_arm(directory, policy, read_table):
                          saved, re.M)
     require(identity, f'{directory}: expected saved normal account at 1× XP')
     if policy == 'transferred':
-        require(re.search(r'^native-transfer: retained policy uses [1-9]\d*$', trace, re.M)
-                and 'native-transfer: score {correct #t ' in trace,
-                f'{directory}: no successful live use of the retained policy')
+        if correct:
+            require(re.search(r'^native-transfer: retained policy uses [1-9]\d*$', trace, re.M)
+                    and 'native-transfer: score {correct #t ' in trace,
+                    f'{directory}: no successful live use of the retained policy')
+        else:
+            require(re.search(r'^native-transfer: recovered \{version 2 ', trace, re.M),
+                    f'{directory}: no verified retained policy before combat failure')
+            decision = 'transferred-task-failed'
         if 'donor_judge_frames_sha256' in manifest:
             frames = judge_frames(directory / 'disk.img')
             require(frames and hashlib.sha256(frames).hexdigest() == manifest['donor_judge_frames_sha256'],
