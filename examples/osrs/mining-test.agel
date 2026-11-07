@@ -53,11 +53,13 @@
           (< (osrs-pause-events previous interface component) (osrs-pause-events state interface component))
           #f)
         #f)))
+  (def observe-dialogue
+    (fn (state ready)
+      (let ((bounded (observe-live state ready 12)))
+        (if (ready bounded) bounded (osrs-observe-ready bounded ready 128)))))
   (def observe-interface
     (fn (state previous interface component)
-      (let ((ready (fn (g) (fresh-dialogue? g previous interface component))))
-        (let ((bounded (observe-live state ready 12)))
-          (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))))
+      (observe-dialogue state (fn (g) (fresh-dialogue? g previous interface component)))))
   (def require-interface
     (fn (observed previous interface component)
       (if (fresh-dialogue? observed previous interface component) observed
@@ -110,6 +112,17 @@
                 (let ((fresh-menu (get reply 'state)))
                   (await-interface (osrs-resume-dialogue fresh-menu 219 1 1) fresh-menu 217 5))
                 (require-interface (get reply 'state) menu 217 5))))))))
+  (def advice-object
+    (fn (player observe retry?)
+      (let ((ready (fn (g) (if (fresh-dialogue? g player 193 0) #t
+                            (if retry? (fresh-tutor-menu? g player) #f)))))
+        (let ((next (observe-dialogue (osrs-resume-dialogue player 217 5 -1) ready)))
+          (if (fresh-dialogue? next player 193 0) next
+            (if (if retry? (fresh-tutor-menu? next player) #f)
+              (begin
+                (observe "mining tutor reopened the menu, selecting advice again")
+                (advice-object (advice-page next observe) observe #f))
+              (require-interface next player 193 0)))))))
   (def copper-ready? (fn (g) (if (= (ores g) 1) (< 0 (mining-xp g)) #f)))
   (def mine-copper-rock
     (fn (state observe)
@@ -128,7 +141,7 @@
         (let ((menu (tutor-menu ready observe)))
           (let ((player (advice-page menu observe)))
             (observe "mining tutor accepted the advice choice")
-            (let ((object (await-interface (osrs-resume-dialogue player 217 5 -1) player 193 0)))
+            (let ((object (advice-object player observe #t)))
               (observe "mining tutor showed the mining site icon")
               (let ((gift (await-interface (osrs-resume-dialogue object 193 0 0) object 231 5)))
                 (require (= (pickaxes gift) 1) "the mining tutor did not provide a bronze pickaxe")

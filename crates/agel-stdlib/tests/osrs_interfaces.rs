@@ -66,29 +66,38 @@ fn mining_advice_retries_only_after_a_fresh_menu() {
         (def osrs-talk
           (fn (state _) (assoc (assoc (assoc state 219 2) 'active 219) 'talks 1)))
         (def osrs-resume-dialogue
-          (fn (state _id _component _slot)
-            (let ((choices (+ 1 (get state 'choices))))
-              (if (= choices (get state 219))
-                (let ((next (assoc state 'choices choices)))
-                  (if (= choices 2) (assoc (assoc next 'active 217) 217 1) next))
-                (signal 'test "choice reused an old menu")))))
+          (fn (state id _component _slot)
+            (if (= id 217)
+              (if (get state 'reopened)
+                (assoc (assoc state 'active 193) 193 1)
+                (assoc (assoc (assoc state 'active 219) 219 2) 'reopened #t))
+              (let ((choices (+ 1 (get state 'choices))))
+                (if (= choices (get state 219))
+                  (let ((next (assoc state 'choices choices)))
+                    (if (= choices 2) (assoc (assoc next 'active 217) 217 (+ 1 (get state 217))) next))
+                  (signal 'test "choice reused an old menu"))))))
         (def osrs-keepalive (fn (state) state))
         (def osrs-observe-bounded (fn (state _ready _ticks) state))
         (def osrs-observe-ready (fn (state _ready _limit) state)))
     "#).unwrap();
     let mining = include_str!("../../../examples/osrs/mining-test.agel").replace(
         "(export mine-first-copper",
-        "(export advice-page mine-first-copper",
+        "(export advice-page advice-object mine-first-copper",
     );
     world.evaluate(&mining).unwrap();
-    let result = world.evaluate(
-        "(import agel/osrs-mining-test)
+    let result = world
+        .evaluate(
+            "(import agel/osrs-mining-test)
          (def page (advice-page (dict 'active 219 219 1 217 0 'choices 0 'talks 0) (fn (_) nil)))
-         (list (get page 'active) (get page 'talks) (get page 'choices))",
-    ).unwrap();
+         (def object (advice-object (dict 'active 217 217 1 219 1 193 0 'choices 1 'talks 0)
+           (fn (_) nil) #t))
+         (list (get page 'active) (get page 'talks) (get page 'choices)
+               (get object 'active) (get object 'talks) (get object 'choices))",
+        )
+        .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(217 1 2)")
+        Some("(217 1 2 193 0 2)")
     );
 }
 
@@ -511,23 +520,24 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
             (let ((clicked (assoc (assoc state 'clicks (cons component (get state 'clicks)))
                                   'server-stance (if (= component 10) 1 3))))
               (if (if (get state 'late) #t (get state 'clicks))
-                (assoc (if (= component 10) (assoc clicked 'stance 1) clicked)
+                (assoc (if (if (get state 'late) #f
+                               (if (= component 10) #t (< 4 (count (get state 'clicks)))))
+                         (assoc clicked 'stance (get clicked 'server-stance)) clicked)
                        'npcs (list rat-one rat-two))
                 clicked))))
         (def osrs-varp (fn (state varp) (get state 'stance)))
         (def osrs-attack
           (fn (state index)
             (let ((next (assoc state 'attempts (cons index (get state 'attempts)))))
-              (if (= index 1) next
-                (assoc (assoc (assoc next 'npcs (list rat-one))
+              (if (= (get state 'server-stance) nil)
+                (assoc (assoc next 0 8) 3 1156)
+                (if (= index 1) next
+                  (assoc (assoc (assoc next 'npcs (list rat-one))
                   (if (= (get state 'server-stance) 1) 2 1) 8)
-                  3 (+ (get state 3) 2)))))))
+                  3 (+ (get state 3) 2))))))))
       (module agel/osrs-combat-test
-        (export test-rat-combat-bounded)
-        (def test-rat-combat-bounded
-          (fn (state await after-attack)
-            (dict 'state (assoc (assoc state 0 8) 3 1156)
-                  'report (dict 'target-index 1)))))
+        (export nearest-rat)
+        (def nearest-rat (fn (_) (dict 'index 1 'type 2854))))
     "#,
         )
         .unwrap();
@@ -541,10 +551,10 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
             r#"
       (import agel/osrs-combat-training)
       (import agel/sequence)
-      (def trained (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154) 8 2 nil))
+      (def trained (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154 'npcs (list (dict 'index 1 'type 2854))) 8 2 nil))
       (def report (get trained 'report))
       (def phases nil)
-      (def late (train-rat-melee-with-progress (dict 0 0 1 0 2 0 3 1154 'late #t) 8 2 nil
+      (def late (train-rat-melee-with-progress (dict 0 0 1 0 2 0 3 1154 'late #t 'npcs (list (dict 'index 1 'type 2854))) 8 2 nil
         (fn (phase) (def phases (cons (get phase 'phase) phases)))))
       (list (get report 'passed) (get report 'defence-xp) (get report 'stance)
         (reverse (get (get trained 'state) 'clicks))
@@ -559,6 +569,6 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 1 (10 18 10 18 10 18) (1 1 2 2) (1 2 2) 3 (10 18) 2 1 (training stance-requested training stance-requested training))")
+        Some("(#t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 3 (10 18) 2 1 (training stance-requested training stance-requested training))")
     );
 }
