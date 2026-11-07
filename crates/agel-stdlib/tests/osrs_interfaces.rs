@@ -205,9 +205,13 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
             r#"
       (module agel/osrs-mining-test)
       (module agel/osrs-game
-        (export osrs-keepalive osrs-observe-bounded osrs-wait-ticks)
+        (export osrs-keepalive osrs-observe-bounded osrs-observe-ready osrs-wait-ticks
+          osrs-inventory-count osrs-map-route)
         (def osrs-keepalive (fn (state) state))
         (def osrs-wait-ticks (fn (state _) (assoc state 'visible #f)))
+        (def osrs-inventory-count (fn (state _container _item) (get state 'items)))
+        (def osrs-map-route (fn (_) nil))
+        (def osrs-observe-ready (fn (state _ready _limit) (assoc state 'items 1)))
         (def osrs-observe-bounded
           (fn (state ready _)
             (let ((visible (assoc state 'visible #t)))
@@ -219,17 +223,18 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
         .evaluate(
             &include_str!("../../../examples/osrs/quest-test.agel").replace(
                 "(export stage-cook-ingredients",
-                "(export wait-live stage-cook-ingredients",
+                "(export wait-live wait-item stage-cook-ingredients",
             ),
         )
         .unwrap();
     let result = world
         .evaluate(
             "(import agel/osrs-quest-test)
-      (get (wait-live (dict 'visible #f) (fn (state) (get state 'visible)) 1) 'visible)",
+      (list (get (wait-live (dict 'visible #f) (fn (state) (get state 'visible)) 1) 'visible)
+            (get (wait-item (dict 'items 0) 1931) 'items))",
         )
         .unwrap();
-    assert_eq!(result.values.last(), Some(&Value::Bool(true)));
+    assert_eq!(result.values.last(), Some(&Value::List(vec![Value::Bool(true), Value::Int(1)])));
 }
 
 #[test]

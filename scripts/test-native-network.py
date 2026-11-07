@@ -411,16 +411,19 @@ else:
         (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
       (scenario quest-start-state log-quest))))
 (def quest-trace-keys
-  (dict 'talk #t 'resume-dialogue #t
-        "IF_OPENSUB" #t "IF_CLOSESUB" #t "IF_RESYNC_V2" #t "IF_SETEVENTS_V2" #t "IF_SETTEXT" #t))
+  (dict 'talk "dialogue" 'resume-dialogue "dialogue"
+        "IF_OPENSUB" "dialogue" "IF_CLOSESUB" "dialogue" "IF_RESYNC_V2" "dialogue"
+        "IF_SETEVENTS_V2" "dialogue" "IF_SETTEXT" "dialogue"
+        'take-ground-item "inventory" "UPDATE_INV_FULL" "inventory" "UPDATE_INV_PARTIAL" "inventory"))
 (def trace-quest-record
   (fn (history record)
-    (if (get quest-trace-keys (if (get record 'name) (get record 'name) (get record 'action)))
-      (let ((data (if (has-key? record 'bytes) (get (get record 'bytes) 'data) nil)))
-        (log-quest (text-concat "dialogue trace "
-          (print-form (if (if data (< 512 (text-bytes data)) #f)
-                        (assoc record 'bytes (text-slice data 0 512)) record)))))
-      nil)
+    (let ((category (get quest-trace-keys (if (get record 'name) (get record 'name) (get record 'action)))))
+      (if category
+        (let ((data (if (has-key? record 'bytes) (get (get record 'bytes) 'data) nil)))
+          (log-quest (text-concat category (text-concat " trace "
+            (print-form (if (if data (< 512 (text-bytes data)) #f)
+                          (assoc record 'bytes (text-slice data 0 512)) record))))))
+        nil))
     (record-chain-push history record)))
 (def quest-start-state (assoc quest-start-state 'history-push trace-quest-record))
 '''

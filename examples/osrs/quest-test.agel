@@ -63,15 +63,24 @@
               (run-dialogue (osrs-resume-dialogue next id (get page-components id) -1)
                 next choices (- pages 1) observe)))))))
   (def inventory (fn (state item) (osrs-inventory-count state 93 item)))
+  (def observe-live
+    (fn (state predicate batches)
+      (if (if (predicate state) #t (= batches 0)) state
+        (observe-live (osrs-observe-bounded (osrs-keepalive state) predicate 5)
+          predicate (- batches 1)))))
   (def wait-live
     (fn (state predicate batches)
-      (if (predicate state) state
-        (if (= batches 0) (signal 'osrs/quest-test "live observation timed out")
-          (wait-live (osrs-observe-bounded (osrs-keepalive state) predicate 5) predicate (- batches 1))))))
+      (let ((observed (observe-live state predicate batches)))
+        (if (predicate observed) observed (signal 'osrs/quest-test "live observation timed out")))))
   (def wait-item
     (fn (state item)
-      (with-handler (* problem) (signal 'osrs/quest-test "waiting for gathered item" (list item problem))
-        (wait-live state (fn (g) (= (inventory g item) 1)) 24))))
+      (let ((ready (fn (g) (= (inventory g item) 1))))
+        (let ((bounded (observe-live state ready 24)))
+          (let ((observed (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))
+            (if (ready observed) observed
+              (signal 'osrs/quest-test "waiting for gathered item"
+                (dict 'item item 'observed-count (inventory observed item)
+                      'route (osrs-map-route observed)))))))))
   (def castle-pot (fn (state) (osrs-ground-count state 1931 3209 3214 0)))
   (def cook-containers
     (fn (state observe)
