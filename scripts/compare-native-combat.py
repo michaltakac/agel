@@ -60,6 +60,18 @@ def verify_combat_source(directory, source, manifest):
         require(actual == manifest.get(digest_field),
                 f'{directory}: installed {name} differs from the world manifest')
 
+    if manifest.get('goal_xp') is not None:
+        boundary = '(import agel/bytes)\n(import agel/meta)\n(import agel/sequence)\n(import agel/work-profile)\n'
+        start = source.find(boundary)
+        stop = source.find('\n(import agel/osrs-wire)\n', start)
+        require(start >= 0 and stop > start, f'{directory}: missing installed melee service policy')
+        actual = hashlib.sha256(source[start:stop].encode()).hexdigest()
+        require(actual == manifest.get('service_policy_sha256'),
+                f'{directory}: installed melee service policy differs from the world manifest')
+        phase = 'after-attack' if '(def train-rat-melee-with-transition' in source else None
+        require(phase == manifest.get('optimizer_phase'),
+                f'{directory}: installed melee transition differs from the world manifest')
+
 
 def verify_optimizer_approval(directory, trace, receipts):
     commits = list(re.finditer(r'^native-opt: policy committed after text judgment and measured replay$', trace, re.M))
@@ -455,42 +467,26 @@ def optimizer_score(directory):
           f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
 
 
-def verify_transfer_donor(donor, recipient, evaluation_accounts):
+def verify_transfer_donor(donor, recipient, evaluation_accounts, read_table):
     origin = json.loads((donor / 'world.json').read_text())
     target = json.loads((recipient / 'world.json').read_text())
-    require(origin.get('encoder_policy') == 'adaptive' and target.get('encoder_policy') == 'transferred',
-            'expected an adaptive donor and a transferred recipient')
-    for key in ('image', 'manifest', 'combat_policy_sha256', 'goal_xp'):
+    require(target.get('encoder_policy') == 'transferred', 'expected a transferred recipient')
+    keys = ('image', 'manifest', 'combat_policy_sha256', 'goal_xp')
+    if target.get('goal_xp') is not None:
+        keys += ('training_policy_sha256', 'service_policy_sha256', 'optimizer_phase')
+    for key in keys:
         require(origin.get(key) == target.get(key), f'donor differs from recipient on {key}')
     with (donor / 'disk.img').open('rb') as image:
         digest = hashlib.file_digest(image, 'sha256').hexdigest()
     require(target.get('donor_disk_sha256') == digest, 'recipient names a different donor disk')
-    _, frames = verified_judge_ledger(donor)
+    frames = judge_frames(donor / 'disk.img')
     require(frames and frames == judge_frames(recipient / 'disk.img'),
             'recipient does not retain the donor judge journal')
-    read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
-    verify_combat_source(donor, installed_client(donor, read_table), origin)
-    trace = (donor / 'serial.log').read_text()
-    saved = saved_outcome(donor)
-    identity = re.search(r'^account=(\d+) character=\d+ rights= x=\d+ z=\d+ level=0 xp_rate_in_hundreds=100$',
-                         saved, re.M)
-    require(identity and identity[1] not in evaluation_accounts,
-            'donor must be a distinct normal account')
-    require(re.findall(r'^process agel exited with status (\d+)$', trace, re.M) == ['0'],
-            'donor combat did not complete')
-    goal = origin.get('goal_xp')
-    if goal is None:
-        xp = combat_xp(trace)
-        require(re.search(r'^native-combat: \{test rat-combat passed #t .*target-removed #t\}$', trace, re.M),
-                'donor has no successful combat report')
-    else:
-        xp, levels = melee_xp(trace, goal)
-        require(melee_levels_saved(levels, saved), 'donor melee levels differ from its report')
-    require(combat_xp_saved(xp, saved, minimum=goal is not None), 'donor XP differs from its report')
-    charges, decision, usage = adaptation_evidence(donor, trace, True)
-    clocks = re.findall(r'^native-combat: task-us ([1-9]\d*)$', trace, re.M)
-    require(decision == 'committed' and len(clocks) == 1, 'donor has no timed committed policy')
-    return int(clocks[0]), charges, usage
+    _, account, elapsed, charges, correct, decision, usage = load_arm(donor, 'adaptive', read_table)
+    require(account not in evaluation_accounts, 'donor must be a distinct normal account')
+    require(correct and decision == 'committed' and elapsed > 0,
+            'donor has no successful timed and exercised policy')
+    return elapsed, charges, usage
 
 
 def transfer_recovery_time(directory, read_table):
@@ -547,7 +543,7 @@ def main():
     donor_score = None
     if args.donor:
         require(adaptive_policy == 'transferred', '--donor requires a transferred policy')
-        donor_score = verify_transfer_donor(args.donor, args.candidate, {fixed_account, transfer_account})
+        donor_score = verify_transfer_donor(args.donor, args.candidate, {fixed_account, transfer_account}, read_table)
     digest = hashlib.sha256(json.dumps(fixed, sort_keys=True).encode()).hexdigest()
     print("(import agel/benchmark)")
     task = 'first-bronze-sale' if args.economy else 'adamant-platebody' if args.craft else 'cooks-assistant' if args.quest else 'three-skill-melee' if args.melee else 'one-rat'

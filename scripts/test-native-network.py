@@ -96,7 +96,6 @@ if options.combat:
 if melee is not None:
     manifest['scope']='native three-skill melee training on a fresh normal account'
     manifest['goal_xp']=melee
-    manifest['optimizer_phase']='after-attack'
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
     manifest['evaluation_fuel']=250_000_000
     manifest['keepalive_interval_us']=3_000_000
@@ -163,8 +162,12 @@ if options.combat or melee is not None:
     combat_module=(examples / 'osrs/combat-test.agel').read_bytes()
     manifest['combat_policy_sha256']=hashlib.sha256(combat_module).hexdigest()
     source+=combat_module.decode()+'\n'
+melee_transition = False
 if melee is not None:
     training_module=(examples / 'osrs/combat-training.agel').read_bytes()
+    melee_transition = b'(def train-rat-melee-with-transition' in training_module
+    if melee_transition:
+        manifest['optimizer_phase'] = 'after-attack'
     manifest['training_policy_sha256']=hashlib.sha256(training_module).hexdigest()
     source+=training_module.decode()+'\n'
 if options.transfer_from:
@@ -222,8 +225,9 @@ if shared_carrier:
             manifest['service_policy_sha256']=hashlib.sha256(service_policy).hexdigest()
             if options.transfer_from:
                 for field in ('service_policy_sha256', 'training_policy_sha256',
-                              'evaluation_fuel', 'keepalive_interval_us', 'guest_memory_mib'):
-                    if previous.get(field) != manifest[field]:
+                              'evaluation_fuel', 'keepalive_interval_us', 'guest_memory_mib',
+                              'optimizer_phase'):
+                    if previous.get(field) != manifest.get(field):
                         raise SystemExit('donor differs from current melee contract: '+field)
         source+=service_policy.decode()+'\n'
     else:
@@ -326,7 +330,7 @@ else:
     if editing and not options.combat:
         task_label = ('native-combat' if melee is not None else 'native-economy' if options.economy
                       else 'native-craft' if options.craft else 'native-quest' if fresh_quest else None)
-        if melee is not None:
+        if melee_transition:
             source += """(def after-attack-phase (fn (state) (begin
 (def ready state)
 (console-log "native-combat: adapting after Attack training")
@@ -361,11 +365,11 @@ else:
             source+=observation_finish
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
-        if melee is not None:
+        if melee_transition:
             source += "ready)))))\n"
         elif task_label:
             source += "))\n"
-    if melee is not None and not options.optimize:
+    if melee_transition and not options.optimize:
         source += "(def after-attack-phase (fn (state) state))\n"
     if options.optimize:
         source+='''(def report-policy-use
@@ -447,6 +451,8 @@ else:
 (console-log (text-concat "native-combat: history-records " (print-form retained-count)))
 '''
     elif melee is not None:
+        train = 'train-rat-melee-with-transition' if melee_transition else 'train-rat-melee-with-progress'
+        transition = ' after-attack-phase' if melee_transition else ''
         source+=f'''(import agel/osrs-combat-training)
 (console-log "native-combat: training three melee skills")
 (def log-encounter (fn (skill report)
@@ -459,7 +465,7 @@ else:
     (report-policy-use)
     (console-log (text-concat "native-combat: task-us " (print-form (- (clock-us) task-start))))
     (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
-  (train-rat-melee-with-transition ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter log-training after-attack-phase)))
+  ({train} ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter log-training{transition})))
 (def finish (clock-us))
 (def completed (get trained 'state))
 (def report (get trained 'report))
