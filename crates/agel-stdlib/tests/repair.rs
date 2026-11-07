@@ -40,7 +40,7 @@ fn general_repair_predicts_judges_replays_and_activates() {
     reply(&mut world, &options, "writer", GOOD);
     assert!(world.pending_model_requests()[0]
         .prompt
-        .contains("Agel parsed the proposal and statically analyzed its quoted after form"));
+        .contains("The quoted after form is Agel source."));
     assert_eq!(
         world
             .evaluate("(get (repair-state worker) 'status)")

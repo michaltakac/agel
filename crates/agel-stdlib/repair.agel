@@ -90,8 +90,8 @@
       (let ((prompt (judgment-request
               (list (list "contract and observations" (get state 'context))
                     (list "before" (get state 'before-text)) (list "proposal" text)
-                    (list "reader preflight" "Agel parsed the proposal and statically analyzed its quoted after form. Judge the proposed after form as Agel source. Executable replay checks its behavior separately."))
-              (list '(noul "patch" "Does the proposed change stay within the stated contract, and does its diagnosis explain how the code addresses the observations?")
+                    (list "reader preflight" "The quoted after form is Agel source. (let ((name value)) body) is valid and integer division truncates. Replay measures behavior later."))
+              (list '(noul "patch" "Does after satisfy the stated source contract, and does the diagnosis ground the change in observations? Judge the proposal without assuming replay has run.")
                     '(choice "reason" "Which defect is directly evident in the proposal text? Use none when no defect is directly evident."
                       ("none" "No identified defect") ("contract" "Does not implement the contract")
                       ("boundary" "Fails at valid boundaries, types or integer limits")
