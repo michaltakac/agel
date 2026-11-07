@@ -25,7 +25,7 @@ fn mining_tutor_waits_for_a_new_actionable_menu() {
         (def osrs-pause-events (fn (state _id _component) (get state 'pauses))))"#,
         )
         .unwrap();
-    let source = include_str!("../../../examples/osrs/mining-test.agel").replace(
+    let source = include_str!("../mining-test.agel").replace(
         "(export mine-first-copper",
         "(export fresh-tutor-menu? talk-to-tutor mine-first-copper",
     );
@@ -94,7 +94,7 @@ fn mining_advice_retries_only_after_a_fresh_menu() {
             (if (has-key? state 'walks) (assoc state 'arrived #t) state)))
         (def osrs-observe-ready (fn (state _ready _limit) state)))
     "#).unwrap();
-    let mining = include_str!("../../../examples/osrs/mining-test.agel").replace(
+    let mining = include_str!("../mining-test.agel").replace(
         "(export mine-first-copper",
         "(export advice-page advice-object open-furnace mine-first-copper",
     );
@@ -203,9 +203,7 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                          (signal 'test/dialogue "unexpected dialogue action")))))"#,
         )
         .unwrap();
-    world
-        .evaluate(include_str!("../../../examples/osrs/quest-test.agel"))
-        .unwrap();
+    world.evaluate(include_str!("../quest-test.agel")).unwrap();
     let result = world
         .evaluate(
             "(import agel/osrs-quest-test)
@@ -259,12 +257,10 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
         )
         .unwrap();
     world
-        .evaluate(
-            &include_str!("../../../examples/osrs/quest-test.agel").replace(
-                "(export stage-cook-ingredients",
-                "(export wait-live wait-item take-castle-pot travel-to stage-cook-ingredients",
-            ),
-        )
+        .evaluate(&include_str!("../quest-test.agel").replace(
+            "(export stage-cook-ingredients",
+            "(export wait-live wait-item take-castle-pot travel-to stage-cook-ingredients",
+        ))
         .unwrap();
     let result = world
         .evaluate(
@@ -277,7 +273,16 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
             (get (travel-to (dict 'visible #f) 3197 3270 8) 'visible))",
         )
         .unwrap();
-    assert_eq!(result.values.last(), Some(&Value::List(vec![Value::Bool(true), Value::Int(1), Value::Int(2), Value::Bool(true), Value::Bool(true)])));
+    assert_eq!(
+        result.values.last(),
+        Some(&Value::List(vec![
+            Value::Bool(true),
+            Value::Int(1),
+            Value::Int(2),
+            Value::Bool(true),
+            Value::Bool(true)
+        ]))
+    );
 }
 
 #[test]
@@ -285,14 +290,14 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     let mut world = World::default();
     agel_stdlib::install(&mut world, &Default::default()).unwrap();
     for source in [
-        include_str!("../bytes.agel"),
-        include_str!("../crypto.agel"),
-        include_str!("../../../examples/osrs/osrs-wire.agel"),
-        include_str!("../../../examples/osrs/osrs-crypto.agel"),
-        include_str!("../../../examples/osrs/osrs-packets.agel"),
-        include_str!("../../../examples/osrs/osrs-bits.agel"),
-        include_str!("../../../examples/osrs/osrs-npcs.agel"),
-        include_str!("../../../examples/osrs/osrs-game.agel"),
+        include_str!("../../../crates/agel-stdlib/bytes.agel"),
+        include_str!("../../../crates/agel-stdlib/crypto.agel"),
+        include_str!("../osrs-wire.agel"),
+        include_str!("../osrs-crypto.agel"),
+        include_str!("../osrs-packets.agel"),
+        include_str!("../osrs-bits.agel"),
+        include_str!("../osrs-npcs.agel"),
+        include_str!("../osrs-game.agel"),
     ] {
         world.evaluate(source).unwrap();
     }
@@ -407,7 +412,7 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
         pause.values.last().map(Value::to_string).as_deref(),
         Some("(#t 1 0 1 1 0)")
     );
-    let mining = include_str!("../../../examples/osrs/mining-test.agel").replace(
+    let mining = include_str!("../mining-test.agel").replace(
         "(export mine-first-copper",
         "(export fresh-tutor-menu? fresh-dialogue? mine-first-copper",
     );
@@ -581,7 +586,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
     "#,
         )
         .unwrap();
-    let training = include_str!("../../../examples/osrs/combat-training.agel").replace(
+    let training = include_str!("../combat-training.agel").replace(
         "(export train-rat-attack",
         "(export next-rat train-rat-attack",
     );

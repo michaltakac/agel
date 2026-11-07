@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-cargo build -q --release -p agel-stdlib --example osrs
+cargo build -q --release -p agel-osrs-example --example osrs
 python3 scripts/test-osrs-crypto.py
 python3 scripts/test-osrs-login-fixture.py
 python3 scripts/test-osrs-npcs.py

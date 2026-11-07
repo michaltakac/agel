@@ -4,13 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+publish = false
 description = "Agel plays DOOM: a hosted agent that drives the native desktop through the machine's screen and keys, through Agel's model-provider effect, and keeps a dataset of every step"
 
 [dependencies]
-agel-core = { path = "../agel-core" }
-agel-effects = { path = "../agel-effects" }
-agel-integrity = { path = "../agel-integrity" }
-agel-model = { path = "../agel-model" }
+agel-core = { path = "../../../crates/agel-core" }
+agel-effects = { path = "../../../crates/agel-effects" }
+agel-integrity = { path = "../../../crates/agel-integrity" }
+agel-model = { path = "../../../crates/agel-model" }
 serde_json = "1"
 
 [lints]

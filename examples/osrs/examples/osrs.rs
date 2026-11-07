@@ -194,36 +194,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..EvaluationOptions::default()
     };
     agel_stdlib::install(&mut world, &options)?;
-    world.evaluate_with(include_str!("../bytes.agel"), &options)?;
     world.evaluate_with(
-        include_str!("../../../examples/osrs/osrs-wire.agel"),
+        include_str!("../../../crates/agel-stdlib/bytes.agel"),
         &options,
     )?;
-    world.evaluate_with(include_str!("../crypto.agel"), &options)?;
+    world.evaluate_with(include_str!("../osrs-wire.agel"), &options)?;
     world.evaluate_with(
-        include_str!("../../../examples/osrs/osrs-crypto.agel"),
+        include_str!("../../../crates/agel-stdlib/crypto.agel"),
         &options,
     )?;
-    world.evaluate_with(
-        include_str!("../../../examples/osrs/osrs-login.agel"),
-        &options,
-    )?;
-    world.evaluate_with(
-        include_str!("../../../examples/osrs/osrs-packets.agel"),
-        &options,
-    )?;
-    world.evaluate_with(
-        include_str!("../../../examples/osrs/osrs-bits.agel"),
-        &options,
-    )?;
-    world.evaluate_with(
-        include_str!("../../../examples/osrs/osrs-npcs.agel"),
-        &options,
-    )?;
-    world.evaluate_with(
-        include_str!("../../../examples/osrs/osrs-game.agel"),
-        &options,
-    )?;
+    world.evaluate_with(include_str!("../osrs-crypto.agel"), &options)?;
+    world.evaluate_with(include_str!("../osrs-login.agel"), &options)?;
+    world.evaluate_with(include_str!("../osrs-packets.agel"), &options)?;
+    world.evaluate_with(include_str!("../osrs-bits.agel"), &options)?;
+    world.evaluate_with(include_str!("../osrs-npcs.agel"), &options)?;
+    world.evaluate_with(include_str!("../osrs-game.agel"), &options)?;
     if let Some(value) = world
         .evaluate_with(&fs::read_to_string(program)?, &options)?
         .values

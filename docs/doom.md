@@ -206,7 +206,7 @@ Agel's model-provider effect, and leaves a dataset of every step.
 
 ![DOOM paused in its window while Agel decides; the engine's state lines in the terminal, at v0.2.72](images/native-desktop-v0.2.72.png)
 
-`crates/agel-play` is the agent, a Rust program on the host (Tier 2 in
+`examples/doom/host` is the agent, a Rust program on the host (Tier 2 in
 [`deployment-targets.md`](deployment-targets.md)): it boots the desktop
 image in QEMU with the monitor and serial sockets the tests use, formats
 the region, starts the engine from the workshop (`-warp 1 -skill 2`), and
@@ -299,7 +299,7 @@ step it `model-request`s what it saw, and until an answer arrives it
 holds nothing. The desktop prints the request, the state line and the
 window as shades on the serial console between `model-request N:` and
 `model-request end`, and reads the answer back as `:model-reply N <action>
-<reason>`. `crates/agel-play` is now only that bridge: it boots the image,
+<reason>`. `examples/doom/host` is now only that bridge: it boots the image,
 loads the program, runs `:play`, and answers each request by calling a
 provider through `agel-model`'s typed, audited `model/infer` effect,
 recording every step to `steps.jsonl`; a `--policy echo` answers

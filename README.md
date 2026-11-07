@@ -5,8 +5,16 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.195.** Native combat can stop optimization before
-inference when the task completes during preparation. See the [release notes](docs/release-v0.3.195.md).
+**Current release: v0.3.196.** The OSRS host harness and legacy DOOM bridge
+live with their examples. See the [release notes](docs/release-v0.3.196.md).
+
+Agel's language, standard library, and OS provide reusable capabilities for
+programs to compose, including networking, research, inspection, live edits,
+and replay. Game protocols, guides, policies, and scoring belong with the
+examples in [examples/osrs](examples/osrs) and [examples/doom](examples/doom).
+
+v0.3.195 stops native combat optimization before inference when the task
+completes during preparation. See the [release notes](docs/release-v0.3.195.md).
 
 v0.3.194 separates task source from adaptive bookkeeping. See the [release notes](docs/release-v0.3.194.md).
 

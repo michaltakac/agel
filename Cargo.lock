@@ -75,6 +75,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agel-osrs-example"
+version = "0.2.97"
+dependencies = [
+ "agel-core",
+ "agel-stdlib",
+]
+
+[[package]]
 name = "agel-play"
 version = "0.2.97"
 dependencies = [
