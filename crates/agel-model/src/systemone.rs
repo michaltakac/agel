@@ -614,10 +614,15 @@ impl JevProvider {
             })();
             self.journal.release().map_err(ProviderError::Io)?;
             let (status, body) = attempt_result?;
-            if (status == 429 || status == 529) && attempt < RETRY_PAUSES.len() {
+            if (status == 429 || status == 529)
+                && attempt < RETRY_PAUSES.len()
+                && self.journal.retry_allowed()
+            {
                 std::thread::sleep(RETRY_PAUSES[attempt]);
-                attempt += 1;
-                continue;
+                if self.journal.retry_allowed() {
+                    attempt += 1;
+                    continue;
+                }
             }
             return Ok((status, body));
         }

@@ -1,4 +1,4 @@
-"""Verify that a delayed judge receipt survives a native Agel process exit."""
+"""Verify that a delayed judge receipt survives native Agel exit without retrying."""
 import json
 from pathlib import Path
 import subprocess
@@ -9,7 +9,7 @@ from graphical_console import prepared_image
 from native_provider_support import decode_judge_ledger, provider_environment
 
 
-def main():
+def verify_exit(status, cost):
     with tempfile.TemporaryDirectory(prefix='agel-judge-exit-', dir='/tmp') as root:
         directory = Path(root)
         disk = prepared_image('target/boot/agel-v1.img', directory, blank_sectors=1024)
@@ -26,7 +26,8 @@ def main():
             subprocess.run(['python3', 'scripts/install-program.py', *arguments], check=True)
         environment = provider_environment(directory, False)
         curl = directory / 'curl-fixture'
-        curl.write_text(curl.read_text().replace('cat >/dev/null\n', 'cat >/dev/null\nsleep 6\n'))
+        delayed = curl.read_text().replace('cat >/dev/null\n', 'cat >/dev/null\nsleep 6\n')
+        curl.write_text(delayed.replace(r'\n200', rf'\n{status}'))
         socket = directory / 'serial'
         machine = subprocess.Popen([
             'qemu-system-x86_64', '-machine', 'pc,accel=tcg', '-m', '128M', '-display', 'none',
@@ -51,9 +52,10 @@ def main():
             machine.wait(timeout=10)
         records = decode_judge_ledger(disk, directory, environment['TYPESAFEAI_API_KEY'], False)
         assert records.count('(judge-start ') == records.count('(judge-result ') == 1
-        assert 'cost-nanousd 4200' in records
-        print('PASS: the delayed judge receipt survived guest process exit before any poll')
+        assert f'status {status} ' in records and f'cost-nanousd {cost} ' in records, records
+        print(f'PASS: judge status {status} and its cost survived guest exit without another call')
 
 
 if __name__ == '__main__':
-    main()
+    verify_exit(200, 4200)
+    verify_exit(429, 0)

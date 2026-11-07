@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 pub trait JudgeJournal: Debug + Send + Sync {
+    fn retry_allowed(&self) -> bool {
+        true
+    }
     fn reserve(&self, _bytes: u64) -> Result<(), String> {
         Ok(())
     }

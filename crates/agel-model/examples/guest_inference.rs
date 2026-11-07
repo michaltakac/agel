@@ -129,6 +129,14 @@ impl Wire {
     }
 }
 
+struct StopJudgeRetries<'a>(&'a GuestJudgeJournal);
+
+impl Drop for StopJudgeRetries<'_> {
+    fn drop(&mut self) {
+        self.0.stop_retries();
+    }
+}
+
 fn encode(bytes: &[u8]) -> String {
     let mut hex = String::new();
     for byte in bytes {
@@ -285,6 +293,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut byte_block = String::new();
     let started = Instant::now();
     let deadline = started + Duration::from_secs(seconds);
+    // The loop owns this guard so retries stop before the scope joins its workers.
+    let stop_retries = StopJudgeRetries(&journal);
     let outcome: Result<(), Box<dyn std::error::Error>> = thread::scope(|scope| loop {
         let lines = wire.lines(&mut cursor);
         for line in lines.lines() {
@@ -305,6 +315,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("guest process input queue refused a frame".into());
             }
             if line.starts_with(&args[2]) {
+                drop(stop_retries);
                 return Ok(());
             }
             if line == "model-request end" {

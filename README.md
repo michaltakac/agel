@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.95.** Repair prompts distinguish source judgment
-from measured replay. See the [release notes](docs/release-v0.3.95.md).
+**Current release: v0.3.96.** Native judge receipts drain on process exit
+without further retries. See the [release notes](docs/release-v0.3.96.md).
+
+v0.3.95 separates source judgment from measured replay in repair prompts.
+See the [release notes](docs/release-v0.3.95.md).
 
 v0.3.94 scores measured crafting failures with unchanged stock and XP.
 See the [release notes](docs/release-v0.3.94.md).

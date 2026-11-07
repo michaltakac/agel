@@ -7,6 +7,7 @@ type Exchange = dyn Fn(&str) -> Result<u64, String> + Send + Sync;
 pub struct GuestJudgeJournal {
     exchange: Box<Exchange>,
     failed: AtomicBool,
+    retry_allowed: AtomicBool,
     token: AtomicU64,
 }
 
@@ -21,9 +22,15 @@ impl GuestJudgeJournal {
         Self {
             exchange: Box::new(exchange),
             failed: AtomicBool::new(false),
+            retry_allowed: AtomicBool::new(true),
             token: AtomicU64::new(0),
         }
     }
+    pub fn stop_retries(&self) {
+        self.retry_allowed
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
     pub fn check(&self) -> Result<(), String> {
         if self.failed.load(std::sync::atomic::Ordering::Relaxed) {
             Err(
@@ -40,6 +47,11 @@ impl GuestJudgeJournal {
 }
 
 impl JudgeJournal for GuestJudgeJournal {
+    fn retry_allowed(&self) -> bool {
+        self.retry_allowed
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     fn reserve(&self, bytes: u64) -> Result<(), String> {
         self.check()?;
         if self
