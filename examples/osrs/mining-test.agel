@@ -53,19 +53,25 @@
           (< (osrs-pause-events previous interface component) (osrs-pause-events state interface component))
           #f)
         #f)))
-  (def await-interface
+  (def observe-interface
     (fn (state previous interface component)
       (let ((ready (fn (g) (fresh-dialogue? g previous interface component))))
         (let ((bounded (observe-live state ready 12)))
-          (let ((observed (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))
-            (if (ready observed) observed
-              (signal 'osrs/mining-test "expected actionable tutor dialogue"
-                (dict 'interface interface 'component component
-                  'opens-before (osrs-interface-opens previous interface)
-                  'opens-after (osrs-interface-opens observed interface)
-                  'pauses-before (osrs-pause-events previous interface component)
-                  'pauses-after (osrs-pause-events observed interface component)
-                  'tutor (tutor-state observed)))))))))
+          (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))))
+  (def require-interface
+    (fn (observed previous interface component)
+      (if (fresh-dialogue? observed previous interface component) observed
+        (signal 'osrs/mining-test "expected actionable tutor dialogue"
+          (dict 'interface interface 'component component
+            'opens-before (osrs-interface-opens previous interface)
+            'opens-after (osrs-interface-opens observed interface)
+            'pauses-before (osrs-pause-events previous interface component)
+            'pauses-after (osrs-pause-events observed interface component)
+            'tutor (tutor-state observed))))))
+  (def await-interface
+    (fn (state previous interface component)
+      (require-interface (observe-interface state previous interface component)
+        previous interface component)))
   (def fresh-tutor-menu?
     (fn (state previous) (fresh-dialogue? state previous 219 1)))
   (def talk-to-tutor
@@ -93,6 +99,17 @@
               (if (get second 'fresh) (get second 'state)
                 (signal 'osrs/mining-test "mining tutor did not open a menu after two talks"
                   (tutor-state (get second 'state))))))))))
+  (def advice-page
+    (fn (menu observe)
+      (let ((first (observe-interface (osrs-resume-dialogue menu 219 1 1) menu 217 5)))
+        (if (fresh-dialogue? first menu 217 5) first
+          (begin
+            (observe "tutor advice choice did not open a page, asking again")
+            (let ((reply (talk-to-tutor first observe)))
+              (if (get reply 'fresh)
+                (let ((fresh-menu (get reply 'state)))
+                  (await-interface (osrs-resume-dialogue fresh-menu 219 1 1) fresh-menu 217 5))
+                (require-interface (get reply 'state) menu 217 5))))))))
   (def copper-ready? (fn (g) (if (= (ores g) 1) (< 0 (mining-xp g)) #f)))
   (def mine-copper-rock
     (fn (state observe)
@@ -109,7 +126,7 @@
         (require (= (list (mining-xp ready) (pickaxes ready) (ores ready)) '(0 0 0))
           "expected a fresh account without a pickaxe or ore")
         (let ((menu (tutor-menu ready observe)))
-          (let ((player (await-interface (osrs-resume-dialogue menu 219 1 1) menu 217 5)))
+          (let ((player (advice-page menu observe)))
             (observe "mining tutor accepted the advice choice")
             (let ((object (await-interface (osrs-resume-dialogue player 217 5 -1) player 193 0)))
               (observe "mining tutor showed the mining site icon")

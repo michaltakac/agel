@@ -51,6 +51,48 @@ fn mining_tutor_waits_for_a_new_actionable_menu() {
 }
 
 #[test]
+fn mining_advice_retries_only_after_a_fresh_menu() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world.evaluate(r#"
+      (module agel/osrs-game
+        (export osrs-open-interface? osrs-interface-opens osrs-pause-events osrs-map-route
+          osrs-nearby-npcs osrs-talk osrs-resume-dialogue osrs-keepalive osrs-observe-bounded osrs-observe-ready)
+        (def osrs-open-interface? (fn (state id) (= id (get state 'active))))
+        (def osrs-interface-opens (fn (state id) (get state id)))
+        (def osrs-pause-events (fn (state id _) (get state id)))
+        (def osrs-map-route (fn (_) nil))
+        (def osrs-nearby-npcs (fn (_) (list (dict 'type 3222 'index 7))))
+        (def osrs-talk
+          (fn (state _) (assoc (assoc (assoc state 219 2) 'active 219) 'talks 1)))
+        (def osrs-resume-dialogue
+          (fn (state _id _component _slot)
+            (let ((choices (+ 1 (get state 'choices))))
+              (if (= choices (get state 219))
+                (let ((next (assoc state 'choices choices)))
+                  (if (= choices 2) (assoc (assoc next 'active 217) 217 1) next))
+                (signal 'test "choice reused an old menu")))))
+        (def osrs-keepalive (fn (state) state))
+        (def osrs-observe-bounded (fn (state _ready _ticks) state))
+        (def osrs-observe-ready (fn (state _ready _limit) state)))
+    "#).unwrap();
+    let mining = include_str!("../../../examples/osrs/mining-test.agel").replace(
+        "(export mine-first-copper",
+        "(export advice-page mine-first-copper",
+    );
+    world.evaluate(&mining).unwrap();
+    let result = world.evaluate(
+        "(import agel/osrs-mining-test)
+         (def page (advice-page (dict 'active 219 219 1 217 0 'choices 0 'talks 0) (fn (_) nil)))
+         (list (get page 'active) (get page 'talks) (get page 'choices))",
+    ).unwrap();
+    assert_eq!(
+        result.values.last().map(Value::to_string).as_deref(),
+        Some("(217 1 2)")
+    );
+}
+
+#[test]
 fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
     let mut world = World::default();
     agel_stdlib::install(&mut world, &Default::default()).unwrap();

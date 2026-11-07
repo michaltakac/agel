@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.142.** The native RuneScape runner can read 1 KiB
-per carrier request. See the [release notes](docs/release-v0.3.142.md).
+**Current release: v0.3.143.** Agel retries tutor advice on a fresh menu.
+See the [release notes](docs/release-v0.3.143.md).
+
+v0.3.142 reads up to 1 KiB per native carrier request.
+See the [release notes](docs/release-v0.3.142.md).
 
 v0.3.141 seals history in smaller chunks.
 See the [release notes](docs/release-v0.3.141.md).
