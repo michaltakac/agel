@@ -110,7 +110,10 @@
 (prepare-service)
 (require-optimization)
 (send worker '(repair/start)) (run 1)
-(def session (repair-agent-drive worker infer audit 6))
+(def session (repair-agent-drive-while worker infer audit 6 (fn (_) (optimization-needed?))))
+(if (= (get session 'status) 'stopped)
+  (signal 'native/optimization-complete "task completed after optimizer started" 'after-start)
+  nil)
 (map (fn (event)
   (if (= (get event 'event) 'refused)
     (begin

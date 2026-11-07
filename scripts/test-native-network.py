@@ -378,8 +378,14 @@ else:
       (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
     (with-handler (native/optimization-complete problem)
       (begin
-        (console-log "native-opt: task completed during preparation")
-        (skip-completed-combat (osrs-service-stop ready)))
+        (if (= (get problem 'data) 'after-start)
+          (begin
+            (def optimization-skipped 'after-start)
+            (console-log "native-opt: stopped optimizer after combat completed")
+            (osrs-service-stop ready))
+          (begin
+            (console-log "native-opt: task completed during preparation")
+            (skip-completed-combat (osrs-service-stop ready)))))
       (begin
         (def ready attacking)
         (def optimization-needed? needed)
@@ -574,7 +580,7 @@ else:
 '''
     source+='(wire-close)\n'
     if options.optimize:
-        source+='''(if optimization-skipped nil (begin
+        source+='''(if (= optimization-skipped #t) nil (begin
 (check (= (text-slice (file-read "judge-log") tape-offset (+ tape-offset (text-bytes replay-tape))) replay-tape)
   "recorded workload differed in protected storage")
 (console-log "native-opt: recorded workload verified in append-only log")))
@@ -674,7 +680,11 @@ if skipped:
     assert passed and options.combat and options.optimize and options.live
     assert 'inference-bridge: started job ' not in output
     assert 'native-opt: live uses 0' in output and not judge_frames(disk)
-if editing and not skipped:
+stopped = 'native-opt: stopped optimizer after combat completed' in output
+if stopped:
+    assert passed and options.combat and options.optimize and options.live and not skipped
+    assert 'native-opt: policy committed' not in output and 'native-opt: live uses 0' in output
+if editing and not (skipped or stopped):
     assert passed, 'native session failed; disk, serial log and judge records retained'
     if options.optimize:
         activated='native-opt: policy committed after text judgment and measured replay' in output

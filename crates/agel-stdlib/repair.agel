@@ -6,7 +6,7 @@
   (import agel/judgment)
   (export make-repair-agent repair-state repair-prompt repair-evaluate
           repair-new repair-start repair-pending repair-complete repair-fail repair-exchange repair-advance
-          repair-agent-exchange repair-agent-drive)
+          repair-agent-exchange repair-agent-drive repair-agent-drive-while)
 
   (def driver-seal
     (fn (agent id stage) (fn () (list agent id stage))))
@@ -297,18 +297,24 @@
                     (wait-agent-change agent state 8192))))
               (if (= (get state 'status) 'approved) (external-advance agent state append-record) state)))))))
   (def drive
-    (fn (agent state infer append-record remaining)
+    (fn (agent state infer append-record remaining continue?)
       (let ((status (get state 'status)))
         (if (if (= status 'approved) #t (if (= status 'proposing) #t (= status 'judging)))
-          (if (< 0 remaining)
-            (drive agent (repair-agent-exchange agent infer append-record) infer append-record (- remaining 1))
-            (signal 'repair/driver "repair transition budget exhausted" status))
+          (if (continue? state)
+            (if (< 0 remaining)
+              (drive agent (repair-agent-exchange agent infer append-record) infer append-record
+                (- remaining 1) continue?)
+              (signal 'repair/driver "repair transition budget exhausted" status))
+            (assoc state 'status 'stopped))
           state))))
+  (def repair-agent-drive-while
+    (fn (agent infer append-record budget continue?)
+      (if (if (= (type-of budget) 'int) (< -1 budget) #f)
+        (drive agent (repair-state agent) infer append-record budget continue?)
+        (signal 'repair/driver "repair transition budget must be a nonnegative integer"))))
   (def repair-agent-drive
     (fn (agent infer append-record budget)
-      (if (if (= (type-of budget) 'int) (< -1 budget) #f)
-        (drive agent (repair-state agent) infer append-record budget)
-        (signal 'repair/driver "repair transition budget must be a nonnegative integer"))))
+      (repair-agent-drive-while agent infer append-record budget (fn (_) #t))))
   (def repair-exchange
     (fn (state infer append-record)
       (let ((request (repair-pending state)))

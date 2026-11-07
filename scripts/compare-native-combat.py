@@ -111,6 +111,16 @@ def adaptation_evidence(directory, trace, correct):
                 and not judge_frames(directory / 'disk.img'),
                 f'{directory}: invalid combat optimization skip evidence')
         return [], 'skipped-completed', []
+    stops = re.findall(r'^native-opt: stopped optimizer after combat completed$', trace, re.M)
+    if stops:
+        require(len(stops) == 1 and correct
+                and 'native-opt: policy committed' not in trace
+                and 'native-opt: recorded workload verified in append-only log' in trace
+                and 'native-combat: {test rat-combat passed #t ' in trace
+                and re.findall(r'^native-opt: live uses (\d+)$', trace, re.M) == ['0'],
+                f'{directory}: invalid post-start combat stop evidence')
+        charges, usage = optimizer_charges(directory, trace)
+        return charges, 'stopped-completed', usage
     activated = 'native-opt: policy committed after text judgment and measured replay' in trace
     rolled_back = 'native-opt: continued with fixed policy after exhausted retries' in trace
     interrupted = not correct and bool(re.search(r'^native-(?:combat|craft|economy|quest): optimizer failure \{', trace, re.M))

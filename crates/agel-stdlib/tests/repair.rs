@@ -603,6 +603,21 @@ fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
         )
         .unwrap();
     assert_eq!(exhausted.values.last().unwrap().to_string(), "judging");
+    let stopped = world
+        .evaluate_with(
+            r#"
+      (def unused (fn (provider prompt) (signal 'test/inference "unexpected dispatch")))
+      (def stopped (repair-agent-drive-while subject unused audit 2
+                    (fn (state) (if (= (get state 'status) 'judging) #f #t))))
+      (list (get stopped 'status) (get (repair-state subject) 'status)
+        (evolution-current (get (repair-state subject) 'versions) 'cell 'batches))"#,
+            &options,
+        )
+        .unwrap();
+    assert_eq!(
+        stopped.values.last().unwrap().to_string(),
+        "(stopped judging 1)"
+    );
     let result = world
         .evaluate_with(
             r#"
