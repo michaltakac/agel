@@ -5,8 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.196.** The OSRS host harness and legacy DOOM bridge
-live with their examples. See the [release notes](docs/release-v0.3.196.md).
+**Current release: v0.3.197.** A matched native one-rat run measures replay
+savings and the cost of a policy that saw no live use. See the
+[release notes](docs/release-v0.3.197.md).
+
+v0.3.196 moves the OSRS host harness and legacy DOOM bridge into the
+examples. See the [release notes](docs/release-v0.3.196.md).
 
 Agel's language, standard library, and OS provide reusable capabilities for
 programs to compose, including networking, research, inspection, live edits,
