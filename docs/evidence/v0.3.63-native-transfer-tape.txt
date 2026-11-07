@@ -1,0 +1,2 @@
+native-transfer: tape replay {bytes 4614 quantum 320 calls 15}
+native-transfer: recovered {version 2 version-crc32 2526739047 workload-crc32 2661667798 profile-crc32 1828123377}

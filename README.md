@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.62.** Kernel staging retains signed versions for
-restaging after slot reuse. See the [release notes](docs/release-v0.3.62.md).
+**Current release: v0.3.63.** Fresh-account transfer replays the retained
+workload before connecting. See the [release notes](docs/release-v0.3.63.md).
+
+v0.3.62 retains signed kernel versions for restaging after slot reuse.
+See the [release notes](docs/release-v0.3.62.md).
 
 v0.3.61 gates and reverts native domain launches.
 See the [release notes](docs/release-v0.3.61.md).

@@ -63,6 +63,8 @@ if options.optimize:
 if options.combat:
     manifest['scope']='native one-rat combat on a fresh normal account'
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
+    manifest['guest_memory_mib']=1024
+    manifest['evaluation_fuel']=250_000_000
 
 if melee is not None:
     manifest['scope']='native three-skill melee training on a fresh normal account'
@@ -509,6 +511,7 @@ if editing:
 assert passed,'native network scenario failed; evidence retained'
 if options.transfer_from:
     assert 'native-transfer: recovered {version 2 ' in output
+    assert 'native-transfer: tape replay {bytes ' in output
     assert 'native-transfer: score {correct #t ' in output
     assert re.search(r'native-transfer: retained policy uses [1-9][0-9]*',output)
 if options.combat:

@@ -125,18 +125,23 @@ def load_arm(directory, policy, read_table):
     timings = re.findall(r'^native-combat: task-us (\d+)$', trace, re.M)
     require(len(timings) == 1, f'{directory}: expected one task clock')
     source = installed_client(directory, read_table)
+    if policy == 'transferred' and 'native-transfer: tape replay ' in source:
+        require(re.search(r'^(?:live-desktop> )?native-transfer: tape replay \{bytes \d+ quantum \d+ calls \d+\}$',
+                          trace, re.M),
+                f'{directory}: no retained workload replay')
     start = source.index('(module agel/osrs-wire\n')
     end = source.index('(module agel/record-chain\n', start)
     contract = {key: manifest[key] for key in ('image', 'manifest', 'combat_policy_sha256')}
+    contract['guest_memory_mib'] = manifest.get('guest_memory_mib', 64)
+    contract['evaluation_fuel'] = manifest.get('evaluation_fuel', 50_000_000)
+    pool = re.findall(r'^x86 frame pool ends at (\d+) MiB$', trace, re.M)
+    require(len(pool) <= 1, f'{directory}: ambiguous guest frame pool')
+    if pool:
+        contract['guest_pool_end_mib'] = int(pool[0])
     if goal is not None:
         contract.update({key: manifest[key] for key in (
             'goal_xp', 'training_policy_sha256', 'service_policy_sha256',
-            'evaluation_fuel', 'keepalive_interval_us')})
-        contract['guest_memory_mib'] = manifest.get('guest_memory_mib', 64)
-        pool = re.findall(r'^x86 frame pool ends at (\d+) MiB$', trace, re.M)
-        require(len(pool) <= 1, f'{directory}: ambiguous guest frame pool')
-        if pool:
-            contract['guest_pool_end_mib'] = int(pool[0])
+            'keepalive_interval_us')})
         boundaries = (
             ('stream_adapter', '(module agel/byte-stream\n', '(module agel/osrs-wire\n'),
             ('combat_source', '(module agel/osrs-combat-test\n', '(module agel/osrs-combat-training\n'),
