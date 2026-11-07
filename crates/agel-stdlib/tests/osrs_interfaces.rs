@@ -489,12 +489,18 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .evaluate(
             r#"
       (module agel/osrs-game
-        (export osrs-keepalive osrs-observe-bounded osrs-stat osrs-nearby-npcs osrs-attack
+        (export osrs-keepalive osrs-observe-bounded osrs-observe-ready osrs-stat osrs-nearby-npcs osrs-attack
           osrs-walk osrs-open-interface? osrs-click-interface osrs-varp)
         (def rat-one (dict 'index 1 'type 2854))
         (def rat-two (dict 'index 2 'type 2854))
         (def osrs-keepalive (fn (state) state))
         (def osrs-observe-bounded (fn (state _ready _ticks) state))
+        (def osrs-observe-ready
+          (fn (state ready _limit)
+            (if (get state 'late)
+              (let ((next (assoc state 'stance (get state 'server-stance))))
+                (if (ready next) next state))
+              state)))
         (def osrs-stat
           (fn (state skill) (dict 'xp (get state skill) 'level 1)))
         (def osrs-nearby-npcs (fn (state) (get state 'npcs)))
@@ -504,9 +510,10 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
           (fn (state interface component)
             (let ((clicked (assoc (assoc state 'clicks (cons component (get state 'clicks)))
                                   'server-stance (if (= component 10) 1 3))))
-              (if (= (get state 'clicks) nil) clicked
+              (if (if (get state 'late) #t (get state 'clicks))
                 (assoc (if (= component 10) (assoc clicked 'stance 1) clicked)
-                       'npcs (list rat-one rat-two))))))
+                       'npcs (list rat-one rat-two))
+                clicked))))
         (def osrs-varp (fn (state varp) (get state 'stance)))
         (def osrs-attack
           (fn (state index)
@@ -534,15 +541,18 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
       (import agel/sequence)
       (def trained (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154) 8 2 nil))
       (def report (get trained 'report))
+      (def late (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154 'late #t) 8 2 nil))
       (list (get report 'passed) (get report 'defence-xp) (get report 'stance)
         (reverse (get (get trained 'state) 'clicks))
         (reverse (get (get trained 'state) 'attempts))
-        (map (fn (phase) (get (car (get phase 'encounters)) 'target-index)) (get report 'phases)))
+        (map (fn (phase) (get (car (get phase 'encounters)) 'target-index)) (get report 'phases))
+        (get (get late 'report) 'stance)
+        (reverse (get (get late 'state) 'clicks)))
     "#,
         )
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 1 (10 18 10 18 10 18) (1 1 2 2) (1 2 2))")
+        Some("(#t 8 1 (10 18 10 18 10 18) (1 1 2 2) (1 2 2) 3 (10 18))")
     );
 }

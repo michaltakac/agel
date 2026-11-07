@@ -90,6 +90,10 @@
               'hitpoints-before (hitpoints ready) 'hitpoints-after (hitpoints finished)
               'attack-level (get (osrs-stat finished 0) 'level) 'encounters fights))))))
 
+  (def observe-stance
+    (fn (state ready batches)
+      (let ((observed (wait-ticks state ready batches)))
+        (if (ready observed) observed (osrs-observe-ready observed ready 128)))))
   (def stance
     (fn (state component mode)
       (let ((ready (wait-ticks state (fn (g) (osrs-open-interface? g 593)) 8))
@@ -97,12 +101,12 @@
         (if (osrs-open-interface? ready 593) #t
           (signal 'osrs/training "combat stance interface was not observed" mode))
         (if (confirmed ready) ready
-          (let ((first (wait-ticks (osrs-click-interface ready 593 component) confirmed 8)))
+          (let ((first (observe-stance (osrs-click-interface ready 593 component) confirmed 8)))
             (if (confirmed first) first
-              (let ((reset (wait-ticks
+              (let ((reset (observe-stance
                              (osrs-click-interface first 593 (if (= mode 1) 18 10))
                              (fn (g) (= (osrs-varp g 43) (if (= mode 1) 3 1))) 4)))
-                (wait-ticks (osrs-click-interface reset 593 component) confirmed 8))))))))
+                (observe-stance (osrs-click-interface reset 593 component) confirmed 8))))))))
   (def phase
     (fn (state skill goal max-fights index observe)
       (let ((result (train state skill goal max-fights index nil observe)))
