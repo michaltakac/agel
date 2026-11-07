@@ -57,6 +57,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.45 | Native web reads | A guest retrieves an allowlisted HTTPS document through the byte carrier and parses it in Agel. |
 | v0.3.46 | Live native milestones | The graphical guest follows a selected headless native test trace. |
 | v0.3.47 | Native web search | Agel builds queries for configured HTTPS providers and retains the response and its provenance. |
+| v0.3.61 | Native domain launch generations | Isolated ELF canaries gate launch selection and revert in the same controller. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
@@ -185,10 +186,10 @@ See [the client setup](osrs-client.md).
 
 ## Current boundary
 
-v0.3.3 adds policy machinery, not a replacement OS or game result. Versioned
-`domain` and `kernel-slot` entries are namespaced source records; they do not
-change page tables or boot slots. Its functional history can be replaced by
-its caller. v0.3.4 adds protected OS bytes and an opt-in Agel judge wrapper.
+v0.3.3 introduced namespaced source records for domains and kernel slots.
+v0.3.61 applies domain versions to subsequent isolated process launches.
+Existing process migration and Agel-controlled kernel slot activation remain open.
+A caller can still replace its in-memory evolution history. v0.3.4 adds protected OS bytes and an opt-in Agel judge wrapper.
 v0.3.5 connects existing Jev provider calls to Agel accounting and guest
 storage where a guest exists. v0.3.6 adds a larger recoverable append store
 and result-space reservation. Complete accounting for paid calls interrupted

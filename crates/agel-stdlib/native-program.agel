@@ -5,7 +5,8 @@
   (import agel/native-x86)
   (import agel/program-store)
   (import agel/judgment)
-  (export native-program-edit native-program-revert native-program-run native-program-activation)
+  (export native-program-edit native-program-revert native-program-run native-program-activation
+          native-domain-edit native-domain-revert native-domain-run)
   (def require (fn (ok reason) (if ok #t (signal 'program/activation reason))))
   (def rem (fn (a b) (- a (* b (/ a b)))))
   (def status (fn (n) (let ((r (rem n 256))) (if (< r 0) (+ r 256) r))))
@@ -35,9 +36,9 @@
                   (if (= actual (list (status expected) (text-concat (int->text expected) "\n")))
                     (stage adapter stem ir (cdr remaining) (+ index 1) (cons artifact completed))
                     (dict 'passed #f 'reason "compiled canary differs" 'programs (reverse (cons artifact completed)))))))))))))
-  (def native-program-edit
-    (fn (state name before after cases judge adapter)
-      (evolution-edit-with-activation state 'program name before after cases judge
+  (def edit
+    (fn (state kind name before after cases judge adapter)
+      (evolution-edit-with-activation state kind name before after cases judge
         (fn (request replay)
           (stage adapter
             (text-concat (get adapter 'prefix)
@@ -57,20 +58,36 @@
           (text-concat (get adapter 'prefix) (text-concat (int->text (get request 'version))
             (text-concat "s" (int->text (get request 'attempt)))))
           (checked-ir (get request 'after) cases) (unique-cases cases (dict) nil) 0 nil))))
-  (def native-program-revert
-    (fn (state name version cases judge adapter)
+  (def revert
+    (fn (state kind name version cases judge adapter)
       (let ((old (get (get state 'versions) version)))
         (begin
-          (require (if old (if (= (get old 'kind) 'program) (= (get old 'name) name) #f) #f)
+          (require (if old (if (= (get old 'kind) kind) (= (get old 'name) name) #f) #f)
             "version belongs to another object")
-          (native-program-edit state name
-            (evolution-source state (evolution-current state 'program name))
+          (edit state kind name
+            (evolution-source state (evolution-current state kind name))
             (get old 'source) cases judge adapter)))))
-  (def native-program-run
-    (fn (state name arguments run)
-      (let ((version (evolution-current state 'program name)))
+  (def run-active
+    (fn (state kind name arguments run)
+      (let ((version (evolution-current state kind name)))
         (let ((entry (get (get state 'versions) version)))
           (let ((matches (filter (fn (artifact) (= arguments (get artifact 'arguments)))
                           (get (get entry 'activation) 'programs))))
             (if (= matches nil) (signal 'program/arguments "no activated image for these arguments")
-              (run (get (get (car matches) 'program) 'name)))))))))
+              (run (get (get (car matches) 'program) 'name))))))))
+  (def native-program-edit
+    (fn (state name before after cases judge adapter)
+      (edit state 'program name before after cases judge adapter)))
+  (def native-program-revert
+    (fn (state name version cases judge adapter)
+      (revert state 'program name version cases judge adapter)))
+  (def native-program-run
+    (fn (state name arguments run) (run-active state 'program name arguments run)))
+  (def native-domain-edit
+    (fn (state name before after cases judge adapter)
+      (edit state 'domain name before after cases judge adapter)))
+  (def native-domain-revert
+    (fn (state name version cases judge adapter)
+      (revert state 'domain name version cases judge adapter)))
+  (def native-domain-run
+    (fn (state name arguments run) (run-active state 'domain name arguments run))))

@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.60.** The melee example verifies the requested
-skill through XP gains. See the [release notes](docs/release-v0.3.60.md).
+**Current release: v0.3.61.** Agel can gate and revert native domain
+launches. See the [release notes](docs/release-v0.3.61.md).
+
+v0.3.60 verifies the requested melee skill through XP gains.
+See the [release notes](docs/release-v0.3.60.md).
 
 v0.3.59 drives repair from the actor’s state.
 See the [release notes](docs/release-v0.3.59.md).

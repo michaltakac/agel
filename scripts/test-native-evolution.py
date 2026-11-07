@@ -58,7 +58,8 @@ with tempfile.TemporaryDirectory(prefix='agel-native-evolve-', dir='/tmp') as di
         assert 'read-only' in reply and 'exited with status 0' in reply
         reply = run(machine, ':exec agel -- /data/native-evo.agel')
         assert 'native-program: PASS:' in reply and 'process agel exited with status 0' in reply, reply[-4000:]
-        assert reply.count('judge-start') == 5 and reply.count('judge-result') == 5 and 'cost-microusd 0' in reply, reply
+        assert 'native-domain: PASS:' in reply, reply[-4000:]
+        assert reply.count('judge-start') == 9 and reply.count('judge-result') == 9 and 'cost-microusd 0' in reply, reply
         assert 'refused the effect' in machine.submit('(file-write "judge-log" "erased")')
         # After the Agel controller exits, its retained ELF versions still run.
         for name, expected in [('v1a0c0', 41), ('v2a4c0', 42)]:
