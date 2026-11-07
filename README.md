@@ -5,14 +5,17 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.67.** The RuneScape quest example responds to the
-first observed dialogue page. See the [release notes](docs/release-v0.3.67.md).
+**Current release: v0.3.68.** The native optimizer measures a fixed replay
+on either side of each candidate. See the [release notes](docs/release-v0.3.68.md).
 
 RuneScape and DOOM are example workloads. Keep game protocols, commands,
 agent prompts, task definitions and scoring in the examples or their test
 harnesses. The language, standard library and default OS expose shared
 capabilities such as transport, inspection, replay and live versioning.
 The optional legacy DOOM build still has kernel launch and display hooks.
+
+v0.3.67 responds to the first observed quest dialogue page.
+See the [release notes](docs/release-v0.3.67.md).
 
 v0.3.66 verifies checkpoint gate history.
 See the [release notes](docs/release-v0.3.66.md).

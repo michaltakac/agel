@@ -331,7 +331,7 @@ else:
 (def trace-quest-record
   (fn (history record)
     (if (get quest-trace-keys (if (get record 'name) (get record 'name) (get record 'action)))
-      (let ((data (get (get record 'bytes) 'data)))
+      (let ((data (if (has-key? record 'bytes) (get (get record 'bytes) 'data) nil)))
         (log-quest (text-concat "dialogue trace "
           (print-form (if (if data (< 512 (text-bytes data)) #f)
                         (assoc record 'bytes (text-slice data 0 512)) record)))))
