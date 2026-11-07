@@ -1,7 +1,7 @@
 (module agel/byte-stream
   (import agel/sequence)
   (import agel/bytes)
-  (export byte-stream)
+  (export byte-stream byte-stream-with-read-limit)
   (def require (fn (ok reason) (if ok #t (signal 'stream/protocol reason))))
   (def call
     (fn (ask operation)
@@ -36,8 +36,9 @@
             (begin
               (require (= (call ask (text-concat "write " payload)) (decimal size)) "short byte write")
               (write-loop ask (drop bytes size) (+ total size))))))))
-  (def byte-stream
-    (fn (ask)
+  (def byte-stream-with-read-limit
+    (fn (ask limit)
+      (bounded limit 1024)
       (dict
         'open (fn () (begin (require (= (call ask "open") "") "invalid open reply") #t))
         'close (fn () (begin (require (= (call ask "close") "") "invalid close reply") #t))
@@ -46,7 +47,7 @@
             (if (= answer "ready") #t
               (begin (require (if (= answer "idle") #t (= answer "eof")) "invalid readiness reply") #f))))
         'read (fn (n) (begin (bounded n 65536)
-          (let ((size (if (< n 256) n 256)))
+          (let ((size (if (< n limit) n limit)))
             (let ((bytes (bytes-from-hex (call ask (text-concat "read " (decimal size))))))
               (begin (require (< (count bytes) (+ size 1)) "oversized byte reply") bytes)))))
         'write (fn (bytes)
@@ -57,4 +58,5 @@
             (write-loop ask bytes 0)))
         'entropy (fn (n) (begin (bounded n 256)
           (let ((bytes (bytes-from-hex (call ask (text-concat "entropy " (decimal n))))))
-            (begin (require (= (count bytes) n) "short entropy reply") bytes))))))))
+            (begin (require (= (count bytes) n) "short entropy reply") bytes)))))))
+  (def byte-stream (fn (ask) (byte-stream-with-read-limit ask 256))))

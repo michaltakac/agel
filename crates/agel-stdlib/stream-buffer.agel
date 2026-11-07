@@ -7,7 +7,7 @@
   (def buffer-new
     (fn (stream size)
       (begin
-        (require (if (= (type-of size) 'int) (if (< 0 size) (< size 257) #f) #f) "invalid buffer size")
+        (require (if (= (type-of size) 'int) (if (< 0 size) (< size 1025) #f) #f) "invalid buffer size")
         (dict 'read (get stream 'read) 'write (get stream 'write) 'read-ready (get stream 'read-ready)
           'buffer nil 'ended #f 'reads 0 'size size 'service-fn nil 'service-state nil 'failed nil))))
   (def service

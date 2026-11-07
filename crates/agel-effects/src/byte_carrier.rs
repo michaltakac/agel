@@ -74,7 +74,8 @@ impl Carrier {
             }
             "read" | "entropy" => {
                 let size: usize = argument.parse().map_err(|_| "invalid byte count")?;
-                if !(1..=256).contains(&size) {
+                let limit = if operation == "read" { 1024 } else { 256 };
+                if !(1..=limit).contains(&size) {
                     return Err("byte count exceeds carrier bound".into());
                 }
                 let mut bytes = vec![0; size];
@@ -150,7 +151,7 @@ mod tests {
             "ok eof"
         );
         assert_eq!(carrier.exchange("AGEL-BYTES/1 read 4").unwrap(), "ok ");
-        assert!(carrier.exchange("AGEL-BYTES/1 read 257").is_err());
+        assert!(carrier.exchange("AGEL-BYTES/1 read 1025").is_err());
         assert!(carrier.exchange("AGEL-BYTES/1 write ff0").is_err());
     }
 }

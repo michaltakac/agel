@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.141.** Agel seals history in smaller chunks.
+**Current release: v0.3.142.** The native RuneScape runner can read 1 KiB
+per carrier request. See the [release notes](docs/release-v0.3.142.md).
+
+v0.3.141 seals history in smaller chunks.
 See the [release notes](docs/release-v0.3.141.md).
 
 v0.3.140 waits for each mining tutor page to accept input.

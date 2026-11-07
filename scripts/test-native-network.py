@@ -132,7 +132,7 @@ source=catalog[a:b]+'\n'
 source+=''.join((stdlib / f'{name}.agel').read_text()+'\n' for name in ['bytes','byte-stream','stream-buffer','services','service-stream'])
 source+='''(import agel/byte-stream)
 (import agel/service-stream)
-(def stream (service-stream (byte-stream byte-request) 256))
+(def stream (service-stream (byte-stream-with-read-limit byte-request 1024) 1024))
 (def wire-open (get stream 'open)) (def wire-close (get stream 'close))
 (def wire-read (get stream 'read)) (def wire-write (get stream 'write))
 (def entropy-read (get stream 'entropy))
