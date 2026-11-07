@@ -67,14 +67,26 @@
           (edit state kind name
             (evolution-source state (evolution-current state kind name))
             (get old 'source) cases judge adapter)))))
+  (def launch
+    (fn (program adapter)
+      (let ((name (get program 'name)))
+        (if (= (type-of adapter) 'callable) (adapter name)
+          (let ((table (program-table (get adapter 'geometry) ((get adapter 'read) 0))))
+            (let ((row (get (get table 'entries) name)))
+              (require (= (dissoc program 'name) (if row (dissoc row 'end) nil))
+                "installed program differs from the activated artifact")
+              ((get adapter 'run) name)))))))
   (def run-active
-    (fn (state kind name arguments run)
+    (fn (state kind name arguments adapter)
       (let ((version (evolution-current state kind name)))
         (let ((entry (get (get state 'versions) version)))
-          (let ((matches (filter (fn (artifact) (= arguments (get artifact 'arguments)))
-                          (get (get entry 'activation) 'programs))))
-            (if (= matches nil) (signal 'program/arguments "no activated image for these arguments")
-              (run (get (get (car matches) 'program) 'name))))))))
+          (require entry "no active program version")
+          (let ((activation (get entry 'activation)))
+            (require activation "active version has no installed artifacts")
+            (let ((matches (filter (fn (artifact) (= arguments (get artifact 'arguments)))
+                            (get activation 'programs))))
+              (if (= matches nil) (signal 'program/arguments "no activated image for these arguments")
+                (launch (get (car matches) 'program) adapter))))))))
   (def native-program-edit
     (fn (state name before after cases judge adapter)
       (edit state 'program name before after cases judge adapter)))
@@ -82,7 +94,7 @@
     (fn (state name version cases judge adapter)
       (revert state 'program name version cases judge adapter)))
   (def native-program-run
-    (fn (state name arguments run) (run-active state 'program name arguments run)))
+    (fn (state name arguments adapter) (run-active state 'program name arguments adapter)))
   (def native-domain-edit
     (fn (state name before after cases judge adapter)
       (edit state 'domain name before after cases judge adapter)))
@@ -90,4 +102,4 @@
     (fn (state name version cases judge adapter)
       (revert state 'domain name version cases judge adapter)))
   (def native-domain-run
-    (fn (state name arguments run) (run-active state 'domain name arguments run))))
+    (fn (state name arguments adapter) (run-active state 'domain name arguments adapter))))

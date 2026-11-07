@@ -35,7 +35,7 @@
 (check (= (get session 'status) 'done) "repair exhausted or failed")
 (def versions (get session 'versions))
 (check (= (evolution-current versions 'program 'batches) 2) "native version was not activated")
-(check (= (native-program-run versions 'batches '(5 3) exec-canary) '(2 "2\n")) "native repaired execution")
+(check (= (native-program-run versions 'batches '(5 3) adapter) '(2 "2\n")) "native repaired execution")
 (check (= retained-session (dict 'mailbox '(continue report) 'turn 12)) "caller state changed")
 (def old-score (repair-evaluate session 1))
 (def new-score (repair-evaluate session 2))
