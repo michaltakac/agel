@@ -329,11 +329,24 @@ impl KernelRecovery {
             self.fault(storage)?;
             return Err(reason);
         }
+        if verify_slot(
+            storage,
+            self.selector.candidate,
+            self.selector.length,
+            &self.selector.signature,
+        )
+        .is_err()
+        {
+            self.fault(storage)?;
+            return Err("denied: candidate signature could not be reverified before promotion");
+        }
         let previous = self.selector.trusted;
-        self.selector.trusted = self.selector.candidate;
-        self.selector.clear_candidate();
-        save_selector(storage, &self.selector)?;
-        Ok((self.selector.trusted, previous))
+        let mut promoted = self.selector;
+        promoted.trusted = promoted.candidate;
+        promoted.clear_candidate();
+        save_selector(storage, &promoted)?;
+        self.selector = promoted;
+        Ok((promoted.trusted, previous))
     }
 
     /// Exhaust the candidate's budget so the next boot loads the trusted slot.
@@ -343,10 +356,12 @@ impl KernelRecovery {
         if self.selector.candidate == NO_CANDIDATE {
             return Err("denied: no candidate kernel slot to give up");
         }
-        self.selector.attempts = ATTEMPT_BUDGET as u8;
-        self.selector.verified = false;
-        save_selector(storage, &self.selector)?;
-        Ok(self.selector.trusted)
+        let mut faulted = self.selector;
+        faulted.attempts = ATTEMPT_BUDGET as u8;
+        faulted.verified = false;
+        save_selector(storage, &faulted)?;
+        self.selector = faulted;
+        Ok(faulted.trusted)
     }
 }
 

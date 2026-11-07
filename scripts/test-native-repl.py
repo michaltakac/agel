@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import queue
 import subprocess
 import sys
@@ -650,6 +651,36 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     finally:
         replay_rollback.close()
     print("PASS: trusted kernel pinned the trial and refused a candidate with a changed corpus")
+
+    assert stage_kernel.stage(image, good_kernel, good_signature) == 0
+    admission_boot("A", "B", "B")
+    modified = Harness(image, persistent=True)
+    try:
+        modified.expect_until(b"kernel: running slot A; trusted slot B; candidate slot A (unverified, boots 1)")
+        modified.expect_until(b"agel-native[0]> ")
+        send_kernel_healthy(modified, "(+ 1 1)", "2", "A", 1)
+        with open(image, "r+b") as disk:
+            offset = stage_kernel.SLOT_BASE[0] * stage_kernel.SECTOR
+            disk.seek(offset)
+            original = disk.read(1)
+            assert original == good_kernel[:1]
+            disk.seek(offset)
+            disk.write(bytes([original[0] ^ 1]))
+            disk.flush()
+            os.fsync(disk.fileno())
+        modified.send(":kernel-promote", "denied: candidate signature could not be reverified before promotion", 1)
+        shutdown(modified)
+    finally:
+        modified.close()
+    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0, "admitted": 1}, selector()
+    disk_rollback = Harness(image, persistent=True)
+    try:
+        disk_rollback.expect_until(b"kernel: running slot B; trusted slot B; candidate slot A (unverified, boots 3)")
+        disk_rollback.expect_until(b"agel-native[0]> ")
+        shutdown(disk_rollback)
+    finally:
+        disk_rollback.close()
+    print("PASS: promotion reverified the signed slot and refused bytes changed after boot")
 
     # A candidate without a valid signature is refused by the running kernel
     # and cleared, so the stage never loads it.
