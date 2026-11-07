@@ -11,7 +11,11 @@
         (let ((chunk (bytes-from-hex (text-slice recorded-hex at end))))
           ((get stream 'pulse))
           (replay-chunks end (cons chunk chunks)))))))
-(def replay-bytes (foldl (fn (body chunk) (append chunk body)) nil (replay-chunks 0 nil)))
+(def replay-bytes
+  (foldl (fn (body chunk)
+           ((get stream 'pulse))
+           (append chunk body))
+    nil (replay-chunks 0 nil)))
 (def run-profile
   (fn (quantum)
     (profile-work (fn (service) (bytes-hex-quantum replay-bytes service quantum))

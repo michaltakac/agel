@@ -11,7 +11,7 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                  (export osrs-stat osrs-inventory-count osrs-await osrs-nearby-npcs
                          osrs-varp osrs-open-interface? osrs-interface-opens osrs-pause-events
                          osrs-await-bounded osrs-observe-bounded osrs-keepalive osrs-resume-dialogue
-                         osrs-talk osrs-walk osrs-use-location osrs-wait-ticks)
+                         osrs-talk osrs-walk osrs-use-location osrs-wait-ticks osrs-route-cleared?)
                  (def osrs-stat (fn (state _) (dict 'xp (if (= (get state 'page) 3) 300 0))))
                  (def osrs-inventory-count (fn (state inv item) (if (= (get state 'page) 3) 0 1)))
                  (def osrs-await (fn (state ready) state))
@@ -19,12 +19,15 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                    (fn (state ready ticks) (if (ready state) state (signal 'test/wait "missing page"))))
                  (def osrs-observe-bounded
                    (fn (state ready ticks)
-                     (if (= (get state 'talks) 2)
+                     (if (= ticks 40)
+                       (let ((arrived (assoc state 'arrived #t)))
+                         (if (ready arrived) arrived (signal 'test/route "arrival was missed")))
+                       (if (= (get state 'talks) 2)
                        (let ((opened (assoc state 'page 1)))
                          (if (ready opened) (signal 'test/wait "page was used before its pause event")
                            (let ((enabled (assoc opened 'enabled #t)))
                              (if (ready enabled) enabled (signal 'test/wait "pause event was missed")))))
-                       state)))
+                       state))))
                  (def osrs-nearby-npcs (fn (state) (list (dict 'type 4626 'index 7))))
                  (def osrs-varp (fn (state varp) (if (= (get state 'page) 3) 1 0)))
                  (def osrs-open-interface?
@@ -38,7 +41,10 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                    (fn (state id component)
                      (if (get state 'enabled) (osrs-interface-opens state id) 0)))
                  (def osrs-keepalive (fn (state) state))
-                 (def osrs-walk (fn (state x z) (assoc state 'tile (list x z))))
+                 (def osrs-walk (fn (state x z) (assoc (assoc state 'tile (list x z)) 'arrived #f)))
+                 (def osrs-route-cleared?
+                   (fn (state previous x z)
+                     (if (get state 'arrived) (= (get state 'tile) (list x z)) #f)))
                  (def osrs-use-location
                    (fn (state id x z)
                      (let ((door (list id x z (get state 'tile) (get state 'door))))
@@ -52,6 +58,7 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                        (signal 'test/wait "draining ticks would lose the first page") state)))
                  (def osrs-talk
                    (fn (state index)
+                     (if (get state 'arrived) #t (signal 'test/route "talk before observed arrival"))
                      (if (= (get state 'talks) 0)
                        (if (= (list (get state 'tile) (get state 'door)) '((3208 3216) kitchen)) (assoc state 'talks 1)
                          (signal 'test/talk "expected the north approach"))
@@ -222,12 +229,15 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
               (def stopped (route-packet walking '(255 255 255 255)))
               (def next-route (route-packet stopped '(3 39 76 77)))
               (list (osrs-map-route empty-route) (osrs-map-route walking)
-                    (osrs-map-route stopped) (osrs-map-route next-route))"#,
+                    (osrs-map-route stopped) (osrs-map-route next-route)
+                    (osrs-route-cleared? stopped empty-route 3227 3149)
+                    (osrs-route-cleared? stopped walking 3227 3149)
+                    (osrs-route-cleared? stopped empty-route 3229 3149))"#,
         )
         .unwrap();
     assert_eq!(
         route.values.last().map(Value::to_string).as_deref(),
-        Some("(nil {sequence 1 x 3227 z 3149 cleared #f} {sequence 1 x 3227 z 3149 cleared #t} {sequence 2 x 3229 z 3149 cleared #f})")
+        Some("(nil {sequence 1 x 3227 z 3149 cleared #f} {sequence 1 x 3227 z 3149 cleared #t} {sequence 2 x 3229 z 3149 cleared #f} #t #f #f)")
     );
 
     let cadence = world

@@ -14,17 +14,8 @@
         (observe-live (osrs-observe-bounded (osrs-keepalive state) predicate 5) predicate (- batches 1)))))
   (def walk-to-tutor
     (fn (state x z batches)
-      (let ((prior (osrs-map-route state)))
-        (observe-live (osrs-walk state x z)
-          (fn (observed)
-            (let ((route (osrs-map-route observed)))
-              (if route
-                (if (< (if prior (get prior 'sequence) 0) (get route 'sequence))
-                  (if (get route 'cleared)
-                    (if (= (list x z) (list (get route 'x) (get route 'z))) (tutor observed) #f)
-                    #f)
-                  #f)
-                #f))) batches))))
+      (observe-live (osrs-walk state x z)
+        (fn (observed) (if (osrs-route-cleared? observed state x z) (tutor observed) #f)) batches)))
   (def approach-tutor
     (fn (state)
       (let ((first (walk-to-tutor state 3227 3149 18)))
