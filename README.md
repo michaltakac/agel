@@ -5,14 +5,17 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.78.** Kernel promotion rechecks the signed bytes
-on disk. See the [release notes](docs/release-v0.3.78.md).
+**Current release: v0.3.79.** The native economy task has fixed and
+adaptive arms. See the [release notes](docs/release-v0.3.79.md).
 
 RuneScape and DOOM are example workloads. Keep game protocols, commands,
 agent prompts, task definitions and scoring in the examples or their test
 harnesses. The language, standard library and default OS expose shared
 capabilities such as transport, inspection, replay and live versioning.
 The optional legacy DOOM build still has kernel launch and display hooks.
+
+v0.3.78 rechecks signed kernel bytes before promotion.
+See the [release notes](docs/release-v0.3.78.md).
 
 v0.3.77 pins the Agel trial during kernel admission.
 See the [release notes](docs/release-v0.3.77.md).
