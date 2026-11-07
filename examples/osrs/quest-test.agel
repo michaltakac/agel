@@ -140,13 +140,21 @@
               "ingredient production left unused containers or wheat")
             (assoc (finish-cooks-assistant (return-to-cook supplies)) 'source 'gathered))))))
 
+  (def start-cook-dialogue
+    (fn (nearby)
+      (let ((attempt (travel (osrs-talk nearby (get (cook nearby) 'index)) 4)))
+        (if (page attempt nearby)
+          (run-dialogue attempt nearby 0 40)
+          (let ((retry (wait-live attempt cook 4)))
+            (run-dialogue (osrs-talk retry (get (cook retry) 'index)) retry 0 40))))))
+
   (def finish-cooks-assistant
     (fn (state)
       (let ((stock (ready state)))
         (require (= (ingredients stock) '(1 1 1)) "expected exactly one of each quest ingredient")
         (require (= (xp stock) 0) "expected no starting Cooking XP")
-        (let ((nearby (wait-live (osrs-walk stock 3211 3218) cook 24)))
-          (let ((finished (run-dialogue (osrs-talk nearby (get (cook nearby) 'index)) nearby 0 40)))
+        (let ((nearby (wait-live (travel (osrs-walk stock 3211 3218) 2) cook 24)))
+          (let ((finished (start-cook-dialogue nearby)))
             (require (= (ingredients finished) '(0 0 0)) "the cook did not consume all ingredients")
             (dict 'test 'cooks-assistant 'passed #t 'choices 2 'quest-points (osrs-varp finished 101)
               'cooking-xp (xp finished) 'ingredients-after (ingredients finished))))))))

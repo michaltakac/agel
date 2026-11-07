@@ -5,9 +5,13 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.30.** Agel OS restored an accepted encoder
-policy and its audit history, then completed combat on a fresh account
-without new model calls. See the [release notes and evidence](docs/release-v0.3.30.md).
+**Current release: v0.3.31.** The transferred policy finished one
+fresh-account combat task 50.421 seconds faster than its fixed control.
+A fresh account also completed Cook's Assistant in one session. See the
+[release notes and evidence](docs/release-v0.3.31.md).
+
+v0.3.30 first [restored a native policy and its audit history](docs/release-v0.3.30.md)
+on a fresh account without new inference.
 
 v0.3.29 adds [Agel benchmark scoring](docs/release-v0.3.29.md) and
 records an uninterrupted Cook's Assistant run.
