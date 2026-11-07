@@ -197,18 +197,26 @@ def load_craft(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
     require(manifest['encoder_policy'] == policy, f'{directory}: unexpected crafting policy')
-    require(re.findall(r'^process agel exited with status (\d+)$', trace, re.M) == ['0']
-            and 'native-network: client completed: login, observations and adamant platebody' in trace,
-            f'{directory}: crafting did not complete')
+    exits = re.findall(r'^process agel exited with status (\d+)$', trace, re.M)
+    require(len(exits) == 1, f'{directory}: expected one terminal guest exit')
+    correct = exits[0] == '0'
     before = craft_stock((directory / 'before-account.txt').read_text())
-    after = craft_stock((directory / 'saved-account.txt').read_text(), finished=True)
+    saved = (directory / 'saved-account.txt').read_text()
     clocks = re.findall(r'^native-craft: task-us ([1-9]\d*)$', trace, re.M)
-    require(len(clocks) == 1 and craft_saved(trace, before, after),
-            f'{directory}: crafting clock or saved evidence differs')
+    require(before is not None and len(clocks) == 1, f'{directory}: missing crafting stock or task clock')
+    if correct:
+        require('native-network: client completed: login, observations and adamant platebody' in trace
+                and craft_saved(trace, before, craft_stock(saved, finished=True)),
+                f'{directory}: crafting report and saved result differ')
+    else:
+        require(re.search(r'^native-craft: failure \{', trace, re.M)
+                and 'native-craft: {test adamant-platebody passed #t ' not in trace
+                and craft_stock(saved, at_anvil=False) == before,
+                f'{directory}: failure did not leave the original stock and XP intact')
 
     charges, decision, usage = [], policy, []
     if policy == 'adaptive':
-        charges, decision, usage = adaptation_evidence(directory, trace, True)
+        charges, decision, usage = adaptation_evidence(directory, trace, correct)
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: fixed crafting incurred inference')
     source = installed_client(directory, read_table)
@@ -226,7 +234,7 @@ def load_craft(directory, policy, read_table):
     contract['initial_smithing_fine_xp'] = before[1]
     contract['common_setup'] = hashlib.sha256(common.encode()).hexdigest()
     contract['task'] = hashlib.sha256(task.encode()).hexdigest()
-    return contract, before[0], int(clocks[0]), charges, True, decision, usage
+    return contract, before[0], int(clocks[0]), charges, correct, decision, usage
 
 
 def charge_forms(charges):
@@ -279,7 +287,7 @@ def main():
     tasks = parser.add_mutually_exclusive_group()
     tasks.add_argument('--melee', action='store_true', help='compare in-session adaptation on three-skill melee')
     tasks.add_argument('--economy', action='store_true', help='compare in-session adaptation on the first bronze sale')
-    tasks.add_argument('--craft', action='store_true', help='compare completed adamant platebody runs')
+    tasks.add_argument('--craft', action='store_true', help='compare measured adamant platebody runs')
     tasks.add_argument('--optimizer', action='store_true', help='score the optimizer decision independently of the game')
     parser.add_argument('--transfer', action='store_true', help='score a melee run using a retained policy')
     args = parser.parse_args()

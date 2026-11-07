@@ -126,9 +126,10 @@ For a native crafting comparison, stage two distinct named fixtures with
 Names use `ac` followed by eight lowercase hexadecimal digits. Pass the
 two names to `python3 scripts/test-native-economy-pair.py --craft FIXED ADAPTIVE`
 to run them in order with one copy of the runtime artifacts and sources.
-The scorer requires two completed runs, matching starting stock and
-Smithing XP, and an independently verified platebody and XP gain from
-each account. Evaluate the generated `score.agel` with `agel/benchmark`.
+The scorer requires two terminal runs with matching starting stock and
+Smithing XP. It verifies the saved platebody and XP gain on success. For
+a measured crafting failure, it requires the original stock and XP to
+remain intact. Evaluate the generated `score.agel` with `agel/benchmark`.
 
 This runs the Agel scenarios and checks authoritative persisted server state:
 

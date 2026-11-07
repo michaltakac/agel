@@ -68,7 +68,7 @@ def combat_xp_saved(expected, oracle, *, minimum=False):
     return all(stats.get(stat, -1) // 10 == xp for stat, xp in expected.items())
 
 
-def craft_stock(snapshot, *, finished=False):
+def craft_stock(snapshot, *, finished=False, at_anvil=True):
     header = re.search(
         r'^account=(\d+) character=\d+ rights= x=(\d+) z=(\d+) level=0 xp_rate_in_hundreds=100$',
         snapshot, re.M)
@@ -76,7 +76,7 @@ def craft_stock(snapshot, *, finished=False):
     inventory = sorted(line for line in snapshot.splitlines() if line.startswith('inv='))
     product = 'adamant_platebody count=1' if finished else 'adamantite_bar count=5'
     if header and xp and inventory == [f'inv=inv.inv item=obj.{product}', 'inv=inv.inv item=obj.hammer count=1']:
-        if finished or header.groups()[1:] == ('3187', '3425'):
+        if finished or not at_anvil or header.groups()[1:] == ('3187', '3425'):
             return int(header[1]), int(xp[1])
     return None
 

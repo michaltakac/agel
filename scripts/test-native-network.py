@@ -532,6 +532,8 @@ if not passed and melee is not None and 'native-combat: failure ' in output:
                     ['varp.com_mode'])
 if not passed and options.economy and 'native-economy: failure ' in output:
     capture_account(lambda snapshot: economy_saved(0, snapshot), [])
+if not passed and options.craft and re.search(r'^native-craft: failure \{', output, re.M):
+    capture_account(lambda snapshot: craft_stock(snapshot, at_anvil=False) == craft_before, [])
 if editing:
     assert passed, 'native session failed; disk, serial log and judge records retained'
     if options.optimize:
