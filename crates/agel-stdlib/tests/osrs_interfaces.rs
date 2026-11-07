@@ -1,7 +1,7 @@
 use agel_core::{Value, World};
 
 #[test]
-fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
+fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     let mut world = World::default();
     agel_stdlib::install(&mut world, &Default::default()).unwrap();
     for source in [
@@ -35,6 +35,22 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
         (let ((byte (+ opcode (get (isaac-bytes-next (get state 'in)) 'value))))
           (def raw (cons (- byte (* 256 (/ byte 256))) body))
           (get (osrs-next-packet state) 'state))))
+      (def ground-observations
+        (fn (start)
+          (let ((base (decode start 96 '(0 8 255 255 1 146 146 1 0 0))))
+            (let ((added (decode base 107 '(0 27 40 40 128
+              11 128 31 128 255 0 65 0 0 10
+              9 0 106 139 7 0 0 0 0 0 0 1 0 0 0))))
+              (let ((updated (decode added 107 '(0 15 40 40 128
+                2 150 11 7 0 0 3 0 0 0 0 1))))
+                (let ((removed (decode updated 107 '(0 11 40 40 128
+                  5 139 7 234 0 0 0 3)))
+                      (cleared (decode updated 68 '(40 0 40)))
+                      (overlap (decode updated 96 '(0 6 1 147 147 1 0 0)))
+                      (distant (decode updated 96 '(0 6 1 170 170 1 0 0)))
+                      (instance (decode updated 39 '(0 0))))
+                  (map (fn (state) (osrs-ground-count state 1931 3209 3214 0))
+                    (list base added updated removed cleared overlap distant instance))))))))
       (def original (osrs-game-state '(1 2 3 4)))
       (def used (osrs-use-location original 2097 3188 3424))
       (def location-body (cdr sent))
@@ -89,10 +105,10 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
         (osrs-open-interface? resynced 312) talk-body invalid-talk
         choice-body continue-body invalid-resume trade-body invalid-trade sell-body buy-body invalid-offset absent-item invalid-sale
         (osrs-interface-opens opened 312) (osrs-interface-opens reopened 312)
-        (osrs-varp small 101) (osrs-varp large 29) (osrs-varp wide 29) (osrs-varp reset 29))
+        (osrs-varp small 101) (osrs-varp large 29) (osrs-varp wide 29) (osrs-varp reset 29) (ground-observations original))
     "#, &options).unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil)")
+        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil (nil 1 3 0 0 3 nil nil))")
     );
 }

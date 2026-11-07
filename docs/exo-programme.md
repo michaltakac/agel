@@ -36,6 +36,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.24 | First economy outcome | Agel sells a bar it made from freshly mined ores at the Lumbridge General Store. The hosted test checks observed and saved coins and confirms the bar was consumed by the sale. |
 | v0.3.25 | Verified quest completion | Agel accepts and completes Cook's Assistant under normal rights from staged ingredients. The hosted test checks dialogue, the quest scroll, the saved stage and hand-ins, one quest point, and Cooking XP. |
 | v0.3.26 | Quest containers from gameplay | A fresh normal account picks up a pot and buys a bucket with its bronze-bar earnings. The hosted test verifies the saved containers, remaining coin, and unstarted quest. |
+| v0.3.27 | Ground-item observations | Agel distinguishes unseen tiles from observed absence and verifies the castle pot disappears from the ground and enters inventory. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |

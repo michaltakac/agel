@@ -161,8 +161,9 @@ Maximum stats, training and material acquisition for the adamant recipe,
 the coins-per-dollar benchmark, and transfer still need their own scores.
 The quest fixture verifies Cook's Assistant completion and rewards with
 staged ingredients. Its container mode picks up a pot and buys a bucket
-with coins earned on the same fresh account. Full ingredient acquisition
-and a multi-quest comparison remain open.
+with coins earned on the same fresh account. The pot pickup requires a
+ground-item observation and verifies the item disappears from that tile.
+Full ingredient acquisition and a multi-quest comparison remain open.
 v0.3.17 connects a retained repair actor to polling inference and the native
 client. It repairs a seeded planner and executes five queued game actions on
 the same connection. Full gameplay policy, durable episode history and paired

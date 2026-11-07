@@ -5,9 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.26.** A fresh normal account picks up an empty
-pot and buys a bucket with coins from its first bronze-bar sale. See the
-[release notes and evidence](docs/release-v0.3.26.md).
+**Current release: v0.3.27.** Agel observes a ground item, picks it up,
+and verifies the removal in live server packets. See the
+[release notes and evidence](docs/release-v0.3.27.md).
+
+v0.3.26 verifies a fresh account buying a bucket with coins earned from
+its first bronze-bar sale. See the [container evidence](docs/release-v0.3.26.md).
 
 v0.3.25 verifies Cook's Assistant completion and rewards through ordinary
 dialogue with staged ingredients. See the [quest evidence](docs/release-v0.3.25.md).

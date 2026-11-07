@@ -130,7 +130,8 @@ started = time.monotonic()
 if options.containers:
     notice("RuneScape quest: obtaining the pot and earning coins for the bucket without admin setup")
     report = execute("(acquire-cook-containers game)")
-    assert "test cook-containers passed #t pot 1 bucket 1 coins-earned 3 coins-left 1" in report, report
+    assert ("test cook-containers passed #t pot 1 bucket 1 coins-earned 3 coins-left 1 "
+            "pot-on-ground-before 1 pot-on-ground-after 0") in report, report
     after = await_saved(lambda s: all(inventory(s, name) == 1 for name in ("pot_empty", "bucket_empty", "coins")))
     assert "rights= " in after and "xp_rate_in_hundreds=100" in after, after
     assert all(varp(after, key) == 0 for key in VARPS), after
