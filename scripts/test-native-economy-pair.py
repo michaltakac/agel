@@ -72,7 +72,7 @@ def pin_transfer(output, evidence):
     return donor, fixed_seed
 
 
-def evaluate_score(output, boot_image, executable):
+def evaluate_score(output, boot_image, executable, memory_mib):
     library = output / 'sources/crates/agel-stdlib'
     sequence = (library / 'stdlib.agel').read_text().split('\n(module agel/result', 1)[0]
     score = output / 'score.agel'
@@ -86,7 +86,7 @@ def evaluate_score(output, boot_image, executable):
         subprocess.run([*install, disk, 'agel', str(executable)], check=True, capture_output=True)
         subprocess.run([*install, '--region', 'data', disk, program.name, str(program)],
                        check=True, capture_output=True)
-        machine = console.Machine(disk, scratch)
+        machine = console.Machine(disk, scratch, memory_mib=memory_mib)
         try:
             reply = machine.submit(':exec agel -- --no-stdlib /data/benchmark.agel', seconds=120)
             deadline = time.monotonic() + 120
@@ -181,7 +181,8 @@ def main():
                                      *scoring_options, fixed, adaptive])
     (output / 'score.agel').write_bytes(score)
     print('Agel score input:', output / 'score.agel', flush=True)
-    evaluate_score(output, output / boot_image.name, output / 'agel')
+    memory_mib = json.loads((Path(fixed) / 'world.json').read_text())['guest_memory_mib']
+    evaluate_score(output, output / boot_image.name, output / 'agel', memory_mib)
     print('Agel OS score:', output / 'score-result.agel', flush=True)
 
 
