@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.167.** The OSRS client retains player tick packets
-without running unrelated state observers. See the [release notes](docs/release-v0.3.167.md).
+**Current release: v0.3.168.** Agel sends single-byte carrier writes
+without assembling a chunk. See the [release notes](docs/release-v0.3.168.md).
+
+v0.3.167 skips unrelated state observers on OSRS player ticks. See the [release notes](docs/release-v0.3.167.md).
 
 v0.3.166 verifies donor source compatibility before either transfer arm starts. See the [release notes](docs/release-v0.3.166.md).
 

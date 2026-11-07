@@ -55,8 +55,14 @@
           (begin
             (require (if (= bytes nil) #t (= (type-of bytes) 'list)) "expected byte list")
             (require (< (count bytes) 65537) "write exceeds byte bound")
-            (foldl (fn (_ byte) (valid-byte byte)) #t bytes)
-            (write-loop ask bytes 0)))
+            (if (= (count bytes) 1)
+              (let ((byte (car bytes)))
+                (valid-byte byte)
+                (require (= (call ask (text-concat "write " (byte-hex byte))) "1") "short byte write")
+                1)
+              (begin
+                (foldl (fn (_ byte) (valid-byte byte)) #t bytes)
+                (write-loop ask bytes 0)))))
         'entropy (fn (n) (begin (bounded n 256)
           (let ((hex (call ask (text-concat "entropy " (decimal n)))))
             (require (= (text-bytes hex) (* 2 n)) "invalid entropy reply length")
