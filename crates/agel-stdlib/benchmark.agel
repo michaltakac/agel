@@ -1,6 +1,6 @@
 (module agel/benchmark
   (import agel/sequence)
-  (export benchmark-run benchmark-pair benchmark-transfer benchmark-writer-usage)
+  (export benchmark-run benchmark-pair benchmark-transfer benchmark-writer-usage benchmark-writer-estimate)
 
   (def require
     (fn (ok reason) (if ok #t (signal 'benchmark/invalid reason))))
@@ -27,6 +27,29 @@
         (dict 'calls 0 'metered 0 'cache-metered 0 'known-input 0 'known-cached-input 0 'known-output 0)
         receipts)))
 
+  (def estimate-writer-call
+    (fn (rates totals usage)
+      (let ((input (get usage 'input)) (cached (get usage 'cached-input))
+            (input-rate (get rates 'input)) (cache-rate (get rates 'cached-input))
+            (output-cost (* (get usage 'output) (get rates 'output))))
+        (let ((uncached-cost (* input input-rate)) (discount (- input-rate cache-rate)))
+          (let ((low (- uncached-cost (* (if (= cached nil) input cached) discount)))
+                (high (- uncached-cost (* (if (= cached nil) 0 cached) discount))))
+            (dict 'min-nanousd (+ (get totals 'min-nanousd) low output-cost)
+                  'max-nanousd (+ (get totals 'max-nanousd) high output-cost)))))))
+  (def benchmark-writer-estimate
+    (fn (receipts rates)
+      (let ((input (get rates 'input)) (cached (get rates 'cached-input))
+            (output (get rates 'output)) (usage (benchmark-writer-usage receipts)))
+        (require (if (natural? input) (if (natural? cached) (natural? output) #f) #f)
+          "writer rates must be nonnegative nanodollars per token")
+        (require (if (< input cached) #f #t) "cached writer rate exceeds input rate")
+        (if (= (get usage 'calls) (get usage 'metered))
+          (let ((estimate (foldl (fn (totals receipt) (estimate-writer-call rates totals receipt))
+                            (dict 'min-nanousd 0 'max-nanousd 0) receipts)))
+            (dict 'basis 'supplied-rates 'min-nanousd (get estimate 'min-nanousd)
+                  'max-nanousd (get estimate 'max-nanousd)))
+          (dict 'basis 'supplied-rates 'min-nanousd nil 'max-nanousd nil)))))
   (def add-charge
     (fn (totals charge)
       (let ((cost (get charge 'cost-nanousd)) (kind (get charge 'kind)))

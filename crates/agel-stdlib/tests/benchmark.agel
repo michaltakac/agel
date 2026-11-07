@@ -54,3 +54,13 @@
 (check (rejected (fn () (benchmark-writer-usage (list (dict 'input 2 'cached-input 3 'output 4)))))
   "cached writer tokens must be a subset of input")
 #t
+
+(def rates (dict 'input 10 'cached-input 2 'output 20))
+(def priced (dict 'input 10 'cached-input 4 'output 2))
+(check (= (benchmark-writer-estimate (list priced) rates)
+  (dict 'basis 'supplied-rates 'min-nanousd 108 'max-nanousd 108)) "complete metering yields an exact estimate")
+(check (= (benchmark-writer-estimate (list priced (dict 'input 10 'output 2)) rates)
+  (dict 'basis 'supplied-rates 'min-nanousd 168 'max-nanousd 248)) "unknown cache usage yields a range")
+(check (= (get (benchmark-writer-estimate (list priced nil) rates) 'max-nanousd) nil)
+  "missing usage prevents a total estimate")
+#t

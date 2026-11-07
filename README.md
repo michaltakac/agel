@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.180.** Agel OS scores retained native crafting
-and bronze-sale pairs. See the [release notes](docs/release-v0.3.180.md).
+**Current release: v0.3.181.** Agel can estimate writer cost from metered
+tokens and explicitly supplied rates. See the [release notes](docs/release-v0.3.181.md).
+
+v0.3.180 scores retained native crafting and bronze-sale pairs. See the [release notes](docs/release-v0.3.180.md).
 
 v0.3.179 adds matched one-rat adaptation comparisons. See the [release notes](docs/release-v0.3.179.md).
 
