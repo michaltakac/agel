@@ -72,16 +72,28 @@
     (fn (state predicate batches)
       (let ((observed (observe-live state predicate batches)))
         (if (predicate observed) observed (signal 'osrs/quest-test "live observation timed out")))))
-  (def wait-item
+  (def observe-item
     (fn (state item)
       (let ((ready (fn (g) (= (inventory g item) 1))))
         (let ((bounded (observe-live state ready 24)))
-          (let ((observed (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))
-            (if (ready observed) observed
-              (signal 'osrs/quest-test "waiting for gathered item"
-                (dict 'item item 'observed-count (inventory observed item)
-                      'route (osrs-map-route observed)))))))))
+          (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))))
+  (def require-item
+    (fn (observed item)
+      (if (= (inventory observed item) 1) observed
+        (signal 'osrs/quest-test "waiting for gathered item"
+          (dict 'item item 'observed-count (inventory observed item)
+                'route (osrs-map-route observed))))))
+  (def wait-item (fn (state item) (require-item (observe-item state item) item)))
   (def castle-pot (fn (state) (osrs-ground-count state 1931 3209 3214 0)))
+  (def take-castle-pot
+    (fn (state observe)
+      (let ((first (observe-item (osrs-take-ground-item state 1931 3209 3214) 1931)))
+        (let ((ground (castle-pot first)))
+          (if (if (= (inventory first 1931) 0) (if ground (< 0 ground) #f) #f)
+            (begin
+              (observe "castle pot is still visible, retrying pickup")
+              (wait-item (osrs-take-ground-item first 1931 3209 3214) 1931))
+            (require-item first 1931))))))
   (def cook-containers
     (fn (state observe)
       (let ((initial (ready state)))
@@ -95,7 +107,7 @@
           (observe "observed the castle pot on the ground")
           (let ((pot (with-handler (* problem)
                        (signal 'osrs/quest-test "waiting for the castle pot pickup" problem)
-                       (wait-item (osrs-take-ground-item visible 1931 3209 3214) 1931))))
+                       (take-castle-pot visible observe))))
             (observe "picked up the castle pot")
             (let ((sold (get (first-bronze-sale-using pot observe) 'state)))
               (let ((bucket (wait-item (osrs-click-inventory-item-offset sold 300 16 3 1925 2 1) 1925)))

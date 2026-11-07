@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.171.** Native benchmarks report adaptive policy
-use when gameplay fails. See the [release notes](docs/release-v0.3.171.md).
+**Current release: v0.3.172.** The OSRS quest retries a castle pot pickup
+when the pot is still visible. See the [release notes](docs/release-v0.3.172.md).
+
+v0.3.171 reports adaptive policy use on native task failures. See the [release notes](docs/release-v0.3.171.md).
 
 v0.3.170 classifies benchmark cost and time outcomes. See the [release notes](docs/release-v0.3.170.md).
 

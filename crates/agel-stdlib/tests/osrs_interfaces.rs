@@ -215,12 +215,22 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
       (module agel/osrs-mining-test)
       (module agel/osrs-game
         (export osrs-keepalive osrs-observe-bounded osrs-observe-ready osrs-wait-ticks
-          osrs-inventory-count osrs-map-route)
+          osrs-inventory-count osrs-map-route osrs-ground-count osrs-take-ground-item)
         (def osrs-keepalive (fn (state) state))
         (def osrs-wait-ticks (fn (state _) (assoc state 'visible #f)))
         (def osrs-inventory-count (fn (state _container _item) (get state 'items)))
         (def osrs-map-route (fn (_) nil))
-        (def osrs-observe-ready (fn (state _ready _limit) (assoc state 'items 1)))
+        (def osrs-ground-count (fn (state item x z level) (get state 'ground)))
+        (def osrs-take-ground-item
+          (fn (state item x z)
+            (let ((attempts (+ 1 (get state 'attempts))))
+              (if (= attempts 2)
+                (if (= (get state 'ground) 1) (assoc (assoc state 'attempts attempts) 'items 1)
+                  (signal 'test "attempted a pickup without ground evidence"))
+                (assoc state 'attempts attempts)))))
+        (def osrs-observe-ready
+          (fn (state _ready _limit)
+            (if (has-key? state 'attempts) state (assoc state 'items 1))))
         (def osrs-observe-bounded
           (fn (state ready _)
             (let ((visible (assoc state 'visible #t)))
@@ -232,18 +242,21 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
         .evaluate(
             &include_str!("../../../examples/osrs/quest-test.agel").replace(
                 "(export stage-cook-ingredients",
-                "(export wait-live wait-item stage-cook-ingredients",
+                "(export wait-live wait-item take-castle-pot stage-cook-ingredients",
             ),
         )
         .unwrap();
     let result = world
         .evaluate(
             "(import agel/osrs-quest-test)
+      (def picked (take-castle-pot (dict 'items 0 'ground 1 'attempts 0) (fn (_) nil)))
+      (def missing (with-handler (osrs/quest-test problem) #t
+        (begin (take-castle-pot (dict 'items 0 'ground 0 'attempts 0) (fn (_) nil)) #f)))
       (list (get (wait-live (dict 'visible #f) (fn (state) (get state 'visible)) 1) 'visible)
-            (get (wait-item (dict 'items 0) 1931) 'items))",
+            (get (wait-item (dict 'items 0) 1931) 'items) (get picked 'attempts) missing)",
         )
         .unwrap();
-    assert_eq!(result.values.last(), Some(&Value::List(vec![Value::Bool(true), Value::Int(1)])));
+    assert_eq!(result.values.last(), Some(&Value::List(vec![Value::Bool(true), Value::Int(1), Value::Int(2), Value::Bool(true)])));
 }
 
 #[test]
