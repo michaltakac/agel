@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
@@ -90,7 +91,7 @@ def evaluate_score(output, boot_image, executable, memory_mib):
         try:
             reply = machine.submit(':exec agel -- --no-stdlib /data/benchmark.agel', seconds=120)
             deadline = time.monotonic() + 120
-            while 'process agel exited with status ' not in reply:
+            while not re.search(r'^process agel exited with status \d+[\r\n]', reply, re.M):
                 if time.monotonic() >= deadline:
                     raise TimeoutError('guest benchmark evaluator did not exit')
                 try:

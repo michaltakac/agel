@@ -489,6 +489,18 @@ def verify_transfer_donor(donor, recipient, evaluation_accounts, read_table):
     return elapsed, charges, usage
 
 
+def melee_progress_form(directory):
+    saved = saved_outcome(directory)
+    fields = []
+    for skill, label in ((0, 'attack'), (2, 'strength'), (1, 'defence'), (3, 'hitpoints')):
+        values = re.findall(rf'^stat={skill} base=\d+ visible=\d+ fine_xp=(\d+)$', saved, re.M)
+        require(len(values) == 1, f'{directory}: expected one saved {label} XP value')
+        fields.append(f"'{label} {int(values[0])}")
+    stance = re.findall(r'^varp\.com_mode=(\d+)$', saved, re.M)
+    require(len(stance) <= 1, f'{directory}: ambiguous saved combat stance')
+    return f"(dict 'xp-tenths (dict {' '.join(fields)}) 'saved-stance {int(stance[0]) if stance else 'nil'})"
+
+
 def transfer_recovery_time(directory, read_table):
     source = installed_client(directory, read_table)
     if '"native-transfer: recovery-us "' not in source:
@@ -538,6 +550,8 @@ def main():
         args.candidate, adaptive_policy, read_table)
     if args.combat:
         require('goal_xp' not in fixed and 'goal_xp' not in transfer, '--combat requires one-rat arms')
+    if args.melee:
+        require('goal_xp' in fixed and 'goal_xp' in transfer, '--melee requires three-skill arms')
     require(fixed == transfer, 'world, runtime, game adapter, task source, or starting state differs')
     require(fixed_account != transfer_account, 'task accounts must differ')
     donor_score = None
@@ -559,6 +573,9 @@ def main():
     pair = (f"(assoc (assoc (benchmark-pair fixed adaptive) 'policy-outcomes "
             f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision})) "
             f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
+    if args.melee:
+        pair = (f"(assoc {pair} 'melee-progress (dict 'goal-xp {fixed['goal_xp']} "
+                f"'fixed {melee_progress_form(args.fixed)} 'adaptive {melee_progress_form(args.candidate)}))")
     if args.writer_rates is not None:
         pair = f"(assoc {pair} 'writer-estimate {writer_estimate_form(usage, args.writer_rates)})"
     if donor_score:
