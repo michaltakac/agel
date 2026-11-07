@@ -88,18 +88,14 @@
   (def squares
     (fn (x context remaining)
       (if (= remaining 0) x (squares (mont x x context) context (- remaining 1)))))
-  (def divide-byte
-    (fn (digits carry out)
-      (if (= digits nil) (dict 'digits out 'byte carry)
-        (let ((value (+ (* carry radix) (car digits))))
-          (let ((digit (/ value 256)))
-            (divide-byte (cdr digits) (rem value 256)
-              (if (if (= out nil) (= digit 0) #f) out (cons digit out))))))))
-  (def bytes-loop
-    (fn (digits out)
-      (if (= digits nil) (if (= out nil) '(0) out)
-        (let ((next (divide-byte (reverse digits) 0 nil)))
-          (bytes-loop (get next 'digits) (cons (get next 'byte) out))))))
+  (def limbs-to-bytes
+    (fn (digits carry bits out)
+      (if (< 7 bits)
+        (limbs-to-bytes digits (/ carry 256) (- bits 8) (cons (rem carry 256) out))
+        (if (= digits nil)
+          (if (= carry 0) out (cons carry out))
+          (limbs-to-bytes (cdr digits) (+ carry (* (car digits) (get powers bits)))
+            (+ bits 31) out)))))
   (def trim
     (fn (xs) (if (= xs nil) '(0) (if (= (car xs) 0) (trim (cdr xs)) xs))))
   (def rsa-encrypt
@@ -113,7 +109,7 @@
                   (let ((base (mont x (get context 'r2) context)))
                     (let ((encrypted (mont (mont (squares base context 16) base context)
                                            (pad '(1) (+ 2 (get context 'size))) context)))
-                      (let ((result (trim (bytes-loop encrypted nil))))
+                      (let ((result (trim (limbs-to-bytes encrypted 0 0 nil))))
                         (if (< (car result) 128) result (cons 0 result)))))
                   (signal 'crypto/rsa "plaintext is not smaller than the modulus")))
             (signal 'crypto/rsa "plaintext exceeds the modulus width")))))
