@@ -115,13 +115,21 @@
 (check (= (evolution-source policy-versions 1) initial-policy) "frozen policy source was lost")
 (check (= retained-owner (get stream 'owner)) "stream owner changed")
 (audit (dict 'event 'live-policy-versions 'versions policy-versions))
-(console-log (text-concat "native-opt: task-us " (print-form (- (clock-us) optimizer-started))))
+(def optimizer-elapsed (- (clock-us) optimizer-started))
+(console-log (text-concat "native-opt: task-us " (print-form optimizer-elapsed)))
 (if policy-activated
   (begin
     (check (= (evolution-current policy-versions 'cell 'service-quantum) 2) "policy version did not change")
     (check (< 64 (retained-quantum observed-length)) "retained encoder did not use the changed policy")
     (console-log (text-concat "native-opt: candidate " (print-form (get session 'candidate))))
-    (console-log "native-opt: policy committed after text judgment and measured replay"))
+    (console-log "native-opt: policy committed after text judgment and measured replay")
+    (let ((probe (get (get (get (get policy-versions 'versions) 2) 'activation) 'probe)))
+      (let ((estimate (profile-break-even optimizer-elapsed
+                       (get (get probe 'control-before) 'elapsed-us)
+                       (get (get probe 'control-after) 'elapsed-us)
+                       (get (get probe 'metrics) 'elapsed-us))))
+        (audit (dict 'event 'optimizer-break-even 'estimate estimate))
+        (console-log (text-concat "native-opt: replay break-even " (print-form estimate))))))
   (begin
     (console-log (text-concat "native-opt: last refusal " (get session 'reason)))
     (check (if continue-after-refusal (= (get session 'status) 'exhausted) #f)

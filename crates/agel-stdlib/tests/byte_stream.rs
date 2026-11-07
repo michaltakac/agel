@@ -129,6 +129,13 @@ fn profiling_separates_service_time_and_calibrates_a_conservative_limit() {
         result.values.last().unwrap().to_string(),
         "(done 2 260 200 30 120 320)"
     );
+    let break_even = world
+        .evaluate("(list (profile-break-even 100 80 70 60) (profile-break-even 101 80 70 60) (profile-break-even 100 60 70 60))")
+        .unwrap();
+    assert_eq!(
+        break_even.values.last().unwrap().to_string(),
+        "({overhead-us 100 saving-us 10 replays 10} {overhead-us 101 saving-us 10 replays 11} {overhead-us 100 saving-us 0 replays nil})"
+    );
     assert!(world
         .evaluate("(profile-limit (dict 'calls 1 'work-max-us 0) 64 300 2 512)")
         .is_err());

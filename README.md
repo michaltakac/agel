@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.190.** The native optimizer decodes its recorded
-tape with the compact Agel decoder. See the [release notes](docs/release-v0.3.190.md).
+**Current release: v0.3.191.** The native optimizer reports the replay
+count needed to recover its measured setup time. See the [release notes](docs/release-v0.3.191.md).
+
+v0.3.190 decodes optimizer tapes with the compact Agel decoder. See the [release notes](docs/release-v0.3.190.md).
 
 v0.3.189 reports a completed native one-rat comparison. See the [release notes](docs/release-v0.3.189.md).
 

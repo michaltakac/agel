@@ -1,6 +1,6 @@
 (module agel/work-profile
   (import agel/services)
-  (export profile-work profile-limit)
+  (export profile-work profile-limit profile-break-even)
   (def require (fn (ok reason) (if ok #t (signal 'profile/contract reason))))
   (def peak (fn (a b) (if (< a b) b a)))
   (def duration
@@ -52,4 +52,15 @@
         (require (positive (get metrics 'work-max-us)) "profile has no measured work interval")
         (let ((bound (/ (* unit budget) (* margin (get metrics 'work-max-us)))))
           (if (< maximum bound) maximum bound)))))
+  (def profile-break-even
+    (fn (overhead before after candidate)
+      (require (if (= overhead 0) #t (positive overhead)) "profile overhead must be nonnegative")
+      (require (if (positive before) (positive after) #f) "control durations must be positive")
+      (require (if (= candidate 0) #t (positive candidate)) "candidate duration must be nonnegative")
+      (let ((control (if (< before after) before after)))
+        (let ((saving (- control candidate)))
+          (dict 'overhead-us overhead 'saving-us saving
+            'replays (if (< 0 saving)
+              (if (= overhead 0) 0 (+ 1 (/ (- overhead 1) saving))) nil))))))
+
 )
