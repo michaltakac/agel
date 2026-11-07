@@ -2,7 +2,7 @@
   (import agel/sequence)
   (import agel/osrs-game)
   (import agel/osrs-mining-test)
-  (export stage-cook-ingredients finish-cooks-assistant acquire-cook-containers
+  (export stage-cook-ingredients finish-cooks-assistant finish-cooks-assistant-using acquire-cook-containers
     gather-and-finish-cooks-assistant gather-and-finish-cooks-assistant-using)
   (def require (fn (ok reason) (if ok #t (signal 'osrs/quest-test reason))))
   (def xp (fn (g) (get (osrs-stat g 7) 'xp)))

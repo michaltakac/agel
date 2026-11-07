@@ -29,7 +29,10 @@ scenario.add_argument('--repair', action='store_true', help='repair a general to
 parser.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
 parser.add_argument('--transfer-from', type=Path, help='resume a verified native combat policy on a fresh account from a donor evidence directory')
 parser.add_argument('--live', action='store_true', help='use real providers for --repair or --optimize')
+parser.add_argument('--quest-resume', type=Path, help='isolate quest hand-in on a previously gathered account')
 options=parser.parse_args()
+if options.quest_resume and not options.quest:
+    parser.error('--quest-resume requires --quest')
 melee=options.melee_xp
 if melee is not None and (not 1 <= melee <= 512 or options.combat):
     parser.error('--melee-xp requires a goal of 1..512 and is separate from --combat')
@@ -77,6 +80,17 @@ if options.quest:
     manifest['evaluation_fuel']=250_000_000
     manifest['keepalive_interval_us']=3_000_000
     manifest['guest_memory_mib']=1024
+    if options.quest_resume:
+        prior = options.quest_resume
+        original = json.loads((prior/'world.json').read_text())
+        if any(original.get(key) != manifest[key] for key in ('image', 'manifest', 'scope')):
+            parser.error('quest checkpoint differs from the current world or fresh quest workload')
+        trace = (prior/'serial.log').read_text()
+        if ('native-quest: milled wheat and collected a pot of flour' not in trace
+                or 'process agel exited with status 1' not in trace):
+            parser.error('quest checkpoint requires a failed native run that gathered the ingredients')
+        manifest['scope']="native Cook's Assistant hand-in on a retained normal account"
+        manifest['checkpoint_trace_sha256']=hashlib.sha256(trace.encode()).hexdigest()
 
 catalog=Path('crates/agel-stdlib/stdlib.agel').read_text()
 a=catalog.index('(module agel/sequence\n');b=catalog.find('\n(module ',a+1)
@@ -184,6 +198,8 @@ if options.challenge:
 '''
 else:
     account={'username':'nat'+secrets.token_hex(4),'password':secrets.token_hex(12)}
+    if options.quest_resume:
+        account=json.loads((options.quest_resume/'account.json').read_text())
     if options.craft:
         fixture=Path('target/osrs-login-probes/agelcraft.json')
         account={'username':'agelcraft','password':json.loads(fixture.read_text())['password']}
@@ -284,11 +300,26 @@ else:
 (console-log (text-concat "native-combat: task-us " (print-form (- finish task-start))))
 '''
     elif options.quest:
-        source+='''(import agel/osrs-quest-test) (import agel/benchmark)
+        source+='''(import agel/osrs-quest-test)
+(def log-quest (fn (phase) (console-log (text-concat "native-quest: " phase))))
+(def run-quest
+  (fn (scenario)
+    (with-handler (* problem)
+      (begin
+        (log-quest (print-form problem))
+        (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+      (scenario game log-quest))))
+'''
+        if options.quest_resume:
+            source+='''(log-quest "verifying retained ingredients and attempting hand-in")
+(def quest-report (assoc (run-quest finish-cooks-assistant-using) 'source 'checkpoint))
+(console-log (text-concat "native-quest: " (print-form quest-report)))
+'''
+        else:
+            source+='''(import agel/benchmark)
 (def started (clock-us))
-(console-log "native-quest: gathering Cook's Assistant ingredients")
-(def quest-report (gather-and-finish-cooks-assistant-using game
-  (fn (phase) (console-log (text-concat "native-quest: " phase)))))
+(log-quest "gathering Cook's Assistant ingredients")
+(def quest-report (run-quest gather-and-finish-cooks-assistant-using))
 (def finished (clock-us))
 (console-log (text-concat "native-quest: " (print-form quest-report)))
 (console-log (text-concat "native-quest: score " (print-form
@@ -367,7 +398,7 @@ else:
     if melee is not None:completion='login, observations and melee training'
     if options.craft:completion='login, observations and adamant platebody'
     if options.economy:completion='login, mining, smelting and first bronze sale'
-    if options.quest:completion="login, gathered ingredients and Cook's Assistant"
+    if options.quest:completion="login and Cook's Assistant hand-in" if options.quest_resume else "login, gathered ingredients and Cook's Assistant"
     source+='(console-log "native-network: client completed: '+completion+' inside Agel OS")\n#t\n'
 (directory/'world.json').write_text(json.dumps(manifest,indent=2)+'\n')
 source='(begin\n'+source+'\n#t)\n'
@@ -462,8 +493,10 @@ if options.economy:
                    'stat=13 base=1 visible=1 fine_xp=62','stat=14 base=1 visible=1 fine_xp=350'}
 oracle_varps=['varp.com_mode'] if melee is not None else []
 if options.quest:
-    assert 'native-quest: {test cooks-assistant passed #t choices 2 quest-points 1 cooking-xp 300 ingredients-after (0 0 0) source gathered}' in output
-    assert 'native-quest: score {correct #t ' in output
+    ingredient_source = 'checkpoint' if options.quest_resume else 'gathered'
+    assert f'native-quest: {{test cooks-assistant passed #t choices 2 quest-points 1 cooking-xp 300 ingredients-after (0 0 0) source {ingredient_source}}}' in output
+    if not options.quest_resume:
+        assert 'native-quest: score {correct #t ' in output
     assert output.count('operation open ') == output.count('operation close ') == 2
     assert 'inference-bridge: started job' not in output
     oracle_varps=['varp.cookquest','varp.qp','varp.cooks_assistant_ingredients']

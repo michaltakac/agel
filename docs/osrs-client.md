@@ -103,6 +103,12 @@ sh scripts/test-native-network.sh --economy
 sh scripts/test-native-network.sh --quest
 ```
 
+For a hand-in diagnostic on an earlier native quest attempt that gathered
+all three ingredients, pass its evidence directory to
+`scripts/test-native-network.py --quest --quest-resume EVIDENCE`.
+The guest rechecks the saved inventory and starts at the cook dialogue.
+The result is labeled as a checkpoint run and omits the fresh-account score.
+
 The native melee commands use the same fresh-account XP goal. The
 adaptive arm times the proposal, text judgment and measured replay as
 part of the task. After both runs pass, give their evidence directories
