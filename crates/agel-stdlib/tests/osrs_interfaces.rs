@@ -215,11 +215,15 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
       (module agel/osrs-mining-test)
       (module agel/osrs-game
         (export osrs-keepalive osrs-observe-bounded osrs-observe-ready osrs-wait-ticks
-          osrs-inventory-count osrs-map-route osrs-ground-count osrs-take-ground-item)
+          osrs-inventory-count osrs-map-route osrs-ground-count osrs-take-ground-item osrs-walk osrs-route-cleared?)
         (def osrs-keepalive (fn (state) state))
         (def osrs-wait-ticks (fn (state _) (assoc state 'visible #f)))
         (def osrs-inventory-count (fn (state _container _item) (get state 'items)))
         (def osrs-map-route (fn (_) nil))
+        (def osrs-walk (fn (state x z) (assoc state 'target (list x z))))
+        (def osrs-route-cleared?
+          (fn (state before x z)
+            (if (= (get state 'target) (list x z)) (get state 'visible) #f)))
         (def osrs-ground-count (fn (state item x z level) (get state 'ground)))
         (def osrs-take-ground-item
           (fn (state item x z)
@@ -242,7 +246,7 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
         .evaluate(
             &include_str!("../../../examples/osrs/quest-test.agel").replace(
                 "(export stage-cook-ingredients",
-                "(export wait-live wait-item take-castle-pot stage-cook-ingredients",
+                "(export wait-live wait-item take-castle-pot travel-to stage-cook-ingredients",
             ),
         )
         .unwrap();
@@ -253,10 +257,11 @@ fn quest_wait_can_stop_before_a_transient_observation_disappears() {
       (def missing (with-handler (osrs/quest-test problem) #t
         (begin (take-castle-pot (dict 'items 0 'ground 0 'attempts 0) (fn (_) nil)) #f)))
       (list (get (wait-live (dict 'visible #f) (fn (state) (get state 'visible)) 1) 'visible)
-            (get (wait-item (dict 'items 0) 1931) 'items) (get picked 'attempts) missing)",
+            (get (wait-item (dict 'items 0) 1931) 'items) (get picked 'attempts) missing
+            (get (travel-to (dict 'visible #f) 3197 3270 8) 'visible))",
         )
         .unwrap();
-    assert_eq!(result.values.last(), Some(&Value::List(vec![Value::Bool(true), Value::Int(1), Value::Int(2), Value::Bool(true)])));
+    assert_eq!(result.values.last(), Some(&Value::List(vec![Value::Bool(true), Value::Int(1), Value::Int(2), Value::Bool(true), Value::Bool(true)])));
 }
 
 #[test]

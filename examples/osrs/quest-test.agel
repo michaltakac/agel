@@ -125,24 +125,28 @@
         (travel (osrs-wait-ticks (osrs-keepalive state) 5) (- batches 1)))))
   (def gather-egg
     (fn (state)
-      (let ((road (travel (osrs-walk state 3197 3270) 8)))
-        (let ((farm (travel (osrs-walk road 3181 3288) 8)))
+      (let ((road (travel-to state 3197 3270 8)))
+        (let ((farm (travel-to road 3181 3288 8)))
           (let ((opened (travel (osrs-use-location farm 1558 3181 3289) 2)))
             (let ((inside (travel (osrs-walk opened 3181 3291) 3)))
               (require (= (osrs-ground-count inside 1944 3185 3297 0) 1) "egg was not observed")
               (wait-item (osrs-take-ground-item inside 1944 3185 3297) 1944)))))))
+  (def travel-to
+    (fn (state x z batches)
+      (observe-live (osrs-walk state x z)
+        (fn (g) (osrs-route-cleared? g state x z)) batches)))
   (def gather-milk
     (fn (state)
       (let ((gate (travel (osrs-walk state 3181 3291) 4)))
         (let ((open (travel (osrs-use-location gate 1558 3181 3289) 2)))
           (let ((road (travel (osrs-walk open 3181 3288) 2)))
-            (let ((north (travel (osrs-walk road 3176 3314) 9)))
+            (let ((north (travel-to road 3176 3314 9)))
               (let ((opened (travel (osrs-use-location north 883 3176 3315) 2)))
                 (let ((inside (travel (osrs-walk opened 3176 3317) 3)))
                   (wait-item (osrs-use-location inside 8689 3172 3317) 1927)))))))))
   (def gather-grain
     (fn (state)
-      (let ((outside (travel (osrs-walk state 3163 3289) 8)))
+      (let ((outside (travel-to state 3163 3289 8)))
         (let ((opened (travel (osrs-use-location outside 1558 3163 3290) 2)))
           (let ((inside (travel (osrs-walk opened 3163 3291) 2)))
             (let ((grain (wait-item (osrs-use-location-option inside 15506 3162 3294 2) 1947)))
@@ -170,7 +174,7 @@
       (let ((door (travel (osrs-use-location state 1521 3166 3302) 4)))
         (let ((outside (travel (osrs-walk door 3166 3301) 4)))
           (let ((road (travel (osrs-walk outside 3172 3290) 5)))
-            (travel (osrs-walk road 3204 3260) 12))))))
+            (travel-to road 3204 3260 12))))))
   (def gather-and-finish-cooks-assistant
     (fn (state) (gather-and-finish-cooks-assistant-using state (fn (_) nil))))
   (def gather-and-finish-cooks-assistant-using
