@@ -291,7 +291,11 @@ else:
 (console-log "native-combat: training three melee skills")
 (def log-encounter (fn (skill report)
   (console-log (text-concat "native-combat: encounter " (print-form (list skill report))))))
-(def trained (train-rat-melee-result ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter))
+(def trained (with-handler (* problem)
+  (begin
+    (console-log (text-concat "native-combat: failure " (print-form problem)))
+    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+  (train-rat-melee-result ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter)))
 (def finish (clock-us))
 (def completed (get trained 'state))
 (def report (get trained 'report))

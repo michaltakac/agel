@@ -233,8 +233,10 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (def osrs-open-interface? (fn (state interface) #t))
         (def osrs-click-interface
           (fn (state interface component)
-            (assoc (assoc state 'stance (if (= component 10) 1 3))
-                   'npcs (list rat-one rat-two))))
+            (let ((clicked (assoc state 'clicks (cons component (get state 'clicks)))))
+              (if (= (get state 'clicks) nil) clicked
+                (assoc (assoc clicked 'stance (if (= component 10) 1 3))
+                       'npcs (list rat-one rat-two))))))
         (def osrs-varp (fn (state varp) (get state 'stance)))
         (def osrs-attack
           (fn (state index)
@@ -263,6 +265,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
       (def trained (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154) 8 2 nil))
       (def report (get trained 'report))
       (list (get report 'passed) (get report 'defence-xp) (get report 'stance)
+        (reverse (get (get trained 'state) 'clicks))
         (reverse (get (get trained 'state) 'attempts))
         (map (fn (phase) (get (car (get phase 'encounters)) 'target-index)) (get report 'phases)))
     "#,
@@ -270,6 +273,6 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 3 (1 1 2 2) (1 2 2))")
+        Some("(#t 8 3 (10 18 10 18) (1 1 2 2) (1 2 2))")
     );
 }
