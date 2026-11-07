@@ -144,6 +144,16 @@
     (fn (state)
       (append (prediction-cases (get state 'examples) (get (get state 'candidate) 'predictions))
         (append (get state 'examples) (get state 'held-out)))))
+  (def replay-refusal
+    (fn (state replay)
+      (let ((checked (get replay 'checked)) (reason (get replay 'reason))
+            (displayed (count (get state 'examples))))
+        (if (= (type-of checked) 'int)
+          (text-concat
+            (if (< checked displayed) "Displayed prediction: "
+              (if (< checked (+ displayed displayed)) "Displayed contract: " "Held-out contract: "))
+            reason)
+          reason))))
   (def apply-judgment
     (fn (self state receipt probe)
       (let ((before (read-one (get state 'before-text))))
@@ -154,7 +164,12 @@
           (let ((next (assoc state 'versions versions)))
             (if (= (evolution-current versions (object-kind state) (get state 'tool))
                    (evolution-current (get state 'versions) (object-kind state) (get state 'tool)))
-                (retry self next (get (car (reverse (get versions 'history))) 'reason))
+                (let ((history (reverse (get versions 'history))))
+                  (let ((prior (car (cdr history))))
+                    (retry self next
+                      (if (= (get prior 'event) 'replay)
+                        (replay-refusal state (get prior 'result))
+                        (get (car history) 'reason)))))
                 (assoc next 'status 'done)))))))
   (def advance
     (fn (self state)
@@ -167,7 +182,7 @@
         (let ((result (nth message 2)))
           (if (= (type-of (get result 'reason)) 'string)
             (if (= (get result 'stage) 'recorded-replay)
-              (retry self (note state (dict 'event 'recorded-replay 'result result)) (get result 'reason))
+              (retry self (note state (dict 'event 'recorded-replay 'result result)) (replay-refusal state result))
               (let ((next (note state (dict 'event 'activation-probe 'result result))))
                 (if (= (get result 'passed) #t) (apply-judgment self next (get state 'approved-receipt) result)
                   (retry self next (get result 'reason))))) state)) state)))

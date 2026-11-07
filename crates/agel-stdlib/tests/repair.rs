@@ -82,7 +82,10 @@ fn held_out_failures_and_false_predictions_retry_with_reasons() {
     );
     assert!(world.pending_model_requests()[0]
         .prompt
-        .contains("recorded step differs"));
+        .contains("Held-out contract: recorded step differs"));
+    assert!(!world.pending_model_requests()[0]
+        .prompt
+        .contains("HELD_OUT_SECRET"));
     assert!(world.pending_model_requests()[0]
         .prompt
         .contains("(if (= n 0) 0 2)"));
@@ -501,7 +504,7 @@ fn recorded_replay_refuses_before_external_probe() {
         .unwrap();
     assert_eq!(
         result.values.last().unwrap().to_string(),
-        r#"(0 recorded-replay proposing "recorded step differs" 1)"#
+        r#"(0 recorded-replay proposing "Displayed prediction: recorded step differs" 1)"#
     );
 }
 
