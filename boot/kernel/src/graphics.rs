@@ -6597,11 +6597,19 @@ fn interactive(
         if byte_frame_active {
             if byte == b'\n' {
                 let payload = &byte_frame[..byte_frame_length];
+                let ledger_handled = !byte_frame_overflow
+                    && relay_ledger(
+                        payload,
+                        &mut console_driver,
+                        &mut storage,
+                        filesystem.as_mut(),
+                    );
                 let accepted = !byte_frame_overflow
-                    && core::str::from_utf8(payload).is_ok()
-                    && running
-                        .as_mut()
-                        .is_some_and(|run| run.feed_console(payload));
+                    && (ledger_handled
+                        || (core::str::from_utf8(payload).is_ok()
+                            && running
+                                .as_mut()
+                                .is_some_and(|run| run.feed_console(payload))));
                 if !accepted {
                     console::write("byte-input refused\n");
                 }

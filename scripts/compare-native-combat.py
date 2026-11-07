@@ -91,8 +91,9 @@ def load_arm(directory, policy, read_table):
         keys = [match.groups() for match in started]
         require(len(set(keys)) == len(keys) and sorted(keys) == sorted(match.groups() for match in completed),
                 f'{directory}: unmatched or duplicate judge receipts')
-        receipt_jobs = [identity.rsplit('/', 1)[-1] for identity, _ in keys]
-        require(sorted(receipt_jobs) == sorted(dispatched), f'{directory}: judge ledger differs from bridge dispatches')
+        receipt_jobs = {identity.rsplit('/', 1)[-1] for identity, _ in keys}
+        require(len(set(dispatched)) == len(dispatched) and receipt_jobs == set(dispatched),
+                f'{directory}: judge ledger differs from bridge dispatches')
         for receipt in receipts:
             charges.append(('judge', judge_cost(receipt)))
         writers = re.findall(r'^inference-bridge: started job \d+ provider codex ', trace, re.M)

@@ -256,7 +256,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut byte_block = String::new();
     let started = Instant::now();
     let deadline = started + Duration::from_secs(seconds);
-    loop {
+    let outcome: Result<(), Box<dyn std::error::Error>> = thread::scope(|scope| loop {
         let lines = wire.lines(&mut cursor);
         for line in lines.lines() {
             if number.is_none()
@@ -324,7 +324,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let providers = Arc::clone(&providers);
                         let journal = Arc::clone(&journal);
                         let (sender, result) = mpsc::channel();
-                        thread::spawn(move || {
+                        // Finish any reserved judge receipt before the bridge exits.
+                        scope.spawn(move || {
                             let outcome = providers.infer(&request);
                             // A failed durable receipt never becomes an accepted model result.
                             let reply = match journal.check() {
@@ -395,7 +396,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("guest run exceeded its {seconds}-second deadline").into());
         }
         thread::sleep(Duration::from_millis(5));
-    }
+    });
+    outcome?;
+    journal.check()?;
+    Ok(())
 }
 
 #[cfg(test)]

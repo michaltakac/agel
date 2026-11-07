@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.49.** Agel services the game connection while it
-reconstructs replay input. See the [release notes](docs/release-v0.3.49.md).
+**Current release: v0.3.50.** The OS can preserve outstanding judge receipts
+after the requesting process exits. See the [release notes](docs/release-v0.3.50.md).
+
+v0.3.49 services the game connection during replay setup.
+See the [release notes](docs/release-v0.3.49.md).
 
 v0.3.48 verifies judge receipts against the guest disk.
 See the [release notes](docs/release-v0.3.48.md).
