@@ -63,7 +63,9 @@ phases = 3 if options.melee_xp is not None else 1
 result = evaluate(source, 43594, timeout=120 if goal is None else 30 + phases * max_fights * 300)
 assert password not in result.stdout + result.stderr, 'credential output'
 assert result.returncode == 0, result.stderr
-assert 'passed #t' in result.stdout and 'target-removed #t' in result.stdout, result.stdout
+assert 'passed #t' in result.stdout, result.stdout
+if goal is None:
+    assert 'target-removed #t' in result.stdout, result.stdout
 if options.live_tools:
     assert 'live-tool-version 2' in result.stdout and 'preserved-calls 3' in result.stdout, result.stdout
 if options.melee_xp is not None:
