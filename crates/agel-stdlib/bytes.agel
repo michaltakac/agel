@@ -1,0 +1,257 @@
+(module agel/bytes
+  (import agel/sequence)
+  (export bytes-from-hex bytes-from-compact-hex bytes-crc32 text-hex text-from-hex bytes-hex-chunks bytes-crc32-feed bytes-crc32-finish text-crc32 bytes-hex bytes-pack-field bytes-unpack-field bytes-hex-serviced bytes-pack-field-serviced bytes-hex-quantum bytes-pack-field-quantum)
+  (def byte-drop (fn (xs n) (if (= n 0) xs (byte-drop (cdr xs) (- n 1)))))
+  (def byte-take
+    (fn (xs n out) (if (= n 0) (reverse out) (byte-take (cdr xs) (- n 1) (cons (car xs) out)))))
+  (def utf8-boundary
+    (fn (xs at needed boundary)
+      (if (= xs nil) boundary
+        (let ((c (car xs)))
+          (let ((next
+            (if (= needed 0)
+              (if (< c 128) 0 (if (if (< 193 c) (< c 224) #f) 1
+                (if (if (< 223 c) (< c 240) #f) 2 (if (if (< 239 c) (< c 245) #f) 3
+                  (signal 'bytes/utf8 "invalid UTF-8 byte")))))
+              (if (if (< 127 c) (< c 192) #f) (- needed 1) (signal 'bytes/utf8 "invalid UTF-8 continuation")))))
+            (utf8-boundary (cdr xs) (+ at 1) next (if (= next 0) (+ at 1) boundary)))))))
+  (def text-chunks
+    (fn (chunks carry out)
+      (if (= chunks nil)
+        (if (= carry nil) out (signal 'bytes/utf8 "incomplete UTF-8 sequence"))
+        (let ((bytes (append carry (car chunks))))
+          (let ((end (utf8-boundary bytes 0 0 0)))
+            (text-chunks (cdr chunks) (byte-drop bytes end)
+              (text-concat out (text-from-bytes (byte-take bytes end nil)))))))))
+  (def text-from-hex (fn (text) (text-chunks (bytes-hex-chunks text 128) nil "")))
+  (def chunks-loop
+    (fn (text at high limit bytes size out)
+      (if (= size limit)
+        (chunks-loop text at high limit nil 0 (cons (reverse bytes) out))
+        (if (= at (text-bytes text))
+          (if (= high nil) (reverse (if (= size 0) out (cons (reverse bytes) out)))
+            (signal 'bytes/hex "odd hex length"))
+          (let ((c (text-byte text at)))
+            (if (if (= c 32) #t (if (= c 9) #t (if (= c 10) #t (= c 13))))
+              (chunks-loop text (+ at 1) high limit bytes size out)
+              (let ((n (digit c)))
+                (if (= high nil) (chunks-loop text (+ at 1) n limit bytes size out)
+                  (chunks-loop text (+ at 1) nil limit (cons (+ (* high 16) n) bytes) (+ size 1) out)))))))))
+  (def bytes-hex-chunks
+    (fn (text limit)
+      (if (if (= (type-of limit) 'int) (if (< 0 limit) (< limit 257) #f) #f)
+        (chunks-loop text 0 nil limit nil 0 nil)
+        (signal 'bytes/chunk "chunk size must be 1..256"))))
+  (def hex-span
+    (fn (text start end)
+      (if (= start end) ""
+        (if (= (+ start 1) end)
+          (let ((byte (text-byte text start)))
+            (text-concat (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
+              (text-slice "0123456789abcdef" (- byte (* 16 (/ byte 16))) (+ 1 (- byte (* 16 (/ byte 16)))))))
+          (let ((middle (/ (+ start end) 2)))
+            (text-concat (hex-span text start middle) (hex-span text middle end)))))))
+  (def text-hex (fn (text) (hex-span text 0 (text-bytes text))))
+  (def rem (fn (a b) (- a (* b (/ a b)))))
+  (def digit
+    (fn (c)
+      (if (if (< 47 c) (< c 58) #f) (- c 48)
+        (if (if (< 96 c) (< c 103) #f) (- c 87)
+          (if (if (< 64 c) (< c 71) #f) (- c 55)
+            (signal 'bytes/hex "invalid hex digit"))))))
+  (def decode
+    (fn (text at high out)
+      (if (= at (text-bytes text))
+        (if (= high nil) (reverse out) (signal 'bytes/hex "odd hex length"))
+        (let ((c (text-byte text at)))
+          (if (if (= c 32) #t (if (= c 9) #t (if (= c 10) #t (= c 13))))
+            (decode text (+ at 1) high out)
+            (let ((n (digit c)))
+              (if (= high nil) (decode text (+ at 1) n out)
+                (decode text (+ at 1) nil (cons (+ (* high 16) n) out)))))))))
+  (def decode-pairs
+    (fn (text at length out)
+      (if (= at length) (reverse out)
+        (if (< (+ at 1) length)
+          (let ((high (text-byte text at)) (low (text-byte text (+ at 1))))
+            (if (if (< 32 high) (< 32 low) #f)
+              (decode-pairs text (+ at 2) length (cons (+ (* (digit high) 16) (digit low)) out))
+              (decode text at nil out)))
+          (decode text at nil out)))))
+  (def bytes-from-hex
+    (fn (text)
+      (decode-pairs text 0 (text-bytes text) nil)))
+  (def decode-compact
+    (fn (text at length out)
+      (if (= at length) (reverse out)
+        (decode-compact text (+ at 2) length
+          (cons (+ (* 16 (digit (text-byte text at))) (digit (text-byte text (+ at 1)))) out)))))
+  (def bytes-from-compact-hex
+    (fn (text)
+      (let ((length (text-bytes text)))
+        (if (= length (* 2 (/ length 2)))
+          (decode-compact text 0 length nil)
+          (signal 'bytes/hex "odd hex length")))))
+  (def hex-pairs
+    (fn (pieces out)
+      (if (= (count pieces) 0) (reverse out)
+        (if (= (count pieces) 1) (reverse (cons (car pieces) out))
+          (hex-pairs (cdr (cdr pieces)) (cons (text-concat (car pieces) (car (cdr pieces))) out))))))
+  (def hex-join
+    (fn (pieces)
+      (if (= (count pieces) 0) ""
+        (if (= (count pieces) 1) (car pieces) (hex-join (hex-pairs pieces nil))))))
+  (def hex-byte-table
+    (foldl text-concat ""
+      '(
+        "000102030405060708090a0b0c0d0e0f"
+        "101112131415161718191a1b1c1d1e1f"
+        "202122232425262728292a2b2c2d2e2f"
+        "303132333435363738393a3b3c3d3e3f"
+        "404142434445464748494a4b4c4d4e4f"
+        "505152535455565758595a5b5c5d5e5f"
+        "606162636465666768696a6b6c6d6e6f"
+        "707172737475767778797a7b7c7d7e7f"
+        "808182838485868788898a8b8c8d8e8f"
+        "909192939495969798999a9b9c9d9e9f"
+        "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"
+        "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+        "c0c1c2c3c4c5c6c7c8c9cacbcccdcecf"
+        "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
+        "e0e1e2e3e4e5e6e7e8e9eaebecedeeef"
+        "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff")))
+  (def encode-bytes
+    (fn (bytes part size pieces service quantum since)
+      (if (= bytes nil) (hex-join (reverse (if (= size 0) pieces (cons part pieces))))
+        (if (= size 64)
+          (begin
+            (if (= since quantum) (service) nil)
+            (encode-bytes bytes "" 0 (cons part pieces) service quantum (if (= since quantum) 0 since)))
+          (let ((byte (car bytes)))
+            (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
+              (let ((offset (* byte 2)))
+                (encode-bytes (cdr bytes)
+                  (text-concat part (text-slice hex-byte-table offset (+ offset 2)))
+                  (+ size 1) pieces service quantum (+ since 1)))
+              (signal 'bytes/value "expected byte")))))))
+  (def bytes-hex-quantum
+    (fn (bytes service quantum)
+      (begin
+        (if (if (= (type-of quantum) 'int)
+              (if (< 63 quantum) (if (< quantum 4097) (= (* 64 (/ quantum 64)) quantum) #f) #f) #f)
+          #t (signal 'bytes/quantum "quantum must be a multiple of 64 between 64 and 4096"))
+        (let ((length (count bytes)))
+          (if (= length 0) ""
+            (begin
+              (if (< length 64) nil (service))
+              (encode-bytes bytes "" 0 nil service quantum 0)))))))
+  (def bytes-hex-serviced (fn (bytes service) (bytes-hex-quantum bytes service 64)))
+  (def bytes-hex (fn (bytes) (bytes-hex-serviced bytes (fn () #t))))
+  (def field-require (fn (ok reason) (if ok #t (signal 'bytes/field reason))))
+  (def bytes-pack-field-quantum
+    (fn (record key service quantum)
+      (begin
+        (field-require (has-key? record key) "missing byte field")
+        (let ((values (get record key)))
+          (begin
+            (field-require (if (= values nil) #t (= (type-of values) 'list)) "expected byte list")
+            (assoc record key (dict 'encoding 'hex 'nil? (= values nil) 'data (bytes-hex-quantum values service quantum))))))))
+  (def bytes-pack-field-serviced (fn (record key service) (bytes-pack-field-quantum record key service 64)))
+  (def bytes-pack-field (fn (record key) (bytes-pack-field-serviced record key (fn () #t))))
+  (def bytes-unpack-field
+    (fn (record key)
+      (begin
+        (field-require (has-key? record key) "missing byte field")
+        (let ((encoded (get record key)))
+          (if (= (type-of encoded) 'map)
+            (begin
+              (field-require (if (= (count encoded) 3) (if (= (get encoded 'encoding) 'hex)
+                (= (type-of (get encoded 'nil?)) 'bool) #f) #f) "invalid byte field encoding")
+              (let ((values (bytes-from-hex (get encoded 'data))))
+                (begin
+                  (field-require (if (get encoded 'nil?) (= (count values) 0) #t) "nonempty nil byte field")
+                  (assoc record key (if (get encoded 'nil?) nil
+                    (if (= (count values) 0) (keys (dict)) values))))))
+            (begin
+              (field-require (if (= encoded nil) #t (= (type-of encoded) 'list)) "expected byte field")
+              (bytes-hex encoded) record))))))
+  (def xor-table (text-from-bytes
+    '(
+      0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+      1 0 3 2 5 4 7 6 9 8 11 10 13 12 15 14
+      2 3 0 1 6 7 4 5 10 11 8 9 14 15 12 13
+      3 2 1 0 7 6 5 4 11 10 9 8 15 14 13 12
+      4 5 6 7 0 1 2 3 12 13 14 15 8 9 10 11
+      5 4 7 6 1 0 3 2 13 12 15 14 9 8 11 10
+      6 7 4 5 2 3 0 1 14 15 12 13 10 11 8 9
+      7 6 5 4 3 2 1 0 15 14 13 12 11 10 9 8
+      8 9 10 11 12 13 14 15 0 1 2 3 4 5 6 7
+      9 8 11 10 13 12 15 14 1 0 3 2 5 4 7 6
+      10 11 8 9 14 15 12 13 2 3 0 1 6 7 4 5
+      11 10 9 8 15 14 13 12 3 2 1 0 7 6 5 4
+      12 13 14 15 8 9 10 11 4 5 6 7 0 1 2 3
+      13 12 15 14 9 8 11 10 5 4 7 6 1 0 3 2
+      14 15 12 13 10 11 8 9 6 7 4 5 2 3 0 1
+      15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0)))
+  (def xor24
+    (fn (a b place out)
+      (if (= place 16777216) out
+        (xor24 (/ a 16) (/ b 16) (* place 16)
+          (+ out (* place (text-byte xor-table (+ (* (rem a 16) 16) (rem b 16)))))))))
+  (def crc-byte-table
+    (dict 0 0 1 1996959894 2 3993919788 3 2567524794 4 124634137 5 1886057615 6 3915621685 7 2657392035
+          8 249268274 9 2044508324 10 3772115230 11 2547177864 12 162941995 13 2125561021 14 3887607047 15 2428444049
+          16 498536548 17 1789927666 18 4089016648 19 2227061214 20 450548861 21 1843258603 22 4107580753 23 2211677639
+          24 325883990 25 1684777152 26 4251122042 27 2321926636 28 335633487 29 1661365465 30 4195302755 31 2366115317
+          32 997073096 33 1281953886 34 3579855332 35 2724688242 36 1006888145 37 1258607687 38 3524101629 39 2768942443
+          40 901097722 41 1119000684 42 3686517206 43 2898065728 44 853044451 45 1172266101 46 3705015759 47 2882616665
+          48 651767980 49 1373503546 50 3369554304 51 3218104598 52 565507253 53 1454621731 54 3485111705 55 3099436303
+          56 671266974 57 1594198024 58 3322730930 59 2970347812 60 795835527 61 1483230225 62 3244367275 63 3060149565
+          64 1994146192 65 31158534 66 2563907772 67 4023717930 68 1907459465 69 112637215 70 2680153253 71 3904427059
+          72 2013776290 73 251722036 74 2517215374 75 3775830040 76 2137656763 77 141376813 78 2439277719 79 3865271297
+          80 1802195444 81 476864866 82 2238001368 83 4066508878 84 1812370925 85 453092731 86 2181625025 87 4111451223
+          88 1706088902 89 314042704 90 2344532202 91 4240017532 92 1658658271 93 366619977 94 2362670323 95 4224994405
+          96 1303535960 97 984961486 98 2747007092 99 3569037538 100 1256170817 101 1037604311 102 2765210733 103 3554079995
+          104 1131014506 105 879679996 106 2909243462 107 3663771856 108 1141124467 109 855842277 110 2852801631 111 3708648649
+          112 1342533948 113 654459306 114 3188396048 115 3373015174 116 1466479909 117 544179635 118 3110523913 119 3462522015
+          120 1591671054 121 702138776 122 2966460450 123 3352799412 124 1504918807 125 783551873 126 3082640443 127 3233442989
+          128 3988292384 129 2596254646 130 62317068 131 1957810842 132 3939845945 133 2647816111 134 81470997 135 1943803523
+          136 3814918930 137 2489596804 138 225274430 139 2053790376 140 3826175755 141 2466906013 142 167816743 143 2097651377
+          144 4027552580 145 2265490386 146 503444072 147 1762050814 148 4150417245 149 2154129355 150 426522225 151 1852507879
+          152 4275313526 153 2312317920 154 282753626 155 1742555852 156 4189708143 157 2394877945 158 397917763 159 1622183637
+          160 3604390888 161 2714866558 162 953729732 163 1340076626 164 3518719985 165 2797360999 166 1068828381 167 1219638859
+          168 3624741850 169 2936675148 170 906185462 171 1090812512 172 3747672003 173 2825379669 174 829329135 175 1181335161
+          176 3412177804 177 3160834842 178 628085408 179 1382605366 180 3423369109 181 3138078467 182 570562233 183 1426400815
+          184 3317316542 185 2998733608 186 733239954 187 1555261956 188 3268935591 189 3050360625 190 752459403 191 1541320221
+          192 2607071920 193 3965973030 194 1969922972 195 40735498 196 2617837225 197 3943577151 198 1913087877 199 83908371
+          200 2512341634 201 3803740692 202 2075208622 203 213261112 204 2463272603 205 3855990285 206 2094854071 207 198958881
+          208 2262029012 209 4057260610 210 1759359992 211 534414190 212 2176718541 213 4139329115 214 1873836001 215 414664567
+          216 2282248934 217 4279200368 218 1711684554 219 285281116 220 2405801727 221 4167216745 222 1634467795 223 376229701
+          224 2685067896 225 3608007406 226 1308918612 227 956543938 228 2808555105 229 3495958263 230 1231636301 231 1047427035
+          232 2932959818 233 3654703836 234 1088359270 235 936918000 236 2847714899 237 3736837829 238 1202900863 239 817233897
+          240 3183342108 241 3401237130 242 1404277552 243 615818150 244 3134207493 245 3453421203 246 1423857449 247 601450431
+          248 3009837614 249 3294710456 250 1567103746 251 711928724 252 3020668471 253 3272380065 254 1510334235 255 755167117))
+  (def xor-byte
+    (fn (a b)
+      (+ (text-byte xor-table (+ (* (rem a 16) 16) (rem b 16)))
+         (* 16 (text-byte xor-table (+ (* (/ a 16) 16) (/ b 16)))))))
+  ; The shifted accumulator has 24 bits; the table entry supplies the high byte.
+  (def crc-step
+    (fn (crc byte)
+      (let ((entry (get crc-byte-table (xor-byte (rem crc 256) byte))))
+        (xor24 (/ crc 256) entry 1 (* 16777216 (/ entry 16777216))))))
+  (def crc-loop
+    (fn (bytes crc)
+      (if (= bytes nil) crc
+        (let ((byte (car bytes)))
+          (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
+            (crc-loop (cdr bytes) (crc-step crc byte))
+            (signal 'bytes/value "expected byte"))))))
+  (def text-crc-loop
+    (fn (text at length crc)
+      (if (= at length) (- 4294967295 crc)
+        (text-crc-loop text (+ at 1) length (crc-step crc (text-byte text at))))))
+  (def text-crc32 (fn (text) (text-crc-loop text 0 (text-bytes text) 4294967295)))
+  (def bytes-crc32-feed (fn (crc bytes) (crc-loop bytes crc)))
+  (def bytes-crc32-finish (fn (crc) (- 4294967295 crc)))
+  (def bytes-crc32 (fn (bytes) (bytes-crc32-finish (crc-loop bytes 4294967295)))))

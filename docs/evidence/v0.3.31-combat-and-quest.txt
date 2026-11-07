@@ -1,0 +1,37 @@
+Fresh fixed-policy combat control
+native-combat: {test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t}
+native-combat: task-us 163167721
+External model calls: 0; external judge calls: 0; model cost: $0 (fixed scripted policy)
+Persisted combat XP: stat=0 base=1 visible=1 fine_xp=80
+stat=3 base=10 visible=10 fine_xp=11566
+PASS: native client combat XP saved with normal rights and 1x XP
+Elapsed seconds: 338.475
+
+Fresh combat using the retained policy
+native-combat: {test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t}
+native-combat: task-us 112746617
+native-transfer: score {correct #t elapsed-us 112746617 charges {calls 0 judge-calls 0 known-nanousd 0 judge-nanousd 0 unknown 0} cost-nanousd 0 coins nil coins-per-dollar nil}
+native-transfer: retained policy uses 6
+Persisted combat XP: stat=0 base=1 visible=1 fine_xp=80
+stat=3 base=10 visible=10 fine_xp=11566
+PASS: native client combat XP saved with normal rights and 1x XP
+Elapsed seconds: 257.838
+
+Paired scorer inside Agel OS
+=> {comparison {task one-rat phase fresh-account-evaluation contract "c0316699cdf44eb556d186743d93184ee71672c860a829244a430d5484b4077d" randomness uncontrolled} fixed {correct #t elapsed-us 163167721 charges {calls 0 judge-calls 0 known-nanousd 0 judge-nanousd 0 unknown 0} cost-nanousd 0 coins nil coins-per-dollar nil} adaptive {correct #t elapsed-us 112746617 charges {calls 0 judge-calls 0 known-nanousd 0 judge-nanousd 0 unknown 0} cost-nanousd 0 coins nil coins-per-dollar nil} elapsed-delta-us -50421104 cost-delta-nanousd 0}
+agel: 1 forms, 507 steps, revision 2
+process agel exited with status 0
+
+Rejection of an earlier fixed run with a different game adapter
+world, boot image, Agel executable, game adapter, or combat source differs
+
+Uninterrupted no-admin quest with the updated route
+RuneScape quest: gathering all ingredients and completing Cook's Assistant without admin setup
+{test cooks-assistant passed #t choices 2 quest-points 1 cooking-xp 300 ingredients-after (0 0 0) source gathered}
+stat=7 base=4 visible=4 fine_xp=3000
+varp.cookquest=2
+varp.qp=1
+varp.cooks_assistant_ingredients=7
+Saved Cook's Assistant state: stage 2, all three hand-ins, one quest point and 300 Cooking XP
+Quest and verification elapsed seconds: 567.373
+RuneScape PASS: Cook's Assistant completion and reward saved at normal rights

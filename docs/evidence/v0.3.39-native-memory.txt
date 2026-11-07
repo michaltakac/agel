@@ -1,0 +1,10 @@
+
+QEMU RAM: 64 MiB
+x86 frame pool ends at 62 MiB
+allocation refused at chunk 491
+process ramcheck exited with status 12
+
+QEMU RAM: 1024 MiB
+x86 frame pool ends at 256 MiB
+live-desktop> 80 MiB touched and verified
+process ramcheck exited with status 0

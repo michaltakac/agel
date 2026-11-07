@@ -1,0 +1,3 @@
+restaged kernel version 9213c7ecec2a879b132a5e1701cc053e8fdb645a6280ec3fb255007d80ed6027df0defd955464ff5dbf4d83d4da8f91e5a6b4538f32afde2b4c865a5faa9cb67 as candidate slot A
+PASS: archived kernel and signature restored through normal slot admission
+Agel kernel slots: stage -> budgeted boots -> verify, promote, rollback [ok]

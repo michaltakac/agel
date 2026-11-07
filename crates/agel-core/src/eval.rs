@@ -950,6 +950,28 @@ fn apply_builtin(
         Builtin::Keys => keys(arguments, runtime),
         Builtin::Count => count(arguments),
         Builtin::TypeOf => type_of(arguments),
+        Builtin::TextFromBytes => {
+            expect_arity("text-from-bytes", arguments.len(), 1)?;
+            let bytes = match &arguments[0] {
+                Value::Nil => &[][..],
+                Value::List(bytes) => bytes.as_slice(),
+                _ => return Err(condition("type", "text-from-bytes expects a byte list")),
+            };
+            runtime.check_collection(bytes.len())?;
+            runtime.charge(bytes.len() as u64)?;
+            let bytes = bytes
+                .iter()
+                .map(|value| match value {
+                    Value::Int(n) => {
+                        u8::try_from(*n).map_err(|_| condition("text/range", "byte out of range"))
+                    }
+                    _ => Err(condition("type", "expected an integer byte")),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            String::from_utf8(bytes)
+                .map(Value::String)
+                .map_err(|_| condition("text/range", "invalid UTF-8 bytes"))
+        }
         Builtin::TextBytes
         | Builtin::TextByte
         | Builtin::TextSlice
@@ -1064,13 +1086,13 @@ fn car(arguments: Vec<Value>) -> Result<Value, Signal> {
 
 fn cdr(arguments: Vec<Value>) -> Result<Value, Signal> {
     expect_arity("cdr", arguments.len(), 1)?;
-    match &arguments[0] {
-        Value::List(values) => {
-            let tail = values.iter().skip(1).cloned().collect::<Vec<_>>();
-            if tail.is_empty() {
+    match arguments.into_iter().next().expect("arity checked") {
+        Value::List(mut values) => {
+            if values.len() <= 1 {
                 Ok(Value::Nil)
             } else {
-                Ok(Value::List(tail))
+                values.remove(0);
+                Ok(Value::List(values))
             }
         }
         Value::Nil => Ok(Value::Nil),
@@ -1087,21 +1109,25 @@ fn dict(arguments: Vec<Value>, runtime: &Runtime<'_>) -> Result<Value, Signal> {
     }
     runtime.check_collection(arguments.len() / 2)?;
     let mut entries = Vec::new();
-    for pair in arguments.chunks_exact(2) {
-        map_insert(&mut entries, pair[0].clone(), pair[1].clone());
+    let mut arguments = arguments.into_iter();
+    while let Some(key) = arguments.next() {
+        let value = arguments.next().expect("even number of arguments");
+        map_insert(&mut entries, key, value);
     }
     Ok(Value::Map(entries))
 }
 
 fn get(arguments: Vec<Value>) -> Result<Value, Signal> {
     expect_arity("get", arguments.len(), 2)?;
-    let Value::Map(entries) = &arguments[0] else {
+    let mut arguments = arguments.into_iter();
+    let Value::Map(entries) = arguments.next().expect("arity checked") else {
         return Err(condition("type", "get expects a map"));
     };
+    let key = arguments.next().expect("arity checked");
     Ok(entries
-        .iter()
-        .find(|(key, _)| key == &arguments[1])
-        .map(|(_, value)| value.clone())
+        .into_iter()
+        .find(|(entry, _)| entry == &key)
+        .map(|(_, value)| value)
         .unwrap_or(Value::Nil))
 }
 
@@ -1117,20 +1143,25 @@ fn has_key(arguments: Vec<Value>) -> Result<Value, Signal> {
 
 fn assoc(arguments: Vec<Value>, runtime: &Runtime<'_>) -> Result<Value, Signal> {
     expect_arity("assoc", arguments.len(), 3)?;
-    let Value::Map(mut entries) = arguments[0].clone() else {
+    let mut arguments = arguments.into_iter();
+    let Value::Map(mut entries) = arguments.next().expect("arity checked") else {
         return Err(condition("type", "assoc expects a map"));
     };
-    map_insert(&mut entries, arguments[1].clone(), arguments[2].clone());
+    let key = arguments.next().expect("arity checked");
+    let value = arguments.next().expect("arity checked");
+    map_insert(&mut entries, key, value);
     runtime.check_collection(entries.len())?;
     Ok(Value::Map(entries))
 }
 
 fn dissoc(arguments: Vec<Value>) -> Result<Value, Signal> {
     expect_arity("dissoc", arguments.len(), 2)?;
-    let Value::Map(mut entries) = arguments[0].clone() else {
+    let mut arguments = arguments.into_iter();
+    let Value::Map(mut entries) = arguments.next().expect("arity checked") else {
         return Err(condition("type", "dissoc expects a map"));
     };
-    entries.retain(|(key, _)| key != &arguments[1]);
+    let key = arguments.next().expect("arity checked");
+    entries.retain(|(entry, _)| entry != &key);
     Ok(Value::Map(entries))
 }
 

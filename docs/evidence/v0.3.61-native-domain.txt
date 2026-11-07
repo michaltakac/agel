@@ -1,0 +1,4 @@
+native-domain: PASS: isolated generation dispatch, replay refusal, and guarded revert
+native-program: PASS: real ELF install, activation, canary rollback, revert, retained state and no-file canary
+PASS: retained ELF versions and judge log survive reboot
+PASS: native program bytes installed and selected by Agel; controller state and previous images retained

@@ -55,6 +55,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "journal-check"
+version = "0.1.0"
+dependencies = [
+ "agel-process-abi",
+]
+
+[[package]]
+name = "ledger-check"
+version = "0.1.0"
+dependencies = [
+ "agel-process-abi",
+]
+
+[[package]]
+name = "program-io-check"
+version = "0.1.0"
+dependencies = [
+ "agel-process-abi",
+]
+
+[[package]]
 name = "reader"
 version = "0.1.0"
 dependencies = [

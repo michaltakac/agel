@@ -1,0 +1,8 @@
+native-quest: verifying retained ingredients and attempting hand-in
+native-quest: talking to the observed cook
+native-quest: talking to the observed cook
+native-quest: talking to the observed cook
+native-quest: observed cook dialogue interface 231
+native-quest: observed cook dialogue interface 231
+native-quest: {kind osrs/quest-test message "waiting for the next cook dialogue" data {choices 0 pages-left 38 problem {kind osrs/wait message "observation did not arrive within the bound" data nil}}}
+process agel exited with status 1

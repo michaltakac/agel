@@ -13,6 +13,18 @@ pub const NATIVE_X86: &str = include_str!("../native-x86.agel");
 
 pub const SOURCE: &str = concat!(
     include_str!("../stdlib.agel"),
+    "\n",
+    include_str!("../research.agel"),
+    "\n",
+    include_str!("../evolution.agel"),
+    "\n",
+    include_str!("../live-tools.agel"),
+    "\n",
+    include_str!("../judge-log.agel"),
+    "\n",
+    include_str!("../judge-accounting.agel"),
+    "\n",
+    include_str!("../journal-frame.agel"),
     "\n(module agel/native-modules (export native-link native-link-source) (def native-link ",
     include_str!("../native-modules.agel"),
     ") (def native-link-source '",

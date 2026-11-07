@@ -1,0 +1,5 @@
+(if (= ((fn (captured) ((fn (value) (+ captured value)) 22)) 20) 42)
+  (if (= (eval '(+ 19 23)) 42)
+    (if (= (/ (* 6 7) 2) 21) 42 0)
+    0)
+  0)

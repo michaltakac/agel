@@ -162,7 +162,7 @@ the place a model of Agel's own can later stand.
 
 ## DOOM, judged
 
-[`boot/desktop/doom-agent-judge.agel`](../boot/desktop/doom-agent-judge.agel)
+[`examples/doom/doom-agent-judge.agel`](../examples/doom/doom-agent-judge.agel)
 is the agent. Each step it sends, within the native evaluator's 200-byte
 request:
 

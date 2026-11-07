@@ -1,0 +1,23 @@
+Native fresh-account transfer
+native-combat: {test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t}
+native-combat: action-us 112746413
+native-combat: task-us 112746617
+native-combat: history-records 1786
+native-transfer: score {correct #t elapsed-us 112746617 charges {calls 0 judge-calls 0 known-nanousd 0 judge-nanousd 0 unknown 0} cost-nanousd 0 coins nil coins-per-dollar nil}
+native-transfer: retained policy uses 6
+agel: 1 forms, 47188478 steps, revision 1
+process agel exited with status 0
+External model calls: 0; external judge calls: 0; model cost: $0
+Persisted combat XP: stat=0 base=1 visible=1 fine_xp=80
+stat=3 base=10 visible=10 fine_xp=11566
+PASS: native client combat XP saved with normal rights and 1x XP
+Elapsed seconds: 257.838
+
+Historical fixed-policy sample on the same pinned world and combat source
+native-combat: {test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t}
+native-combat: task-us 226847065
+External model calls: 0; external judge calls: 0; model cost: $0 (fixed scripted policy)
+Persisted combat XP: stat=0 base=1 visible=1 fine_xp=80
+stat=3 base=10 visible=10 fine_xp=11566
+PASS: native client combat XP saved with normal rights and 1x XP
+Elapsed seconds: 441.543

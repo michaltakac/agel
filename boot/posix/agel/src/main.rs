@@ -26,6 +26,8 @@
 
 extern crate alloc;
 
+mod heap_runs;
+
 use agel_core::{Budget, EvaluationOptions, HostError, HostWord, Pulse, Value, World};
 use agel_process_abi as abi;
 use alloc::{format, string::String, vec::Vec};
@@ -37,10 +39,11 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 /// call-depth budget.
 const STACK_PAGES: u64 = 1024;
 /// Evaluation steps between two yields to the supervisor.
-const PULSE_STEPS: u64 = 4096;
+const PULSE_STEPS: u64 = 1024;
 /// Fuel for one file: the standard library alone takes tens of thousands
 /// of steps, and a program is expected to do real work after it.
 const FUEL: u64 = 50_000_000;
+const MAX_FUEL: u64 = 500_000_000;
 /// The most bytes read from the source file: the filesystem's files are
 /// smaller, and the runtime's own source limit is larger.
 const SOURCE_BYTES: usize = 256 * 1024;
@@ -79,16 +82,14 @@ fn map_pages(pages: u64) -> i64 {
 
 /// Pages at the break, handed out in power-of-two classes from 16 bytes to
 /// 64 KiB with a free list each, and as whole page runs for anything
-/// larger. A freed block goes back to its class; a freed run to a small
-/// table of free runs. The evaluator's churn of small nodes is therefore
-/// reused at once and never walks a list; a run a class cannot hold is
-/// rare (a long text, a large vector). Nothing here is thread-safe,
-/// because nothing here is threaded.
+/// larger. A freed block goes back to its class; free runs retain their
+/// metadata in the free pages and coalesce adjacent ranges. Small nodes
+/// reuse their class lists; large vectors and texts reuse page runs.
+/// The process is single-threaded.
 const CLASS_FIRST: u32 = 4;
 const CLASS_LAST: u32 = 16;
 const CLASSES: usize = (CLASS_LAST - CLASS_FIRST + 1) as usize;
 const PAGE: usize = 4096;
-const RUNS: usize = 64;
 
 struct Heap {
     /// The first free block of each class, or 0; a free block's first word
@@ -97,8 +98,8 @@ struct Heap {
     /// The pages not yet carved: `[bump, end)`, contiguous with the break.
     bump: usize,
     end: usize,
-    /// Free page runs: address and page count, `(0, 0)` for an empty slot.
-    runs: [(usize, usize); RUNS],
+    /// Free page runs, linked through their own mapped memory.
+    runs: heap_runs::Runs,
 }
 
 struct Allocator;
@@ -107,7 +108,7 @@ static mut HEAP: Heap = Heap {
     free: [0; CLASSES],
     bump: 0,
     end: 0,
-    runs: [(0, 0); RUNS],
+    runs: heap_runs::Runs::new(),
 };
 
 /// The class of a request, or `None` for one that needs whole pages.
@@ -131,24 +132,63 @@ unsafe fn carve(heap: &mut Heap, bytes: usize, align: usize) -> *mut u8 {
         }
         let missing = (start + bytes).saturating_sub(heap.end).max(1);
         let pieces = missing.div_ceil(PAGE * abi::BRK_PAGES as usize) as u64;
+        let process = process();
+        let before = process.brk(0);
         let mapped = map_pages(pieces * abi::BRK_PAGES);
+        let after = process.brk(0);
+        if heap.bump == 0 && before >= 0 {
+            heap.bump = before as usize;
+        }
+        if after >= 0 {
+            heap.end = after as usize;
+        }
         if mapped < 0 {
-            // The window is full: say so and end, rather than fail the
-            // allocation into a panic that names only the bytes.
-            let process = process();
+            let aligned = (heap.bump + align - 1) & !(align - 1);
+            if aligned + bytes <= heap.end {
+                continue;
+            }
+            let exact = (aligned + bytes).saturating_sub(heap.end).div_ceil(PAGE);
+            let _ = map_pages(exact as u64);
+            let after = process.brk(0);
+            if after >= 0 {
+                heap.end = after as usize;
+            }
+            if aligned + bytes <= heap.end {
+                continue;
+            }
             process.report(
                 2,
-                b"agel: out of memory: the process window is full after ",
+                b"agel: out of memory: heap growth failed after ",
                 ((heap.end - heap.bump) / PAGE) as i64,
                 b" free pages\n",
             );
+            process.report(2, b"agel: allocation bytes ", bytes as i64, b"\n");
+            let cached = heap.runs.cached_pages();
+            process.report(2, b"agel: cached large-run pages ", cached as i64, b"\n");
+            let mut class_bytes = 0;
+            for class in 0..CLASSES {
+                let mut block = heap.free[class];
+                while block != 0 {
+                    class_bytes += 1 << (class as u32 + CLASS_FIRST);
+                    block = *(block as *const usize);
+                }
+            }
+            process.report(2, b"agel: cached class bytes ", class_bytes, b"\n");
             process.exit(12);
         }
-        if heap.bump == 0 {
-            heap.bump = mapped as usize;
-            heap.end = mapped as usize;
+    }
+}
+
+unsafe fn release_page_classes(heap: &mut Heap) {
+    for class in (PAGE.trailing_zeros() - CLASS_FIRST) as usize..CLASSES {
+        let class_pages = (1 << (class as u32 + CLASS_FIRST)) / PAGE;
+        let mut head = heap.free[class];
+        heap.free[class] = 0;
+        while head != 0 {
+            let next = *(head as *const usize);
+            heap.runs.insert(head, class_pages);
+            head = next;
         }
-        heap.end += pieces as usize * abi::BRK_PAGES as usize * PAGE;
     }
 }
 
@@ -162,21 +202,35 @@ unsafe impl GlobalAlloc for Allocator {
                     heap.free[class] = *(head as *const usize);
                     return head as *mut u8;
                 }
+                let pages = bytes.div_ceil(PAGE);
+                let align = layout.align().max(PAGE);
+                let address = heap.runs.take(pages, align).or_else(|| {
+                    release_page_classes(heap);
+                    heap.runs.take(pages, align)
+                });
+                if let Some(address) = address {
+                    if bytes < PAGE {
+                        let blocks = PAGE / bytes;
+                        for offset in (1..blocks).rev() {
+                            let block = address + offset * bytes;
+                            *(block as *mut usize) = heap.free[class];
+                            heap.free[class] = block;
+                        }
+                    }
+                    return address as *mut u8;
+                }
                 carve(heap, bytes, bytes.min(PAGE).max(layout.align()))
             }
             None => {
                 let pages = layout.size().div_ceil(PAGE);
-                for slot in heap.runs.iter_mut() {
-                    if slot.1 >= pages && layout.align() <= PAGE {
-                        let address = slot.0;
-                        *slot = if slot.1 == pages {
-                            (0, 0)
-                        } else {
-                            (slot.0 + pages * PAGE, slot.1 - pages)
-                        };
-                        return address as *mut u8;
-                    }
+                if let Some(address) = heap.runs.take(pages, layout.align()) {
+                    return address as *mut u8;
                 }
+                release_page_classes(heap);
+                if let Some(address) = heap.runs.take(pages, layout.align()) {
+                    return address as *mut u8;
+                }
+                heap.runs.rewind(&mut heap.bump);
                 carve(heap, pages * PAGE, PAGE.max(layout.align()))
             }
         }
@@ -191,10 +245,8 @@ unsafe impl GlobalAlloc for Allocator {
             }
             None => {
                 let pages = layout.size().div_ceil(PAGE);
-                if let Some(slot) = heap.runs.iter_mut().find(|slot| slot.1 == 0) {
-                    *slot = (pointer as usize, pages);
-                }
-                // With the table full the run is left mapped and unused.
+                heap.runs.insert(pointer as usize, pages);
+                heap.runs.rewind(&mut heap.bump);
             }
         }
     }
@@ -287,7 +339,7 @@ fn pulse() {
 /// kind, an agent holds what it was spawned with — and `print-form`, the
 /// printed form of a value as text, pure, so a program can write source
 /// the reader reads.
-static HOST: [HostWord; 9] = [
+static HOST: [HostWord; 16] = [
     HostWord {
         name: "file-read",
         capability: "file/read",
@@ -314,6 +366,11 @@ static HOST: [HostWord; 9] = [
         call: clock,
     },
     HostWord {
+        name: "clock-us",
+        capability: "clock/read",
+        call: clock_us,
+    },
+    HostWord {
         name: "console-log",
         capability: "console/write",
         call: console_log,
@@ -329,22 +386,55 @@ static HOST: [HostWord; 9] = [
         call: model_request,
     },
     HostWord {
+        name: "byte-request",
+        capability: "byte/relay",
+        call: byte_request,
+    },
+    HostWord {
         name: "print-form",
         capability: "",
         call: print_form,
+    },
+    HostWord {
+        name: "program-region",
+        capability: "program/read",
+        call: program_region,
+    },
+    HostWord {
+        name: "program-sector-read",
+        capability: "program/read",
+        call: program_sector_read,
+    },
+    HostWord {
+        name: "program-sector-write",
+        capability: "program/write",
+        call: program_sector_write,
+    },
+    HostWord {
+        name: "program-flush",
+        capability: "program/write",
+        call: program_flush,
+    },
+    HostWord {
+        name: "exec-canary",
+        capability: "process/run",
+        call: exec_canary,
     },
 ];
 
 /// The capability kinds the words need, issued to the evaluation for
 /// every scope: the namespace `:exec` granted is the bound on what they
 /// can name, and an agent gets only what it is spawned with.
-const CAPABILITY_KINDS: [&str; 6] = [
+const CAPABILITY_KINDS: [&str; 9] = [
     "file/read",
     "file/write",
     "clock/read",
     "console/write",
     "process/run",
     "model/infer",
+    "byte/relay",
+    "program/read",
+    "program/write",
 ];
 
 /// The most bytes `file-read` answers.
@@ -401,21 +491,50 @@ fn file_error(word: &str, path: &str, error: i64) -> HostError {
 }
 
 fn file_read(arguments: &[Value]) -> Result<Value, HostError> {
-    expect_arguments("file-read", arguments, 1)?;
+    if arguments.is_empty() || arguments.len() > 3 {
+        return Err(fail(
+            "arity",
+            "file-read expects path, optional offset and byte limit".into(),
+        ));
+    }
     let path = text_argument("file-read", arguments, 0)?;
     let process = process();
+    let from = match arguments.get(1) {
+        None => 0,
+        Some(Value::Int(n)) if *n >= 0 => *n,
+        _ => return Err(fail("type", "file-read offset must be nonnegative".into())),
+    };
+    let limit = match arguments.get(2) {
+        None => FILE_READ_BYTES,
+        Some(Value::Int(n)) if *n >= 0 && *n <= FILE_READ_BYTES as i64 => *n as usize,
+        _ => {
+            return Err(fail(
+                "type",
+                "file-read limit is outside its byte bound".into(),
+            ))
+        }
+    };
     let descriptor = process.open(namespace_path(path), abi::O_RDONLY);
     if descriptor < 0 {
         return Err(file_error("file-read", path, descriptor));
     }
+    let sought = process.seek(descriptor as u64, from, 0);
+    if sought < 0 {
+        process.close(descriptor as u64);
+        return Err(file_error("file-read", path, sought));
+    }
     let mut bytes = Vec::new();
     let mut block = [0_u8; abi::BLOCK_BYTES];
     let outcome = loop {
-        let count = process.read(descriptor as u64, &mut block);
+        if bytes.len() >= limit {
+            break Ok(());
+        }
+        let take = (limit - bytes.len()).min(block.len());
+        let count = process.read(descriptor as u64, &mut block[..take]);
         if count < 0 {
             break Err(file_error("file-read", path, count));
         }
-        if count == 0 || bytes.len() >= FILE_READ_BYTES {
+        if count == 0 {
             break Ok(());
         }
         bytes.extend_from_slice(&block[..count as usize]);
@@ -490,6 +609,11 @@ fn clock(arguments: &[Value]) -> Result<Value, HostError> {
     Ok(Value::Int((process().clock() / 1_000_000) as i64))
 }
 
+fn clock_us(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("clock-us", arguments, 0)?;
+    Ok(Value::Int(process().clock() as i64))
+}
+
 fn console_log(arguments: &[Value]) -> Result<Value, HostError> {
     expect_arguments("console-log", arguments, 1)?;
     let process = process();
@@ -512,10 +636,76 @@ fn print_form(arguments: &[Value]) -> Result<Value, HostError> {
 /// no standard input, this process's console as its output, and wait for
 /// it: its status.
 fn exec(arguments: &[Value]) -> Result<Value, HostError> {
-    expect_arguments("exec", arguments, 1)?;
-    let name = text_argument("exec", arguments, 0)?;
+    exec_flags("exec", arguments, 0)
+}
+
+fn exec_canary(arguments: &[Value]) -> Result<Value, HostError> {
+    let image = match arguments {
+        [_] => None,
+        [_, Value::Int(start), Value::Int(length), Value::Int(checksum)] => {
+            let word = |n| {
+                u32::try_from(n).map_err(|_| fail("process/error", "invalid image identity".into()))
+            };
+            Some([word(*start)?, word(*length)?, word(*checksum)?])
+        }
+        _ => {
+            return Err(fail(
+                "process/error",
+                "expected name or name, start, length, and CRC".into(),
+            ))
+        }
+    };
+    let name = text_argument("exec-canary", arguments, 0)?;
     let process = process();
-    let child = process.spawn(name.as_bytes(), b"", abi::NO_DESCRIPTOR, 1, 0);
+    let (reader, writer) = process
+        .pipe()
+        .map_err(|e| fail("process/error", format!("pipe: {e}")))?;
+    let child = process.spawn_with_image(
+        name.as_bytes(),
+        b"",
+        abi::NO_DESCRIPTOR,
+        writer,
+        abi::SPAWN_NO_FILES,
+        image,
+    );
+    process.close(writer);
+    if child < 0 {
+        process.close(reader);
+        return Err(fail("process/error", format!("spawn: {child}")));
+    }
+    let mut out = Vec::new();
+    let mut block = [0; 512];
+    loop {
+        let count = process.read(reader, &mut block);
+        if count == 0 {
+            break;
+        }
+        if count < 0 || out.len() + count as usize > 4096 {
+            process.kill(child as u64, abi::SIGNAL_KILLED);
+            process.close(reader);
+            process.wait(child as u64);
+            return Err(fail(
+                "process/error",
+                String::from("canary output failed or exceeded 4096 bytes"),
+            ));
+        }
+        out.extend_from_slice(&block[..count as usize]);
+    }
+    process.close(reader);
+    let status = process.wait(child as u64);
+    let text = String::from_utf8(out)
+        .map_err(|_| fail("process/error", String::from("non-UTF8 canary output")))?;
+    Ok(Value::List(alloc::vec![
+        Value::Int(status),
+        Value::String(text)
+    ]))
+}
+
+fn exec_flags(word: &str, arguments: &[Value], flags: u64) -> Result<Value, HostError> {
+    expect_arguments(word, arguments, 1)?;
+    let name = text_argument(word, arguments, 0)?;
+    let process = process();
+    let child = process.spawn(name.as_bytes(), b"", abi::NO_DESCRIPTOR, 1, flags);
     if child < 0 {
         return Err(fail(
             "process/error",
@@ -523,6 +713,96 @@ fn exec(arguments: &[Value]) -> Result<Value, HostError> {
         ));
     }
     Ok(Value::Int(process.wait(child as u64)))
+}
+
+fn program_result(result: i64) -> Result<i64, HostError> {
+    if result < 0 {
+        Err(fail(
+            "program/io",
+            format!("program region error {}", -result),
+        ))
+    } else {
+        Ok(result)
+    }
+}
+
+fn program_region(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("program-region", arguments, 0)?;
+    let info = program_result(process().program_info())? as u64;
+    Ok(Value::List(alloc::vec![
+        Value::Int((info & 0xffff_ffff) as i64),
+        Value::Int((info >> 32) as i64)
+    ]))
+}
+
+fn program_sector_read(arguments: &[Value]) -> Result<Value, HostError> {
+    let [Value::Int(sector)] = arguments else {
+        return Err(fail(
+            "type",
+            String::from("program-sector-read expects an index"),
+        ));
+    };
+    if *sector < 0 {
+        return Err(fail("type", String::from("negative sector index")));
+    }
+    let mut bytes = [0; 512];
+    program_result(process().program_read(*sector as u64, &mut bytes))?;
+    Ok(Value::List(
+        bytes
+            .into_iter()
+            .map(|b| Value::Int(i64::from(b)))
+            .collect(),
+    ))
+}
+
+fn program_sector_write(arguments: &[Value]) -> Result<Value, HostError> {
+    let [Value::Int(sector), Value::List(values)] = arguments else {
+        return Err(fail(
+            "type",
+            String::from("program-sector-write expects an index and byte list"),
+        ));
+    };
+    if *sector < 0 {
+        return Err(fail(
+            "type",
+            String::from("expected nonnegative index and 512 bytes"),
+        ));
+    }
+    let mut bytes = [0; 512];
+    let mut offset = 0;
+    let parts: Vec<&[Value]> = if values.iter().all(|v| matches!(v, Value::List(_))) {
+        values
+            .iter()
+            .map(|v| match v {
+                Value::List(xs) => xs.as_slice(),
+                _ => unreachable!(),
+            })
+            .collect()
+    } else {
+        alloc::vec![values.as_slice()]
+    };
+    for value in parts.into_iter().flatten() {
+        if offset == 512 {
+            return Err(fail("type", String::from("sector exceeds 512 bytes")));
+        }
+        let Value::Int(value) = value else {
+            return Err(fail("type", String::from("expected byte")));
+        };
+        bytes[offset] =
+            u8::try_from(*value).map_err(|_| fail("type", String::from("expected byte")))?;
+        offset += 1;
+    }
+    if offset != 512 {
+        return Err(fail("type", String::from("sector needs exactly 512 bytes")));
+    }
+    program_result(process().program_write(*sector as u64, &bytes))?;
+    Ok(Value::Int(0))
+}
+
+fn program_flush(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("program-flush", arguments, 0)?;
+    program_result(process().program_flush())?;
+    Ok(Value::Int(0))
 }
 
 fn say(descriptor: u64, text: &str) {
@@ -556,6 +836,14 @@ fn model_request(arguments: &[Value]) -> Result<Value, HostError> {
                 format!("model-request {number}: the console ended before a reply"),
             ));
         };
+        if let Some(rest) = line.strip_prefix(b":audit ") {
+            relay_audit(rest);
+            continue;
+        }
+        if line.starts_with(b":ledger") {
+            relay_ledger(&line);
+            continue;
+        }
         if let Some(reply) = line.strip_prefix(prefix.as_bytes()) {
             return Ok(Value::String(String::from(
                 String::from_utf8_lossy(reply).trim(),
@@ -564,16 +852,159 @@ fn model_request(arguments: &[Value]) -> Result<Value, HostError> {
     }
 }
 
+fn byte_request(arguments: &[Value]) -> Result<Value, HostError> {
+    expect_arguments("byte-request", arguments, 1)?;
+    let text = text_argument("byte-request", arguments, 0)?;
+    let number = REQUESTS.fetch_add(1, Ordering::Relaxed) + 1;
+    say(
+        1,
+        &format!("byte-request {number}:\n{text}\nbyte-request end\n"),
+    );
+    let prefix = format!(":byte-reply {number} ");
+    loop {
+        let Some(line) = console_line() else {
+            return Err(fail(
+                "byte/unavailable",
+                "console ended before byte reply".into(),
+            ));
+        };
+        if let Some(rest) = line.strip_prefix(b":audit ") {
+            relay_audit(rest);
+            continue;
+        }
+        if line.starts_with(b":ledger") {
+            relay_ledger(&line);
+            continue;
+        }
+        if let Some(reply) = line.strip_prefix(prefix.as_bytes()) {
+            return Ok(Value::String(String::from_utf8_lossy(reply).trim().into()));
+        }
+    }
+}
+
+fn ledger_number(bytes: &[u8]) -> Option<u64> {
+    if bytes.is_empty() {
+        return None;
+    }
+    bytes.iter().try_fold(0_u64, |n, byte| {
+        if byte.is_ascii_digit() {
+            n.checked_mul(10)?.checked_add(u64::from(byte - b'0'))
+        } else {
+            None
+        }
+    })
+}
+
+fn relay_ledger(line: &[u8]) {
+    let mut fields = line.splitn(4, |byte| *byte == b' ');
+    let (Some(command), Some(id), Some(argument)) = (fields.next(), fields.next(), fields.next())
+    else {
+        return;
+    };
+    if ledger_number(id).is_none() {
+        return;
+    }
+    let process = process();
+    let outcome = (|| -> Option<i64> {
+        let number = ledger_number(argument)?;
+        if command == b":ledger-reserve" {
+            if fields.next().is_some() {
+                return None;
+            }
+            Some(process.ledger_reserve(number))
+        } else if command == b":ledger-release" {
+            if fields.next().is_some() {
+                return None;
+            }
+            Some(process.ledger_release(number))
+        } else if command == b":ledger" {
+            let packet = fields.next()?;
+            if packet.len() != 511 || !packet.iter().all(|byte| (32..=126).contains(byte)) {
+                return None;
+            }
+            let mut bytes = [0; 512];
+            bytes[..511].copy_from_slice(packet);
+            bytes[511] = b'\n';
+            Some(process.ledger_append(number, &bytes))
+        } else {
+            None
+        }
+    })()
+    .unwrap_or(-22);
+    process.write(1, b"ledger ");
+    process.write(1, id);
+    if outcome >= 0 {
+        process.report(1, b" ok ", outcome, b"\n");
+    } else {
+        process.report(1, b" error ", -outcome, b"\n");
+    }
+}
+
+fn relay_audit(rest: &[u8]) {
+    let Some(space) = rest.iter().position(|byte| *byte == b' ') else {
+        return;
+    };
+    let (id, hex) = (&rest[..space], &rest[space + 1..]);
+    let mut bytes = Vec::new();
+    let mut valid = !id.is_empty()
+        && id.iter().all(u8::is_ascii_digit)
+        && hex.len() <= 512
+        && hex.len() % 2 == 0;
+    if valid {
+        for pair in hex.as_chunks::<2>().0 {
+            let digit = |byte: u8| match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                _ => None,
+            };
+            let (Some(high), Some(low)) = (digit(pair[0]), digit(pair[1])) else {
+                valid = false;
+                break;
+            };
+            bytes.push(high * 16 + low);
+        }
+    }
+    let process = process();
+    let stored = if valid {
+        let descriptor = process.open(b"judge-log", abi::O_WRONLY | abi::O_CREAT | abi::O_APPEND);
+        if descriptor < 0 {
+            false
+        } else {
+            let written = process.write(descriptor as u64, &bytes);
+            process.close(descriptor as u64);
+            written == bytes.len() as u64
+        }
+    } else {
+        false
+    };
+    process.write(1, b"audit ");
+    process.write(1, id);
+    process.write(1, if stored { b" ok\n" } else { b" error\n" });
+}
+
 extern "C" fn main() -> ! {
     let process = process();
     let arguments = arguments();
     let mut stdlib = true;
+    let mut fuel = FUEL;
     let mut file = None;
     let mut world_file: Option<Vec<u8>> = None;
     let mut arguments = arguments.into_iter().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.as_slice() {
             b"--no-stdlib" => stdlib = false,
+            b"--fuel" => {
+                let limit = arguments
+                    .next()
+                    .and_then(|value| core::str::from_utf8(&value).ok()?.parse::<u64>().ok());
+                match limit {
+                    Some(limit) if (1..=MAX_FUEL).contains(&limit) => fuel = limit,
+                    _ => {
+                        say(2, "agel: --fuel needs a limit from 1 to 500000000\n");
+                        process.exit(2);
+                    }
+                }
+            }
             b"--world" => match arguments.next() {
                 Some(name) => world_file = Some(name),
                 None => {
@@ -619,7 +1050,7 @@ extern "C" fn main() -> ! {
     }
     let options = EvaluationOptions {
         budget: Budget {
-            fuel: FUEL,
+            fuel,
             ..Budget::default()
         },
         capabilities,

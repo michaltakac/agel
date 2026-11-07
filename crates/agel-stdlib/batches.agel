@@ -1,0 +1,24 @@
+(module agel/batches
+  (export run-batches)
+  (def require (fn (ok reason) (if ok #t (signal 'batches/contract reason))))
+  (def apply-group
+    (fn (action state inputs left)
+      (if (if (= left 0) #t (= (count inputs) 0)) (dict 'state state 'remaining inputs)
+        (apply-group action (action state (car inputs)) (cdr inputs) (- left 1)))))
+  (def execute
+    (fn (action state inputs size left completed)
+      (if (if (= left 0) #t (= (count inputs) 0))
+        (dict 'state state 'remaining inputs 'completed completed)
+        (let ((next (apply-group action state inputs size)))
+          (execute action (get next 'state) (get next 'remaining) size (- left 1) (+ completed 1))))))
+  (def run-batches
+    (fn (planner action state inputs size)
+      (begin
+        (require (if (= inputs nil) #t (= (type-of inputs) 'list)) "expected action list")
+        (require (< (count inputs) 1001) "action list exceeds 1000")
+        (require (if (= (type-of size) 'int) (if (< 0 size) (< size 1001) #f) #f) "invalid batch size")
+        (let ((planned (planner (count inputs) size)))
+          (begin
+            (require (if (= (type-of planned) 'int) (if (< -1 planned) (< planned 1001) #f) #f) "invalid batch plan")
+            (let ((result (execute action state inputs size planned 0)))
+              (assoc (assoc result 'planned planned) 'processed (- (count inputs) (count (get result 'remaining)))))))))))

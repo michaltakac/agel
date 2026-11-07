@@ -39,7 +39,7 @@ const STREAM_HEADER_BYTES: usize = 16;
 const STREAM_MAGIC: &[u8; 4] = b"AGV1";
 const VECTOR_STREAM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/native-desktop.agv"));
 const MAX_SCENE_COMMANDS: usize = 224;
-const INPUT_BYTES: usize = PAYLOAD_BYTES;
+const INPUT_BYTES: usize = 4104;
 /// The self-documenting command postcard. It must fit one status line, and a
 /// longer postcard is a build error rather than a silently truncated `:help`.
 const HELP_POSTCARD: &[u8] = b"click the desktop or :workbench | a sentence summons the agent | :load NAME :play/:drive N | :preview FORM :promote :discard | :cell :run :show :cells :save | :exec NAME :close :min/max N | :fs-ls :fs-format | :rollback :shutdown";
@@ -1154,6 +1154,8 @@ struct Terminal {
     line_ended: bool,
     /// Written since the panel was last painted.
     dirty: bool,
+    /// Lines remaining in a byte carrier frame sent to serial.
+    carrier_lines: u8,
     /// The line being written and the last one finished, whole where the
     /// panel would wrap them: what the language looks at.
     line: [u8; LOOK_LINE_BYTES],
@@ -1174,6 +1176,7 @@ impl Terminal {
         used: 0,
         line_ended: false,
         dirty: false,
+        carrier_lines: 0,
         line: [0; LOOK_LINE_BYTES],
         line_length: 0,
         last: [0; LOOK_LINE_BYTES],
@@ -1243,6 +1246,33 @@ impl Terminal {
             }
         }
     }
+
+    fn push_process_output(&mut self, mut bytes: &[u8]) {
+        if self.carrier_lines == 0 {
+            if let Some(header) = bytes.strip_prefix(b"byte-request ") {
+                if let Some(end) = header.iter().position(|byte| *byte == b'\n') {
+                    if let Some(id) = header[..end].strip_suffix(b":\r") {
+                        if !id.is_empty()
+                            && id.iter().all(u8::is_ascii_digit)
+                            && header[end + 1..].starts_with(b"AGEL-BYTES/1 ")
+                        {
+                            self.carrier_lines = 3;
+                        }
+                    }
+                }
+            }
+        }
+        while self.carrier_lines > 0 {
+            let Some(end) = bytes.iter().position(|byte| *byte == b'\n') else {
+                return;
+            };
+            bytes = &bytes[end + 1..];
+            self.carrier_lines -= 1;
+        }
+        if !bytes.is_empty() {
+            self.push(bytes);
+        }
+    }
 }
 
 /// A console that writes to the serial console driver and to the terminal
@@ -1256,7 +1286,7 @@ impl crate::process::Console for Tee<'_> {
     #[inline(never)]
     fn write(&mut self, bytes: &[u8]) {
         crate::process::Console::write(self.serial, bytes);
-        self.terminal.push(bytes);
+        self.terminal.push_process_output(bytes);
     }
 
     fn lines(&self) -> u32 {
@@ -2520,62 +2550,21 @@ fn scene_command(line: &[u8]) -> bool {
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"(title \""))
 }
 
-/// An Agel program the desktop carries, by the name `:load` takes: the
-/// source, each form a cell named by the prefix, and the status shown when
-/// it is in.
-/// A program the desktop carries: its source lives in the image's data
-/// region (installed by `scripts/build-boot.sh` from `boot/desktop/`), read
-/// through the filesystem service when loaded, so the kernel image holds
-/// only its name, its cell prefix, its file and its ready status.
-struct Program {
-    name: &'static [u8],
-    prefix: &'static [u8],
-    file: &'static [u8],
-    ready: &'static [u8],
+/// A desktop program, with one source form per cell. Optional applications
+/// supply these fields in the disk catalog.
+struct Program<'a> {
+    name: &'a [u8],
+    prefix: &'a [u8],
+    file: &'a [u8],
+    ready: &'a [u8],
 }
 
-const PROGRAMS: &[Program] = &[
+const PROGRAMS: &[Program<'static>] = &[
     Program {
         name: b"workbench",
         prefix: b"wb-",
         file: b"/data/wb.agel",
         ready: b"WORKBENCH READY - CLICK OR TAB",
-    },
-    Program {
-        name: b"doom-agent",
-        prefix: b"da-",
-        file: b"/data/da.agel",
-        ready: b"DOOM AGENT READY - :PLAY STEPS",
-    },
-    Program {
-        name: b"doom-agent-model",
-        prefix: b"dm-",
-        file: b"/data/dm.agel",
-        ready: b"DOOM MODEL AGENT READY - :PLAY STEPS",
-    },
-    Program {
-        name: b"doom-agent-judge",
-        prefix: b"dj-",
-        file: b"/data/dj.agel",
-        ready: b"DOOM JUDGE AGENT READY - :PLAY STEPS",
-    },
-    Program {
-        name: b"desktop-agent",
-        prefix: b"dk-",
-        file: b"/data/dk.agel",
-        ready: b"DESKTOP AGENT READY - :DRIVE STEPS",
-    },
-    Program {
-        name: b"review",
-        prefix: b"rv-",
-        file: b"/data/rv.agel",
-        ready: b"REVIEW AGENT READY - :AGENTS STEPS",
-    },
-    Program {
-        name: b"lookup",
-        prefix: b"lk-",
-        file: b"/data/lk.agel",
-        ready: b"LOOKUP AGENT READY - :AGENTS STEPS",
     },
     Program {
         name: b"builder",
@@ -2584,6 +2573,45 @@ const PROGRAMS: &[Program] = &[
         ready: b"BUILDER AGENT READY - :AGENTS STEPS",
     },
 ];
+
+const APP_CATALOG_BYTES: usize = 1024;
+
+#[inline(never)]
+fn find_program<'a>(
+    name: &[u8],
+    host: &mut EffectHost<'_>,
+    catalog: &'a mut [u8; APP_CATALOG_BYTES],
+) -> Result<Option<Program<'a>>, &'static [u8]> {
+    if let Some(program) = PROGRAMS.iter().find(|program| program.name == name) {
+        return Ok(Some(Program { ..*program }));
+    }
+    let length = match host.read_file(b"/data/apps.cfg", catalog) {
+        Ok(length) if length < catalog.len() => length,
+        Ok(_) => return Err(b"APP CATALOG IS TOO LONG"),
+        Err(2 | 38) => return Ok(None),
+        Err(_) => return Err(b"APP CATALOG COULD NOT BE READ"),
+    };
+    for row in catalog[..length].split(|byte| *byte == b'\n') {
+        let mut fields = row.split(|byte| *byte == b'|');
+        if fields.next() != Some(name) {
+            continue;
+        }
+        if let (Some(prefix), Some(file), Some(ready), None) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        {
+            if !prefix.is_empty() && file.starts_with(b"/data/") && !ready.is_empty() {
+                return Ok(Some(Program {
+                    name: &row[..name.len()],
+                    prefix,
+                    file,
+                    ready,
+                }));
+            }
+        }
+        return Err(b"INVALID APP CATALOG ENTRY");
+    }
+    Ok(None)
+}
 
 /// How long the play loop holds a step's keys, in passes of the run, unless
 /// `:play STEPS HOLD` says otherwise; how long it waits for the program to
@@ -2646,7 +2674,7 @@ fn play_passes(
 /// A line typed on the serial console while the play loop waits for a
 /// model's answer, bounded: none when nothing whole arrives in time.
 #[inline(never)]
-fn serial_line(serial: &mut ServiceDomain, out: &mut [u8; PAYLOAD_BYTES]) -> Option<usize> {
+fn serial_line(serial: &mut ServiceDomain, out: &mut [u8]) -> Option<usize> {
     let handle = serial.handle();
     let mut length = 0;
     for _ in 0..PLAY_REPLY_POLLS {
@@ -2678,6 +2706,8 @@ fn serial_line(serial: &mut ServiceDomain, out: &mut [u8; PAYLOAD_BYTES]) -> Opt
 fn relay_request(
     evaluator: &mut arch::Domain,
     serial: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
+    mut filesystem: Option<&mut ServiceDomain>,
     look: &[u8; LOOK_BYTES],
     task: &[u8],
 ) -> Option<bool> {
@@ -2724,9 +2754,25 @@ fn relay_request(
         crate::process::Console::write(serial, &shades);
     }
     crate::process::Console::write(serial, b"model-request end\n");
-    let mut answer = [0_u8; PAYLOAD_BYTES];
+    let mut answer = [0_u8; 2048];
     let mut delivered = false;
     while let Some(length) = serial_line(serial, &mut answer) {
+        if relay_ledger(
+            &answer[..length],
+            serial,
+            storage,
+            filesystem.as_deref_mut(),
+        ) {
+            continue;
+        }
+        if relay_audit(
+            &answer[..length],
+            serial,
+            storage,
+            filesystem.as_deref_mut(),
+        ) {
+            continue;
+        }
         let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
             // A page the bridge delivers ahead of its reply, line by line,
             // is kept for the loop to write to a file once the step is
@@ -2835,7 +2881,7 @@ const PROGRAM_SOURCE_BYTES: usize = 8192;
 /// A program's source, read from its file in the data region.
 #[inline(never)]
 fn program_source(
-    program: &Program,
+    program: &Program<'_>,
     host: &mut EffectHost<'_>,
     source: &mut [u8; PROGRAM_SOURCE_BYTES],
 ) -> Result<usize, &'static [u8]> {
@@ -2854,7 +2900,7 @@ fn program_source(
 
 #[inline(never)]
 fn load_program(
-    program: &Program,
+    program: &Program<'_>,
     evaluator: &mut arch::Domain,
     evaluator_revision: &mut u64,
     workspace: &mut Workspace,
@@ -2926,7 +2972,7 @@ fn program_cells_only(workspace: &Workspace) -> bool {
 /// summonable beside the workbench; a program already joined is ready.
 #[inline(never)]
 fn join_program(
-    program: &Program,
+    program: &Program<'_>,
     evaluator: &mut arch::Domain,
     evaluator_revision: &mut u64,
     workspace: &mut Workspace,
@@ -2986,7 +3032,13 @@ static mut INTENT_LEN: usize = 0;
 /// comes back on the line the bridge answers programs on. None when no
 /// answer came.
 #[inline(never)]
-fn judge_fact(serial: &mut ServiceDomain, number: u64, question: &[u8]) -> Option<bool> {
+fn judge_fact(
+    serial: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
+    mut filesystem: Option<&mut ServiceDomain>,
+    number: u64,
+    question: &[u8],
+) -> Option<bool> {
     let mut text = StatusLine::new(b"model-request ");
     text.number_u64(number);
     text.push(b" (judge (noul fact \"");
@@ -2999,8 +3051,24 @@ fn judge_fact(serial: &mut ServiceDomain, number: u64, question: &[u8]) -> Optio
     }
     text.push(b"\"))\nlook-line: desktop\nmodel-request end\n");
     crate::process::Console::write(serial, text.get());
-    let mut answer = [0_u8; PAYLOAD_BYTES];
+    let mut answer = [0_u8; 2048];
     while let Some(length) = serial_line(serial, &mut answer) {
+        if relay_ledger(
+            &answer[..length],
+            serial,
+            storage,
+            filesystem.as_deref_mut(),
+        ) {
+            continue;
+        }
+        if relay_audit(
+            &answer[..length],
+            serial,
+            storage,
+            filesystem.as_deref_mut(),
+        ) {
+            continue;
+        }
         let Some(rest) = answer[..length].strip_prefix(b":model-reply ") else {
             continue;
         };
@@ -3024,6 +3092,148 @@ fn judge_fact(serial: &mut ServiceDomain, number: u64, question: &[u8]) -> Optio
         return Some(probability > 500);
     }
     None
+}
+
+fn ledger_number(bytes: &[u8]) -> Option<u64> {
+    if bytes.is_empty() {
+        return None;
+    }
+    bytes.iter().try_fold(0_u64, |n, byte| {
+        if byte.is_ascii_digit() {
+            n.checked_mul(10)?.checked_add(u64::from(byte - b'0'))
+        } else {
+            None
+        }
+    })
+}
+
+fn relay_ledger(
+    line: &[u8],
+    serial: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+) -> bool {
+    use crate::world::fs;
+    if !line.starts_with(b":ledger") {
+        return false;
+    }
+    let mut fields = line.splitn(4, |byte| *byte == b' ');
+    let (Some(command), Some(id), Some(argument)) = (fields.next(), fields.next(), fields.next())
+    else {
+        return true;
+    };
+    if ledger_number(id).is_none() {
+        return true;
+    }
+    let mut host = EffectHost {
+        storage,
+        filesystem,
+        console: serial,
+        clock: None,
+    };
+    let outcome = (|| -> Result<u64, u64> {
+        let number = ledger_number(argument).ok_or(fs::EINVAL)?;
+        let result = if command == b":ledger-reserve" {
+            if fields.next().is_some() {
+                return Err(fs::EINVAL);
+            }
+            host.filesystem(fs::COMMAND_RESERVE, [number, 0, 0])?
+        } else if command == b":ledger-release" {
+            if fields.next().is_some() {
+                return Err(fs::EINVAL);
+            }
+            host.filesystem(fs::COMMAND_RELEASE, [number, 0, 0])?
+        } else if command == b":ledger" {
+            if number == 0 || number >= fs::RESERVED_OFFSET {
+                return Err(fs::EINVAL);
+            }
+            let packet = fields.next().ok_or(fs::EINVAL)?;
+            if packet.len() != 511 || !packet.iter().all(|byte| (32..=126).contains(byte)) {
+                return Err(fs::EINVAL);
+            }
+            let filesystem = host.filesystem.as_deref_mut().ok_or(38_u64)?;
+            for (index, byte) in packet.iter().enumerate() {
+                filesystem.write_block(index, *byte);
+            }
+            filesystem.write_block(511, b'\n');
+            host.filesystem(
+                fs::COMMAND_WRITE,
+                [fs::LEDGER_ENTRY as u64, fs::RESERVED_OFFSET | number, 512],
+            )?
+        } else {
+            return Err(fs::EINVAL);
+        };
+        Ok(result[0])
+    })();
+    let mut reply = StatusLine::new(b"ledger ");
+    reply.push(id);
+    match outcome {
+        Ok(value) => {
+            reply.push(b" ok ");
+            reply.number_u64(value);
+        }
+        Err(error) => {
+            reply.push(b" error ");
+            reply.number_u64(error);
+        }
+    }
+    reply.push(b"\n");
+    crate::process::Console::write(serial, reply.get());
+    true
+}
+
+fn relay_audit(
+    line: &[u8],
+    serial: &mut ServiceDomain,
+    storage: &mut ServiceDomain,
+    filesystem: Option<&mut ServiceDomain>,
+) -> bool {
+    let Some(rest) = line.strip_prefix(b":audit ") else {
+        return false;
+    };
+    let Some(space) = rest.iter().position(|byte| *byte == b' ') else {
+        return true;
+    };
+    let (id, hex) = (&rest[..space], &rest[space + 1..]);
+    let mut bytes = [0_u8; 256];
+    let mut count = 0;
+    let valid = !id.is_empty()
+        && id.iter().all(u8::is_ascii_digit)
+        && hex.len() <= 512
+        && hex.len() % 2 == 0;
+    let mut decoded = valid;
+    if valid {
+        for pair in hex.as_chunks::<2>().0 {
+            let digit = |byte: u8| match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                _ => None,
+            };
+            let (Some(high), Some(low)) = (digit(pair[0]), digit(pair[1])) else {
+                decoded = false;
+                break;
+            };
+            bytes[count] = high * 16 + low;
+            count += 1;
+        }
+    }
+    let stored = if decoded {
+        let mut host = EffectHost {
+            storage,
+            filesystem,
+            console: serial,
+            clock: None,
+        };
+        host.file_write(b"judge-log", &bytes[..count], true)
+            .is_ok_and(|(written, _)| written == count as u64)
+    } else {
+        false
+    };
+    let mut reply = StatusLine::new(b"audit ");
+    reply.push(id);
+    reply.push(if stored { b" ok\n" } else { b" error\n" });
+    crate::process::Console::write(serial, reply.get());
+    true
 }
 
 /// The number the desktop's own questions start at, past any program's.
@@ -3244,9 +3454,6 @@ fn execute_workshop(
     // `:join NAME`: a program the desktop carries joins the world beside
     // what is in it, under its own prefix, as a sentence joins the agent.
     if let Some(name) = command_argument(line, b":join ") {
-        let Some(program) = PROGRAMS.iter().find(|program| program.name == name) else {
-            return StatusLine::new(b"NO SUCH PROGRAM TO JOIN");
-        };
         let mut tee = Tee {
             serial: &mut *serial,
             terminal: &mut current.terminal,
@@ -3257,8 +3464,14 @@ fn execute_workshop(
             console: &mut tee,
             clock: clock.as_deref_mut(),
         };
+        let mut catalog = [0; APP_CATALOG_BYTES];
+        let program = match find_program(name, &mut host, &mut catalog) {
+            Ok(Some(program)) => program,
+            Ok(None) => return StatusLine::new(b"NO SUCH PROGRAM TO JOIN"),
+            Err(message) => return StatusLine::new(message),
+        };
         return join_program(
-            program,
+            &program,
             evaluator,
             evaluator_revision,
             workspace,
@@ -3316,7 +3529,14 @@ fn execute_workshop(
                 b"May this Agel cell run on the desktop, where a program can read and write files and paint rectangles, and nothing else? ",
             );
             question.push(&form[..form.len().min(700)]);
-            if judge_fact(serial, number, question.get()) != Some(true) {
+            if judge_fact(
+                serial,
+                storage,
+                filesystem.as_deref_mut(),
+                number,
+                question.get(),
+            ) != Some(true)
+            {
                 let mut report = StatusLine::new(b"GATE REFUSED FORM ");
                 report.number_u64(count + 1);
                 report.push(b" OF ");
@@ -3380,7 +3600,7 @@ fn execute_workshop(
     let mut load_path: Option<StatusLine> =
         command_argument(line, b":load-file ").map(StatusLine::new);
     if let Some(name) = program {
-        if let Some(program) = PROGRAMS.iter().find(|program| program.name == name) {
+        {
             let mut tee = Tee {
                 serial: &mut *serial,
                 terminal: &mut current.terminal,
@@ -3391,14 +3611,21 @@ fn execute_workshop(
                 console: &mut tee,
                 clock: clock.as_deref_mut(),
             };
-            return load_program(
-                program,
-                evaluator,
-                evaluator_revision,
-                workspace,
-                dirty,
-                &mut host,
-            );
+            let mut catalog = [0; APP_CATALOG_BYTES];
+            match find_program(name, &mut host, &mut catalog) {
+                Ok(Some(program)) => {
+                    return load_program(
+                        &program,
+                        evaluator,
+                        evaluator_revision,
+                        workspace,
+                        dirty,
+                        &mut host,
+                    )
+                }
+                Ok(None) => {}
+                Err(message) => return StatusLine::new(message),
+            }
         }
         let mut path = StatusLine::new(b"/");
         path.push(name);
@@ -3994,14 +4221,14 @@ fn execute_workshop(
                     return loaded;
                 }
             }
-            let Some(agent) = PROGRAMS
-                .iter()
-                .find(|program| program.name == b"desktop-agent")
-            else {
-                return StatusLine::new(b"NO AGENT IN THE IMAGE");
+            let mut catalog = [0; APP_CATALOG_BYTES];
+            let agent = match find_program(b"desktop-agent", &mut host, &mut catalog) {
+                Ok(Some(program)) => program,
+                Ok(None) => return StatusLine::new(b"NO AGENT IN THE IMAGE"),
+                Err(message) => return StatusLine::new(message),
             };
             let joined = join_program(
-                agent,
+                &agent,
                 evaluator,
                 evaluator_revision,
                 workspace,
@@ -4309,13 +4536,19 @@ impl EffectHost<'_> {
             for (index, byte) in content[written..written + chunk].iter().enumerate() {
                 filesystem.write_block(index, *byte);
             }
-            let [count, _, _] =
-                self.filesystem(fs::COMMAND_WRITE, [entry, offset, chunk as u64])?;
+            let [count, end, _] = self.filesystem(
+                fs::COMMAND_WRITE,
+                [
+                    entry,
+                    if append { fs::APPEND_OFFSET } else { offset },
+                    chunk as u64,
+                ],
+            )?;
             if count == 0 {
                 break;
             }
             written += count as usize;
-            offset += count;
+            offset = end;
         }
         Ok((written as u64, 0))
     }
@@ -4521,46 +4754,56 @@ fn perform_handover(
     let mut words = rest
         .split(|byte| *byte == b' ')
         .filter(|word| !word.is_empty());
-    let mut load = StatusLine::new(b":load ");
-    load.push(words.next().unwrap_or(b""));
+    let name = words.next().unwrap_or(b"");
     let steps = words.next().unwrap_or(b"1");
-    // `:handover NAME STEPS agents`: the reviewer joins and the two run
-    // as agents instead of the one playing alone.
-    let with_agents = words.next() == Some(b"agents");
+    let mut wait_prefix = None;
+    let mut companion = None;
+    for option in words {
+        if let Some(prefix) = option.strip_prefix(b"wait=") {
+            wait_prefix = Some(prefix);
+        } else if let Some(name) = option.strip_prefix(b"join=") {
+            companion = Some(name);
+        } else {
+            return StatusLine::new(b"USE :HANDOVER NAME STEPS [WAIT=PREFIX] [JOIN=NAME]");
+        }
+    }
+    let with_agents = companion.is_some();
     let mut play_line = StatusLine::new(if with_agents { b":agents " } else { b":play " });
     play_line.push(steps);
-    let status = execute_workshop(
-        machine,
-        compositor,
-        inputs.as_deref_mut(),
-        evaluator,
-        storage,
-        filesystem.as_deref_mut(),
-        serial,
-        clock.as_deref_mut(),
-        recovery,
-        kernel,
-        current,
-        previous,
-        scene_revision,
-        evaluator_revision,
-        workspace,
-        committed_workspace,
-        generation,
-        dirty,
-        running,
-        load.get(),
-    );
-    if !status.get().ends_with(b"READY - :PLAY STEPS") {
-        return status;
+    {
+        let mut tee = Tee {
+            serial: &mut *serial,
+            terminal: &mut current.terminal,
+        };
+        let mut host = EffectHost {
+            storage: &mut *storage,
+            filesystem: filesystem.as_deref_mut(),
+            console: &mut tee,
+            clock: clock.as_deref_mut(),
+        };
+        let mut catalog = [0; APP_CATALOG_BYTES];
+        let program = match find_program(name, &mut host, &mut catalog) {
+            Ok(Some(program)) => program,
+            Ok(None) => return StatusLine::new(b"NO SUCH PROGRAM TO HAND OVER TO"),
+            Err(message) => return StatusLine::new(message),
+        };
+        let status = load_program(
+            &program,
+            evaluator,
+            evaluator_revision,
+            workspace,
+            dirty,
+            &mut host,
+        );
+        if status.get() != program.ready {
+            return status;
+        }
     }
-    // The game prints its first frame when it is ready to be played; up
-    // to a bounded wait for that line.
-    if let Some(run) = running.as_deref_mut() {
+    if let (Some(prefix), Some(run)) = (wait_prefix, running.as_deref_mut()) {
         let mut waited = 0;
         while waited < 200
             && !current.terminal.last[..usize::from(current.terminal.last_length)]
-                .starts_with(b"doom:")
+                .starts_with(prefix)
         {
             if play_passes(
                 machine,
@@ -4589,30 +4832,32 @@ fn perform_handover(
             .copied()
             .find(|slot| listening(slot));
     }
-    if with_agents {
-        let joined = execute_workshop(
-            machine,
-            compositor,
-            inputs.as_deref_mut(),
+    if let Some(name) = companion {
+        let mut tee = Tee {
+            serial: &mut *serial,
+            terminal: &mut current.terminal,
+        };
+        let mut host = EffectHost {
+            storage: &mut *storage,
+            filesystem: filesystem.as_deref_mut(),
+            console: &mut tee,
+            clock: clock.as_deref_mut(),
+        };
+        let mut catalog = [0; APP_CATALOG_BYTES];
+        let program = match find_program(name, &mut host, &mut catalog) {
+            Ok(Some(program)) => program,
+            Ok(None) => return StatusLine::new(b"NO SUCH PROGRAM TO JOIN"),
+            Err(message) => return StatusLine::new(message),
+        };
+        let joined = join_program(
+            &program,
             evaluator,
-            storage,
-            filesystem.as_deref_mut(),
-            serial,
-            clock.as_deref_mut(),
-            recovery,
-            kernel,
-            current,
-            previous,
-            scene_revision,
             evaluator_revision,
             workspace,
-            committed_workspace,
-            generation,
             dirty,
-            running,
-            b":join review",
+            &mut host,
         );
-        if !joined.get().starts_with(b"REVIEW AGENT READY") {
+        if joined.get() != program.ready {
             return joined;
         }
     }
@@ -4942,8 +5187,8 @@ fn agents(
             }
             let Some(mut decision) = evaluate!(step_name.get()) else {
                 return StatusLine::new(match mode {
-                    LoopMode::Drive => b"DRIVE-STEP FAILED - :LOAD DESKTOP-AGENT",
-                    LoopMode::Play => b"PLAY-STEP FAILED - :LOAD DOOM-AGENT",
+                    LoopMode::Drive => b"DRIVE-STEP FAILED - LOAD A DRIVE AGENT",
+                    LoopMode::Play => b"PLAY-STEP FAILED - LOAD A PLAY AGENT",
                     LoopMode::Agents => b"STEP FAILED - :LOAD THE AGENT AGAIN",
                 });
             };
@@ -4956,7 +5201,15 @@ fn agents(
             // too: the judge reads it beside the picture.
             let task = intent();
             for _ in 0..4 {
-                if relay_request(evaluator, serial, &look, task) != Some(true) {
+                if relay_request(
+                    evaluator,
+                    serial,
+                    storage,
+                    filesystem.as_deref_mut(),
+                    &look,
+                    task,
+                ) != Some(true)
+                {
                     break;
                 }
                 flush_page(
@@ -5836,6 +6089,10 @@ fn interactive(
         .unwrap_or_else(|reason| failed(reason));
     let mut line = [0; INPUT_BYTES];
     let mut length = 0;
+    let mut byte_frame = [0; 4096];
+    let mut byte_frame_length = 0;
+    let mut byte_frame_active = false;
+    let mut byte_frame_overflow = false;
     let mut keyboard = Keyboard::new();
     let mut pointer = crate::pointer::Pointer::new(
         crate::world::SCENE_WIDTH as i32,
@@ -5963,6 +6220,7 @@ fn interactive(
                     .focus
                     .and_then(|slot| current.windows[usize::from(slot)].as_mut())
                     .filter(|window| window.listens() && running.is_some())
+                    .filter(|_| !byte_frame_active && byte != 0x1d)
                     .filter(|_| length == 0 && byte != b':' || length > 0 && line[0] != b':')
                 {
                     window.queue(crate::world::process::EVENT_KEY | u64::from(byte));
@@ -6350,6 +6608,40 @@ fn interactive(
                 }
             }
         };
+        if byte == 0x1d {
+            byte_frame_active = true;
+            byte_frame_length = 0;
+            byte_frame_overflow = false;
+            continue;
+        }
+        if byte_frame_active {
+            if byte == b'\n' {
+                let payload = &byte_frame[..byte_frame_length];
+                let ledger_handled = !byte_frame_overflow
+                    && relay_ledger(
+                        payload,
+                        &mut console_driver,
+                        &mut storage,
+                        filesystem.as_mut(),
+                    );
+                let accepted = !byte_frame_overflow
+                    && (ledger_handled
+                        || (core::str::from_utf8(payload).is_ok()
+                            && running
+                                .as_mut()
+                                .is_some_and(|run| run.feed_console(payload))));
+                if !accepted {
+                    console::write("byte-input refused\n");
+                }
+                byte_frame_active = false;
+            } else if byte_frame_length < byte_frame.len() {
+                byte_frame[byte_frame_length] = byte;
+                byte_frame_length += 1;
+            } else {
+                byte_frame_overflow = true;
+            }
+            continue;
+        }
         let mut prompt_pending = false;
         match byte {
             b'\t' if workspace.find(b"wb-0").is_none() => {
@@ -6388,25 +6680,42 @@ fn interactive(
                 // A program reading the console owns the line, as a
                 // terminal's foreground program does; `:eof` alone ends
                 // its input, the way a terminal's end-of-file key does.
-                let fed = match running.as_mut().filter(|run| run.reading_console()) {
-                    Some(run) => {
-                        status = if trim(&line[..length]) == b":eof" {
-                            run.end_console();
-                            StatusLine::new(b"END OF INPUT")
-                        } else if run.feed_console(&line[..length]) {
-                            StatusLine::new(b"LINE GIVEN TO THE PROGRAM")
-                        } else {
-                            StatusLine::new(b"THE PROGRAM'S INPUT IS FULL")
-                        };
-                        true
+                let queued = line[..length].strip_prefix(b":stdin ");
+                let fed = if let Some(payload) = queued {
+                    status = match running.as_mut() {
+                        Some(run) => {
+                            if run.feed_console(payload) {
+                                StatusLine::new(b"INPUT QUEUED")
+                            } else {
+                                StatusLine::new(b"THE PROGRAM'S INPUT IS FULL OR CLOSED")
+                            }
+                        }
+                        None => StatusLine::new(b"NO RUNNING PROGRAM"),
+                    };
+                    true
+                } else {
+                    match running.as_mut().filter(|run| run.reading_console()) {
+                        Some(run) => {
+                            status = if trim(&line[..length]) == b":eof" {
+                                run.end_console();
+                                StatusLine::new(b"END OF INPUT")
+                            } else if run.feed_console(&line[..length]) {
+                                StatusLine::new(b"LINE GIVEN TO THE PROGRAM")
+                            } else {
+                                StatusLine::new(b"THE PROGRAM'S INPUT IS FULL")
+                            };
+                            true
+                        }
+                        None => false,
                     }
-                    None => false,
                 };
                 #[cfg(target_arch = "x86_64")]
                 let clock = clock_driver.as_mut();
                 #[cfg(not(target_arch = "x86_64"))]
                 let clock: Option<&mut ServiceDomain> = None;
-                if !fed {
+                if !fed && length > PAYLOAD_BYTES {
+                    status = StatusLine::new(b"WORKSHOP INPUT LIMIT 896 BYTES");
+                } else if !fed {
                     status = execute_workshop(
                         machine,
                         compositor,
@@ -6468,10 +6777,16 @@ fn interactive(
                     length += 1;
                     console::write_byte(byte);
                 } else {
-                    status = StatusLine::new(b"INPUT LIMIT 256 BYTES");
+                    status = StatusLine::new(b"INPUT LIMIT 4104 BYTES");
                 }
             }
             _ => {}
+        }
+        if line[..length].starts_with(b":stdin ")
+            || (line[..length].starts_with(b":ledger")
+                && running.as_ref().is_some_and(|run| run.reading_console()))
+        {
+            continue;
         }
         let frame = materialize(current, Some(&line[..length]), status.get())
             .unwrap_or_else(|reason| failed(reason));

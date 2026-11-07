@@ -267,6 +267,8 @@ with tempfile.TemporaryDirectory(prefix="agel-drive-", dir="/tmp") as directory:
         assert machine.submit("facing-tolerance").strip().startswith("20")
         waited = machine.submit(":agents 1")
         assert "agents: step 1 dj waits window" in waited and "rv waits file summary" in waited, waited[-2000:]
+        handover = machine.submit(":handover doom-agent-judge 1 wait=unused: join=review")
+        assert "dj waits window" in handover and "rv waits file summary" in handover, handover
     finally:
         machine.close()
 print("An Agel program drives the desktop from inside the OS: the desktop's state read "

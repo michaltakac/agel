@@ -1,0 +1,17 @@
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+RuneScape combat: discovering a rat, attacking and waiting for XP and removal
+{test rat-combat passed #t target-index 20025 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t live-tool-version 2 preserved-calls 3 judge deterministic-fixture}
+RuneScape combat: kill observed; verifying persisted Attack and Hitpoints XP
+persisted: account=14 character=14 rights= x=3210 z=3206 level=0 xp_rate_in_hundreds=100
+stat=0 base=1 visible=1 fine_xp=80
+stat=3 base=10 visible=10 fine_xp=11566
+RuneScape PASS: observed rat kill, Attack/Hitpoints XP and normal-account persistence

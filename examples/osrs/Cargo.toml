@@ -1,0 +1,14 @@
+[package]
+name = "agel-osrs-example"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dev-dependencies]
+agel-core = { path = "../../crates/agel-core" }
+agel-stdlib = { path = "../../crates/agel-stdlib" }
+
+[lints]
+workspace = true

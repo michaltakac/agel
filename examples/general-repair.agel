@@ -1,0 +1,37 @@
+(import agel/repair)
+(import agel/evolution)
+(import agel/live-tools)
+(import agel/meta)
+(def writer-cap (request-capability 'model/infer "codex"))
+(def judge-cap (request-capability 'model/infer "jev"))
+(def initial
+  (fn (name source cases)
+    (evolution-edit (evolution-new) 'cell name nil source cases
+      (fn (request) (dict 'allowed #t 'reason "fixed control initialization" 'cost-microusd 0)))))
+(def batch-source '(fn (n size) (/ n size)))
+(def batch-versions (initial 'batches batch-source (list (dict 'arguments '(6 3) 'expected 2))))
+(def readiness-source '(fn (ready target) target))
+(def readiness-versions (initial 'choose readiness-source (list (dict 'arguments '(#t 41) 'expected 41))))
+(def batches
+  (make-repair-agent "resource-batches"
+    (dict 'versions batch-versions 'tool 'batches 'before-text "(fn (n size) (/ n size))"
+      'context "A resource planner must return the minimum whole batches needed for nonnegative n and positive size. Integer division truncates. Observed failure: (5 3) returned 1 but requires 2 batches. Displayed probes in order: (5 3) expected 2; (0 3) expected 0."
+      'examples (list (dict 'arguments '(5 3) 'expected 2) (dict 'arguments '(0 3) 'expected 0))
+      'held-out (list (dict 'arguments '(9 3) 'expected 3) (dict 'arguments '(10 3) 'expected 4)
+                      (dict 'arguments '(0 7) 'expected 0) (dict 'arguments '(1 7) 'expected 1)
+                      (dict 'arguments '(9223372036854775807 2) 'expected 4611686018427387904)
+                      (dict 'arguments '(9223372036854775807 9223372036854775807) 'expected 1))
+      'max-attempts 2 'threshold 800 'proposal-provider 'codex 'judge-provider 'jev)
+    (list writer-cap judge-cap)))
+(def readiness
+  (make-repair-agent "readiness-gate"
+    (dict 'versions readiness-versions 'tool 'choose 'before-text "(fn (ready target) target)"
+      'context "An event consumer must return target when ready is #t; otherwise nil. ready is a boolean or nil; target is any integer, including zero. Observed failure: (nil 41) returned 41 before readiness. Displayed probes in order: (nil 41) expected nil; (#t 41) expected 41."
+      'examples (list (dict 'arguments '(nil 41) 'expected nil) (dict 'arguments '(#t 41) 'expected 41))
+      'held-out (list (dict 'arguments '(#f 0) 'expected nil) (dict 'arguments '(#t 73) 'expected 73)
+                      (dict 'arguments '(#t 0) 'expected 0) (dict 'arguments '(nil -9) 'expected nil))
+      'max-attempts 2 'threshold 800 'proposal-provider 'codex 'judge-provider 'jev)
+    (list writer-cap judge-cap)))
+(send batches '(repair/start))
+(send readiness '(repair/start))
+(run)

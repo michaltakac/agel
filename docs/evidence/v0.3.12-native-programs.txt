@@ -1,0 +1,103 @@
+qemu-system-x86_64: -chardev socket,id=serial0,path=/tmp/agel-native-evolve-zb7hjytx/serial,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/tmp/agel-native-evolve-zb7hjytx/serial,server=on
+
+bounded-program-io
+process program-io-check exited with status 0
+PROCESS ENDED
+live-desktop> 
+
+read-only
+process program-io-check exited with status 0
+PROCESS ENDED
+live-desktop> 
+
+agel: standard library installed, 3734 steps
+PROCESS RUNNING
+live-desktop> native-program: version 1 installed and executed in this OS
+native-program: version 2 active; same Agel process and session
+{event judge-start id 1 request {kind program name worker base nil before nil after (fn (n) (+ n 1))}}
+{event judge-result id 1 receipt {allowed #t reason "local native activation fixture" cost-microusd 0} cost-microusd 0}
+{event judge-start id 2 request {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2))}}
+{event judge-result id 2 receipt {allowed #t reason "local native activation fixture" cost-microusd 0} cost-microusd 0}
+{event judge-start id 3 request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1))}}
+{event judge-result id 3 receipt {allowed #t reason "local native activation fixture" cost-microusd 0} cost-microusd 0}
+{event judge-start id 4 request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 3))}}
+{event judge-result id 4 receipt {allowed #t reason "local native activation fixture" cost-microusd 0} cost-microusd 0}
+{event judge-start id 5 request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1))}}
+{event judge-result id 5 receipt {allowed #t reason "local native activation fixture" cost-microusd 0} cost-microusd 0}
+
+native-program: retained history ({event judge request {kind program name worker base nil before nil after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 1 result {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} {event commit kind program name worker version 1} {event judge request {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 2 result {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}} {event commit kind program name worker version 2} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #f checked 0 reason "recorded step differs" arguments (40) expected 42 actual 41}} {event rollback reason "recorded step differs"} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 3))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 3 result {passed #f reason "compiled canary differs" programs ({program {name "v3a11c0" start 3174 length 779 crc 1018715943} arguments (40) expected 43 actual (112 "")})}} {event rollback reason "compiled canary differs"} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 3 result {passed #t reason "compiled canaries match" programs ({program {name "v3a15c0" start 3176 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} {event commit kind program name worker version 3})
+native-program: PASS: real ELF install, activation, canary rollback, revert, retained state and no-file canary
+=> #<module:agel/bytes>
+=> #<module:agel/program-store>
+=> #<module:agel/native-program>
+=> #<module:agel/native-program>
+=> #<module:agel/sequence>
+=> #<module:agel/program-store>
+=> #<module:agel/evolution>
+=> #<module:agel/judge-log>
+=> #<closure>
+=> {turns 7 mailbox (a b)}
+=> 0
+=> #<closure>
+=> {geometry (2048 8192) read #<builtin> write #<builtin> flush #<builtin> run #<builtin> prefix "v" fuel 1000000}
+=> (fn (n) (+ n 1))
+=> (fn (n) (+ n 2))
+=> ({arguments (40) expected 41})
+=> ({arguments (40) expected 42})
+=> {versions {1 {kind program name worker base nil before nil after (fn (n) (+ n 1)) source (fn (n) (+ n 1)) activation {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}}} active {program {worker 1}} history ({event judge request {kind program name worker base nil before nil after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 1 result {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} {event commit kind program name worker version 1}) next 2}
+=> #t
+=> #t
+=> nil
+=> {versions {1 {kind program name worker base nil before nil after (fn (n) (+ n 1)) source (fn (n) (+ n 1)) activation {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} 2 {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2)) source (fn (n) (+ n 2)) activation {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}}} active {program {worker 2}} history ({event judge request {kind program name worker base nil before nil after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 1 result {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} {event commit kind program name worker version 1} {event judge request {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 2 result {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}} {event commit kind program name worker version 2}) next 3}
+=> #t
+=> #t
+=> nil
+=> {versions {1 {kind program name worker base nil before nil after (fn (n) (+ n 1)) source (fn (n) (+ n 1)) activation {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} 2 {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2)) source (fn (n) (+ n 2)) activation {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}}} active {program {worker 2}} history ({event judge request {kind program name worker base nil before nil after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 1 result {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} {event commit kind program name worker version 1} {event judge request {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 2 result {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}} {event commit kind program name worker version 2} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #f checked 0 reason "recorded step differs" arguments (40) expected 42 actual 41}} {event rollback reason "recorded step differs"}) next 3}
+=> #t
+=> {versions {1 {kind program name worker base nil before nil after (fn (n) (+ n 1)) source (fn (n) (+ n 1)) activation {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} 2 {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2)) source (fn (n) (+ n 2)) activation {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}}} active {program {worker 2}} history ({event judge request {kind program name worker base nil before nil after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 1 result {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} {event commit kind program name worker version 1} {event judge request {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 2 result {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}} {event commit kind program name worker version 2} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #f checked 0 reason "recorded step differs" arguments (40) expected 42 actual 41}} {event rollback reason "recorded step differs"} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 3))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 3 result {passed #f reason "compiled canary differs" programs ({program {name "v3a11c0" start 3174 length 779 crc 1018715943} arguments (40) expected 43 actual (112 "")})}} {event rollback reason "compiled canary differs"}) next 3}
+=> #t
+=> #t
+=> {versions {1 {kind program name worker base nil before nil after (fn (n) (+ n 1)) source (fn (n) (+ n 1)) activation {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} 2 {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2)) source (fn (n) (+ n 2)) activation {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}} 3 {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1)) source (fn (n) (+ n 1)) activation {passed #t reason "compiled canaries match" programs ({program {name "v3a15c0" start 3176 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}}} active {program {worker 3}} history ({event judge request {kind program name worker base nil before nil after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 1 result {passed #t reason "compiled canaries match" programs ({program {name "v1a0c0" start 3170 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} {event commit kind program name worker version 1} {event judge request {kind program name worker base 1 before (fn (n) (+ n 1)) after (fn (n) (+ n 2))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 2 result {passed #t reason "compiled canaries match" programs ({program {name "v2a4c0" start 3172 length 779 crc 2689800815} arguments (40) expected 42 actual (42 "42\n")})}} {event commit kind program name worker version 2} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #f checked 0 reason "recorded step differs" arguments (40) expected 42 actual 41}} {event rollback reason "recorded step differs"} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 3))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 3 result {passed #f reason "compiled canary differs" programs ({program {name "v3a11c0" start 3174 length 779 crc 1018715943} arguments (40) expected 43 actual (112 "")})}} {event rollback reason "compiled canary differs"} {event judge request {kind program name worker base 2 before (fn (n) (+ n 2)) after (fn (n) (+ n 1))} receipt {allowed #t reason "local native activation fixture" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 3 result {passed #t reason "compiled canaries match" programs ({program {name "v3a15c0" start 3176 length 779 crc 204744560} arguments (40) expected 41 actual (41 "41\n")})}} {event commit kind program name worker version 3}) next 4}
+=> #t
+=> #t
+=> #t
+=> #t
+=> #t
+=> #<agent:1>
+=> go
+=> {turns 1 pending 0 events 3}
+=> #t
+=> ({sequence 4 kind turn-failed agent #<agent:1> detail {kind capability/denied message "no supplied capability permits program/read for program-sector-read" data nil}})
+=> #t
+=> nil
+=> nil
+=> nil
+=> #t
+agel: 46 forms, 8873551 steps, revision 2
+process agel exited with status 0
+
+
+41
+process v1a0c0 exited with status 41
+PROCESS ENDED
+live-desktop> 
+
+42
+process v2a4c0 exited with status 42
+PROCESS ENDED
+live-desktop> 
+qemu-system-x86_64: terminating on signal 15 from pid 83104 (<unknown process>)
+qemu-system-x86_64: -chardev socket,id=serial0,path=/tmp/agel-native-evolve-zb7hjytx/reboot/serial,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/tmp/agel-native-evolve-zb7hjytx/reboot/serial,server=on
+
+41
+process v1a0c0 exited with status 41
+PROCESS ENDED
+live-desktop> 
+
+42
+process v2a4c0 exited with status 42
+PROCESS ENDED
+live-desktop> 
+PASS: retained ELF versions and judge log survive reboot
+PASS: native program bytes installed and selected by Agel; controller state and previous images retained
+qemu-system-x86_64: terminating on signal 15 from pid 83104 (<unknown process>)

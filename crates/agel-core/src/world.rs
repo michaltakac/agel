@@ -150,6 +150,7 @@ pub(crate) const SEED_BUILTINS: &[(&str, Builtin)] = &[
     ("type-of", Builtin::TypeOf),
     ("text-bytes", Builtin::TextBytes),
     ("text-byte", Builtin::TextByte),
+    ("text-from-bytes", Builtin::TextFromBytes),
     ("text-slice", Builtin::TextSlice),
     ("text-concat", Builtin::TextConcat),
     ("text-symbol", Builtin::TextSymbol),

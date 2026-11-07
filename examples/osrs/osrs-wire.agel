@@ -1,0 +1,90 @@
+(module agel/osrs-wire
+  (import agel/sequence)
+  (export osrs-js5-open osrs-js5-group osrs-game-open osrs-read-exact osrs-read-exact-serviced osrs-u32 osrs-uint)
+
+  (def remainder (fn (n divisor) (- n (* divisor (/ n divisor)))))
+  (def osrs-u32
+    (fn (n)
+      (if (if (= (type-of n) 'int) (if (< -1 n) (< n 4294967296) #f) #f)
+          (list (/ n 16777216) (remainder (/ n 65536) 256)
+                (remainder (/ n 256) 256) (remainder n 256))
+          (signal 'osrs/integer "unsigned 32-bit value required"))))
+  (def osrs-uint
+    (fn (bytes)
+      (foldl (fn (n byte)
+               (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
+                   (+ (* n 256) byte)
+                   (signal 'osrs/byte "invalid wire byte"))) 0 bytes)))
+  (def prepend-reversed
+    (fn (bytes tail)
+      (if (= bytes nil) tail
+        (prepend-reversed (cdr bytes) (cons (car bytes) tail)))))
+  (def join-read-chunks
+    (fn (chunks out service)
+      (if (= chunks nil) out
+        (begin
+          (if service (service) nil)
+          (join-read-chunks (cdr chunks)
+            (prepend-reversed (prepend-reversed (car chunks) nil) out)
+            service)))))
+  (def read-loop
+    (fn (remaining chunks service)
+      (let ((bytes (wire-read remaining)))
+        (if (= bytes nil) (signal 'osrs/eof "connection ended inside packet")
+          (let ((missing (- remaining (count bytes))))
+            (if (< missing 0) (signal 'osrs/length "transport exceeded the requested read length")
+              (if (= missing 0) (join-read-chunks chunks bytes service)
+                (read-loop missing (cons bytes chunks) service))))))))
+  (def osrs-read-exact-serviced
+    (fn (length service)
+      (if (if (= (type-of length) 'int) (if (< -1 length) (< length 65537) #f) #f)
+          (if (= length 0) nil (read-loop length nil service))
+          (signal 'osrs/length "read length exceeds the packet bound"))))
+  (def osrs-read-exact (fn (length) (osrs-read-exact-serviced length nil)))
+  (def osrs-js5-open
+    (fn (revision seed)
+      (if (= (foldl (fn (n _) (+ n 1)) 0 seed) 4)
+          (begin
+            (wire-open)
+            (wire-write (cons 15 (append (osrs-u32 revision)
+              (foldl (fn (bytes word) (append bytes (osrs-u32 word))) nil seed))))
+            (let ((status (car (osrs-read-exact 1))))
+              (if (= status 0) (dict 'phase 'js5 'revision revision 'status status)
+                  (signal 'osrs/rejected "JS5 connection refused" status))))
+          (signal 'osrs/seed "JS5 requires four seed words"))))
+  (def group-body
+    (fn (remaining room out)
+      (let ((take (if (< remaining room) remaining room)))
+        (let ((bytes (foldl (fn (all byte) (cons byte all)) out (osrs-read-exact take))))
+          (if (= take remaining) (reverse bytes)
+              (if (= (car (osrs-read-exact 1)) 255)
+                  (group-body (- remaining take) 511 bytes)
+                  (signal 'osrs/block "invalid JS5 continuation marker")))))))
+  (def osrs-js5-group
+    (fn (archive group)
+      (if (if (= (type-of archive) 'int)
+              (if (= (type-of group) 'int)
+                  (if (< -1 archive) (if (< archive 256) (if (< -1 group) (< group 65536) #f) #f) #f) #f) #f)
+          (begin
+            (wire-write (list 1 archive (/ group 256) (remainder group 256)))
+            (let ((header (osrs-read-exact 8)))
+              (let ((got-archive (car header))
+                    (got-group (osrs-uint (list (car (cdr header)) (car (cdr (cdr header))))))
+                    (compression (car (cdr (cdr (cdr header)))))
+                    (length (osrs-uint (cdr (cdr (cdr (cdr header)))))))
+                (if (if (= got-archive archive) (= got-group group) #f)
+                    (if (if (< compression 3) (< length 65533) #f)
+                        (dict 'archive archive 'group group 'compression compression 'length length
+                              'bytes (group-body (+ length (if (= compression 0) 0 4)) 504 nil))
+                        (signal 'osrs/group "unsupported compression or oversized group"))
+                    (signal 'osrs/group "server returned another cache group")))))
+          (signal 'osrs/group "invalid archive or group identifier"))))
+  (def osrs-game-open
+    (fn ()
+      (begin
+        (wire-open)
+        (wire-write '(14))
+        (let ((status (car (osrs-read-exact 1))))
+          (if (= status 0)
+              (dict 'phase 'login-challenge 'status status 'session-bytes (osrs-read-exact 8))
+              (signal 'osrs/rejected "game connection refused" status)))))))

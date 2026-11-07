@@ -1,0 +1,7 @@
+byte-bridge: request 1 operation open at-ms 4048 duration-ms 0 status ok
+byte-bridge: request 2 operation write at-ms 5125 duration-ms 0 status ok
+byte-bridge: request 3 operation read at-ms 5135 duration-ms 413 status ok
+byte-bridge: request 4 operation read at-ms 5613 duration-ms 0 status ok
+byte-bridge: request 5 operation close at-ms 5632 duration-ms 0 status ok
+=> ("metacircular evaluator" "https://en.wikipedia.org/w/api.php?action=opensearch&limit=5&format=json&search=%6D%65%74%61%63%69%72%63%75%6C%61%72%20%65%76%61%6C%75%61%74%6F%72" json external "[\"metacircular evaluator\",[\"Meta-circular evaluator\"],[\"\"],[\"https://en.wikipedia.org/wiki/Meta-circular_evaluator\"]]")
+process agel exited with status 0

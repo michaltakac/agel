@@ -1,0 +1,99 @@
+(import agel/bytes)
+(import agel/sequence)
+(import agel/native-reader)
+(import agel/benchmark)
+(import agel/meta)
+(import agel/work-profile)
+
+(def audit-prefixes
+  (dict 'version "{event live-policy-versions "
+        'workload "(recorded-workload "
+        'profile "{event runtime-observation "))
+(def audit-records
+  (fn (log)
+    (let ((fields (keys audit-prefixes)))
+      (let ((collect
+              (fn (start end found)
+                (foldl (fn (matches field)
+                         (if (has-key? matches field) matches
+                           (let ((prefix (get audit-prefixes field)))
+                             (let ((limit (+ start (text-bytes prefix))))
+                               (if (if (< end limit) #f (= (text-slice log start limit) prefix))
+                                 (assoc matches field (text-slice log start end))
+                                 matches)))))
+                  found fields))))
+        (let ((scan (fn (self at end found)
+                      (if (< at 0)
+                        (if end (collect 0 end found) found)
+                        (if (= (text-byte log at) 10)
+                          (let ((next (if end (collect (+ at 1) end found) found)))
+                            (if (= (count next) (count fields)) next
+                              (self self (- at 1) at next)))
+                          (self self (- at 1) end found))))))
+          (scan scan (- (text-bytes log) 1) nil (dict)))))))
+(def recovery-started (clock-us))
+(def donor-audit (file-read "judge-log"))
+(def donor-records (audit-records donor-audit))
+(def version-line (get donor-records 'version))
+(def workload-line (get donor-records 'workload))
+(def profile-line (get donor-records 'profile))
+(check (if version-line (if workload-line profile-line #f) #f)
+  "required record missing from retained audit log")
+(def retained-policy (get (car (native-read version-line 8192 64)) 'versions))
+(def retained-profile (get (car (native-read profile-line 8192 64)) 'profile))
+(def retained-workload (car (native-read workload-line 32768 8)))
+(def retained-length (car (cdr retained-workload)))
+(def retained-hex (car (cdr (cdr retained-workload))))
+(def retained-bound (get retained-profile 'bound))
+
+(check (evolution-valid? retained-policy) "retained version store is invalid")
+(check (= (evolution-current retained-policy 'cell 'service-quantum) 2) "accepted policy missing")
+(check (= (evolution-source retained-policy 1) '(fn (limit) 64)) "frozen policy missing")
+(check (= (count retained-workload) 3) "invalid retained workload")
+(check (if (= (type-of retained-length) 'int)
+         (if (< 1023 retained-length) (< retained-length 8193) #f) #f) "unsafe retained workload size")
+(check (= (text-bytes retained-hex) (* 2 retained-length)) "retained workload length differs")
+(check (= (get retained-profile 'bytes) retained-length) "profile and workload differ")
+(check (if (< 127 retained-bound) (< retained-bound 513) #f) "unsafe retained bound")
+(def retained-checks
+  (list (dict 'arguments '(64) 'expected 64) (dict 'arguments '(128) 'expected 128)
+    (dict 'arguments '(65) 'expected 64) (dict 'arguments '(191) 'expected 128)))
+(def original-replay (evolution-replay-version retained-policy 2))
+(def legacy-replay (= (get original-replay 'reason) "version has no retained replay corpus"))
+(check (= (get (if legacy-replay
+            (evolution-replay (evolution-source retained-policy 2) retained-checks)
+            original-replay) 'passed) #t)
+  "retained policy failed the transfer replay")
+(console-log (text-concat "native-transfer: corpus "
+  (if legacy-replay "legacy compatibility cases" "retained version cases")))
+(def retained-quantum-replay
+  (meta-apply (meta-eval (evolution-source retained-policy 2) (meta-base-env)) (list retained-bound)))
+(check (if (= (type-of retained-quantum-replay) 'int)
+         (if (< 64 retained-quantum-replay) (if (< retained-bound retained-quantum-replay) #f #t) #f) #f)
+  "retained cadence is outside the recorded safe bound")
+(def retained-replay-bytes (bytes-from-hex retained-hex))
+(def retained-replay
+  (profile-work
+    (fn (service) (bytes-hex-quantum retained-replay-bytes service retained-quantum-replay))
+    (fn () #t) clock-us))
+(check (= (get retained-replay 'value) retained-hex) "retained policy changed workload bytes")
+(check (< (get (get retained-replay 'metrics) 'calls) (get (get retained-profile 'baseline) 'calls))
+  "retained policy no longer reduces service calls")
+(def retained-activation (get (get (get retained-policy 'versions) 2) 'activation))
+(if retained-activation
+  (let ((probe (get retained-activation 'probe)))
+    (check (if probe
+             (if (= (get probe 'passed) #t)
+               (if (= (get probe 'quantum) retained-quantum-replay)
+                 (= (get (get probe 'metrics) 'calls) (get (get retained-replay 'metrics) 'calls)) #f) #f) #f)
+      "retained probe differs from the replayed cadence or call count"))
+  nil)
+(console-log (text-concat "native-transfer: tape replay " (print-form
+  (dict 'bytes retained-length 'quantum retained-quantum-replay
+        'calls (get (get retained-replay 'metrics) 'calls)))))
+(def retained-lineage
+  (dict 'version 2 'version-crc32 (text-crc32 version-line)
+    'workload-crc32 (text-crc32 workload-line) 'profile-crc32 (text-crc32 profile-line)))
+(console-log (text-concat "native-transfer: recovered " (print-form retained-lineage)))
+(console-log (text-concat "native-transfer: recovery-us "
+  (print-form (- (clock-us) recovery-started))))

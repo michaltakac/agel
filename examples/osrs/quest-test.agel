@@ -1,0 +1,235 @@
+(module agel/osrs-quest-test
+  (import agel/sequence)
+  (import agel/osrs-game)
+  (import agel/osrs-mining-test)
+  (export stage-cook-ingredients finish-cooks-assistant finish-cooks-assistant-using acquire-cook-containers
+    gather-and-finish-cooks-assistant gather-and-finish-cooks-assistant-using)
+  (def require (fn (ok reason) (if ok #t (signal 'osrs/quest-test reason))))
+  (def xp (fn (g) (get (osrs-stat g 7) 'xp)))
+  (def ingredients
+    (fn (g)
+      (map (fn (item) (osrs-inventory-count g 93 item)) '(1927 1944 1933))))
+  (def ready
+    (fn (state)
+      (osrs-await state (fn (g) (if (osrs-stat g 7) (has-key? (get g 'inventories) 93) #f)))))
+  (def stage-cook-ingredients
+    (fn (state)
+      (let ((stocked (osrs-command (osrs-command (osrs-command (ready state)
+                       "item 1927 1") "item 1944 1") "item 1933 1")))
+        (osrs-await stocked (fn (g) (= (ingredients g) '(1 1 1)))))))
+  (def cook
+    (fn (state)
+      (let ((matches (filter (fn (npc) (= (get npc 'type) 4626)) (osrs-nearby-npcs state))))
+        (if matches (car matches) nil))))
+  (def complete?
+    (fn (state)
+      (if (= (xp state) 300)
+        (if (= (osrs-varp state 101) 1) (osrs-open-interface? state 153) #f) #f)))
+  (def page-components (dict 219 1 217 5 231 5 11 4))
+  (def page
+    (fn (state previous)
+      (foldl (fn (found id)
+        (if found found
+          (if (osrs-open-interface? state id)
+            (let ((component (get page-components id)))
+              (if (< (osrs-interface-opens previous id) (osrs-interface-opens state id))
+                (if (< (osrs-pause-events previous id component) (osrs-pause-events state id component)) id nil)
+                nil))
+            nil))) nil '(219 217 231 11))))
+  (def page-names (dict 219 "219" 217 "217" 231 "231" 11 "11"))
+  (def observe-dialogue
+    (fn (state ready windows)
+      (if (ready state) state
+        (if (= windows 0) (osrs-observe-ready state ready 128)
+          (observe-dialogue (osrs-observe-bounded (osrs-keepalive state) ready 20)
+            ready (- windows 1))))))
+  (def run-dialogue
+    (fn (state previous choices pages observe)
+      (require (< 0 pages) "Cook's Assistant exceeded the dialogue bound")
+      (let ((next (with-handler (* problem) (signal 'osrs/quest-test "waiting for the next cook dialogue"
+                     (dict 'choices choices 'pages-left pages 'problem problem))
+                    (observe-dialogue state (fn (g) (if (complete? g) #t (page g previous))) 3))))
+        (if (if (complete? next) #t (page next previous)) #t
+          (signal 'osrs/quest-test "waiting for the next cook dialogue"
+            (dict 'choices choices 'pages-left pages)))
+        (if (complete? next)
+          (begin (require (= choices 2) "unexpected cook choice count") next)
+          (let ((id (page next previous)))
+            (observe (text-concat "observed cook dialogue interface " (get page-names id)))
+            (if (= id 219)
+              (begin
+                (require (< choices 2) "unexpected cook dialogue menu")
+                (run-dialogue (osrs-resume-dialogue next id (get page-components id) 1) next (+ choices 1) (- pages 1) observe))
+              (run-dialogue (osrs-resume-dialogue next id (get page-components id) -1)
+                next choices (- pages 1) observe)))))))
+  (def inventory (fn (state item) (osrs-inventory-count state 93 item)))
+  (def observe-live
+    (fn (state predicate batches)
+      (if (if (predicate state) #t (= batches 0)) state
+        (observe-live (osrs-observe-bounded (osrs-keepalive state) predicate 5)
+          predicate (- batches 1)))))
+  (def wait-live
+    (fn (state predicate batches)
+      (let ((observed (observe-live state predicate batches)))
+        (if (predicate observed) observed (signal 'osrs/quest-test "live observation timed out")))))
+  (def observe-item
+    (fn (state item)
+      (let ((ready (fn (g) (= (inventory g item) 1))))
+        (let ((bounded (observe-live state ready 24)))
+          (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))))
+  (def require-item
+    (fn (observed item)
+      (if (= (inventory observed item) 1) observed
+        (signal 'osrs/quest-test "waiting for gathered item"
+          (dict 'item item 'observed-count (inventory observed item)
+                'route (osrs-map-route observed))))))
+  (def wait-item (fn (state item) (require-item (observe-item state item) item)))
+  (def castle-pot (fn (state) (osrs-ground-count state 1931 3209 3214 0)))
+  (def take-castle-pot
+    (fn (state observe)
+      (let ((first (observe-item (osrs-take-ground-item state 1931 3209 3214) 1931)))
+        (let ((ground (castle-pot first)))
+          (if (if (= (inventory first 1931) 0) (if ground (< 0 ground) #f) #f)
+            (begin
+              (observe "castle pot is still visible, retrying pickup")
+              (wait-item (osrs-take-ground-item first 1931 3209 3214) 1931))
+            (require-item first 1931))))))
+  (def cook-containers
+    (fn (state observe)
+      (let ((initial (ready state)))
+        (require (= (list (inventory initial 1931) (inventory initial 1925) (inventory initial 995)) '(0 0 0))
+          "expected no pot, bucket, or coins on the fresh account")
+        (let ((visible (with-handler (* problem)
+                         (signal 'osrs/quest-test "waiting for the castle pot on the ground" problem)
+                         (wait-live initial (fn (g)
+                           (let ((count (castle-pot g)))
+                             (if count (< 0 count) #f))) 4))))
+          (observe "observed the castle pot on the ground")
+          (let ((pot (with-handler (* problem)
+                       (signal 'osrs/quest-test "waiting for the castle pot pickup" problem)
+                       (take-castle-pot visible observe))))
+            (observe "picked up the castle pot")
+            (let ((sold (get (first-bronze-sale-using pot observe) 'state)))
+              (let ((bucket (wait-item (osrs-click-inventory-item-offset sold 300 16 3 1925 2 1) 1925)))
+                (require (= (list (inventory bucket 1931) (inventory bucket 1925)) '(1 1))
+                  "expected the empty pot and bucket")
+                (require (= (- (inventory sold 995) (inventory bucket 995)) 2) "bucket price changed")
+                (dict 'state bucket 'report
+                  (dict 'test 'cook-containers 'passed #t 'pot 1 'bucket 1
+                    'coins-earned (inventory sold 995) 'coins-left (inventory bucket 995)
+                    'pot-on-ground-before (castle-pot visible) 'pot-on-ground-after (castle-pot pot))))))))))
+  (def acquire-cook-containers (fn (state) (get (cook-containers state (fn (_) nil)) 'report)))
+  (def travel
+    (fn (state batches)
+      (if (= batches 0) state
+        (travel (osrs-wait-ticks (osrs-keepalive state) 5) (- batches 1)))))
+  (def gather-egg
+    (fn (state)
+      (let ((road (travel-to state 3197 3270 8)))
+        (let ((farm (travel-to road 3181 3288 8)))
+          (let ((opened (travel (osrs-use-location farm 1558 3181 3289) 2)))
+            (let ((inside (travel (osrs-walk opened 3181 3291) 3)))
+              (require (= (osrs-ground-count inside 1944 3185 3297 0) 1) "egg was not observed")
+              (wait-item (osrs-take-ground-item inside 1944 3185 3297) 1944)))))))
+  (def travel-to
+    (fn (state x z batches)
+      (observe-live (osrs-walk state x z)
+        (fn (g) (osrs-route-cleared? g state x z)) batches)))
+  (def gather-milk
+    (fn (state)
+      (let ((gate (travel (osrs-walk state 3181 3291) 4)))
+        (let ((open (travel (osrs-use-location gate 1558 3181 3289) 2)))
+          (let ((road (travel (osrs-walk open 3181 3288) 2)))
+            (let ((north (travel-to road 3176 3314 9)))
+              (let ((opened (travel (osrs-use-location north 883 3176 3315) 2)))
+                (let ((inside (travel (osrs-walk opened 3176 3317) 3)))
+                  (wait-item (osrs-use-location inside 8689 3172 3317) 1927)))))))))
+  (def gather-grain
+    (fn (state)
+      (let ((outside (travel-to state 3163 3289 8)))
+        (let ((opened (travel (osrs-use-location outside 1558 3163 3290) 2)))
+          (let ((inside (travel (osrs-walk opened 3163 3291) 2)))
+            (let ((grain (wait-item (osrs-use-location-option inside 15506 3162 3294 2) 1947)))
+              (let ((gate (travel (osrs-walk grain 3163 3291) 3)))
+                (let ((opened (travel (osrs-use-location gate 1558 3163 3290) 2)))
+                  (travel (osrs-walk opened 3163 3289) 3)))))))))
+  (def gather-flour
+    (fn (state)
+      (let ((grain (gather-grain state)))
+        (let ((road (travel (osrs-walk grain 3166 3291) 3)))
+          (let ((front (travel (osrs-walk road 3166 3301) 4)))
+            (let ((door (travel (osrs-use-location front 1521 3166 3302) 2)))
+              (let ((entrance (travel (osrs-walk door 3166 3304) 3)))
+                (let ((first-floor (travel (osrs-use-location entrance 12964 3164 3307) 4)))
+                  (let ((top (travel (osrs-use-location-option first-floor 12965 3164 3307 2) 2)))
+                    (let ((filled (with-handler (* problem) (signal 'osrs/quest-test "filling the hopper" problem)
+                                    (wait-live (osrs-use-location top 24961 3166 3307)
+                                      (fn (g) (= (inventory g 1947) 0)) 10))))
+                      (let ((milled (travel (osrs-use-location (osrs-wait-ticks filled 2) 24964 3166 3305) 2)))
+                        (let ((middle (travel (osrs-use-location milled 12966 3164 3307) 2)))
+                          (let ((ground (travel (osrs-use-location-option middle 12965 3164 3307 3) 2)))
+                            (wait-item (osrs-use-location ground 1781 3166 3306) 1933))))))))))))))
+  (def return-to-cook
+    (fn (state)
+      (let ((door (travel (osrs-use-location state 1521 3166 3302) 4)))
+        (let ((outside (travel (osrs-walk door 3166 3301) 4)))
+          (let ((road (travel (osrs-walk outside 3172 3290) 5)))
+            (travel-to road 3204 3260 12))))))
+  (def gather-and-finish-cooks-assistant
+    (fn (state) (gather-and-finish-cooks-assistant-using state (fn (_) nil))))
+  (def gather-and-finish-cooks-assistant-using
+    (fn (state observe)
+      (let ((initial (ready state)))
+        (require (= (ingredients initial) '(0 0 0)) "fresh route started with ingredients")
+        (let ((containers (get (cook-containers initial observe) 'state)))
+          (observe "obtained pot and bucket through gameplay")
+          (let ((egg (gather-egg containers)))
+            (observe "picked up an egg")
+            (let ((milk (gather-milk egg)))
+              (observe "filled the bucket with milk")
+              (let ((supplies (gather-flour milk)))
+                (require (= (list (inventory supplies 1925) (inventory supplies 1931) (inventory supplies 1947)) '(0 0 0))
+                  "ingredient production left unused containers or wheat")
+                (observe "milled wheat and collected a pot of flour")
+                (assoc (finish-cooks-assistant-using (return-to-cook supplies) observe) 'source 'gathered))))))))
+
+  (def enter-castle-kitchen
+    (fn (state)
+      (let ((front (travel (osrs-walk state 3221 3218) 5)))
+        (let ((opened (travel (osrs-use-location front 1529 3216 3218) 2)))
+          (let ((hall (travel (osrs-walk opened 3215 3221) 3)))
+            (let ((passage (travel (osrs-use-location hall 12349 3213 3221) 2)))
+              (let ((kitchen-door (travel (osrs-walk passage 3207 3218) 4)))
+                (travel (osrs-use-location kitchen-door 12348 3207 3217) 2))))))))
+
+  (def approach-cook
+    (fn (state tile)
+      (let ((x (car tile)) (z (car (cdr tile))))
+        (let ((arrived (osrs-observe-bounded (osrs-keepalive (osrs-walk state x z))
+                         (fn (g) (if (osrs-route-cleared? g state x z) (cook g) #f)) 40)))
+          (wait-live arrived cook 4)))))
+  (def start-cook-dialogue
+    (fn (state approaches observe)
+      (require approaches "cook did not open a dialogue after three approaches")
+      (let ((nearby (approach-cook state (car approaches))))
+        (observe "talking to the observed cook")
+        (let ((asked (osrs-talk nearby (get (cook nearby) 'index))))
+          (let ((attempt (observe-dialogue asked (fn (g) (page g nearby)) 3)))
+            (if (page attempt nearby)
+              (run-dialogue attempt nearby 0 40 observe)
+              (begin
+                (observe "no fresh cook page with a pause event before the observation limit")
+                (start-cook-dialogue attempt (cdr approaches) observe))))))))
+
+  (def finish-cooks-assistant
+    (fn (state) (finish-cooks-assistant-using state (fn (_) nil))))
+  (def finish-cooks-assistant-using
+    (fn (state observe)
+      (let ((stock (ready state)))
+        (require (= (ingredients stock) '(1 1 1)) "expected exactly one of each quest ingredient")
+        (require (= (xp stock) 0) "expected no starting Cooking XP")
+        (let ((entrance (enter-castle-kitchen stock)))
+          (let ((finished (start-cook-dialogue entrance '((3208 3216) (3207 3215) (3209 3215)) observe)))
+            (require (= (ingredients finished) '(0 0 0)) "the cook did not consume all ingredients")
+            (dict 'test 'cooks-assistant 'passed #t 'choices 2 'quest-points (osrs-varp finished 101)
+              'cooking-xp (xp finished) 'ingredients-after (ingredients finished))))))))

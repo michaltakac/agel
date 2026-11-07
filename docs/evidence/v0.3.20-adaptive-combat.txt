@@ -1,0 +1,43 @@
+Evidence: target/native-network-1794022913298724000
+Providers: real
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-network: observations {smithing-level 1 coins 0}
+native-combat: searching for a rat
+native-combat: attack packet acknowledged by the byte carrier
+native-combat: target {index 20014 type 2854 spawn-dx -4 spawn-dz -5 direction 6 jump #t extended #f movement nil}
+native-opt: observation {bytes 4614 baseline {elapsed-us 52254782 service-us 46293974 work-max-us 149609 gap-max-us 789979 calls 73} bound 320 work-budget-us 3000000 gap-budget-us 6000000 margin 4 record "REBUILD_NORMAL_V2"}
+inference-bridge: started job 232 provider codex at-ms 239846
+inference-bridge: completed job 232 at-ms 246168 status ok
+native-session: serviced inference polls 5
+inference-bridge: started job 243 provider jev at-ms 248568
+inference-bridge: completed job 243 at-ms 260140 status ok
+native-session: serviced inference polls 9
+native-opt: probe {passed #t reason "recorded bytes match; fewer service calls and lower elapsed time" quantum 320 metrics {elapsed-us 15423142 service-us 9483731 work-max-us 736435 gap-max-us 1364257 calls 15} active 1}
+native-opt: candidate {diagnosis "The fixed 64-byte quantum ignores limit and incurred 73 calls for 4614 bytes; rounding limit down to a multiple of 64 selects the largest permitted quantum." after (fn (limit) (* (/ limit 64) 64)) predictions (64 192)}
+native-opt: policy committed after text judgment and measured replay
+native-combat: {test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t}
+native-combat: action-us 273137123
+native-combat: task-us 273137589
+native-combat: history-records 2623
+native-opt: live uses 2
+native-network: keepalives 284
+native-opt: recorded workload verified in append-only log
+native-network: client completed: login, observations and rat combat inside Agel OS
+agel: 1 forms, 49213451 steps, revision 1
+process agel exited with status 0
+Durable guest judge calls: 1 known real cost-nanousd: 32130 unknown receipts: 0
+Codex dollar cost: unknown
+Ledger SHA-256: b6769f7651799c3a4906dabfa187d124110cb5df6a150c3be98d10ba0c8d06a8
+Persisted native client: account=[omitted] character=[omitted] rights= x=3221 z=3216 level=0 xp_rate_in_hundreds=100
+Persisted combat XP: stat=0 base=1 visible=1 fine_xp=80
+stat=3 base=10 visible=10 fine_xp=11566
+PASS: native client combat XP saved with normal rights and 1x XP
+Elapsed seconds: 454.141
+
+byte-bridge: request 1 operation open at-ms 339 duration-ms 1 status ok
+byte-bridge: request 6 operation close at-ms 3711 duration-ms 1 status ok
+byte-bridge: request 9 operation open at-ms 36720 duration-ms 1 status ok
+byte-bridge: request 409 operation close at-ms 444314 duration-ms 1 status ok

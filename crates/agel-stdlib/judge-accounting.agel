@@ -1,0 +1,31 @@
+(module agel/judge-accounting
+  (export judge-attempt-start judge-attempt-result)
+
+  (def judge-attempt-start
+    (fn (id endpoint model attempt request time)
+      (list 'judge-start 'id id 'endpoint endpoint 'model model
+            'attempt attempt 'time-unix-nanos time 'request request)))
+
+  (def judge-attempt-result
+    (fn (id endpoint model attempt status input output response time)
+      (let ((rate
+              (if (= endpoint "https://api.typesafe.ai/v1/systemone")
+                  (= model "jev-latest") #f)))
+        (let ((failed (if (= (type-of status) 'int)
+                         (if (< 399 status) (< status 600) #f) #f)))
+          (let ((known (if rate
+                         (if failed #t
+                             (if (= status 200)
+                                 (if (= (type-of input) 'int)
+                                     (if (< -1 input) (< input 219604096115589800) #f) #f) #f)) #f)))
+            (let ((cost (if known (if failed 0 (* input 42)) nil)))
+              (list 'judge-result 'id id 'endpoint endpoint 'model model
+                    'attempt attempt 'time-unix-nanos time 'status status
+                    'input-tokens input 'output-tokens output
+                    'cost-nanousd cost
+                    'cost-microusd (if known (/ (+ cost 999) 1000) nil)
+                    'cost-status (if known 'published-rate 'unknown)
+                    'price-basis (if known
+                      "https://help.typesafe.ai/articles/5187202169-how-much-does-jev-cost; checked 2026-11-06; USD 0.042/M input; output free"
+                      "no verified rate or usage")
+                    'response response))))))))

@@ -1,0 +1,48 @@
+(module agel/osrs-bank
+  (import agel/osrs-game)
+  (export osrs-bank-layout-241 osrs-bank-open osrs-bank-close osrs-bank-withdraw osrs-bank-deposit)
+  (def osrs-bank-layout-241
+    (dict 'main-interface 12 'main-component 12 'side-interface 15 'side-component 3
+          'bank-inventory 95))
+  (def require
+    (fn (ok message) (if ok #t (signal 'osrs/bank message))))
+  (def osrs-bank-open
+    (fn (state layout booth x z)
+      (let ((interface (get layout 'main-interface)) (inventory (get layout 'bank-inventory)))
+        (let ((opens (osrs-interface-opens state interface))
+              (updates (osrs-inventory-updates state inventory)))
+          (osrs-await (osrs-use-location-option state booth x z 2)
+            (fn (g)
+              (if (osrs-open-interface? g interface)
+                (if (< opens (osrs-interface-opens g interface))
+                  (< updates (osrs-inventory-updates g inventory)) #f)
+                #f)))))))
+  (def osrs-bank-close
+    (fn (state layout)
+      (let ((main (get layout 'main-interface)) (side (get layout 'side-interface)))
+        (let ((closed (fn (g)
+                        (if (osrs-open-interface? g main) #f
+                          (if (osrs-open-interface? g side) #f #t)))))
+          (if (closed state) state
+            (osrs-await (osrs-close-modal state) closed))))))
+  (def transfer
+    (fn (state interface component from to item amount option)
+      (let ((before-from (osrs-inventory-count state from item))
+            (before-to (osrs-inventory-count state to item)))
+        (require (if (= from to) #f (< (- amount 1) before-from)) "insufficient observed stock")
+        (osrs-await (osrs-click-inventory-item state interface component from item option)
+          (fn (g)
+            (= (list (osrs-inventory-count g from item) (osrs-inventory-count g to item))
+               (list (- before-from amount) (+ before-to amount))))))))
+  (def withdraw-option
+    (fn (amount)
+      (if (= amount 1) 2 (if (= amount 5) 3 (if (= amount 10) 4
+        (signal 'osrs/bank "bank amount must be 1, 5 or 10"))))))
+  (def osrs-bank-withdraw
+    (fn (state layout item amount)
+      (transfer state (get layout 'main-interface) (get layout 'main-component)
+        (get layout 'bank-inventory) 93 item amount (withdraw-option amount))))
+  (def osrs-bank-deposit
+    (fn (state layout item amount)
+      (transfer state (get layout 'side-interface) (get layout 'side-component)
+        93 (get layout 'bank-inventory) item amount (+ 1 (withdraw-option amount))))))

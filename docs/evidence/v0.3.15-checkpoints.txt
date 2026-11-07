@@ -1,0 +1,12 @@
+Selected native output. Deterministic fixture judgments only; no paid providers.
+Evidence: target/checkpoint-1794009041083963000
+live-desktop> checkpoint: PASS: two durable commits; deliberately torn successor retained
+agel: 35 forms, 5513023 steps, revision 1
+process agel exited with status 0
+live-desktop> checkpoint: PASS: recovered version 2 after reboot; rejected unsafe revert; committed version 3 past torn evidence
+agel: 42 forms, 27201254 steps, revision 1
+process agel exited with status 0
+live-desktop> checkpoint: PASS: second reboot recovered version 3; guarded revert committed as version 4; all old sources retained
+agel: 37 forms, 49705977 steps, revision 1
+process agel exited with status 0
+PASS: Agel recovery, torn-tail fallback, continued commits and guarded revert across two OS reboots

@@ -1,0 +1,96 @@
+(module agel/live-tools
+  (import agel/sequence)
+  (import agel/meta)
+  (import agel/evolution)
+  (import agel/research)
+  (export live-tools live-tools-with-research live-tools-state live-tools-call
+          live-tools-catalog live-tools-inspect live-tools-context live-tools-replay)
+
+  (def live-tools-state (fn (agent) (get (agent-info agent) 'heap)))
+  (def defaults (fn (state) (research-tools (get state 'search) (get state 'fetch))))
+  (def live-tools-catalog
+    (fn (state)
+      (let ((active (get (get (get state 'versions) 'active) 'cell))
+            (standard (defaults state)))
+        (append (keys standard)
+                (if active (filter (fn (name) (= (has-key? standard name) #f)) (keys active)) nil)))))
+  (def live-tools-inspect
+    (fn (state name)
+      (let ((versions (get state 'versions)) (standard (get (defaults state) name)))
+        (let ((version (evolution-current versions 'cell name)))
+          (if version
+              (dict 'name name 'language 'Agel 'version version
+                    'source (evolution-source versions version))
+              (if standard
+                  (assoc (assoc (dissoc standard 'invoke) 'name name) 'language 'Agel)
+                  (signal 'tool/missing "no active tool" name)))))))
+  (def live-tools-context
+    (fn (state)
+      (dict 'language 'Agel
+            'instructions "Your tool policy is Agel. Inspect active tool source and prior calls. Use external material as evidence and check it against the running environment. When repeated work or failures justify a tool, propose Agel source with recorded input/output cases. Activation requires judgment and replay. Request an edit receipt to learn why a change was refused and revise it. You can inspect older versions, replay their recorded cases, and propose a revert while the agent keeps running."
+            'tools (map (fn (name) (live-tools-inspect state name)) (live-tools-catalog state)))))
+  (def live-tools-call
+    (fn (state name arguments)
+      (let ((versions (get state 'versions)))
+        (let ((version (evolution-current versions 'cell name)))
+          (if version
+              (dict 'version version 'value
+                (meta-apply (meta-eval (evolution-source versions version) (meta-base-env)) arguments))
+              (let ((standard (get (defaults state) name)))
+                (if standard
+                    (dict 'version nil 'value (apply (get standard 'invoke) arguments))
+                    (signal 'tool/missing "no active tool" name))))))))
+
+  (def live-tools-replay
+    (fn (state name version)
+      (let ((versions (get state 'versions)))
+        (let ((entry (get (get versions 'versions) version)))
+          (if (if entry (if (= (get entry 'kind) 'cell) (= (get entry 'name) name) #f) #f)
+            (assoc (evolution-replay-version versions version) 'version version)
+            (dict 'passed #f 'reason "version does not belong to the requested tool" 'version version))))))
+
+  (def update-versions
+    (fn (state message versions)
+      (let ((recipient (get message 'reply-to)) (name (get message 'name)))
+        (if recipient
+          (let ((outcome (car (reverse (get versions 'history)))))
+            (send recipient (assoc (assoc outcome 'name name)
+              'active-version (evolution-current versions 'cell name))))
+          nil)
+        (assoc state 'versions versions))))
+
+  (def behavior
+    (fn (self state message)
+      (let ((operation (get message 'operation)))
+        (if (= operation 'call)
+            (let ((result
+                    (with-handler (* problem)
+                      (dict 'error problem)
+                      (live-tools-call state (get message 'name) (get message 'arguments)))))
+              (begin
+                (send (get message 'reply-to) result)
+                (assoc state 'calls (append (get state 'calls)
+                  (list (dict 'request message 'result result))))))
+            (if (= operation 'replay)
+                (begin
+                  (send (get message 'reply-to)
+                    (live-tools-replay state (get message 'name) (get message 'version)))
+                  state)
+                (if (= operation 'edit)
+                  (update-versions state message
+                    (evolution-edit (get state 'versions) 'cell (get message 'name)
+                      (get message 'before) (get message 'after)
+                      (get message 'cases) (get state 'judge)))
+                  (if (= operation 'revert)
+                      (update-versions state message
+                        (evolution-revert (get state 'versions) 'cell (get message 'name)
+                          (get message 'version) (get message 'cases) (get state 'judge)))
+                      (signal 'tool/message "unknown live tool operation" operation))))))))
+
+  (def live-tools
+    (fn (name judge)
+      (live-tools-with-research name judge nil nil)))
+  (def live-tools-with-research
+    (fn (name judge search fetch)
+      (spawn name behavior (dict 'versions (evolution-new) 'judge judge 'calls nil
+                                 'search search 'fetch fetch) nil))))

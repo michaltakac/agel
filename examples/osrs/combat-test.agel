@@ -1,0 +1,41 @@
+(module agel/osrs-combat-test
+  (import agel/sequence)
+  (import agel/osrs-game)
+  (export test-rat-combat test-rat-combat-using test-rat-combat-bounded nearest-rat rat-combat-complete?)
+  ; Public revision-241 cache mapping: npc.rat=2854.
+  (def rats (fn (state) (filter (fn (npc) (= (get npc 'type) 2854)) (osrs-nearby-npcs state))))
+  (def abs (fn (n) (if (< n 0) (- 0 n) n)))
+  (def distance (fn (npc) (+ (abs (get npc 'spawn-dx)) (abs (get npc 'spawn-dz)))))
+  (def nearest
+    (fn (candidates)
+      (foldl (fn (best npc) (if best (if (< (distance npc) (distance best)) npc best) npc)) nil candidates)))
+  (def nearest-rat (fn (state) (nearest (rats state))))
+  (def rat-combat-complete?
+    (fn (state target attack-before hp-before)
+      (if (< attack-before (get (osrs-stat state 0) 'xp))
+        (if (< hp-before (get (osrs-stat state 3) 'xp))
+          (= (filter (fn (npc) (= (get npc 'index) (get target 'index))) (osrs-nearby-npcs state)) nil)
+          #f) #f)))
+  (def combat
+    (fn (state choose await after-attack)
+      (let ((ready (await state (fn (g) (if (osrs-stat g 0) (if (osrs-stat g 3) #t #f) #f)))))
+        (let ((visible (await ready (fn (g) (if (= (rats g) nil) #f #t)))))
+          (let ((target (choose visible))
+                (attack-before (get (osrs-stat visible 0) 'xp))
+                (hp-before (get (osrs-stat visible 3) 'xp)))
+            (let ((finished
+                    (await (after-attack (osrs-attack visible (get target 'index)) target)
+                      (fn (g) (rat-combat-complete? g target attack-before hp-before)))))
+              (dict 'state finished 'report
+                (dict 'test 'rat-combat 'passed #t 'target-index (get target 'index) 'target-type 2854
+                      'attack-before attack-before 'attack-after (get (osrs-stat finished 0) 'xp)
+                      'hitpoints-before hp-before 'hitpoints-after (get (osrs-stat finished 3) 'xp)
+                      'target-removed #t))))))))
+  (def test-rat-combat-bounded
+    (fn (state await after-attack)
+      (combat state nearest-rat await after-attack)))
+  (def test-rat-combat
+    (fn (state) (test-rat-combat-bounded state osrs-await (fn (attacking _) attacking))))
+  (def test-rat-combat-using
+    (fn (state choose) (combat state choose osrs-await (fn (attacking _) attacking))))
+)

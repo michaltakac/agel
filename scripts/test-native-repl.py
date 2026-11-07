@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import queue
 import subprocess
 import sys
@@ -526,6 +528,7 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
 def kernel_rollback_test(image: str, kernel_path: str) -> None:
     import importlib.util
     import os
+    from pathlib import Path
 
     location = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stage-kernel.py")
     spec = importlib.util.spec_from_file_location("stage_kernel", location)
@@ -574,7 +577,10 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
 
     # The same kernel staged as candidate B with a good signature: the stage
     # does not load it until the running kernel has admitted it.
-    assert stage_kernel.stage(image, good_kernel, good_signature) == 1
+    staged = subprocess.run([sys.executable, location, image, kernel_path, "--signature",
+                             good_signature.hex()], check=True, capture_output=True, text=True)
+    archived = staged.stdout.splitlines()[-1].removeprefix("retained kernel version ")
+    assert stage_kernel.archived_candidate(image, archived) == (good_kernel, good_signature)
     assert selector() == {"trusted": 0, "candidate": 1, "attempts": 0, "verified": 0, "admitted": 0}, selector()
     admission_boot("B", "A", "A")
     assert selector() == {"trusted": 0, "candidate": 1, "attempts": 0, "verified": 0, "admitted": 1}, selector()
@@ -599,7 +605,9 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
             "kernel: running slot B; trusted slot A; candidate slot B (verified, boots 0)",
             1,
         )
-        second.send(":kernel-promote", "selected kernel slot B; slot A retained for rollback", 1)
+        second.send(":kernel-promote",
+                    "candidate passed isolated Agel kernel replay\r\n"
+                    "selected kernel slot B; slot A retained for rollback", 1)
         second.send(":kernel-status", "kernel: running slot B; trusted slot B; no candidate", 1)
         shutdown(second)
     finally:
@@ -615,6 +623,64 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
         shutdown(third)
     finally:
         third.close()
+
+    # A signed, interactive candidate cannot substitute its own trial.
+    trial = (Path(__file__).resolve().parent.parent / "boot/kernel/agel/kernel-trial.agel").read_bytes()
+    assert good_kernel.count(trial) == 1
+    wrong_trial = trial.replace(b"21) 42 0)", b"21) 41 0)")
+    assert wrong_trial != trial and len(wrong_trial) == len(trial)
+    wrong_kernel = good_kernel.replace(trial, wrong_trial)
+    assert stage_kernel.stage(image, wrong_kernel, stage_kernel.sign(wrong_kernel)) == 0
+    admission_boot("A", "B", "B")
+    assert stage_kernel.read_selector(image)["trial_digest"] == hashlib.sha512(trial).digest()
+    wrong = Harness(image, persistent=True)
+    try:
+        wrong.expect_until(b"kernel: running slot A; trusted slot B; candidate slot A (unverified, boots 1)")
+        wrong.expect_until(b"agel-native[0]> ")
+        send_kernel_healthy(wrong, "(+ 1 1)", "2", "A", 1)
+        wrong.send(":kernel-promote", "denied: Agel kernel replay differs from the admitted trial", 1)
+        shutdown(wrong)
+    finally:
+        wrong.close()
+    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0, "admitted": 1}, selector()
+    replay_rollback = Harness(image, persistent=True)
+    try:
+        replay_rollback.expect_until(b"kernel: running slot B; trusted slot B; candidate slot A (unverified, boots 3)")
+        replay_rollback.expect_until(b"agel-native[0]> ")
+        shutdown(replay_rollback)
+    finally:
+        replay_rollback.close()
+    print("PASS: trusted kernel pinned the trial and refused a candidate with a changed corpus")
+
+    assert stage_kernel.stage(image, good_kernel, good_signature) == 0
+    admission_boot("A", "B", "B")
+    modified = Harness(image, persistent=True)
+    try:
+        modified.expect_until(b"kernel: running slot A; trusted slot B; candidate slot A (unverified, boots 1)")
+        modified.expect_until(b"agel-native[0]> ")
+        send_kernel_healthy(modified, "(+ 1 1)", "2", "A", 1)
+        with open(image, "r+b") as disk:
+            offset = stage_kernel.SLOT_BASE[0] * stage_kernel.SECTOR
+            disk.seek(offset)
+            original = disk.read(1)
+            assert original == good_kernel[:1]
+            disk.seek(offset)
+            disk.write(bytes([original[0] ^ 1]))
+            disk.flush()
+            os.fsync(disk.fileno())
+        modified.send(":kernel-promote", "denied: candidate signature could not be reverified before promotion", 1)
+        shutdown(modified)
+    finally:
+        modified.close()
+    assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0, "admitted": 1}, selector()
+    disk_rollback = Harness(image, persistent=True)
+    try:
+        disk_rollback.expect_until(b"kernel: running slot B; trusted slot B; candidate slot A (unverified, boots 3)")
+        disk_rollback.expect_until(b"agel-native[0]> ")
+        shutdown(disk_rollback)
+    finally:
+        disk_rollback.close()
+    print("PASS: promotion reverified the signed slot and refused bytes changed after boot")
 
     # A candidate without a valid signature is refused by the running kernel
     # and cleared, so the stage never loads it.
@@ -685,9 +751,15 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
         rolled.close()
     assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0, "admitted": 1}, selector()
 
-    # A fresh signed candidate in slot A is admitted, gets a fresh budget and
-    # verifies itself.
-    assert stage_kernel.stage(image, good_kernel, good_signature) == 0
+    # A corrupted archive must leave the slot selector untouched.
+    previous = selector()
+    corrupt = "0" * 128
+    (Path(image + ".kernel-history") / corrupt).write_bytes(good_signature + broken_kernel)
+    bad_restore = subprocess.run([sys.executable, location, image, "--restore", corrupt],
+                                 capture_output=True, text=True)
+    assert bad_restore.returncode and selector() == previous
+    # Restage the exact archived kernel and signature after its slot was reused.
+    subprocess.run([sys.executable, location, image, "--restore", archived], check=True)
     admission_boot("A", "B", "B")
     revived = Harness(image, persistent=True)
     try:
@@ -701,6 +773,7 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     finally:
         revived.close()
     assert selector() == {"trusted": 1, "candidate": 0, "attempts": 0, "verified": 1, "admitted": 1}, selector()
+    print("PASS: archived kernel and signature restored through normal slot admission")
 
 
 def power_cut_test(image: str, architecture: str, disk: str) -> None:

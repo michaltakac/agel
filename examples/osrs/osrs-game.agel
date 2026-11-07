@@ -1,0 +1,553 @@
+(module agel/osrs-game
+  (import agel/bytes)
+  (import agel/sequence)
+  (import agel/osrs-crypto)
+  (import agel/osrs-wire)
+  (import agel/osrs-packets)
+  (import agel/osrs-npcs)
+  (export osrs-observe-bounded osrs-observe-ready osrs-pause-events osrs-map-route osrs-route-cleared?)
+  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-inventory-updates osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-close-modal osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-varp-updates osrs-take-ground-item osrs-ground-count)
+  (def rem (fn (n d) (- n (* d (/ n d)))))
+  (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
+  (def drop (fn (xs n) (if (= n 0) xs (drop (cdr xs) (- n 1)))))
+  (def nth (fn (xs n) (if (= n 0) (car xs) (nth (cdr xs) (- n 1)))))
+  (def map-or-empty (fn (v) (if v v (dict))))
+  (def osrs-game-state
+    (fn (seed) (dict 'out (isaac-bytes-new seed 512)
+                     'in (isaac-bytes-new (map (fn (n) (rem (+ n 50) 4294967296)) seed) 512)
+                     'stats (dict) 'interfaces (dict) 'inventories (dict) 'active-world 0 'npc-worlds (dict) 'history nil)))
+  (def full-items
+    (fn (bytes capacity slot out)
+      (if (= slot capacity) out
+          (let ((id (- (osrs-uint (reverse (take bytes 2 nil))) 1))
+                (amount (rem (+ 256 (- 128 (nth bytes 2))) 256)))
+            (let ((quantity (if (= amount 255)
+                              (osrs-uint (list (nth bytes 5) (nth bytes 6) (nth bytes 3) (nth bytes 4))) amount)))
+              (full-items (drop bytes (if (= amount 255) 7 3)) capacity (+ slot 1)
+                (assoc out slot (dict 'item id 'count quantity))))))))
+  (def partial-items
+    (fn (bytes out)
+      (if (= bytes nil) out
+          (let ((wide (< 127 (car bytes))))
+            (let ((slot (if wide (- (osrs-uint (take bytes 2 nil)) 32768) (car bytes)))
+                  (tail (drop bytes (if wide 2 1))))
+              (let ((id (- (osrs-uint (take tail 2 nil)) 1)))
+                (if (= id -1)
+                    (partial-items (drop tail 2) (assoc out slot (dict 'item -1 'count 0)))
+                    (let ((amount (nth tail 2)))
+                      (let ((quantity (if (= amount 255) (osrs-uint (take (drop tail 3) 4 nil)) amount)))
+                        (partial-items (drop tail (if (= amount 255) 7 3))
+                          (assoc out slot (dict 'item id 'count quantity))))))))))))
+  (def read-interface-id
+    (fn (bytes)
+      (+ (* (nth bytes 0) 256) (rem (+ (nth bytes 1) 128) 256))))
+  (def read-subinterfaces
+    (fn (bytes n out)
+      (if (= n 0) out
+        (read-subinterfaces (drop bytes 7) (- n 1)
+          (assoc out (osrs-uint (take bytes 4 nil)) (osrs-uint (take (drop bytes 4) 2 nil)))))))
+  (def resync-interfaces
+    (fn (state bytes)
+      (if (< (count bytes) 4)
+        (signal 'osrs/interface "truncated interface resync header")
+        (let ((n (osrs-uint (take (drop bytes 2) 2 nil))))
+          (if (< (count bytes) (+ 4 (* 7 n)))
+            (signal 'osrs/interface "truncated interface resync")
+            (assoc (assoc state 'top-interface (osrs-uint (take bytes 2 nil))) 'interfaces
+              (read-subinterfaces (drop bytes 4) n (dict))))))))
+  (def osrs-interface-opens
+    (fn (state interface)
+      (let ((n (get (map-or-empty (get state 'interface-opens)) interface)))
+        (if n n 0))))
+  (def remember-interface-open
+    (fn (state parent id)
+      (assoc (assoc state 'interfaces (assoc (map-or-empty (get state 'interfaces)) parent id))
+        'interface-opens (assoc (map-or-empty (get state 'interface-opens)) id
+          (+ 1 (osrs-interface-opens state id))))))
+  (def osrs-pause-events
+    (fn (state interface component)
+      (let ((count (get (map-or-empty (get state 'pause-events)) (+ (* interface 65536) component))))
+        (if count count 0))))
+  (def remember-pause-event
+    (fn (state bytes)
+      ; The low mask byte is second on the wire. Bit zero enables pause input.
+      (if (= (rem (nth bytes 1) 2) 1)
+        (let ((key (osrs-uint (take (drop bytes 8) 4 nil))))
+          (assoc state 'pause-events
+            (assoc (map-or-empty (get state 'pause-events)) key
+              (+ 1 (osrs-pause-events state (/ key 65536) (rem key 65536))))))
+        state)))
+  (def observe-interface
+    (fn (state name bytes)
+      (if (= name "IF_OPENSUB")
+        (let ((parent (osrs-uint (list (nth bytes 1) (nth bytes 0) (nth bytes 3) (nth bytes 2)))))
+          (remember-interface-open state parent (read-interface-id (drop bytes 4))))
+        (if (= name "IF_CLOSESUB")
+          (assoc state 'interfaces (dissoc (map-or-empty (get state 'interfaces)) (osrs-uint bytes)))
+          (if (= name "IF_MOVESUB")
+            (let ((source (osrs-uint (reverse (take bytes 4 nil))))
+                  (destination (osrs-uint (reverse (drop bytes 4))))
+                  (interfaces (map-or-empty (get state 'interfaces))))
+              (if (= source destination) state
+                (let ((remaining (dissoc interfaces source)))
+                  (assoc state 'interfaces (if (has-key? interfaces source)
+                    (assoc remaining destination (get interfaces source))
+                    (dissoc remaining destination))))))
+            (if (= name "IF_OPENTOP")
+              (assoc (assoc state 'top-interface (read-interface-id bytes)) 'interfaces (dict))
+              (if (= name "IF_RESYNC_V2")
+                (resync-interfaces state bytes)
+                (if (= name "IF_SETEVENTS_V2") (remember-pause-event state bytes) state))))))))
+  (def osrs-open-interface?
+    (fn (state interface)
+      (if (if (has-key? state 'top-interface) (= (get state 'top-interface) interface) #f) #t
+        (let ((interfaces (map-or-empty (get state 'interfaces))))
+          (foldl (fn (found parent) (if found #t (= (get interfaces parent) interface)))
+            #f (keys interfaces))))))
+  (def signed (fn (n limit) (if (< n (/ limit 2)) n (- n limit))))
+  (def osrs-varp
+    (fn (state id) (get (map-or-empty (get state 'varps)) id)))
+  (def osrs-varp-updates
+    (fn (state id)
+      (let ((count (get (map-or-empty (get state 'varp-updates)) id)))
+        (if count count 0))))
+  (def remember-varp
+    (fn (state id value)
+      (assoc (assoc state 'varps (assoc (map-or-empty (get state 'varps)) id value))
+        'varp-updates (assoc (map-or-empty (get state 'varp-updates)) id (+ 1 (osrs-varp-updates state id))))))
+  (def varp-word
+    (fn (bytes at)
+      (osrs-uint (list (nth bytes (+ at 1)) (nth bytes at)
+                       (nth bytes (+ at 3)) (nth bytes (+ at 2))))))
+  (def observe-varp
+    (fn (state name bytes)
+      (if (= name "VARP_SMALL")
+        (remember-varp state (+ (nth bytes 1) (* 256 (nth bytes 2)))
+          (signed (rem (- 384 (nth bytes 0)) 256) 256))
+        (if (= name "VARP_LARGE")
+          (remember-varp state (+ (rem (+ (nth bytes 0) 128) 256) (* 256 (nth bytes 1)))
+            (signed (varp-word bytes 2) 4294967296))
+          (if (= name "VARP_LONG")
+            (remember-varp state (osrs-uint (drop bytes 8))
+              (+ (* (signed (varp-word bytes 0) 4294967296) 4294967296) (varp-word bytes 4)))
+            (if (= name "VARP_RESET")
+              (assoc state 'varps (dict))
+              (observe-interface state name bytes)))))))
+  (def ground-zone-sizes '(6 24 11 2 4 7 4 17 7 14 18 0 14 37 7))
+  (def alt1 (fn (byte) (rem (+ byte 128) 256)))
+  (def alt2 (fn (byte) (rem (- 256 byte) 256)))
+  (def alt3 (fn (byte) (rem (- 384 byte) 256)))
+  (def skip-string
+    (fn (bytes)
+      (if bytes (if (= (car bytes) 0) (cdr bytes) (skip-string (cdr bytes)))
+        (signal 'osrs/zone "unterminated location option"))))
+  (def skip-location-options
+    (fn (bytes remaining)
+      (if (= remaining 0) (drop bytes 2)
+        (skip-location-options (skip-string (cdr bytes)) (- remaining 1)))))
+  (def ground-key
+    (fn (item coordinate) (+ (* coordinate 65536) item)))
+  (def ground-change
+    (fn (items item tile delta)
+      (let ((key (ground-key item tile)))
+        (let ((before (get items key)))
+          (let ((after (+ (if before before 0) delta)))
+            (if (< 0 after) (assoc items key after) (dissoc items key)))))))
+  (def ground-zone
+    (fn (items bytes)
+      (if bytes
+        (let ((op (car bytes)) (body (cdr bytes)))
+          (if (= op 11)
+            (ground-zone items (skip-location-options (drop body 4) (alt2 (nth body 3))))
+            (if (< op 15)
+              (let ((next (drop body (nth ground-zone-sizes op))))
+                (ground-zone
+                  (if (= op 9)
+                    (ground-change items (osrs-uint (reverse (take (drop body 2) 2 nil)))
+                      (alt3 (nth body 1)) (osrs-uint (take (drop body 7) 4 nil)))
+                    (if (= op 5)
+                      (ground-change items (osrs-uint (reverse (take body 2 nil)))
+                        (alt2 (nth body 2)) (- 0 (osrs-uint (take (drop body 3) 4 nil))))
+                      (if (= op 2)
+                        (ground-change items (+ (* (nth body 2) 256) (alt1 (nth body 1)))
+                          (alt1 (nth body 0)) (- (osrs-uint (list (nth body 4) (nth body 3)
+                            (nth body 6) (nth body 5))) (osrs-uint (drop (take body 11 nil) 7))))
+                        items)))
+                  next))
+              (signal 'osrs/zone "unknown enclosed zone operation" op))))
+        items)))
+  (def zone-key (fn (x z level) (+ (* level 268435456) (* x 16384) z)))
+  (def osrs-ground-count
+    (fn (state item x z level)
+      (let ((zone (zone-key (- x (rem x 8)) (- z (rem z 8)) level)))
+        (let ((items (get (map-or-empty (get state 'ground-zones)) zone)))
+          (if items
+            (let ((value (get items (ground-key item (+ (* 16 (rem x 8)) (rem z 8))))))
+              (if value value 0))
+            nil)))))
+  (def rebase-ground
+    (fn (state retained)
+      (let ((hex (get (get retained 'bytes) 'data)))
+        (let ((header (bytes-from-hex (text-slice hex (- (text-bytes hex) 12) (text-bytes hex)))))
+          (let ((x (* 8 (- (osrs-uint (reverse (take (drop header 2) 2 nil))) 6)))
+                (z (* 8 (- (osrs-uint (take header 2 nil)) 6)))
+                (zones (map-or-empty (get state 'ground-zones))))
+            (assoc (assoc state 'ground-base (list x z)) 'ground-zones
+              (foldl (fn (kept zone)
+                (let ((zx (rem (/ zone 16384) 16384)) (zz (rem zone 16384)))
+                  (if (if (< (- x 1) zx) (if (< zx (+ x 104))
+                        (if (< (- z 1) zz) (< zz (+ z 104)) #f) #f) #f)
+                    (assoc kept zone (get zones zone)) kept)))
+                (dict) (keys zones))))))))
+  (def observe-ground
+    (fn (state name bytes retained)
+      (if (= name "REBUILD_NORMAL_V2") (rebase-ground state retained)
+        (if (= name "REBUILD_REGION_V2") (dissoc (dissoc state 'ground-base) 'ground-zones)
+          (let ((base (get state 'ground-base)))
+            (if (if base (if (= name "UPDATE_ZONE_FULL_FOLLOWS") #t (= name "UPDATE_ZONE_PARTIAL_ENCLOSED")) #f)
+              (let ((reset (= name "UPDATE_ZONE_FULL_FOLLOWS"))
+                    (zones (map-or-empty (get state 'ground-zones))))
+                (let ((zone (zone-key (+ (car base) (nth bytes (if reset 2 1)))
+                              (+ (car (cdr base)) (car bytes))
+                              (if reset (nth bytes 1) (alt3 (nth bytes 2))))))
+                  (assoc state 'ground-zones
+                    (assoc zones zone (if reset (dict)
+                      (ground-zone (map-or-empty (get zones zone)) (drop bytes 3)))))))
+              state))))))
+  (def osrs-map-route (fn (state) (get state 'map-route)))
+  (def osrs-route-cleared?
+    (fn (state previous x z)
+      (let ((route (osrs-map-route state)) (prior (osrs-map-route previous)))
+        (if (if route (get route 'cleared) #f)
+          (if (< (if prior (get prior 'sequence) 0) (get route 'sequence))
+            (= (list x z) (list (get route 'x) (get route 'z))) #f)
+          #f))))
+  (def observe-map-route
+    (fn (state bytes)
+      (let ((packed (osrs-uint bytes)) (prior (osrs-map-route state)))
+        (if (= packed 4294967295)
+          (if prior (assoc state 'map-route (assoc prior 'cleared #t)) state)
+          (assoc state 'map-route
+            (dict 'sequence (if prior (+ 1 (get prior 'sequence)) 1)
+                  'x (rem (/ packed 16384) 16384) 'z (rem packed 16384) 'cleared #f))))))
+  (def osrs-inventory-updates
+    (fn (state id)
+      (let ((updates (get (map-or-empty (get state 'inventory-updates)) id)))
+        (if updates updates 0))))
+  (def remember-inventory
+    (fn (state id items)
+      (assoc (assoc state 'inventories (assoc (get state 'inventories) id items))
+        'inventory-updates
+        (assoc (map-or-empty (get state 'inventory-updates)) id (+ 1 (osrs-inventory-updates state id))))))
+  (def observe
+    (fn (state packet retained)
+      (let ((name (get packet 'name)) (bytes (get packet 'bytes)))
+        (if (= name "UPDATE_STAT_V2")
+            (assoc state 'stats (assoc (get state 'stats) (rem (- 256 (nth bytes 5)) 256)
+              (dict 'xp (osrs-uint (reverse (take bytes 4 nil)))
+                    'level (rem (- 256 (nth bytes 6)) 256)
+                    'boost (rem (+ 256 (- (nth bytes 4) 128)) 256))))
+            (if (= name "UPDATE_INV_FULL")
+                (let ((inv (osrs-uint (take (drop bytes 4) 2 nil)))
+                      (capacity (osrs-uint (take (drop bytes 6) 2 nil))))
+                  (if (< capacity 4097)
+                      (remember-inventory state inv (full-items (drop bytes 8) capacity 0 (dict)))
+                      (signal 'osrs/inventory "inventory capacity exceeds bound")))
+                (if (= name "UPDATE_INV_PARTIAL")
+                    (let ((inv (osrs-uint (take (drop bytes 4) 2 nil))))
+                      (remember-inventory state inv
+                        (partial-items (drop bytes 6) (map-or-empty (get (get state 'inventories) inv)))))
+                    (if (= name "SET_ACTIVE_WORLD_V2")
+                        (assoc state 'active-world (osrs-uint (take bytes 2 nil)))
+                        (if (if (= name "NPC_INFO_SMALL_V6") #t (= name "NPC_INFO_LARGE_V6"))
+                            (let ((world (get state 'active-world)))
+                              (assoc state 'npc-worlds (assoc (get state 'npc-worlds) world
+                                (npcs-decode (if (get (get state 'npc-worlds) world)
+                                                (get (get state 'npc-worlds) world) (npcs-new))
+                                             bytes (= name "NPC_INFO_LARGE_V6")))))
+                            (if (= name "SET_MAP_FLAG_V2")
+                              (observe-map-route state bytes)
+                              (observe-varp (observe-ground state name bytes retained) name bytes))))))))))
+  (def osrs-nearby-npcs
+    (fn (state)
+      (let ((world (get (get state 'npc-worlds) 0)))
+        (if world
+            (if (= (get world 'npcs) (dict)) nil
+                (map (fn (index) (get (get world 'npcs) index)) (keys (get world 'npcs)))) nil))))
+  (def osrs-stat (fn (state stat) (get (get state 'stats) stat)))
+  (def osrs-inventory-count
+    (fn (state inventory item)
+      (let ((slots (map-or-empty (get (get state 'inventories) inventory))))
+        (if (= slots (dict)) 0
+            (foldl (fn (n slot) (+ n (if (= (get (get slots slot) 'item) item) (get (get slots slot) 'count) 0)))
+                   0 (keys slots))))))
+  (def decipher
+    (fn (byte cipher)
+      (let ((next (isaac-next cipher)))
+        (dict 'byte (rem (+ 256 (- byte (rem (get next 'value) 256))) 256) 'cipher (get next 'state)))))
+  (def encrypted-body
+    (fn (bytes cipher out)
+      (if (= bytes nil) (dict 'bytes (reverse out) 'cipher cipher)
+          (let ((next (decipher (car bytes) cipher)))
+            (encrypted-body (cdr bytes) (get next 'cipher) (cons (get next 'byte) out))))))
+  (def retain-packet
+    (fn (state packet)
+      (let ((maintenance (get state 'maintenance)))
+        (if (if maintenance (get maintenance 'pulse) nil)
+          (if (get maintenance 'quantum)
+            (bytes-pack-field-quantum packet 'bytes (get maintenance 'pulse)
+              ((get maintenance 'quantum) (count (get packet 'bytes))))
+            (bytes-pack-field-serviced packet 'bytes (get maintenance 'pulse)))
+          (bytes-pack-field packet 'bytes)))))
+  (def remember
+    (fn (state event)
+      (let ((push (get state 'history-push)) (history (get state 'history)))
+        (assoc state 'history (if push (push history event) (cons event history))))))
+  (def read-payload
+    (fn (state opcode cipher)
+      (let ((spec (osrs-server-packet opcode)))
+        (if spec
+            (let ((size (get spec 'size)))
+              (let ((length (if (= size -1) (car (osrs-read-exact 1))
+                               (if (= size -2) (osrs-uint (osrs-read-exact 2)) size))))
+                (let ((maintenance (get state 'maintenance)))
+                  (let ((raw (osrs-read-exact-serviced length (if maintenance (get maintenance 'pulse) nil))))
+                    (let ((body (if (get spec 'encrypted) (encrypted-body raw cipher nil)
+                                    (dict 'bytes raw 'cipher cipher))))
+                      (let ((packet (dict 'opcode opcode 'name (get spec 'name) 'bytes (get body 'bytes))))
+                        (let ((retained (retain-packet state packet))
+                              (decoded (assoc state 'in (get body 'cipher))))
+                          (dict 'state (remember (if (= (get spec 'name) "PLAYER_INFO") decoded
+                                                   (observe decoded packet retained)) retained)
+                            'packet packet))))))))
+            (signal 'osrs/opcode "unknown revision-241 server packet" opcode)))))
+  (def osrs-next-packet
+    (fn (state)
+      (let ((first (decipher (car (osrs-read-exact 1)) (get state 'in))))
+        (if (< (get first 'byte) 128)
+            (read-payload state (get first 'byte) (get first 'cipher))
+            (let ((second (decipher (car (osrs-read-exact 1)) (get first 'cipher))))
+              (read-payload state (+ (* (- (get first 'byte) 128) 256) (get second 'byte)) (get second 'cipher)))))))
+  (def wait-ticks
+    (fn (state ticks remaining)
+      (if (= ticks 0) state
+          (if (= remaining 0) (signal 'osrs/wait "player-info packet bound exceeded")
+              (let ((next (osrs-next-packet state)))
+                (wait-ticks (get next 'state)
+                  (- ticks (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0)) (- remaining 1)))))))
+  (def keepalive-service
+    (fn (progress)
+      (let ((next (isaac-next (get progress 'cipher))))
+        (dict 'state (assoc (assoc progress 'cipher (get next 'state)) 'used (+ 1 (get progress 'used)))
+              'bytes (list (rem (+ 75 (get next 'value)) 256))))))
+  (def keepalive-due?
+    (fn (now last interval)
+      (if last (if (< (- now last) interval) #f #t) #t)))
+  (def paced-keepalive
+    (fn (clock interval)
+      (fn (progress)
+        (let ((now (clock)))
+          (if (keepalive-due? now (get progress 'last-write) interval)
+              (keepalive-service (assoc progress 'last-write now))
+              (dict 'state progress 'bytes nil))))))
+  (def osrs-service-start
+    (fn (state)
+      (let ((maintenance (get state 'maintenance)))
+        (if maintenance
+          (let ((clock (get maintenance 'clock-us)))
+            ((get maintenance 'start)
+              (if clock (paced-keepalive clock (get maintenance 'keepalive-interval-us)) keepalive-service)
+              (dict 'cipher (get state 'out) 'used 0 'last-write (get state 'last-keepalive-us))))
+          (signal 'osrs/wait "no maintenance service configured")))))
+  (def osrs-service-stop
+    (fn (state)
+      (let ((progress ((get (get state 'maintenance) 'stop))))
+        (let ((updated (assoc (assoc state 'out (get progress 'cipher)) 'keepalives
+                         (+ (if (get state 'keepalives) (get state 'keepalives) 0) (get progress 'used)))))
+          (if (get progress 'last-write)
+              (assoc updated 'last-keepalive-us (get progress 'last-write))
+              updated)))))
+  (def maintained-read
+    (fn (state action)
+      (if (get state 'maintenance)
+        (begin
+          (osrs-service-start state)
+          (with-handler (* problem)
+            (begin (with-handler (* ignored) nil ((get (get state 'maintenance) 'stop)))
+              (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+            (osrs-service-stop (action state))))
+        (action state))))
+  (def osrs-wait-ticks
+    (fn (state ticks)
+      (if (if (= (type-of ticks) 'int) (if (< -1 ticks) (< ticks 33) #f) #f)
+          (maintained-read state (fn (current) (wait-ticks current ticks 4096)))
+          (signal 'osrs/wait "tick count must be between zero and 32"))))
+  (def await-loop
+    (fn (state ready ticks remaining on-timeout)
+      (if (ready state) state
+          (if (= ticks 0) (on-timeout state)
+              (if (= remaining 0)
+                  (signal 'osrs/wait "observation did not arrive within the bound")
+                  (let ((next (osrs-next-packet state)))
+                    (await-loop (get next 'state) ready
+                      (- ticks (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0))
+                      (- remaining 1) on-timeout)))))))
+  (def observe-bounded
+    (fn (state ready ticks on-timeout)
+      (if (if (= (type-of ticks) 'int) (if (< 0 ticks) (< ticks 513) #f) #f)
+          (maintained-read state (fn (current) (await-loop current ready ticks 4096 on-timeout)))
+          (signal 'osrs/wait "observation tick bound must be between one and 512"))))
+  (def osrs-observe-bounded
+    (fn (state ready ticks) (observe-bounded state ready ticks (fn (last) last))))
+  (def observe-ready-loop
+    (fn (state ready available remaining)
+      (if (if (ready state) #f (if (< 0 remaining) (available) #f))
+        (observe-ready-loop (get (osrs-next-packet state) 'state) ready available (- remaining 1))
+        state)))
+  (def osrs-observe-ready
+    (fn (state ready limit)
+      (if (if (= (type-of limit) 'int) (if (< 0 limit) (< limit 513) #f) #f)
+        (let ((maintenance (get state 'maintenance)))
+          (let ((available (if maintenance (get maintenance 'read-ready) nil)))
+            (if available
+              (maintained-read state (fn (current) (observe-ready-loop current ready available limit)))
+              state)))
+        (signal 'osrs/wait "ready packet bound must be between one and 512"))))
+  (def osrs-await-bounded
+    (fn (state ready ticks)
+      (observe-bounded state ready ticks
+        (fn (_) (signal 'osrs/wait "observation did not arrive within the bound")))))
+  (def osrs-await (fn (state ready) (osrs-await-bounded state ready 32)))
+  (def send
+    (fn (state opcode payload variable event)
+      (let ((next (isaac-next (get state 'out))))
+        (let ((encoded (rem (+ opcode (get next 'value)) 256)))
+          (wire-write (cons encoded (if variable (cons (count payload) payload) payload)))
+          (remember (assoc state 'out (get next 'state)) event)))))
+  (def u16-alt2 (fn (n) (list (/ n 256) (rem (+ (rem n 256) 128) 256))))
+  (def coordinate? (fn (n) (if (= (type-of n) 'int) (if (< -1 n) (< n 16384) #f) #f)))
+  (def osrs-walk
+    (fn (state x z)
+      (if (if (coordinate? x) (coordinate? z) #f)
+          (send state 55 (cons 128 (append (u16-alt2 z) (u16-alt2 x))) #t (dict 'action 'walk 'x x 'z z))
+          (signal 'osrs/coordinate "coordinates must fit fourteen bits"))))
+  (def u16 (fn (n) (list (/ n 256) (rem n 256))))
+  (def ushort? (fn (n) (if (= (type-of n) 'int) (if (< -1 n) (< n 65536) #f) #f)))
+  (def osrs-use-location-option
+    (fn (state id x z option)
+      (if (if (ushort? id) (if (coordinate? x) (coordinate? z) #f) #f)
+        (let ((event (dict 'action 'use-location 'id id 'x x 'z z)))
+          (if (= option 1)
+            (send state 72 (append (reverse (u16 z))
+              (append (reverse (u16-alt2 id)) (cons 0 (append (u16 x) '(0))))) #f event)
+            (if (= option 2)
+              (send state 4 (cons 128 (append (u16 z) (append (u16-alt2 id) (cons 0 (u16 x))))) #f
+                (assoc event 'option 2))
+              (if (= option 3)
+                (send state 100 (append (reverse (u16 z)) (append (reverse (u16 x))
+                  (cons 0 (append (reverse (u16-alt2 id)) '(128))))) #f (assoc event 'option 3))
+                (signal 'osrs/location "location option must be 1, 2 or 3")))))
+        (signal 'osrs/location "invalid location id or coordinates"))))
+  (def osrs-use-location
+    (fn (state id x z) (osrs-use-location-option state id x z 1)))
+  (def osrs-take-ground-item
+    (fn (state item x z)
+      (if (if (ushort? item) (if (< item 65535) (if (coordinate? x) (coordinate? z) #f) #f) #f)
+        (send state 65 (cons 0 (append (u16 x) (append (u16 item)
+          (append (reverse (u16 z)) '(128))))) #f
+          (dict 'action 'take-ground-item 'item item 'x x 'z z))
+        (signal 'osrs/item "invalid ground item or coordinates"))))
+  (def osrs-click-interface
+    (fn (state interface component)
+      (if (if (ushort? interface) (if (ushort? component) (osrs-open-interface? state interface) #f) #f)
+        (send state 78 (append (u16 interface) (u16 component)) #f
+          (dict 'action 'click-interface 'interface interface 'component component))
+        (signal 'osrs/interface "interface is not observed open or component is invalid"))))
+  (def osrs-close-modal
+    (fn (state)
+      (send state 41 nil #f (dict 'action 'close-modal))))
+  (def inventory-slot
+    (fn (state inventory item)
+      (let ((slots (map-or-empty (get (get state 'inventories) inventory))))
+        (foldl (fn (found slot)
+          (if found found
+            (let ((entry (get slots slot)))
+              (if (if (= (get entry 'item) item) (< 0 (get entry 'count)) #f) slot nil))))
+          nil (keys slots)))))
+  (def osrs-click-inventory-item-offset
+    (fn (state interface component inventory item option offset)
+      (if (ushort? offset) #t (signal 'osrs/interface "invalid inventory slot offset"))
+      (if (if (ushort? interface) (if (ushort? component) (osrs-open-interface? state interface) #f) #f)
+        (if (if (ushort? item) (if (< item 65535) (if (ushort? option) (if (< 0 option) (< option 11) #f) #f) #f) #f)
+          (let ((slot (inventory-slot state inventory item)))
+            (if (if (ushort? slot) (< (+ slot offset) 65535) #f)
+              (send state 38
+                (append (u16 interface) (append (u16 component)
+                  (append (u16 (+ slot offset)) (append (u16 item) (list option))))) #f
+                (dict 'action 'click-inventory-item 'interface interface 'component component
+                  'inventory inventory 'slot (+ slot offset) 'item item 'option option))
+              (signal 'osrs/interface "item is not in the observed inventory")))
+          (signal 'osrs/interface "invalid inventory item or interface option"))
+        (signal 'osrs/interface "interface is not observed open or component is invalid"))))
+  (def osrs-click-inventory-item
+    (fn (state interface component inventory item option)
+      (osrs-click-inventory-item-offset state interface component inventory item option 0)))
+  (def osrs-resume-dialogue
+    (fn (state interface component slot)
+      (if (if (ushort? interface) (if (ushort? component)
+            (if (if (= slot -1) #t (if (ushort? slot) (< slot 65535) #f))
+              (osrs-open-interface? state interface) #f) #f) #f)
+        (send state 16
+          (append (reverse (u16 (if (= slot -1) 65535 slot)))
+            (append (reverse (u16 component)) (reverse (u16 interface)))) #f
+          (dict 'action 'resume-dialogue 'interface interface 'component component 'slot slot))
+        (signal 'osrs/interface "dialogue is not observed open or its input is invalid"))))
+  (def text-loop
+    (fn (text at out)
+      (if (= at (text-bytes text)) (reverse (cons 0 (cons 0 out)))
+          (let ((byte (text-byte text at)))
+            (if (if (< 31 byte) (< byte 127) #f)
+                (text-loop text (+ at 1) (cons byte out))
+                (signal 'osrs/command "printable ASCII command required"))))))
+  (def osrs-command
+    (fn (state text)
+      (if (if (< 0 (text-bytes text)) (< (text-bytes text) 201) #f)
+          (send state 84 (text-loop text 0 nil) #t (dict 'action 'command 'text text))
+          (signal 'osrs/command "command length exceeds bound"))))
+  (def observed-npc
+    (fn (state index)
+      (let ((world (get (get state 'npc-worlds) 0)))
+        (if world (get (get world 'npcs) index) nil))))
+  (def osrs-talk
+    (fn (state index)
+      (let ((npc (observed-npc state index)))
+        (if npc
+          (send state 92 (cons 128 (append (reverse (u16-alt2 index)) '(0))) #f
+            (dict 'action 'talk 'index index 'type (get npc 'type)))
+          (signal 'osrs/npc "talk target is not currently observed")))))
+  (def osrs-trade
+    (fn (state index)
+      (let ((npc (observed-npc state index)))
+        (if npc
+          (send state 86 (append (reverse (u16 index)) '(0 128)) #f
+            (dict 'action 'trade 'index index 'type (get npc 'type)))
+          (signal 'osrs/npc "trade target is not currently observed")))))
+  (def osrs-attack
+    (fn (state index)
+      (let ((world (get (get state 'npc-worlds) 0)))
+        (if (if world (get (get world 'npcs) index) #f)
+            (send state 44 (list 128 128 (rem (+ (rem index 256) 128) 256) (/ index 256)) #f
+                  (dict 'action 'attack 'index index 'type (get (get (get world 'npcs) index) 'type)))
+            (signal 'osrs/npc "attack target is not currently observed")))))
+  (def send-keepalive (fn (state) (send state 75 nil #f (dict 'action 'keepalive))))
+  (def osrs-keepalive
+    (fn (state)
+      (let ((maintenance (get state 'maintenance)))
+        (let ((clock (if maintenance (get maintenance 'clock-us) nil)))
+          (if clock
+              (let ((now (clock)))
+                (if (keepalive-due? now (get state 'last-keepalive-us)
+                      (get maintenance 'keepalive-interval-us))
+                    (assoc (send-keepalive state) 'last-keepalive-us now)
+                    state))
+              (send-keepalive state)))))))

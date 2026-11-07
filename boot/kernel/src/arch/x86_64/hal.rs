@@ -29,7 +29,6 @@ pub unsafe fn out8(port: u16, value: u8) {
 ///
 /// # Safety
 /// See [`out8`].
-#[cfg(feature = "native-graphics")]
 #[inline]
 pub unsafe fn out16(port: u16, value: u16) {
     unsafe { asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack)) };

@@ -1,0 +1,191 @@
+//! Bounded TCP and entropy bytes for an explicitly configured endpoint.
+use std::{
+    fmt::Write as _,
+    fs::File,
+    io::{ErrorKind, Read, Write},
+    net::{SocketAddr, TcpStream},
+    time::Duration,
+};
+
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(out, "{byte:02x}").unwrap();
+    }
+    out
+}
+fn unhex(text: &str) -> Result<Vec<u8>, String> {
+    if text.len() > 512 || text.len() % 2 != 0 || !text.is_ascii() {
+        return Err("invalid byte payload".into());
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).map_err(|_| "invalid hex".into()))
+        .collect()
+}
+/// Summarize carrier traffic without printing payloads or error text.
+pub fn trace_metadata(operation: &str, reply: &str) -> String {
+    let Some(value) = reply.strip_prefix("ok ") else {
+        return String::new();
+    };
+    match operation {
+        "read" => {
+            if value.is_empty() {
+                " bytes 0 eof".into()
+            } else {
+                format!(" bytes {}", value.len() / 2)
+            }
+        }
+        "entropy" => format!(" bytes {}", value.len() / 2),
+        "write" => value
+            .parse::<usize>()
+            .map(|count| format!(" bytes {count}"))
+            .unwrap_or_default(),
+        "read-ready" if matches!(value, "ready" | "idle" | "eof") => {
+            format!(" readiness {value}")
+        }
+        _ => String::new(),
+    }
+}
+pub struct Carrier {
+    endpoint: SocketAddr,
+    stream: Option<TcpStream>,
+}
+impl Carrier {
+    pub fn new(endpoint: SocketAddr) -> Self {
+        Self {
+            endpoint,
+            stream: None,
+        }
+    }
+    pub fn exchange(&mut self, request: &str) -> Result<String, String> {
+        let request = request
+            .strip_prefix("AGEL-BYTES/1 ")
+            .ok_or("unknown byte framing")?;
+        let (operation, argument) = request.split_once(' ').unwrap_or((request, ""));
+        match operation {
+            "open" if argument.is_empty() => {
+                if self.stream.is_some() {
+                    return Err("stream already open".into());
+                }
+                let stream = TcpStream::connect_timeout(&self.endpoint, Duration::from_secs(5))
+                    .map_err(|e| e.to_string())?;
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .map_err(|e| e.to_string())?;
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .map_err(|e| e.to_string())?;
+                stream.set_nodelay(true).map_err(|e| e.to_string())?;
+                self.stream = Some(stream);
+                Ok("ok".into())
+            }
+            "close" if argument.is_empty() => {
+                self.stream = None;
+                Ok("ok".into())
+            }
+            "read-ready" if argument.is_empty() => {
+                let stream = self.stream.as_ref().ok_or("stream closed")?;
+                stream.set_nonblocking(true).map_err(|e| e.to_string())?;
+                let readiness = stream.peek(&mut [0]);
+                stream.set_nonblocking(false).map_err(|e| e.to_string())?;
+                match readiness {
+                    Ok(0) => Ok("ok eof".into()),
+                    Ok(_) => Ok("ok ready".into()),
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => Ok("ok idle".into()),
+                    Err(error) => Err(error.to_string()),
+                }
+            }
+            "read" | "entropy" => {
+                let size: usize = argument.parse().map_err(|_| "invalid byte count")?;
+                let limit = if operation == "read" { 1024 } else { 256 };
+                if !(1..=limit).contains(&size) {
+                    return Err("byte count exceeds carrier bound".into());
+                }
+                let mut bytes = vec![0; size];
+                if operation == "entropy" {
+                    File::open("/dev/urandom")
+                        .and_then(|mut f| f.read_exact(&mut bytes))
+                        .map_err(|e| e.to_string())?;
+                } else {
+                    let count = self
+                        .stream
+                        .as_mut()
+                        .ok_or("stream closed")?
+                        .read(&mut bytes)
+                        .map_err(|e| e.to_string())?;
+                    bytes.truncate(count);
+                }
+                Ok(format!("ok {}", hex(&bytes)))
+            }
+            "write" => {
+                let bytes = unhex(argument)?;
+                self.stream
+                    .as_mut()
+                    .ok_or("stream closed")?
+                    .write_all(&bytes)
+                    .map_err(|e| e.to_string())?;
+                Ok(format!("ok {}", bytes.len()))
+            }
+            _ => Err("unknown byte operation".into()),
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{net::TcpListener, thread};
+    #[test]
+    fn trace_reports_byte_counts_and_eof_without_payloads() {
+        assert_eq!(trace_metadata("read", "ok 00ff"), " bytes 2");
+        assert_eq!(trace_metadata("entropy", "ok cafe"), " bytes 2");
+        assert_eq!(trace_metadata("read", "ok "), " bytes 0 eof");
+        assert_eq!(trace_metadata("read-ready", "ok eof"), " readiness eof");
+        assert_eq!(trace_metadata("write", "ok 17"), " bytes 17");
+        assert_eq!(trace_metadata("write", "error 00ff"), "");
+    }
+
+    #[test]
+    fn arbitrary_bytes_and_eof_cross_the_carrier() {
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = server.local_addr().unwrap();
+        let peer = thread::spawn(move || {
+            let (mut socket, _) = server.accept().unwrap();
+            let mut bytes = [0; 4];
+            socket.read_exact(&mut bytes).unwrap();
+            assert_eq!(bytes, [0, 255, 10, 128]);
+            socket.write_all(&bytes).unwrap();
+        });
+        let mut carrier = Carrier {
+            endpoint,
+            stream: None,
+        };
+        assert_eq!(carrier.exchange("AGEL-BYTES/1 open").unwrap(), "ok");
+        assert_eq!(
+            carrier.exchange("AGEL-BYTES/1 read-ready").unwrap(),
+            "ok idle"
+        );
+        assert_eq!(
+            carrier.exchange("AGEL-BYTES/1 write 00ff0a80").unwrap(),
+            "ok 4"
+        );
+        peer.join().unwrap();
+        assert_eq!(
+            carrier.exchange("AGEL-BYTES/1 read-ready").unwrap(),
+            "ok ready"
+        );
+        let mut returned = Vec::new();
+        while returned.len() < 4 {
+            let reply = carrier.exchange("AGEL-BYTES/1 read 4").unwrap();
+            returned.extend(unhex(reply.strip_prefix("ok ").unwrap()).unwrap());
+        }
+        assert_eq!(returned, [0, 255, 10, 128]);
+        assert_eq!(
+            carrier.exchange("AGEL-BYTES/1 read-ready").unwrap(),
+            "ok eof"
+        );
+        assert_eq!(carrier.exchange("AGEL-BYTES/1 read 4").unwrap(), "ok ");
+        assert!(carrier.exchange("AGEL-BYTES/1 read 1025").is_err());
+        assert!(carrier.exchange("AGEL-BYTES/1 write ff0").is_err());
+    }
+}

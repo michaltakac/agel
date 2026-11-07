@@ -15,6 +15,7 @@ std = ["agel-core/std"]
 agel-core = { path = "../agel-core", default-features = false }
 
 [dev-dependencies]
+agel-effects = { path = "../agel-effects" }
 agel-model = { path = "../agel-model" }
 serde_json = "1"
 

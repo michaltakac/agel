@@ -57,6 +57,14 @@ pub const BRK_PAGES: u64 = 64;
 pub const FTRUNCATE: u64 = 21;
 /// A canvas for a window: pixels the process draws, blitted by record 11.
 pub const CANVAS: u64 = 22;
+pub const LEDGER_RESERVE: u64 = 23;
+pub const LEDGER_RELEASE: u64 = 24;
+pub const LEDGER_APPEND: u64 = 25;
+pub const PROGRAM_READ: u64 = 26;
+pub const PROGRAM_WRITE: u64 = 27;
+pub const PROGRAM_FLUSH: u64 = 28;
+pub const PROGRAM_INFO: u64 = 29;
+pub const SPAWN_CHECKED: u64 = 30;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;
@@ -67,6 +75,7 @@ pub const O_APPEND: u64 = 0o2000;
 /// A descriptor argument to `spawn` that names none.
 pub const NO_DESCRIPTOR: u64 = 0xffff;
 pub const SPAWN_READ_ONLY: u64 = 1;
+pub const SPAWN_NO_FILES: u64 = 2;
 /// Set in a `wait` answer when the child was stopped rather than exiting;
 /// the low byte is then the signal a POSIX parent would see.
 pub const WAIT_SIGNALED: u64 = 0x100;
@@ -127,6 +136,52 @@ impl Process {
         written as u64
     }
 
+    pub fn ledger_reserve(&self, bytes: u64) -> i64 {
+        self.request(LEDGER_RESERVE, [bytes, 0, 0, 0]) as i64
+    }
+
+    pub fn program_info(&self) -> i64 {
+        self.request(PROGRAM_INFO, [0; 4]) as i64
+    }
+
+    pub fn program_read(&self, sector: u64, out: &mut [u8; 512]) -> i64 {
+        let result = self.request(PROGRAM_READ, [sector, 512, 0, 0]) as i64;
+        if result == 0 {
+            let block = (self.page as usize + BLOCK_OFFSET) as *const u8;
+            for (offset, byte) in out.iter_mut().enumerate() {
+                *byte = unsafe { block.add(offset).read_volatile() };
+            }
+        }
+        result
+    }
+
+    pub fn program_write(&self, sector: u64, bytes: &[u8; 512]) -> i64 {
+        let block = (self.page as usize + BLOCK_OFFSET) as *mut u8;
+        for (offset, byte) in bytes.iter().enumerate() {
+            unsafe { block.add(offset).write_volatile(*byte) };
+        }
+        self.request(PROGRAM_WRITE, [sector, 512, 0, 0]) as i64
+    }
+
+    pub fn program_flush(&self) -> i64 {
+        self.request(PROGRAM_FLUSH, [0; 4]) as i64
+    }
+
+    pub fn ledger_release(&self, token: u64) -> i64 {
+        self.request(LEDGER_RELEASE, [token, 0, 0, 0]) as i64
+    }
+
+    pub fn ledger_append(&self, token: u64, bytes: &[u8]) -> i64 {
+        if bytes.len() != 512 {
+            return -22;
+        }
+        let payload = (self.page as usize + PAYLOAD_OFFSET) as *mut u8;
+        for (i, byte) in bytes.iter().enumerate() {
+            unsafe { payload.add(i).write_volatile(*byte) };
+        }
+        self.request(LEDGER_APPEND, [token, 512, 0, 0]) as i64
+    }
+
     /// Open `path` through the process's namespace. A descriptor, or a
     /// negated error number: `-ENOENT` for a name the namespace does not
     /// hold, `-EACCES` for a right it does not grant, however the path is
@@ -172,19 +227,46 @@ impl Process {
         stdout: u64,
         flags: u64,
     ) -> i64 {
+        self.spawn_with_image(program, arguments, stdin, stdout, flags, None)
+    }
+
+    pub fn spawn_with_image(
+        &self,
+        program: &[u8],
+        arguments: &[u8],
+        stdin: u64,
+        stdout: u64,
+        flags: u64,
+        image: Option<[u32; 3]>,
+    ) -> i64 {
         let take = program.len().min(16);
         let payload = (self.page as usize + PAYLOAD_OFFSET) as *mut u8;
         for (offset, byte) in program.iter().take(take).enumerate() {
             unsafe { payload.add(offset).write_volatile(*byte) };
         }
         unsafe { payload.add(take).write_volatile(0) };
-        let room = PAYLOAD_BYTES - take - 1;
+        let mut room = PAYLOAD_BYTES - take - 1;
+        let operation = if let Some(image) = image {
+            room -= 12;
+            for (word, value) in image.iter().enumerate() {
+                for (offset, byte) in value.to_le_bytes().iter().enumerate() {
+                    unsafe {
+                        payload
+                            .add(PAYLOAD_BYTES - 12 + word * 4 + offset)
+                            .write_volatile(*byte)
+                    };
+                }
+            }
+            SPAWN_CHECKED
+        } else {
+            SPAWN
+        };
         let block = arguments.len().min(room);
         for (offset, byte) in arguments.iter().take(block).enumerate() {
             unsafe { payload.add(take + 1 + offset).write_volatile(*byte) };
         }
         self.request(
-            SPAWN,
+            operation,
             [take as u64, stdin, stdout, flags | ((block as u64) << 16)],
         ) as i64
     }

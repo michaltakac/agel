@@ -1,6 +1,15 @@
 #!/bin/sh
 set -eu
 
+# The legacy demo selects the ordinary graphics kernel and adds example files.
+doom_demo=false
+case "${1-}:${2-}" in
+  --features:doom-demo)
+    doom_demo=true
+    shift 2
+    set -- --features native-graphics "$@" ;;
+esac
+
 rustup target add x86_64-unknown-none >/dev/null
 kernel_dir=$(CDPATH= cd -- "$(dirname "$0")/../boot/kernel" && pwd)
 project_dir=$(CDPATH= cd -- "$kernel_dir/../.." && pwd)
@@ -52,9 +61,9 @@ test "$(wc -c < "$kernel_bin" | tr -d ' ')" -le 2097152
 # candidate staged with scripts/stage-kernel.py is dropped rather than
 # silently kept in front of the kernel just built. Slot B (sectors
 # 69760-73983) is left as it was.
-disk_bytes=37879808
+disk_bytes=134217728
 if test ! -f "$disk_image"; then
-  dd if=/dev/zero of="$disk_image" bs=512 count=73984 2>/dev/null
+  dd if=/dev/zero of="$disk_image" bs=1 count=1 seek=$((disk_bytes - 1)) 2>/dev/null
 elif test "$(wc -c < "$disk_image" | tr -d ' ')" -lt "$disk_bytes"; then
   dd if=/dev/zero of="$disk_image" bs=1 count=1 seek=$((disk_bytes - 1)) conv=notrunc 2>/dev/null
 fi
@@ -74,23 +83,28 @@ for asset in fira-sans.agf fira-sans-medium.agf fira-mono.agf sprites.agi; do
   python3 "$project_dir/scripts/install-asset.py" "$disk_image" "${asset%.*}" "$assets_dir/$asset" >/dev/null
 done
 
-# The desktop's programs (sectors 13312+, the data region): the kernel
-# carries their names and reads their source from here when one is loaded,
-# so the sources are not in the kernel image. Installed fresh every build
-# of a desktop (`--features native-graphics`) and removed by a build of
-# anything else, so the persistent image's data region holds what its
-# kernel reads and nothing a test of the workshop would list unasked.
-for program in workbench:wb doom-agent:da doom-agent-model:dm doom-agent-judge:dj desktop-agent:dk review:rv lookup:lk builder:bd; do
-  case " $* " in
-    *native-graphics*)
-      source="$project_dir/boot/desktop/${program%%:*}.agel"
-      test -f "$source" || { printf '%s\n' "missing $source" >&2; exit 1; }
-      python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" "${program##*:}.agel" "$source" >/dev/null
-      ;;
-    *)
-      python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" --remove "${program##*:}.agel" >/dev/null
-      ;;
+# Install the source for the selected desktop features in the data region.
+# Remove reserved entries from earlier builds when those features are absent.
+for program in boot/desktop/workbench:wb boot/desktop/builder:bd \
+  examples/doom/doom-agent:da examples/doom/doom-agent-model:dm examples/doom/doom-agent-judge:dj \
+  examples/doom/desktop-agent:dk examples/doom/review:rv examples/doom/lookup:lk; do
+  case "$doom_demo:$*:$program" in
+    true:*|*native-graphics*:boot/desktop/*) install=true ;;
+    *) install=false ;;
   esac
+  if "$install"; then
+    source="$project_dir/${program%%:*}.agel"
+    test -f "$source" || { printf '%s\n' "missing $source" >&2; exit 1; }
+    python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" "${program##*:}.agel" "$source" >/dev/null
+  else
+    python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" --remove "${program##*:}.agel" >/dev/null
+  fi
 done
+
+if "$doom_demo"; then
+  python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" apps.cfg "$project_dir/examples/doom/apps.cfg" >/dev/null
+else
+  python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" --remove apps.cfg >/dev/null
+fi
 
 printf '%s\n' "$disk_image"

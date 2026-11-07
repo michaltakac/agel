@@ -33,11 +33,12 @@ def valid_name(name: str) -> bool:
     return 0 < len(name) <= NAME_BYTES and all(0x21 <= ord(c) <= 0x7E for c in name)
 
 
-def read_table(image: str) -> list[dict]:
+def read_table(image: str, region: str | None = None) -> list[dict]:
+    table, last, magic = (TABLE, LAST, MAGIC) if region is None else REGIONS[region]
     with open(image, "rb") as disk:
-        disk.seek(TABLE * SECTOR)
+        disk.seek(table * SECTOR)
         sector = disk.read(SECTOR)
-    if sector[:8] != MAGIC:
+    if sector[:8] != magic:
         return []
     count = int.from_bytes(sector[8:12], "little")
     if len(sector) != SECTOR or count > MAX_ROWS:
@@ -51,7 +52,7 @@ def read_table(image: str) -> list[dict]:
         end = start + -(-length // SECTOR)
         if not valid_name(name) or any(previous["name"] == name for previous in rows):
             raise ValueError("invalid or duplicate entry name")
-        if length == 0 or start <= TABLE or end > LAST + 1:
+        if length == 0 or start <= table or end > last + 1:
             raise ValueError("table entry is outside its region")
         if any(start < previous["start"] + -(-previous["length"] // SECTOR)
                and previous["start"] < end for previous in rows):

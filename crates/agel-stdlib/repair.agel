@@ -1,0 +1,331 @@
+(module agel/repair
+  (import agel/sequence)
+  (import agel/meta)
+  (import agel/native-reader)
+  (import agel/evolution)
+  (import agel/judgment)
+  (export make-repair-agent repair-state repair-prompt repair-evaluate
+          repair-new repair-start repair-pending repair-complete repair-fail repair-exchange repair-advance
+          repair-agent-exchange repair-agent-drive repair-agent-drive-while)
+
+  (def driver-seal
+    (fn (agent id stage) (fn () (list agent id stage))))
+  (def repair-state (fn (agent) (get (agent-info agent) 'heap)))
+  (def nth (fn (values n) (if (= n 0) (car values) (nth (cdr values) (- n 1)))))
+  (def note (fn (state event) (assoc state 'history (append (get state 'history) (list event)))))
+  (def object-kind (fn (state) (if (get state 'kind) (get state 'kind) 'cell)))
+  (def request-id
+    (fn (self state provider prompt)
+      (if (if self (= (get state 'model-dispatch) 'external) #t) (+ 1 (count (get state 'history)))
+        (model-request provider prompt self))))
+  (def evaluate-cases
+    (fn (candidate cases report)
+      (if (= cases nil) report
+          (let ((case (car cases)))
+            (let ((result (with-handler (* problem) (dict 'error problem 'correct #f)
+                            (let ((actual (meta-apply candidate (get case 'arguments))))
+                              (dict 'actual actual 'correct (= actual (get case 'expected)))))))
+              (evaluate-cases candidate (cdr cases)
+                (assoc (assoc (assoc report 'total (+ (get report 'total) 1))
+                  'correct (+ (get report 'correct) (if (get result 'correct) 1 0)))
+                  'steps (append (get report 'steps) (list (dict 'case case 'result result))))))))))
+  (def repair-evaluate
+    (fn (state version)
+      (let ((entry (get (get (get state 'versions) 'versions) version)))
+        (if (if entry (if (= (get entry 'kind) (object-kind state)) (= (get entry 'name) (get state 'tool)) #f) #f)
+          (evaluate-cases (meta-eval (get entry 'source) (meta-base-env))
+            (append (get state 'examples) (get state 'held-out))
+            (dict 'version version 'total 0 'correct 0 'steps nil))
+          (signal 'repair/version "version is not this tool")))))
+  (def read-one
+    (fn (text)
+      (let ((forms (native-read text 8192 48)))
+        (if (= (count forms) 1) (car forms)
+            (signal 'repair/report "expected exactly one expression")))))
+  (def repair-prompt
+    (fn (state)
+      (text-concat
+        "Repair an Agel tool. Return exactly one expression, no markdown or tools: (dict 'diagnosis \"cause supported by observations\" 'after '(fn (...) ...) 'predictions (list ...)). Predictions are candidate outputs for the displayed probes in order. Use only fn, if, let, begin, quote and pure primitives + - * / = < list cons car cdr dict get assoc count has-key? type-of dissoc keys. Arithmetic is checked signed 64-bit; integer division truncates. The returned source is evaluated in a restricted metacircular environment. Preserve the full contract, not just displayed examples. After refusal, revise the rejected source using the reason.\nContract, observations, probes:\n"
+        (text-concat (get state 'context)
+          (text-concat "\nCurrent source:\n" (text-concat (get state 'before-text)
+            (text-concat "\nPrevious refusal:\n" (text-concat (get state 'reason)
+              (text-concat "\nPrevious report:\n" (get state 'previous-report))))))))))
+  (def propose
+    (fn (self state)
+      (if (< 0 (get state 'remaining))
+          (let ((prompt (repair-prompt state)))
+            (let ((id (request-id self state (get state 'proposal-provider) prompt)))
+              (assoc (assoc (assoc (assoc
+                (note state (dict 'event 'proposal-request 'id id 'prompt prompt 'cost-microusd nil))
+                'status 'proposing) 'pending id) 'remaining (- (get state 'remaining) 1))
+                'pending-provider (get state 'proposal-provider))))
+          (assoc state 'status 'exhausted))))
+  (def retry
+    (fn (self state reason)
+      (propose self (assoc (note state (dict 'event 'refused 'reason reason)) 'reason reason))))
+  (def prediction-cases
+    (fn (cases predictions)
+      (if (= (count cases) (count predictions))
+          (if (= cases nil) nil
+              (cons (dict 'arguments (get (car cases) 'arguments) 'expected (car predictions))
+                (prediction-cases (cdr cases) (cdr predictions))))
+          (signal 'repair/prediction "prediction count differs from displayed probes"))))
+  (def parse-report
+    (fn (state text)
+      (with-handler (* problem) (dict 'error (get problem 'message))
+        (let ((report (meta-eval (read-one text) (meta-base-env))))
+          (if (= (type-of report) 'map)
+              (if (= (type-of (get report 'diagnosis)) 'string)
+                  (if (< 0 (text-bytes (get report 'diagnosis)))
+                      (let ((predictions (get report 'predictions)))
+                        (if (if (= predictions nil) #t (= (type-of predictions) 'list))
+                          (begin
+                            (prediction-cases (get state 'examples) predictions)
+                            (meta-analyze (get report 'after))
+                            report)
+                          (dict 'error "predictions must be a list")))
+                      (dict 'error "diagnosis is empty"))
+                  (dict 'error "diagnosis must be text"))
+              (dict 'error "report must be a map"))))))
+  (def ask-judge
+    (fn (self state report text)
+      (let ((prompt (judgment-request
+              (list (list "contract and observations" (get state 'context))
+                    (list "before" (get state 'before-text)) (list "proposal" text)
+                    (list "reader preflight" "The quoted after form is Agel source. (let ((name value)) body) is valid and integer division truncates. Replay measures behavior later."))
+              (list '(noul "patch" "Does after satisfy the stated source contract, and does the diagnosis ground the change in observations? Judge the proposal without assuming replay has run.")
+                    '(choice "reason" "Which defect is directly evident in the proposal text? Use none when no defect is directly evident."
+                      ("none" "No identified defect") ("contract" "Does not implement the contract")
+                      ("boundary" "Fails at valid boundaries, types or integer limits")
+                      ("syntax" "Invalid Agel or unsupported primitives")
+                      ("effects" "Requires unavailable effects or authority"))))))
+        (let ((id (request-id self state (get state 'judge-provider) prompt)))
+          (assoc (assoc (assoc (assoc
+            (note state (dict 'event 'judge-request 'id id 'prompt prompt 'cost-microusd nil))
+            'status 'judging) 'pending id) 'candidate report)
+            'pending-provider (get state 'judge-provider))))))
+  (def verdict
+    (fn (state text)
+      (with-handler (* problem)
+        (dict 'allowed #f 'reason (get problem 'message) 'cost-microusd nil)
+        (let ((answers (judgment-parse text)))
+          (let ((result (answer answers "patch")) (reason (answer answers "reason")))
+            (if (if (= (count answers) 2) (if result (if reason
+                      (if (= (answer-kind result) 'noul) (= (answer-kind reason) 'choice) #f) #f) #f) #f)
+              (let ((score (answer-value result)) (minimum (get state 'threshold))
+                    (defect (answer-value reason)))
+                (if (if (< -1 score) (< score 1001) #f)
+                  (let ((allowed (if (< score minimum) #f (= defect "none"))))
+                    (dict 'allowed allowed 'score score 'reason-code defect 'reply text 'cost-microusd nil
+                      'reason (if allowed "Text judge approved"
+                        (text-concat "Text judge refused. Score " (text-concat (int->text score)
+                          (text-concat "/1000 (minimum " (text-concat (int->text minimum)
+                            (text-concat "). Reported defect: " defect))))))))
+                  (dict 'allowed #f 'reason "judge score outside 0..1000" 'cost-microusd nil)))
+              (dict 'allowed #f 'reason "judge omitted the patch verdict" 'cost-microusd nil)))))))
+  (def finish-judge
+    (fn (self state text)
+      (let ((receipt (verdict state text)))
+        (if (if (= (get receipt 'allowed) #t) (get state 'defer-activation) #f)
+          (begin
+            (if self (if (= (get state 'model-dispatch) 'external) nil (send self '(repair/advance))) nil)
+            (assoc (assoc state 'approved-receipt receipt) 'status 'approved))
+          (apply-judgment self state receipt nil)))))
+  (def activation-with-probe
+    (fn (activate probe)
+      (if probe
+        (fn (request cases)
+          (if activate
+            (let ((result (activate request cases)))
+              (if (= (type-of result) 'map) (assoc result 'probe probe) result))
+            (dict 'passed #t 'reason (get probe 'reason) 'probe probe)))
+        activate)))
+  (def candidate-cases
+    (fn (state)
+      (append (prediction-cases (get state 'examples) (get (get state 'candidate) 'predictions))
+        (append (get state 'examples) (get state 'held-out)))))
+  (def replay-refusal
+    (fn (state replay)
+      (let ((checked (get replay 'checked)) (reason (get replay 'reason))
+            (displayed (count (get state 'examples))))
+        (if (= (type-of checked) 'int)
+          (if (< checked displayed)
+            (text-concat "Displayed prediction: " reason)
+            (if (< checked (+ displayed displayed))
+              (text-concat "Displayed contract: " reason)
+              (text-concat "Held-out contract: "
+                (if (get replay 'condition) "candidate raised a condition" reason))))
+          reason))))
+  (def apply-judgment
+    (fn (self state receipt probe)
+      (let ((before (read-one (get state 'before-text))))
+        (let ((versions (evolution-edit-with-activation (get state 'versions) (object-kind state) (get state 'tool)
+                before (get (get state 'candidate) 'after)
+                (candidate-cases state) (fn (request) receipt)
+                (activation-with-probe (get state 'activate) probe))))
+          (let ((next (assoc state 'versions versions)))
+            (if (= (evolution-current versions (object-kind state) (get state 'tool))
+                   (evolution-current (get state 'versions) (object-kind state) (get state 'tool)))
+                (let ((history (reverse (get versions 'history))))
+                  (let ((prior (car (cdr history))))
+                    (retry self next
+                      (if (= (get prior 'event) 'replay)
+                        (replay-refusal state (get prior 'result))
+                        (get (car history) 'reason)))))
+                (assoc next 'status 'done)))))))
+  (def advance
+    (fn (self state)
+      (if (if (= (get state 'status) 'approved) (if (get state 'probe) #f #t) #f)
+        (apply-judgment self state (get state 'approved-receipt) nil) state)))
+  (def probe-result
+    (fn (self state message)
+      (if (if (= (get state 'status) 'approved)
+            (if (get state 'probe) (= (nth message 1) (get state 'pending)) #f) #f)
+        (let ((result (nth message 2)))
+          (if (= (type-of (get result 'reason)) 'string)
+            (if (= (get result 'stage) 'recorded-replay)
+              (retry self (note state (dict 'event 'recorded-replay 'result result)) (replay-refusal state result))
+              (let ((next (note state (dict 'event 'activation-probe 'result result))))
+                (if (= (get result 'passed) #t) (apply-judgment self next (get state 'approved-receipt) result)
+                  (retry self next (get result 'reason))))) state)) state)))
+  (def result
+    (fn (self state message)
+      (if (if (= (nth message 1) (get state 'pending))
+              (= (nth message 2) (get state 'pending-provider)) #f)
+        (let ((next (note state (dict 'event 'model-result 'message message 'cost-microusd nil))))
+          (if (= (car message) 'system/model-error)
+              (retry self next (nth message 4))
+              (if (= (get state 'status) 'proposing)
+                  (let ((report (parse-report state (nth message 3)))
+                        (reported (assoc next 'previous-report (nth message 3))))
+                    (if (get report 'error) (retry self reported (get report 'error))
+                        (ask-judge self reported report (nth message 3))))
+                  (if (= (get state 'status) 'judging) (finish-judge self next (nth message 3)) next))))
+        state)))
+  (def behavior
+    (fn (self state message)
+      (if (= (car message) 'repair/start)
+          (if (= (get state 'status) 'idle) (propose self state) state)
+          (if (= (car message) 'repair/advance) (advance self state)
+          (if (= (car message) 'repair/probe-result)
+            (if (if (= (count message) 4) (= (nth message 3) (driver-seal self (get state 'pending) 'probe)) #f)
+              (probe-result self state message) state)
+          (if (= (car message) 'repair/external-result)
+            (if (if (= (count message) 3) (= (nth message 2) (driver-seal self (get state 'pending) 'completion)) #f)
+              (result self state (nth message 1)) state)
+          (if (if (= (car message) 'system/model-result) #t (= (car message) 'system/model-error))
+            (if (= (get state 'model-dispatch) 'external) state (result self state message))
+            (signal 'repair/message "unknown repair message"))))))))
+  (def repair-new
+    (fn (options)
+      (let ((before (read-one (get options 'before-text)))
+            (versions (get options 'versions)) (threshold (get options 'threshold)))
+        (if (if (= (type-of threshold) 'int) (if (< -1 threshold) (< threshold 1001) #f) #f)
+          (if (= before (evolution-source versions (evolution-current versions (object-kind options) (get options 'tool))))
+              (begin
+                (if (get options 'probe)
+                  (if (if (= (get options 'model-dispatch) 'external) (get options 'defer-activation) #f) #t
+                    (signal 'repair/dispatch "probe requires deferred external dispatch")) nil)
+                (assoc (assoc (assoc (assoc (assoc options 'status 'idle) 'history nil) 'reason "")
+                  'previous-report "") 'remaining (get options 'max-attempts)))
+            (signal 'repair/base "source text does not match the active tool"))
+          (signal 'repair/threshold "threshold must be in 0..1000")))))
+  (def make-repair-agent
+    (fn (name options capabilities)
+      (if (= (count capabilities) 0) (spawn name behavior (repair-new options) nil)
+        (spawn name behavior (repair-new options) nil nil 'stop 0 capabilities))))
+  (def repair-start
+    (fn (state) (if (= (get state 'status) 'idle) (propose nil state) state)))
+  (def repair-pending
+    (fn (state)
+      (if (if (= (get state 'status) 'proposing) #t (= (get state 'status) 'judging))
+        (dict 'id (get state 'pending) 'provider (get state 'pending-provider)
+              'prompt (get (car (reverse (get state 'history))) 'prompt)) nil)))
+  (def repair-complete
+    (fn (state id provider text) (result nil state (list 'system/model-result id provider text))))
+  (def repair-fail
+    (fn (state id provider message) (result nil state (list 'system/model-error id provider 'provider/error message))))
+  (def repair-advance (fn (state) (advance nil state)))
+  (def wait-agent-change
+    (fn (agent before remaining)
+      (let ((info (agent-info agent)))
+        (if (= (get info 'status) 'running)
+          (if (= (get info 'heap) before)
+            (begin
+              (if (< 0 remaining) #t (signal 'repair/scheduler "repair actor did not complete"))
+              (run 1) (wait-agent-change agent before (- remaining 1))) (get info 'heap))
+          (signal 'repair/agent "repair actor stopped")))))
+  (def external-probe
+    (fn (agent state append-record)
+      (let ((replay (evolution-replay (get (get state 'candidate) 'after) (candidate-cases state))))
+        (append-record (dict 'event 'recorded-replay 'id (get state 'pending) 'result replay))
+        (if (= (get replay 'passed) #t)
+          (let ((result (with-handler (* problem) (dict 'passed #f 'reason (get problem 'message))
+                          (let ((receipt ((get state 'probe) state)))
+                            (if (= (type-of (get receipt 'reason)) 'string) receipt
+                              (dict 'passed #f 'reason "activation probe omitted its reason"))))))
+            (append-record (dict 'event 'activation-probe 'id (get state 'pending) 'result result))
+            (send agent (list 'repair/probe-result (get state 'pending) result
+              (driver-seal agent (get state 'pending) 'probe))))
+          (send agent (list 'repair/probe-result (get state 'pending) (assoc replay 'stage 'recorded-replay)
+            (driver-seal agent (get state 'pending) 'probe)))))))
+  (def external-advance
+    (fn (agent state append-record)
+      (begin
+        (if (get state 'probe) (external-probe agent state append-record)
+          (send agent '(repair/advance)))
+        (wait-agent-change agent state 8192))))
+  (def repair-agent-exchange
+    (fn (agent infer append-record)
+      (let ((state (repair-state agent)))
+        (begin
+          (if (= (get state 'model-dispatch) 'external) #t
+            (signal 'repair/dispatch "repair actor requires external model dispatch"))
+          (let ((request (repair-pending state)))
+            (if request
+              (begin
+                (append-record (dict 'event 'inference-start 'request request 'cost-microusd nil))
+                (let ((answer (with-handler (* problem) (dict 'error (get problem 'message))
+                                (dict 'text (infer (get request 'provider) (get request 'prompt))))))
+                  (begin
+                    (append-record (dict 'event 'inference-result 'id (get request 'id) 'answer answer 'cost-microusd nil))
+                    (let ((completion (if (get answer 'error)
+                            (list 'system/model-error (get request 'id) (get request 'provider) 'provider/error (get answer 'error))
+                            (list 'system/model-result (get request 'id) (get request 'provider) (get answer 'text)))))
+                      (send agent (list 'repair/external-result completion
+                        (driver-seal agent (get request 'id) 'completion))))
+                    (wait-agent-change agent state 8192))))
+              (if (= (get state 'status) 'approved) (external-advance agent state append-record) state)))))))
+  (def drive
+    (fn (agent state infer append-record remaining continue?)
+      (let ((status (get state 'status)))
+        (if (if (= status 'approved) #t (if (= status 'proposing) #t (= status 'judging)))
+          (if (continue? state)
+            (if (< 0 remaining)
+              (drive agent (repair-agent-exchange agent infer append-record) infer append-record
+                (- remaining 1) continue?)
+              (signal 'repair/driver "repair transition budget exhausted" status))
+            (assoc state 'status 'stopped))
+          state))))
+  (def repair-agent-drive-while
+    (fn (agent infer append-record budget continue?)
+      (if (if (= (type-of budget) 'int) (< -1 budget) #f)
+        (drive agent (repair-state agent) infer append-record budget continue?)
+        (signal 'repair/driver "repair transition budget must be a nonnegative integer"))))
+  (def repair-agent-drive
+    (fn (agent infer append-record budget)
+      (repair-agent-drive-while agent infer append-record budget (fn (_) #t))))
+  (def repair-exchange
+    (fn (state infer append-record)
+      (let ((request (repair-pending state)))
+        (if request
+          (begin
+            (append-record (dict 'event 'inference-start 'request request 'cost-microusd nil))
+            (let ((answer (with-handler (* problem) (dict 'error (get problem 'message))
+                            (dict 'text (infer (get request 'provider) (get request 'prompt))))))
+              (begin
+                (append-record (dict 'event 'inference-result 'id (get request 'id) 'answer answer 'cost-microusd nil))
+                (if (get answer 'error)
+                  (repair-fail state (get request 'id) (get request 'provider) (get answer 'error))
+                  (repair-complete state (get request 'id) (get request 'provider) (get answer 'text))))))
+          (repair-advance state))))))

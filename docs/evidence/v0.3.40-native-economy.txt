@@ -1,0 +1,24 @@
+$ python3 scripts/test-native-network.py --economy
+Evidence: target/native-network-1794037321516449000
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-economy: earning first coins through mining, smelting and sale
+native-economy: mined copper with the tutor's pickaxe
+native-economy: mined tin, returning to the furnace
+native-economy: smelted one bronze bar
+native-economy: sold the bronze bar and observed the proceeds
+native-economy: {test first-sale passed #t pickaxes 1 copper-before 1 tin-before 1 bronze-before 0 copper-after 0 tin-after 0 bronze-after 1 mining-xp 35 smithing-xp 6 bronze-after-sale 0 coins-before 0 coins-after 3}
+native-economy: score {correct #t elapsed-us 180141436 charges {calls 0 judge-calls 0 known-nanousd 0 judge-nanousd 0 unknown 0} cost-nanousd 0 coins 3 coins-per-dollar nil}
+native-network: keepalives 71
+native-network: client completed: login, mining, smelting and first bronze sale inside Agel OS
+agel: 1 forms, 54489954 steps, revision 1
+process agel exited with status 0
+Persisted native client: account=[omitted] character=[omitted] rights= x=3212 z=3245 level=0 xp_rate_in_hundreds=100
+Persisted economy: stat=13 base=1 visible=1 fine_xp=62
+stat=14 base=1 visible=1 fine_xp=350
+inv=inv.inv item=obj.bronze_pickaxe count=1
+inv=inv.inv item=obj.coins count=3
+PASS: native client sale proceeds and XP saved with normal rights and 1x XP
+Elapsed seconds: 236.65

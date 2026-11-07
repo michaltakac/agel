@@ -21,7 +21,7 @@ use crate::native_session::{
     ReplayFailure,
 };
 #[cfg(target_arch = "x86_64")]
-use crate::recovery::{slot_name, Admission, KernelRecovery};
+use crate::recovery::{slot_name, Admission, KernelRecovery, KERNEL_TRIAL};
 use crate::recovery::{BootPlan, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind, ServiceWriter};
 use crate::workspace::{Workspace, MAX_CELL_NAME};
@@ -93,6 +93,8 @@ pub fn run() -> ! {
         }
         None => None,
     };
+    #[cfg(target_arch = "x86_64")]
+    let mut kernel_trial = None;
     #[cfg(target_arch = "x86_64")]
     let mut kernel = match storage.as_mut().map(KernelRecovery::load) {
         Some(Ok(kernel)) => Some(kernel),
@@ -320,9 +322,25 @@ pub fn run() -> ! {
             b":kernel-status" => kernel_status(&mut driver, kernel.as_ref(), false),
             #[cfg(target_arch = "x86_64")]
             b":kernel-promote" => match (storage.as_mut(), kernel.as_mut()) {
-                (Some(storage), Some(kernel)) => match kernel.promote(storage) {
+                (Some(storage), Some(kernel)) => match kernel.promote(storage, || {
+                    if kernel_trial.is_none() {
+                        kernel_trial = Some(machine.create_evaluator_world(evaluator_entry, 20)?);
+                    }
+                    let trial = kernel_trial.as_mut().ok_or("kernel trial evaluator unavailable")?;
+                    reset_evaluator(trial)?;
+                    let replay = evaluator_request_raw(
+                        trial,
+                        shared::COMMAND_EVALUATE,
+                        KERNEL_TRIAL,
+                    )?;
+                    if replay.error || &replay.bytes[..replay.length] != b"42" {
+                        return Err("denied: candidate failed Agel kernel replay");
+                    }
+                    Ok(())
+                }) {
                     Ok((selected, previous)) => {
                         let mut out = ServiceWriter::new(&mut driver);
+                        let _ = writeln!(out, "candidate passed isolated Agel kernel replay");
                         let _ = writeln!(
                             out,
                             "selected kernel slot {}; slot {} retained for rollback",

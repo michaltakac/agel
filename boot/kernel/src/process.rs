@@ -141,7 +141,7 @@ pub(crate) const REGION: Region = Region {
 pub const NAME_BYTES: usize = crate::region::NAME_BYTES;
 const MAX_SEGMENTS: usize = 8;
 /// Pages a process may be built from, code, data and zero fill together:
-/// 8 MiB of the 64 MiB window, the rest for the heap and the canvas. A
+/// At most 8 MiB of the process window, the rest for the heap and the canvas. A
 /// game with its tables is about 730 KiB.
 const MAX_PAGES: usize = 2048;
 const PAGE: u64 = 4096;
@@ -547,7 +547,7 @@ struct ConsoleInput {
     ended: bool,
 }
 
-const CONSOLE_INPUT_BYTES: usize = 1024;
+const CONSOLE_INPUT_BYTES: usize = 4096;
 
 impl ConsoleInput {
     const EMPTY: Self = Self {
@@ -605,7 +605,7 @@ impl Run {
     #[cfg(feature = "native-graphics")]
     pub fn feed_console(&mut self, line: &[u8]) -> bool {
         let console = &mut self.table.console;
-        if console.length + line.len() + 1 > CONSOLE_INPUT_BYTES {
+        if console.ended || console.length + line.len() + 1 > CONSOLE_INPUT_BYTES {
             return false;
         }
         for byte in line.iter().chain(b"\n") {
@@ -1060,10 +1060,24 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         process::KILL => kill(machine, services, table, index, arguments),
         process::BRK => brk(machine, table, index, arguments[0]),
         process::FTRUNCATE => truncate(table, index, services, arguments[0], arguments[1]),
+        process::LEDGER_RESERVE | process::LEDGER_RELEASE | process::LEDGER_APPEND => {
+            ledger_request(table, index, services, kind, arguments)
+        }
+        process::PROGRAM_READ
+        | process::PROGRAM_WRITE
+        | process::PROGRAM_FLUSH
+        | process::PROGRAM_INFO => program_sector_request(table, index, services, kind, arguments),
         process::CLOSE => close(table, index, arguments[0]),
         process::PIPE => pipe(table, index),
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
-        process::SPAWN => spawn(machine, services, table, index, arguments),
+        process::SPAWN | process::SPAWN_CHECKED => spawn(
+            machine,
+            services,
+            table,
+            index,
+            arguments,
+            kind == process::SPAWN_CHECKED,
+        ),
         process::WINDOW => window(table, index, services, arguments),
         process::CANVAS => canvas(machine, table, index, services, arguments),
         process::DRAW => draw(table, index, services, arguments),
@@ -1257,6 +1271,101 @@ fn file_request<'a>(
 }
 
 /// `FTRUNCATE`: the file's length set through a writable descriptor.
+fn ledger_request(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    kind: u64,
+    arguments: [u64; 4],
+) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    if process.namespace.root != 0 || !process.namespace.write {
+        return error(EACCES);
+    }
+    let Some(filesystem) = services.filesystem.as_deref_mut() else {
+        return error(ENOSYS);
+    };
+    let (command, words) = match kind {
+        process::LEDGER_RESERVE => (fs::COMMAND_RESERVE, [arguments[0], 0, 0]),
+        process::LEDGER_RELEASE => (fs::COMMAND_RELEASE, [arguments[0], 0, 0]),
+        _ => {
+            if arguments[1] != 512 || arguments[0] == 0 || arguments[0] >= fs::RESERVED_OFFSET {
+                return error(EINVAL);
+            }
+            for i in 0..512 {
+                filesystem.write_block(i, process.domain.core().read_payload(i));
+            }
+            (
+                fs::COMMAND_WRITE,
+                [
+                    fs::LEDGER_ENTRY as u64,
+                    fs::RESERVED_OFFSET | arguments[0],
+                    512,
+                ],
+            )
+        }
+    };
+    let outcome =
+        filesystem.filesystem_request(filesystem.handle(), services.storage, command, words);
+    match service_error(outcome) {
+        Ok(values) => values[0],
+        Err(number) => error(number),
+    }
+}
+
+fn program_sector_request(
+    table: &mut Table,
+    index: usize,
+    services: &mut Services<'_>,
+    kind: u64,
+    arguments: [u64; 4],
+) -> u64 {
+    let Some(process) = table.processes[index].as_mut() else {
+        return error(EBADF);
+    };
+    let writing = matches!(kind, process::PROGRAM_WRITE | process::PROGRAM_FLUSH);
+    if process.namespace.root != 0
+        || !process.namespace.read
+        || (writing && !process.namespace.write)
+    {
+        return error(EACCES);
+    }
+    let sectors = u64::from(LAST_SECTOR - TABLE_SECTOR + 1);
+    if kind == process::PROGRAM_INFO {
+        return (sectors << 32) | u64::from(TABLE_SECTOR);
+    }
+    if kind == process::PROGRAM_FLUSH {
+        return match crate::workspace::flush(services.storage) {
+            Ok(()) => 0,
+            Err(_) => error(EIO),
+        };
+    }
+    if arguments[0] >= sectors || arguments[1] != 512 {
+        return error(EINVAL);
+    }
+    let lba = TABLE_SECTOR + arguments[0] as u32;
+    let mut bytes = [0_u8; 512];
+    let outcome = if writing {
+        for (offset, byte) in bytes.iter_mut().enumerate() {
+            *byte = process.domain.core().read_block(offset);
+        }
+        crate::workspace::write_sector(services.storage, lba, &bytes)
+    } else {
+        crate::workspace::read_sector(services.storage, lba, &mut bytes)
+    };
+    if outcome.is_err() {
+        return error(EIO);
+    }
+    if !writing {
+        for (offset, byte) in bytes.iter().enumerate() {
+            process.domain.core().write_block(offset, *byte);
+        }
+    }
+    0
+}
+
 fn truncate(
     table: &mut Table,
     index: usize,
@@ -1787,11 +1896,12 @@ fn spawn(
     table: &mut Table,
     index: usize,
     arguments: [u64; 4],
+    checked: bool,
 ) -> u64 {
     let Some(free) = table.processes.iter().position(|slot| slot.is_none()) else {
         return error(EAGAIN);
     };
-    let (name, name_length, block, block_length, namespace, stdin, stdout) = {
+    let (name, name_length, block, block_length, namespace, stdin, stdout, image) = {
         let Some(parent) = table.processes[index].as_mut() else {
             return error(EBADF);
         };
@@ -1803,7 +1913,19 @@ fn spawn(
         // The child's arguments follow the name in the parent's payload:
         // `arguments[3]`'s upper bits say how many bytes. Without any, the
         // child's one argument is its name.
-        let block_length = ((arguments[3] >> 16) as usize).min(PAYLOAD_BYTES - length - 1);
+        let mut room = PAYLOAD_BYTES - length - 1;
+        let image = if checked || arguments[3] & process::SPAWN_MATCH_IMAGE != 0 {
+            room -= 12;
+            let core = parent.domain.core();
+            Some(core::array::from_fn(|word| {
+                u32::from_le_bytes(core::array::from_fn(|offset| {
+                    core.read_payload(PAYLOAD_BYTES - 12 + word * 4 + offset)
+                }))
+            }))
+        } else {
+            None
+        };
+        let block_length = ((arguments[3] >> 16) as usize).min(room);
         let mut block = [0_u8; PAYLOAD_BYTES];
         if block_length == 0 {
             block[..length].copy_from_slice(&name[..length]);
@@ -1816,7 +1938,14 @@ fn spawn(
         } else {
             block_length
         };
-        let namespace = if arguments[3] & process::SPAWN_READ_ONLY != 0 {
+        let namespace = if arguments[3] & process::SPAWN_NO_FILES != 0 {
+            Namespace {
+                read: false,
+                write: false,
+                create: false,
+                ..parent.namespace
+            }
+        } else if arguments[3] & process::SPAWN_READ_ONLY != 0 {
             Namespace {
                 write: false,
                 create: false,
@@ -1843,6 +1972,7 @@ fn spawn(
             namespace,
             given[0],
             given[1],
+            image,
         )
     };
     let program = match find(services.storage, &name[..name_length]) {
@@ -1850,6 +1980,9 @@ fn spawn(
         Ok(None) => return error(fs::ENOENT as i64),
         Err(_) => return error(EIO),
     };
+    if image.is_some_and(|expected| expected != [program.start, program.length, program.checksum]) {
+        return error(EIO);
+    }
     let (mut domain, brk) = match load(machine, services.storage, program) {
         Ok(loaded) => loaded,
         Err(_) => return error(EIO),

@@ -1,0 +1,24 @@
+2026-11-06: sh scripts/test-osrs-combat.sh (exit 0)
+
+RuneScape combat: discovering a rat, attacking and waiting for XP and removal
+{test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t}
+RuneScape combat: kill observed; verifying persisted Attack and Hitpoints XP
+persisted: account=12 character=12 rights= x=3225 z=3217 level=0 xp_rate_in_hundreds=100
+stat=0 base=1 visible=1 fine_xp=80
+stat=3 base=10 visible=10 fine_xp=11566
+RuneScape PASS: observed rat kill, Attack/Hitpoints XP and normal-account persistence
+
+python3 scripts/test-osrs-npcs.py (exit 0)
+OSRS NPCs: bit offsets/widths, spawn variants, clocks, retained movement, removal, truncation and distance signs passed
+
+sh scripts/test-osrs-game.sh (exit 0)
+RuneScape: running Agel skill and item setup test
+RuneScape PASS: Smithing 1 -> 70 and inventory 0 -> 100 coins observed from live packets
+RuneScape: movement and normal-account permission checks observed; checking persistence
+{test admin-setup passed #t smithing-level 70 coins 100}
+{test walk-and-authority passed #t target-x 3223 target-z 3218 unauthorized-setup refused}
+persisted control: account=13 character=13 rights= x=3223 z=3218 level=0 xp_rate_in_hundreds=100
+persisted setup: account=4 character=4 rights=ADMINISTRATOR x=3221 z=3218 level=0 xp_rate_in_hundreds=100
+stat=13 base=70 visible=70 fine_xp=7376270
+inv=inv.inv item=obj.coins count=100
+RuneScape PASS: live movement, skill/item setup, permission separation and persistence

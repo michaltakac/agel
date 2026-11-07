@@ -4,7 +4,7 @@
 # it, the program's typed questions answered by this harness as the host
 # bridge would. No game, no window, no model on the host.
 set -eu
-image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
+image=$(./scripts/build-boot.sh --features doom-demo | tail -n 1)
 disk=$(mktemp "${TMPDIR:-/tmp}/agel-drive.XXXXXX")
 trap 'rm -f "$disk"' EXIT HUP INT TERM
 cp "$image" "$disk"

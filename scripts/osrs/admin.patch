@@ -1,0 +1,47 @@
+diff --git a/content/other/commands/src/main/kotlin/org/rsmod/content/other/commands/AdminCommands.kt b/content/other/commands/src/main/kotlin/org/rsmod/content/other/commands/AdminCommands.kt
+index 4e2a9e8..7a6b7e2 100644
+--- a/content/other/commands/src/main/kotlin/org/rsmod/content/other/commands/AdminCommands.kt
++++ b/content/other/commands/src/main/kotlin/org/rsmod/content/other/commands/AdminCommands.kt
+@@ -100,6 +100,7 @@ constructor(
+     override fun ScriptContext.startup() {
+         onCommand("master", "Max out all stats", ::master)
+         onCommand("reset", "Reset all stats", ::reset)
++        onCommand("setlevel", "Set one skill level: skill level", ::setLevel)
+         onCommand("mypos", "Get current coordinates", ::mypos)
+         onCommand("tele", "Teleport to coordgrid", ::tele) {
+             invalidArgs = "Usage: ::tele mx mz [level](e.g. ::tele 3200 3200 0)"
+@@ -385,6 +386,34 @@ constructor(
+ 
+     private fun reset(cheat: Cheat) = with(cheat) { player.setStatLevels(level = 1) }
+ 
++    @OptIn(InternalApi::class)
++    private fun setLevel(cheat: Cheat) = with(cheat) {
++        val requested = args.getOrNull(1)?.toIntOrNull()
++        if (args.size != 2 || requested == null || requested !in 1..99) {
++            player.mes("Usage: ::setlevel skill 1-99")
++            return@with
++        }
++        val key = "stat.${args[0].removePrefix("stat.")}"
++        val definition = ServerCacheManager.getStats().values.firstOrNull {
++            RSCM.getReverseMapping(RSCMType.STAT, it.id) == key
++        }
++        if (definition == null) {
++            player.mes("Unknown skill")
++            return@with
++        }
++        val target = max(definition.minLevel, requested)
++        val xp = PlayerSkillXPTable.getXPFromLevel(target)
++        if (player.statMap.getBaseLevel(key) > target) {
++            player.statRevert(key, target, xp)
++        } else {
++            val delta = xp - player.statMap.getXP(key)
++            player.statMap.setCurrentLevel(key, target.toByte())
++            player.statAdvance(key, delta.toDouble(), rate = 1.0, source = XpSource.Manual)
++        }
++        player.mes("${args[0]} set to $target")
++    }
++
++
+     private fun mypos(cheat: Cheat) =
+         with(cheat) {
+             player.mes("${player.coords}:")

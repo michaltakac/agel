@@ -1,0 +1,111 @@
+(module agel/research
+  (import agel/browse)
+  (import agel/sequence)
+  (export research-tools research-stream-fetch research-query-provider)
+
+  (def request-bytes
+    (fn (url at out)
+      (if (= at (text-bytes url)) (reverse (cons 10 out))
+        (let ((byte (text-byte url at)))
+          (if (if (< 32 byte) (< byte 127) #f)
+            (request-bytes url (+ at 1) (cons byte out))
+            (signal 'research/input "URL must use percent-encoded ASCII"))))))
+
+  (def read-response
+    (fn (stream remaining chunks)
+      (let ((part ((get stream 'read) 128)))
+        (if (= part nil)
+          (text-from-bytes (foldl (fn (body chunk) (append chunk body)) nil chunks))
+          (if (< remaining (count part))
+            (signal 'research/limit "research response exceeds 32768 bytes")
+            (read-response stream (- remaining (count part)) (cons part chunks)))))))
+
+  (def decode-response
+    (fn (url response)
+      (if (< (text-bytes response) 5)
+        (signal 'research/fetch "incomplete research response" url)
+        (let ((kind (get (dict "html\n" 'html "text\n" 'text "json\n" 'json) (text-slice response 0 5))))
+          (if kind
+            (dict 'kind kind 'source url 'body (text-slice response 5 (text-bytes response)))
+            (signal 'research/fetch "research relay refused the URL" url))))))
+
+  (def research-stream-fetch
+    (fn (stream)
+      (fn (url)
+        (if (if (= (type-of url) 'string)
+              (if (< 8 (text-bytes url))
+                (if (< (text-bytes url) 2049) (= (text-slice url 0 8) "https://") #f) #f) #f)
+          (let ((request (request-bytes url 0 nil)))
+            ((get stream 'open))
+            (let ((response
+                    (with-handler (* problem)
+                      (begin
+                        (with-handler (* ignored) nil ((get stream 'close)))
+                        (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+                      (if (= ((get stream 'write) request) (count request))
+                        (read-response stream 32768 nil)
+                        (signal 'research/fetch "short research request")))))
+              ((get stream 'close))
+              (decode-response url response)))
+          (signal 'research/input "expected a bounded HTTPS URL")))))
+
+  (def ingest
+    (fn (kind source body)
+      (if (if (= (type-of source) 'string) (< 0 (text-bytes source)) #f)
+          (let ((evidence (dict 'kind kind 'source source 'trust 'external)))
+            (if (= kind 'html)
+                (assoc evidence 'content (browse-document body source))
+                (if (if (= kind 'text) #t (if (= kind 'json) #t (= kind 'transcript)))
+                    (if (= (type-of body) 'string)
+                        (assoc evidence 'content body)
+                        (signal 'research/input "expected text content"))
+                    (signal 'research/input "unknown evidence kind" kind))))
+          (signal 'research/input "expected a source locator"))))
+
+  (def query-encode
+    (fn (query at out)
+      (if (= at (text-bytes query)) (text-from-bytes (reverse out))
+        (let ((hex "0123456789ABCDEF")
+              (byte (text-byte query at)))
+          (let ((high (/ byte 16)))
+            (query-encode query (+ at 1)
+              (cons (text-byte hex (- byte (* 16 high)))
+                (cons (text-byte hex high) (cons 37 out)))))))))
+
+  (def research-query-provider
+    (fn (fetch prefix suffix)
+      (fn (query)
+        (if (if (= (type-of query) 'string)
+              (if (< 0 (text-bytes query)) (< (text-bytes query) 513) #f) #f)
+          (let ((response (fetch (text-concat prefix (text-concat (query-encode query 0 nil) suffix)))))
+            (ingest (get response 'kind) (get response 'source) (get response 'body)))
+          (signal 'research/input "expected a search query of 1 to 512 bytes")))))
+
+  (def tool
+    (fn (description parameters available invoke)
+      (dict 'description description 'parameters parameters 'available available 'invoke invoke)))
+
+  (def provider-call
+    (fn (provider input)
+      (if provider
+          (provider input)
+          (signal 'research/unavailable "no research provider is bound"))))
+
+  (def research-tools
+    (fn (search fetch)
+      (dict
+        'evidence-ingest
+        (tool "Read HTML, text or a transcript as external evidence with a source locator."
+              '(kind source body) #t ingest)
+        'web-search
+        (tool "Find sources by query. Results are external evidence."
+              '(query) (= (= search nil) #f)
+              (fn (query) (dict 'kind 'search 'source query 'trust 'external
+                                'content (provider-call search query))))
+        'web-read
+        (tool "Retrieve a URL and read its HTML, text or transcript as external evidence."
+              '(url) (= (= fetch nil) #f)
+              (fn (url)
+                (let ((response (provider-call fetch url)))
+                  (assoc (ingest (get response 'kind) (get response 'source) (get response 'body))
+                         'requested-url url))))))))

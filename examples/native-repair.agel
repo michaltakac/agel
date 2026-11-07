@@ -1,0 +1,47 @@
+(import agel/repair)
+(import agel/inference)
+(import agel/native-program)
+(import agel/evolution)
+(import agel/judge-log)
+(def check (fn (ok label) (if ok #t (signal 'native/repair-test label))))
+(def audit (fn (record) (file-append "judge-log" (text-concat (print-form record) "\n"))))
+(def adapter (dict 'geometry (program-region) 'read program-sector-read 'write program-sector-write
+  'flush program-flush 'run exec-canary 'run-verified exec-canary 'prefix "m" 'fuel 1000000
+  'trace (fn (event) (console-log (text-concat "native-repair: activation " (print-form event))))))
+(def before '(fn (n size) (/ n size)))
+(def baseline (native-program-edit (evolution-new) 'batches nil before
+  (list (dict 'arguments '(6 3) 'expected 2))
+  (fn (request) (judge-with-log 'bootstrap request
+    (fn (diff) (dict 'allowed #t 'reason "frozen control initialization" 'cost-microusd 0)) audit)) adapter))
+(check (= (evolution-current baseline 'program 'batches) 1) "baseline executable installation")
+(def retained-session (dict 'mailbox '(continue report) 'turn 12))
+(def routes (dict 'writer "codex" 'judge "jev"))
+(def infer (fn (provider prompt) (inference-call routes model-request provider prompt)))
+(def session (repair-start (repair-new
+  (dict 'kind 'program 'versions baseline 'tool 'batches 'before-text "(fn (n size) (/ n size))"
+    'context "A resource scheduler receives integers n from 0 through 1000 and size from 1 through 1000. Return the minimum whole batches needed. Observed failure: (5 3) returned 1 but requires 2. Displayed probes in order: (5 3) expected 2; (0 3) expected 0. Preserve all valid inputs. Native compilation supports integer arithmetic, conditionals, lexical fn and let."
+    'examples (list (dict 'arguments '(5 3) 'expected 2) (dict 'arguments '(0 3) 'expected 0))
+    'held-out (list (dict 'arguments '(9 3) 'expected 3) (dict 'arguments '(10 3) 'expected 4)
+                    (dict 'arguments '(1 7) 'expected 1) (dict 'arguments '(6 3) 'expected 2))
+    'max-attempts 2 'threshold 800 'proposal-provider 'writer 'judge-provider 'judge
+    'defer-activation #t 'activate (native-program-activation adapter)))))
+(console-log "native-repair: requesting model-written repair from within Agel OS")
+(begin (def session (repair-exchange session infer audit)) #t)
+(begin (def session (repair-exchange session infer audit)) #t)
+(begin (def session (repair-exchange session infer audit)) #t)
+(begin (def session (repair-exchange session infer audit)) #t)
+(begin (def session (repair-exchange session infer audit)) #t)
+(begin (def session (repair-exchange session infer audit)) #t)
+(check (= (get session 'status) 'done) "repair exhausted or failed")
+(def versions (get session 'versions))
+(check (= (evolution-current versions 'program 'batches) 2) "native version was not activated")
+(check (= (native-program-run versions 'batches '(5 3) adapter) '(2 "2\n")) "native repaired execution")
+(check (= retained-session (dict 'mailbox '(continue report) 'turn 12)) "caller state changed")
+(def old-score (repair-evaluate session 1))
+(def new-score (repair-evaluate session 2))
+(check (= (get old-score 'correct) 3) "control score")
+(check (= (get new-score 'correct) 6) "repaired score")
+(console-log (text-concat "native-repair: candidate " (print-form (get session 'candidate))))
+(console-log (text-concat "native-repair: history " (print-form (get versions 'history))))
+(console-log "native-repair: PASS: native version 2 activated after inference; 3/6 control to 6/6; same controller and retained state")
+#t

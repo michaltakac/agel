@@ -10,7 +10,11 @@ fresh budget; the stage charges each boot, and after three boots without the
 kernel reaching a healthy state it loads the trusted slot instead.
 
     stage-kernel.py IMAGE KERNEL_BIN [--key KEY | --signature HEX | --unsigned]
+    stage-kernel.py IMAGE --restore VERSION
     stage-kernel.py IMAGE --status
+
+Staging from the command line retains the exact kernel and signature in
+IMAGE.kernel-history. A restored version goes through normal admission.
 
 A candidate is not loaded until a running kernel has admitted it: the kernel
 hashes the slot with SHA-512 and verifies an Ed25519 signature over that
@@ -22,7 +26,9 @@ zero signature, which the kernel refuses.
 
 from __future__ import annotations
 
+import hashlib
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -40,20 +46,27 @@ VERSION = 2
 BUDGET = 3
 
 
-def read_selector(image: str) -> dict[str, int]:
+def read_selector(image: str) -> dict[str, int | bytes]:
     with open(image, "rb") as disk:
         disk.seek(SELECTOR_SECTOR * SECTOR)
         sector = disk.read(SECTOR)
-    if sector[:4] != MAGIC or sector[4] != VERSION:
+    if not sector or not any(sector):
         return dict(EMPTY)
+    if len(sector) != SECTOR or sector[:4] != MAGIC or sector[4] != VERSION:
+        raise ValueError("unrecognized kernel slot selector")
+    trusted, candidate = sector[5], sector[6]
+    if trusted not in SLOT_BASE or (candidate != NO_CANDIDATE and
+                                    (candidate not in SLOT_BASE or candidate == trusted)):
+        raise ValueError("invalid kernel slot selector")
     return {
-        "trusted": sector[5],
-        "candidate": sector[6],
+        "trusted": trusted,
+        "candidate": candidate,
         "attempts": sector[7],
         "verified": sector[8],
         "admitted": sector[9],
         "length": int.from_bytes(sector[12:16], "little"),
         "signature": bytes(sector[64:128]),
+        "trial_digest": bytes(sector[128:192]),
     }
 
 
@@ -65,6 +78,7 @@ EMPTY = {
     "admitted": 0,
     "length": 0,
     "signature": bytes(64),
+    "trial_digest": bytes(64),
 }
 
 
@@ -83,6 +97,7 @@ def write_selector(image: str, selector: dict[str, int]) -> None:
         disk.seek(SELECTOR_SECTOR * SECTOR)
         disk.write(sector)
         disk.flush()
+        os.fsync(disk.fileno())
 
 
 def sign(kernel: bytes, key: str = DEFAULT_KEY) -> bytes:
@@ -104,20 +119,25 @@ def sign(kernel: bytes, key: str = DEFAULT_KEY) -> bytes:
 
 
 def stage(image: str, kernel: bytes, signature: bytes) -> int:
-    if len(kernel) > SLOT_SECTORS * SECTOR:
-        raise ValueError(f"kernel is {len(kernel)} bytes; a slot holds {SLOT_SECTORS * SECTOR}")
+    if not 0 < len(kernel) <= SLOT_SECTORS * SECTOR:
+        raise ValueError(f"kernel length must be between 1 and {SLOT_SECTORS * SECTOR} bytes")
     if len(signature) != 64:
         raise ValueError("a signature is 64 bytes")
     selector = read_selector(image)
-    slot = 1 - selector["trusted"]
+    trusted = selector["trusted"]
+    slot = 1 - trusted
+    if selector["candidate"] != NO_CANDIDATE:
+        # A reboot during replacement must load the trusted slot.
+        write_selector(image, {**EMPTY, "trusted": trusted})
     with open(image, "r+b") as disk:
         disk.seek(SLOT_BASE[slot] * SECTOR)
         disk.write(kernel.ljust(SLOT_SECTORS * SECTOR, b"\0"))
         disk.flush()
+        os.fsync(disk.fileno())
     write_selector(
         image,
         {
-            "trusted": selector["trusted"],
+            "trusted": trusted,
             "candidate": slot,
             "attempts": 0,
             "verified": 0,
@@ -127,6 +147,41 @@ def stage(image: str, kernel: bytes, signature: bytes) -> int:
         },
     )
     return slot
+
+
+def archived_candidate(image: str, version: str) -> tuple[bytes, bytes]:
+    if len(version) != 128 or any(char not in "0123456789abcdef" for char in version):
+        raise ValueError("expected a lowercase SHA-512 kernel history version")
+    path = Path(image + ".kernel-history") / version
+    with path.open("rb") as file:
+        record = file.read(65 + SLOT_SECTORS * SECTOR)
+    if not 64 < len(record) <= 64 + SLOT_SECTORS * SECTOR or hashlib.sha512(record).hexdigest() != version:
+        raise ValueError("kernel history record does not match its version")
+    return record[64:], record[:64]
+
+
+def retain_candidate(image: str, kernel: bytes, signature: bytes) -> str:
+    if not 0 < len(kernel) <= SLOT_SECTORS * SECTOR or len(signature) != 64:
+        raise ValueError("invalid kernel or signature length")
+    record = signature + kernel
+    version = hashlib.sha512(record).hexdigest()
+    history = Path(image + ".kernel-history")
+    history.mkdir(mode=0o700, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=history) as file:
+        file.write(record)
+        file.flush()
+        os.fsync(file.fileno())
+        try:
+            os.link(file.name, history / version)
+        except FileExistsError:
+            archived_candidate(image, version)
+    for path in (history, history.parent):
+        directory = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    return version
 
 
 def slot_name(slot: int) -> str:
@@ -151,6 +206,12 @@ def main() -> int:
     if len(arguments) == 2 and arguments[1] == "--status":
         print(describe(read_selector(arguments[0])))
         return 0
+    if len(arguments) == 3 and arguments[1] == "--restore":
+        image, _, version = arguments
+        kernel, signature = archived_candidate(image, version)
+        slot = stage(image, kernel, signature)
+        print(f"restaged kernel version {version} as candidate slot {slot_name(slot)}")
+        return 0
     if len(arguments) not in (2, 3, 4):
         print(__doc__, file=sys.stderr)
         return 2
@@ -168,8 +229,10 @@ def main() -> int:
     else:
         print(__doc__, file=sys.stderr)
         return 2
+    version = retain_candidate(image, kernel, signature)
     slot = stage(image, kernel, signature)
     print(f"staged {kernel_path} as candidate kernel slot {slot_name(slot)}; {describe(read_selector(image))}")
+    print(f"retained kernel version {version}")
     return 0
 
 

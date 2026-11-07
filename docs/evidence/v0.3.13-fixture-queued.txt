@@ -1,0 +1,20 @@
+Deterministic fixture providers; no paid inference. Final queued byte transport.
+Evidence: target/native-repair-fixture-1794007140790025000
+Mode: deterministic transport fixtures
+Elapsed seconds: 84.304
+live-desktop> native-repair: activation {phase emit case 0 name "m1a0c0"}
+native-repair: requesting model-written repair from within Agel OS
+live-desktop> native-repair: activation {phase emit case 0 name "m2s6c0"}
+native-repair: activation {phase emit case 1 name "m2s6c1"}
+native-repair: activation {phase emit case 2 name "m2s6c2"}
+native-repair: activation {phase emit case 3 name "m2s6c3"}
+native-repair: activation {phase emit case 4 name "m2s6c4"}
+native-repair: activation {phase emit case 5 name "m2s6c5"}
+native-repair: candidate {diagnosis "division truncates partial batches" after (fn (n size) (/ (+ n (- size 1)) size)) predictions (2 0)}
+native-repair: history ({event judge request {kind program name batches base nil before nil after (fn (n size) (/ n size))} receipt {allowed #t reason "frozen control initialization" cost-microusd 0}} {event replay result {passed #t checked 1 reason "recorded steps agree"}} {event activation version 1 result {passed #t reason "compiled canaries match" programs ({program {name "m1a0c0" start 3143 length 810 crc 1835737154} arguments (6 3) expected 2 actual (2 "2\n")})}} {event commit kind program name batches version 1} {event judge request {kind program name batches base 1 before (fn (n size) (/ n size)) after (fn (n size) (/ (+ n (- size 1)) size))} receipt {allowed #t reason "text judge returned: patch noul 950 reason choice 5 none 900 900 25 25 25 25" score 950 reason-code "none" cost-microusd nil}} {event replay result {passed #t checked 8 reason "recorded steps agree"}} {event activation version 2 result {passed #t reason "compiled canaries match" programs ({program {name "m2s6c0" start 3145 length 968 crc 2493587102} arguments (5 3) expected 2 actual (2 "2\n")} {program {name "m2s6c1" start 3147 length 968 crc 2932866402} arguments (0 3) expected 0 actual (0 "0\n")} {program {name "m2s6c2" start 3149 length 968 crc 3426196430} arguments (9 3) expected 3 actual (3 "3\n")} {program {name "m2s6c3" start 3151 length 968 crc 3658627738} arguments (10 3) expected 4 actual (4 "4\n")} {program {name "m2s6c4" start 3153 length 968 crc 2632324780} arguments (1 7) expected 1 actual (1 "1\n")} {program {name "m2s6c5" start 3155 length 968 crc 2189737930} arguments (6 3) expected 2 actual (2 "2\n")})}} {event commit kind program name batches version 2})
+native-repair: PASS: native version 2 activated after inference; 3/6 control to 6/6; same controller and retained state
+process agel exited with status 0
+Durable guest judge calls: 1 synthetic priced-record nanousd: 4200
+Codex dollar cost: fixture, no paid inference
+Ledger SHA-256: 17ab4401ea9364146928825559b8616b85b777efdec42a7ac5f476c1080a3880
+PASS: native repair pipeline; scripted provider fixtures; judge records in protected guest ledger

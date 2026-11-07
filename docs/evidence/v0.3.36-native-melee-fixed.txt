@@ -1,0 +1,57 @@
+$ python3 scripts/test-native-network.py --melee-xp 83
+Evidence: target/native-network-1794035185528621000
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-network: observations {smithing-level 1 coins 0}
+native-combat: training three melee skills
+native-combat: encounter (0 {test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 8 attack-after 16 hitpoints-before 1156 hitpoints-after 1159 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 16 attack-after 24 hitpoints-before 1159 hitpoints-after 1161 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 24 attack-after 32 hitpoints-before 1161 hitpoints-after 1164 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 32 attack-after 40 hitpoints-before 1164 hitpoints-after 1167 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 40 attack-after 48 hitpoints-before 1167 hitpoints-after 1169 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 48 attack-after 56 hitpoints-before 1169 hitpoints-after 1172 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 56 attack-after 64 hitpoints-before 1172 hitpoints-after 1174 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 64 attack-after 76 hitpoints-before 1174 hitpoints-after 1178 target-removed #t})
+native-combat: encounter (0 {target-index 20014 attack-before 76 attack-after 84 hitpoints-before 1178 hitpoints-after 1181 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 0 xp-after 8 hitpoints-before 1181 hitpoints-after 1183 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 8 xp-after 16 hitpoints-before 1183 hitpoints-after 1186 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 16 xp-after 24 hitpoints-before 1186 hitpoints-after 1189 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 24 xp-after 32 hitpoints-before 1189 hitpoints-after 1191 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 32 xp-after 40 hitpoints-before 1191 hitpoints-after 1194 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 40 xp-after 48 hitpoints-before 1194 hitpoints-after 1196 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 48 xp-after 56 hitpoints-before 1196 hitpoints-after 1199 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 56 xp-after 64 hitpoints-before 1199 hitpoints-after 1202 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 64 xp-after 72 hitpoints-before 1202 hitpoints-after 1204 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 72 xp-after 80 hitpoints-before 1204 hitpoints-after 1207 target-removed #t})
+native-combat: encounter (2 {target-index 20014 skill 2 xp-before 80 xp-after 88 hitpoints-before 1207 hitpoints-after 1209 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 0 xp-after 8 hitpoints-before 1209 hitpoints-after 1212 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 8 xp-after 16 hitpoints-before 1212 hitpoints-after 1215 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 16 xp-after 24 hitpoints-before 1215 hitpoints-after 1217 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 24 xp-after 32 hitpoints-before 1217 hitpoints-after 1220 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 32 xp-after 40 hitpoints-before 1220 hitpoints-after 1222 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 40 xp-after 48 hitpoints-before 1222 hitpoints-after 1225 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 48 xp-after 56 hitpoints-before 1225 hitpoints-after 1228 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 56 xp-after 64 hitpoints-before 1228 hitpoints-after 1230 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 64 xp-after 72 hitpoints-before 1230 hitpoints-after 1233 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 72 xp-after 80 hitpoints-before 1233 hitpoints-after 1235 target-removed #t})
+native-combat: encounter (1 {target-index 20014 skill 1 xp-before 80 xp-after 88 hitpoints-before 1235 hitpoints-after 1238 target-removed #t})
+native-combat: {test rat-melee passed #t goal-xp 83 stance 3 attack-xp 84 strength-xp 88 defence-xp 88 hitpoints-xp 1238}
+native-combat: {skill 0 xp-before 0 xp-after 84 level 2 fights 10 encounters ({test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t} {target-index 20014 attack-before 8 attack-after 16 hitpoints-before 1156 hitpoints-after 1159 target-removed #t} {target-index 20014 attack-before 16 attack-after 24 hitpoints-before 1159 hitpoints-after 1161 target-removed #t} {target-index 20014 attack-before 24 attack-after 32 hitpoints-before 1161 hitpoints-after 1164 target-removed #t} {target-index 20014 attack-before 32 attack-after 40 hitpoints-before 1164 hitpoints-after 1167 target-removed #t} {target-index 20014 attack-before 40 attack-after 48 hitpoints-before 1167 hitpoints-after 1169 target-removed #t} {target-index 20014 attack-before 48 attack-after 56 hitpoints-before 1169 hitpoints-after 1172 target-removed #t} {target-index 20014 attack-before 56 attack-after 64 hitpoints-before 1172 hitpoints-after 1174 target-removed #t} {target-index 20014 attack-before 64 attack-after 76 hitpoints-before 1174 hitpoints-after 1178 target-removed #t} {target-index 20014 attack-before 76 attack-after 84 hitpoints-before 1178 hitpoints-after 1181 target-removed #t})}
+native-combat: {skill 2 xp-before 0 xp-after 88 level 2 fights 11 encounters ({target-index 20014 skill 2 xp-before 0 xp-after 8 hitpoints-before 1181 hitpoints-after 1183 target-removed #t} {target-index 20014 skill 2 xp-before 8 xp-after 16 hitpoints-before 1183 hitpoints-after 1186 target-removed #t} {target-index 20014 skill 2 xp-before 16 xp-after 24 hitpoints-before 1186 hitpoints-after 1189 target-removed #t} {target-index 20014 skill 2 xp-before 24 xp-after 32 hitpoints-before 1189 hitpoints-after 1191 target-removed #t} {target-index 20014 skill 2 xp-before 32 xp-after 40 hitpoints-before 1191 hitpoints-after 1194 target-removed #t} {target-index 20014 skill 2 xp-before 40 xp-after 48 hitpoints-before 1194 hitpoints-after 1196 target-removed #t} {target-index 20014 skill 2 xp-before 48 xp-after 56 hitpoints-before 1196 hitpoints-after 1199 target-removed #t} {target-index 20014 skill 2 xp-before 56 xp-after 64 hitpoints-before 1199 hitpoints-after 1202 target-removed #t} {target-index 20014 skill 2 xp-before 64 xp-after 72 hitpoints-before 1202 hitpoints-after 1204 target-removed #t} {target-index 20014 skill 2 xp-before 72 xp-after 80 hitpoints-before 1204 hitpoints-after 1207 target-removed #t} {target-index 20014 skill 2 xp-before 80 xp-after 88 hitpoints-before 1207 hitpoints-after 1209 target-removed #t})}
+native-combat: {skill 1 xp-before 0 xp-after 88 level 2 fights 11 encounters ({target-index 20014 skill 1 xp-before 0 xp-after 8 hitpoints-before 1209 hitpoints-after 1212 target-removed #t} {target-index 20014 skill 1 xp-before 8 xp-after 16 hitpoints-before 1212 hitpoints-after 1215 target-removed #t} {target-index 20014 skill 1 xp-before 16 xp-after 24 hitpoints-before 1215 hitpoints-after 1217 target-removed #t} {target-index 20014 skill 1 xp-before 24 xp-after 32 hitpoints-before 1217 hitpoints-after 1220 target-removed #t} {target-index 20014 skill 1 xp-before 32 xp-after 40 hitpoints-before 1220 hitpoints-after 1222 target-removed #t} {target-index 20014 skill 1 xp-before 40 xp-after 48 hitpoints-before 1222 hitpoints-after 1225 target-removed #t} {target-index 20014 skill 1 xp-before 48 xp-after 56 hitpoints-before 1225 hitpoints-after 1228 target-removed #t} {target-index 20014 skill 1 xp-before 56 xp-after 64 hitpoints-before 1228 hitpoints-after 1230 target-removed #t} {target-index 20014 skill 1 xp-before 64 xp-after 72 hitpoints-before 1230 hitpoints-after 1233 target-removed #t} {target-index 20014 skill 1 xp-before 72 xp-after 80 hitpoints-before 1233 hitpoints-after 1235 target-removed #t} {target-index 20014 skill 1 xp-before 80 xp-after 88 hitpoints-before 1235 hitpoints-after 1238 target-removed #t})}
+native-combat: task-us 343092709
+native-network: keepalives 7
+native-network: client completed: login, observations and melee training inside Agel OS
+agel: 1 forms, 100177961 steps, revision 1
+process agel exited with status 0
+Persisted native client: account=[omitted] character=[omitted] rights= x=3223 z=3214 level=0 xp_rate_in_hundreds=100
+Persisted melee XP: stat=0 base=2 visible=2 fine_xp=840
+stat=1 base=2 visible=2 fine_xp=880
+stat=2 base=2 visible=2 fine_xp=880
+stat=3 base=10 visible=10 fine_xp=12385
+varp.com_mode=3
+PASS: native client combat XP saved with normal rights and 1x XP
+Elapsed seconds: 420.263

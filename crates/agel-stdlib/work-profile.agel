@@ -1,0 +1,66 @@
+(module agel/work-profile
+  (import agel/services)
+  (export profile-work profile-limit profile-break-even)
+  (def require (fn (ok reason) (if ok #t (signal 'profile/contract reason))))
+  (def peak (fn (a b) (if (< a b) b a)))
+  (def duration
+    (fn (start end)
+      (begin (require (if (= (type-of end) 'int) (if (< end start) #f #t) #f) "clock went backwards")
+        (- end start))))
+  (def meter
+    (fn (state message)
+      (let ((at (get message 'at)) (phase (get message 'phase)) (last (get state 'last)))
+        (let ((span (duration last at)))
+          (let ((next
+                  (if (= phase 'before)
+                    (assoc (assoc state 'before at) 'work-max-us (peak (get state 'work-max-us) span))
+                    (if (= phase 'after)
+                      (assoc (assoc (assoc (assoc state 'last at)
+                        'service-us (+ (get state 'service-us) (duration (get state 'before) at)))
+                        'gap-max-us (if (= (get state 'calls) 0) 0 (peak (get state 'gap-max-us) span)))
+                        'calls (+ 1 (get state 'calls)))
+                      (assoc (assoc (assoc state 'work-max-us (peak (get state 'work-max-us) span))
+                        'gap-max-us (if (= (get state 'calls) 0) 0 (peak (get state 'gap-max-us) span)))
+                        'elapsed-us (duration (get state 'started) at))))))
+            (dict 'state next 'reply next))))))
+  (def note
+    (fn (id phase at)
+      (let ((result (service-call id (dict 'phase phase 'at at))))
+        (if (get result 'error)
+          (let ((problem (get result 'error))) (signal (get problem 'kind) (get problem 'message))) result))))
+  (def profile-work
+    (fn (operation service now)
+      (let ((started (now)))
+        (let ((id (service-new "work-profile" meter
+                    (dict 'started started 'last started 'before started
+                      'service-us 0 'work-max-us 0 'gap-max-us 0 'calls 0))))
+          (let ((value (operation (fn () (begin (note id 'before (now)) (service) (note id 'after (now)) #t)))))
+            (let ((stats (note id 'finish (now))))
+              (dict 'value value 'metrics (dict 'elapsed-us (get stats 'elapsed-us)
+                'service-us (get stats 'service-us) 'work-max-us (get stats 'work-max-us)
+                'gap-max-us (get stats 'gap-max-us) 'calls (get stats 'calls)))))))))
+  (def positive
+    (fn (value) (if (= (type-of value) 'int) (< 0 value) #f)))
+  (def profile-limit
+    (fn (metrics unit budget margin maximum)
+      (begin
+        (require (positive unit) "profile unit must be positive")
+        (require (positive budget) "work budget must be positive")
+        (require (positive margin) "safety margin must be positive")
+        (require (positive maximum) "work limit must be positive")
+        (require (positive (get metrics 'calls)) "profile has no service calls")
+        (require (positive (get metrics 'work-max-us)) "profile has no measured work interval")
+        (let ((bound (/ (* unit budget) (* margin (get metrics 'work-max-us)))))
+          (if (< maximum bound) maximum bound)))))
+  (def profile-break-even
+    (fn (overhead before after candidate)
+      (require (if (= overhead 0) #t (positive overhead)) "profile overhead must be nonnegative")
+      (require (if (positive before) (positive after) #f) "control durations must be positive")
+      (require (if (= candidate 0) #t (positive candidate)) "candidate duration must be nonnegative")
+      (let ((control (if (< before after) before after)))
+        (let ((saving (- control candidate)))
+          (dict 'overhead-us overhead 'saving-us saving
+            'replays (if (< 0 saving)
+              (if (= overhead 0) 0 (+ 1 (/ (- overhead 1) saving))) nil))))))
+
+)

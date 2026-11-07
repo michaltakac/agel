@@ -1,0 +1,47 @@
+(module agel/osrs-live-tools-test
+  (import agel/sequence)
+  (import agel/live-tools)
+  (import agel/evolution)
+  (import agel/osrs-game)
+  (import agel/osrs-combat-test)
+  (export test-live-combat)
+  (def require (fn (ok) (if ok #t (signal 'osrs/test "live replacement failed"))))
+  (def observe
+    (fn (state)
+      (dict 'ready (if (osrs-stat state 0) (if (osrs-stat state 3) #t #f) #f)
+            'target (car (filter (fn (npc) (= (get npc 'type) 2854)) (osrs-nearby-npcs state))))))
+  (def invoke
+    (fn (agent receiver observation)
+      (begin
+        (send agent (dict 'operation 'call 'name 'attack-target 'arguments (list observation) 'reply-to receiver))
+        (run 1)
+        (recv receiver))))
+  (def test-live-combat
+    (fn (state)
+      (let ((initial (observe state))
+            (ready (osrs-await state (fn (g) (let ((o (observe g))) (if (get o 'ready) (if (get o 'target) #t #f) #f)))))
+            (receiver (spawn "combat-tool-results"))
+            (agent (live-tools "combat-tools"
+              (fn (request) (dict 'allowed #t 'reason "deterministic local test judge" 'cost-microusd 0))))
+            (old '(fn (o) (if (get o 'target) (get o 'target) 0)))
+            (new '(fn (o) (if (get o 'ready) (get o 'target) nil))))
+        (let ((observation (observe ready)))
+          (let ((cases (list (dict 'arguments (list observation) 'expected (get observation 'target)))))
+            (begin
+              (require (= (get initial 'target) nil))
+              (send agent (dict 'operation 'edit 'name 'attack-target 'before nil 'after old 'cases cases))
+              (run 1)
+              (require (= (get (invoke agent receiver initial) 'value) 0))
+              (send agent (dict 'operation 'edit 'name 'attack-target 'before old 'after new
+                'cases (append cases (list (dict 'arguments (list initial) 'expected nil)))))
+              (run 1)
+              (require (= (get (invoke agent receiver initial) 'value) nil))
+              (let ((combat (test-rat-combat-using ready
+                      (fn (visible) (get (invoke agent receiver (observe visible)) 'value)))))
+                (let ((heap (live-tools-state agent)))
+                  (begin
+                    (require (= (evolution-current (get heap 'versions) 'cell 'attack-target) 2))
+                    (require (= (count (get heap 'calls)) 3))
+                    (dict 'state (get combat 'state) 'report
+                      (assoc (assoc (assoc (get combat 'report) 'live-tool-version 2)
+                        'preserved-calls 3) 'judge 'deterministic-fixture))))))))))))

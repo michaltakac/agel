@@ -40,13 +40,12 @@ pub const NAME: &str = "x86_64";
 /// 4 MiB) and the kernel stack from 4 to 5 MiB.
 #[cfg(feature = "isolation-selftest")]
 pub const POOL_START: u64 = 0x0060_0000;
-/// End of the frame pool: 56 MiB of the 64 MiB QEMU is started with
-/// (48 MiB before v0.2.100; the evaluator's stack and a process's zone
-/// grew). The bound is a deliberate fixed resource policy, not a probe
-/// result, and the BIOS stage identity-maps the first gibibyte for the
-/// supervisor.
+/// Ceiling for the pool ledger and supervisor identity window.
 #[cfg(feature = "isolation-selftest")]
-pub const POOL_END: u64 = 0x03E0_0000;
+pub const POOL_END: u64 = 0x1000_0000;
+
+#[cfg(feature = "isolation-selftest")]
+mod fw_memory;
 
 /// A supervisor-only address a world may try to write. It is the first page of
 /// the kernel image, which every domain maps without the user bit.
@@ -252,6 +251,9 @@ impl Machine {
             return Err("processor does not support the no-execute bit");
         }
         let mut pool = crate::memory::FramePool::new();
+        let pool_end = fw_memory::pool_end();
+        pool.limit_to(pool_end);
+        crate::kprint!("x86 frame pool ends at {} MiB\n", pool_end / (1024 * 1024));
         let kernel_identity =
             memory::build_identity_window(&mut pool, 0..0, 0..0).map_err(|error| error.name())?;
         let identity = memory::build_identity_window(

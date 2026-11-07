@@ -1,0 +1,22 @@
+(import agel/repair)
+(import agel/sequence)
+(import agel/live-tools)
+(import agel/evolution)
+(def before '(fn (n size) (/ n size)))
+(def versions
+  (evolution-edit (evolution-new) 'cell 'batches nil before
+    (list (dict 'arguments '(6 3) 'expected 2))
+    (fn (request) (dict 'allowed #t 'reason "initial fixture" 'cost-microusd 0))))
+(def worker
+  (make-repair-agent "general-repair"
+    (dict 'versions versions 'tool 'batches 'before-text "(fn (n size) (/ n size))"
+      'context "Return the minimum whole batches needed for nonnegative n and positive size. Probes: (5 3) -> 2; (0 3) -> 0."
+      'examples (list (dict 'arguments '(5 3) 'expected 2) (dict 'arguments '(0 3) 'expected 0))
+      'held-out (list (dict 'arguments '(9 3) 'expected 3 'private "HELD_OUT_SECRET")
+                      (dict 'arguments '(10 3) 'expected 4)
+                      (dict 'arguments '(9223372036854775807 2) 'expected 4611686018427387904)
+                      (dict 'arguments '(9223372036854775807 9223372036854775807) 'expected 1))
+      'max-attempts 2 'threshold 800 'proposal-provider 'writer 'judge-provider 'judge)
+    (list (request-capability 'model/infer "writer") (request-capability 'model/infer "judge"))))
+(send worker '(repair/start))
+(run)

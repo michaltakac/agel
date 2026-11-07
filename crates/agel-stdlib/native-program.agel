@@ -1,0 +1,110 @@
+(module agel/native-program
+  (import agel/sequence)
+  (import agel/evolution)
+  (import agel/native)
+  (import agel/native-x86)
+  (import agel/program-store)
+  (import agel/judgment)
+  (export native-program-edit native-program-revert native-program-run native-program-activation
+          native-domain-edit native-domain-revert native-domain-run)
+  (def require (fn (ok reason) (if ok #t (signal 'program/activation reason))))
+  (def rem (fn (a b) (- a (* b (/ a b)))))
+  (def status (fn (n) (let ((r (rem n 256))) (if (< r 0) (+ r 256) r))))
+  (def dispatch
+    (fn (adapter program)
+      (let ((name (get program 'name)) (verified (get adapter 'run-verified)))
+        (if verified (verified name (get program 'start) (get program 'length) (get program 'crc))
+          ((get adapter 'run) name)))))
+  (def checked-ir
+    (fn (source cases)
+      (begin
+        (foldl (fn (_ case)
+          (let ((expected (get case 'expected)))
+            (begin
+              (require (= (type-of expected) 'int) "native program cases require integer results")
+              (require (if (< -4611686018427387905 expected) (< expected 4611686018427387904) #f)
+                "result outside tagged integer range")))) #t cases)
+        (native-compile source))))
+  (def stage
+    (fn (adapter stem ir remaining index completed)
+      (if (= remaining nil)
+        (dict 'passed #t 'reason "compiled canaries match" 'programs (reverse completed))
+        (let ((name (text-concat stem (text-concat "c" (int->text index)))) (plan (car remaining)))
+          (with-handler (* problem)
+            (dict 'passed #f 'reason (get problem 'message) 'programs (reverse completed) 'uncertain-name name)
+            (begin
+            (if (get adapter 'trace) ((get adapter 'trace) (dict 'phase 'emit 'case index 'name name)) nil)
+            (let ((entry (program-install-hex (get adapter 'geometry) name (native-x86-emit-limited ir (get plan 'arguments) (get adapter 'fuel))
+                          (get adapter 'read) (get adapter 'write) (get adapter 'flush))))
+              (let ((actual (dispatch adapter entry)) (expected (get plan 'expected)))
+                (let ((artifact (dict 'program entry 'arguments (get plan 'arguments) 'expected expected 'actual actual)))
+                  (if (= actual (list (status expected) (text-concat (int->text expected) "\n")))
+                    (stage adapter stem ir (cdr remaining) (+ index 1) (cons artifact completed))
+                    (dict 'passed #f 'reason "compiled canary differs" 'programs (reverse (cons artifact completed)))))))))))))
+  (def edit
+    (fn (state kind name before after cases judge adapter)
+      (evolution-edit-with-activation state kind name before after cases judge
+        (fn (request replay)
+          (stage adapter
+            (text-concat (get adapter 'prefix)
+              (text-concat (int->text (get request 'version))
+                (text-concat "a" (int->text (count (get state 'history))))))
+            (checked-ir (get request 'after) replay) replay 0 nil)))))
+  (def unique-cases
+    (fn (cases seen out)
+      (if (= cases nil) (reverse out)
+        (let ((arguments (get (car cases) 'arguments)))
+          (if (has-key? seen arguments) (unique-cases (cdr cases) seen out)
+            (unique-cases (cdr cases) (assoc seen arguments #t) (cons (car cases) out)))))))
+  (def native-program-activation
+    (fn (adapter)
+      (fn (request cases)
+        (stage adapter
+          (text-concat (get adapter 'prefix) (text-concat (int->text (get request 'version))
+            (text-concat "s" (int->text (get request 'attempt)))))
+          (checked-ir (get request 'after) cases) (unique-cases cases (dict) nil) 0 nil))))
+  (def revert
+    (fn (state kind name version cases judge adapter)
+      (let ((old (get (get state 'versions) version)))
+        (begin
+          (require (if old (if (= (get old 'kind) kind) (= (get old 'name) name) #f) #f)
+            "version belongs to another object")
+          (edit state kind name
+            (evolution-source state (evolution-current state kind name))
+            (get old 'source) cases judge adapter)))))
+  (def launch
+    (fn (program adapter)
+      (let ((name (get program 'name)))
+        (if (= (type-of adapter) 'callable) (adapter name)
+          (let ((table (program-table (get adapter 'geometry) ((get adapter 'read) 0))))
+            (let ((row (get (get table 'entries) name)))
+              (require (= (dissoc program 'name) (if row (dissoc row 'end) nil))
+                "installed program differs from the activated artifact")
+              (dispatch adapter program)))))))
+  (def run-active
+    (fn (state kind name arguments adapter)
+      (let ((version (evolution-current state kind name)))
+        (let ((entry (get (get state 'versions) version)))
+          (require entry "no active program version")
+          (let ((activation (get entry 'activation)))
+            (require activation "active version has no installed artifacts")
+            (let ((matches (filter (fn (artifact) (= arguments (get artifact 'arguments)))
+                            (get activation 'programs))))
+              (if (= matches nil) (signal 'program/arguments "no activated image for these arguments")
+                (launch (get (car matches) 'program) adapter))))))))
+  (def native-program-edit
+    (fn (state name before after cases judge adapter)
+      (edit state 'program name before after cases judge adapter)))
+  (def native-program-revert
+    (fn (state name version cases judge adapter)
+      (revert state 'program name version cases judge adapter)))
+  (def native-program-run
+    (fn (state name arguments adapter) (run-active state 'program name arguments adapter)))
+  (def native-domain-edit
+    (fn (state name before after cases judge adapter)
+      (edit state 'domain name before after cases judge adapter)))
+  (def native-domain-revert
+    (fn (state name version cases judge adapter)
+      (revert state 'domain name version cases judge adapter)))
+  (def native-domain-run
+    (fn (state name arguments adapter) (run-active state 'domain name arguments adapter))))

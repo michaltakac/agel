@@ -1,0 +1,14 @@
+Evidence: target/native-network-1794012399948144000
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-network: observations {smithing-level 1 coins 0}
+native-network: keepalives 31
+native-network: client completed: login, observations, walking packet and tick consumption inside Agel OS
+process agel exited with status 0
+Persisted native client: account=21 character=21 rights= x=3223 z=3218 level=0 xp_rate_in_hundreds=100
+PASS: native client movement saved with normal rights and 1x XP
+Elapsed seconds: 139.251
+
+agel: 45 forms, 27498755 steps, revision 1

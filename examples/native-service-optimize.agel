@@ -1,0 +1,62 @@
+(import agel/bytes)
+(import agel/meta)
+(import agel/sequence)
+(import agel/work-profile)
+(def initial-policy '(fn (limit) 64))
+(def policy-versions (if retained-policy retained-policy (evolution-edit (evolution-new) 'cell 'service-quantum nil initial-policy
+  (list (dict 'arguments '(64) 'expected 64))
+  (fn (request) (judge-with-log 'bootstrap request
+    (fn (diff) (dict 'allowed #t 'reason "existing fixed encoder cadence" 'cost-microusd 0)) audit)))))
+(def policy-bound (if retained-policy retained-bound 64))
+(def observed-length (if retained-policy retained-length 0))
+(def policy-uses 0)
+(def policy-service-calls-avoided 0)
+(def active-encoder-version nil)
+(def active-encoder nil)
+(def refresh-encoder
+  (fn ()
+    (def active-encoder-version (evolution-current policy-versions 'cell 'service-quantum))
+    (def active-encoder (meta-eval (evolution-source policy-versions active-encoder-version) (meta-base-env)))))
+(refresh-encoder)
+(def check-quantum
+  (fn (quantum limit)
+    (begin
+      (check (if (= (type-of quantum) 'int)
+        (if (< 63 quantum) (if (< limit quantum) #f (= (* 64 (/ quantum 64)) quantum)) #f) #f)
+        "policy exceeded the trusted work bound or returned an invalid quantum") quantum)))
+(def encoder-quantum
+  (fn (length)
+    (if (< length 65) 64
+      (let ((limit (if (< observed-length length) 64 policy-bound)))
+        (if (= limit 64) 64
+          (check-quantum (meta-apply active-encoder (list limit)) limit))))))
+(def retained-quantum
+  (fn (length)
+    (let ((quantum (encoder-quantum length)))
+      (if (if (= active-encoder-version 2) (< 64 quantum) #f)
+        (begin
+          (def policy-uses (+ policy-uses 1))
+          (def policy-service-calls-avoided
+            (+ policy-service-calls-avoided (- (/ (- length 1) 64) (/ (- length 1) quantum)))))
+        nil)
+      quantum)))
+(def replay-size?
+  (fn (size) (if (< 1023 size) (< size 8193) #f)))
+(def replay-field-size
+  (fn (record field)
+    (let ((packed (if (= (type-of record) 'map) (get record field) nil)))
+      (let ((data (if (= (type-of packed) 'map) (get packed 'data) nil)))
+        (if (= (type-of data) 'string)
+          (let ((length (text-bytes data)))
+            (let ((size (/ length 2)))
+              (if (= length (* 2 size)) size 0)))
+          0)))))
+(def largest-field-step
+  (fn (field)
+    (fn (largest record)
+      (let ((size (replay-field-size record field)))
+        (if (if (replay-size? size) (< (replay-field-size largest field) size) #f)
+          record largest)))))
+(def largest-field
+  (fn (records field)
+    (foldl (largest-field-step field) nil records)))

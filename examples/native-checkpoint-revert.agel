@@ -1,0 +1,11 @@
+(def store (recover))
+(check (= (get store 'revision) 3) "second reboot did not restore successor")
+(verify store 3)
+(def reverted (runtime-revert (runtime-new (get store 'state)) 'unless 2 expansions behavior judge))
+(def store (persist store (get reverted 'versions)))
+(check (= (get store 'revision) 4) "guarded revert was not durable")
+(def read-back (recover))
+(check (= (get read-back 'revision) 4) "latest durable pointer differs")
+(verify read-back 4)
+(console-log "checkpoint: PASS: second reboot recovered version 3; guarded revert committed as version 4; all old sources retained")
+#t

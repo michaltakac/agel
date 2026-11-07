@@ -1,0 +1,29 @@
+Evidence: target/native-network-1794018454337935000
+Providers: real
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-network: observations {smithing-level 1 coins 0}
+inference-bridge: started job 152 provider codex at-ms 161636
+inference-bridge: completed job 152 at-ms 167957 status ok
+native-session: serviced inference polls 5
+inference-bridge: started job 163 provider jev at-ms 169578
+inference-bridge: completed job 163 at-ms 179869 status ok
+native-session: serviced inference polls 8
+native-session: candidate {diagnosis "Integer division truncates, so (5 3) returns 1 and leaves two actions unplanned; rounding up preserves partial batches and zero." after (fn (n size) (/ (+ n (- size 1)) size)) predictions (2 0)}
+native-session: tool repaired: text judge, prediction and held-out replay; frozen 3/6 to repaired 6/6; same repair actor, controller and stream owner
+native-session: model-wait service writes 13
+native-session: executed batches 2
+native-network: keepalives 129
+native-network: client completed: login, observations, walking packet and tick consumption inside Agel OS
+process agel exited with status 0
+Durable guest judge calls: 1 known real cost-nanousd: 26166 unknown receipts: 0
+Codex dollar cost: unknown
+Ledger SHA-256: 4f27300a3ceb086992bc6b76730d1a2493fea8b2df53557c94e163555934b880
+Persisted native client: account=38 character=38 rights= x=3223 z=3218 level=0 xp_rate_in_hundreds=100
+PASS: native client movement saved with normal rights and 1x XP
+Elapsed seconds: 203.168
+
+agel: 1 forms, 27519932 steps, revision 1

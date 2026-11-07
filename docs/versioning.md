@@ -493,7 +493,83 @@ promise.
   `:join-file NAME` admits it cell by cell through the judged gate, and
   any program with a step is an agent; the builder's chart paints the
   player's route beside it.
-  Minor releases may make
+  `v0.3.3` adds `agel/evolution`: source diffs, namespaced version records,
+  judge receipts, nonempty replay before activation, reverts retaining
+  history and bounded retries with feedback. The same Lisp contract runs
+  hosted and in an OS process. Protected disk history and real OS service
+  activation are later steps in `exo-programme.md`.
+  `v0.3.4` adds protected `judge-log` OS storage, refusing overwrite,
+  truncation, unlink, rename and format, and an opt-in Agel judge wrapper
+  that records dispatch and result. Syscall denial and reboot are tested;
+  universal accounting and guardian-only append authority remain open.
+  `v0.3.5` routes Jev HTTP attempts through Agel accounting, with raw
+  request/response, usage, published-rate costs and timestamps; the native
+  bridge waits for guest log acknowledgements. Existing disks require
+  `--resume`; guest failures propagate. Native effect buffers now fit their
+  shared mapping. Scalable crash-safe canonical history and activation
+  remain open.
+  `v0.3.6` adds a protected 64 MiB `judge-ledger`, Agel framing and recovery,
+  and reserved result capacity before HTTP dispatch. Append sectors are
+  immutable; interrupted tails remain available as raw evidence. The process
+  ABI gains reservation operations, and the hosted seed gains a pure UTF-8
+  byte constructor. Guardian-only writes and real OS activation remain open.
+  `v0.3.7` adds a container-isolated revision-241 private OSRS world and an
+  Agel wire client tested against its cache and pre-login protocols. Baseline
+  setup enforces 1× XP and disables automatic admin grants. Player login,
+  gameplay, native network transport and Exo comparisons remain open.
+  `v0.3.8` adds Agel RSA/XTEA/ISAAC, password login, revision-241 game
+  frames, stat/inventory observations and executable RuneScape smoke tests.
+  Movement, skill/item setup, permission separation and persisted state are
+  verified against the private world. Native gameplay and task benchmarks
+  remain open.
+  `v0.3.9` adds Agel NPC bit-field decoding and a live combat smoke test.
+  A fresh normal account kills an observed rat and gains exactly 8 Attack
+  XP, with saved Hitpoints XP also verified. Full combat training and Exo
+  comparisons remain open.
+  `v0.3.10` connects replay-gated versions to a running Agel tool actor.
+  One RuneScape login survives replacement and completes a rat kill;
+  actor identity, mailbox and call history survive. Repair and judging are
+  scripted fixtures, so agent understanding and OS service evolution remain open.
+  `v0.3.11` adds general model-written tool repair, predicted outputs,
+  separate text judgment, held-out replay, bounded retries and retained
+  control evals. Real successful and refused trials are recorded. Full
+  model cost accounting and actual OS service replacement remain open.
+  `v0.3.12` adds native program byte transport and Agel table management,
+  compiled canary replay, activation and revert. Retained binaries and judge
+  logs survive reboot. Running-domain migration, canonical activation recovery
+  and native integration of model-driven repairs remain open.
+  `v0.3.13` connects real model-written repairs to native activation in one
+  Agel controller. General inference framing, pure repair sessions, deferred
+  activation, streamed executable bytes and queued console input support the
+  path. Protected guest accounting includes failed paid attempts; full model
+  cost, service migration and Exo comparisons remain open.
+  `v0.3.14` adds an Agel-written subset evaluator with versioned language
+  forms. Real repair, refusal/retry, runtime canaries, retained closures,
+  equivalent versions and guarded revert run in one native controller.
+  Its protected version archive is not automatic canonical recovery; the
+  Rust seed, OS service evolution and Exo comparisons remain unfinished.
+  `v0.3.15` adds Agel inert data encoding, linked checkpoints and explicit
+  bounded source-store recovery across OS reboots. Torn evidence and earlier
+  versions remain available; guarded edits/reverts continue after recovery.
+  General sequence and CRC policy fixes stay in Agel. Automatic service
+  discovery, streaming recovery and domain/kernel restoration remain open.
+  `v0.3.16` adds a general native byte relay and Agel buffering/maintenance
+  agent. The Agel client logs in, observes and walks inside its OS, with a
+  saved-state oracle and unchanged normal rates. Reusable crypto uses 31-bit
+  RSA limbs; bootstrap allocation/framing fixes support the path. The codec
+  adds an explicit empty-list tag refused by older readers. Model-controlled
+  native episodes, visual rendering and Exo comparisons remain unfinished.
+  `v0.3.17` combines native polling inference and byte I/O with Agel-owned
+  serialized services. A retained actor repairs a seeded planner with real
+  providers, passes text/replay gates, and resumes five game actions on the
+  same connection. Packet history uses lossless tagged byte fields, readable
+  through `bytes-unpack-field`; direct packet returns remain raw lists. Load
+  `stream-buffer.agel` before either buffer adapter. Full self-hosting and
+  paired Exo tasks remain open. `v0.3.18` adds a generic profiler and optional
+  precommit probe to externally dispatched repair. The existing fixed byte
+  codec APIs keep their 64-byte callback interval; a separate API accepts a
+  validated interval. A retained native client reads the active policy
+  after the judge and measured replay approve it. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

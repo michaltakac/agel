@@ -50,7 +50,7 @@ def run(*command, **kwargs):
 
 def prepare(work):
     image = run("./scripts/build-boot.sh", "--features", "native-graphics", capture_output=True, text=True).stdout.strip().splitlines()[-1]
-    doom = run("./scripts/build-c-program.sh", "doom", "x86_64", capture_output=True, text=True).stdout.strip().splitlines()[-1]
+    doom = run("./scripts/build-c-program.sh", "doom", "x86_64", "examples/doom/c", capture_output=True, text=True).stdout.strip().splitlines()[-1]
     wad = run("./scripts/fetch-doom-wad.sh", capture_output=True, text=True).stdout.strip().splitlines()[-1]
     agel = run("./scripts/build-program.sh", "agel", "x86_64", capture_output=True, text=True).stdout.strip().splitlines()[-1]
     run("cargo", "build", "-q", "--release", "-p", "agel-play")
@@ -264,7 +264,7 @@ def captions(events):
             names = {":fs-ls /": "lists the files", ":help": "shows the help", "wait": "waits", "done": "is done"}
             if command.startswith(":exec c-doom"):
                 what = "starts DOOM in a window"
-            elif command.startswith(":handover") and command.endswith(" agents"):
+            elif command.startswith(":handover") and " join=" in command:
                 what = "hands the desktop to its DOOM agent and a reviewer, side by side"
             elif command.startswith(":handover"):
                 what = "hands the desktop to its DOOM-playing agent"

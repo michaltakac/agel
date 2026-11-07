@@ -31,6 +31,21 @@ first conservative verification gate, and since v0.2.22 the CLI exposes it as
 `:propose`, `:promote` and `:discard`. This is not a claim that macros—or the
 current deterministic checker—can prove arbitrary code safe.
 
+## Application boundary
+
+Game clients, protocols, prompts, policies, fixtures, and scoring belong to
+their examples. The language and standard library provide reusable operations
+such as byte streams, capability-scoped research, tool definition, judgment
+receipts, versioning, and replay. The OS provides process and window control,
+filesystem access, and program loading through the same interfaces for each
+application.
+
+An image can register optional desktop programs in `/data/apps.cfg`.
+Each row contains `name|cell-prefix|/data/source.agel|ready-message`.
+`:load` and `:join` read that catalog at runtime. The DOOM example supplies
+its own catalog. A window agent can use `:handover NAME STEPS` with an optional
+`wait=PREFIX` for application output and `join=NAME` for a companion agent.
+
 ## Safety invariants
 
 - A failed evaluation never changes the committed world.

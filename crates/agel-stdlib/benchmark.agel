@@ -1,0 +1,137 @@
+(module agel/benchmark
+  (import agel/sequence)
+  (export benchmark-run benchmark-pair benchmark-transfer benchmark-transfer-time benchmark-writer-usage benchmark-writer-estimate)
+
+  (def require
+    (fn (ok reason) (if ok #t (signal 'benchmark/invalid reason))))
+  (def natural?
+    (fn (value) (if (= (type-of value) 'int) (< -1 value) #f)))
+
+  (def add-writer-usage
+    (fn (totals usage)
+      (let ((calls (+ (get totals 'calls) 1)))
+        (if (= usage nil) (assoc totals 'calls calls)
+          (let ((input (get usage 'input)) (cached (get usage 'cached-input)) (output (get usage 'output)))
+            (require (if (natural? input) (natural? output) #f) "invalid writer usage")
+            (require (if (= cached nil) #t (if (natural? cached) (< (- cached 1) input) #f))
+              "invalid cached writer usage")
+            (dict 'calls calls
+                  'metered (+ (get totals 'metered) 1)
+                  'cache-metered (+ (get totals 'cache-metered) (if (= cached nil) 0 1))
+                  'known-input (+ (get totals 'known-input) input)
+                  'known-cached-input (+ (get totals 'known-cached-input) (if (= cached nil) 0 cached))
+                  'known-output (+ (get totals 'known-output) output)))))))
+  (def benchmark-writer-usage
+    (fn (receipts)
+      (foldl add-writer-usage
+        (dict 'calls 0 'metered 0 'cache-metered 0 'known-input 0 'known-cached-input 0 'known-output 0)
+        receipts)))
+
+  (def estimate-writer-call
+    (fn (rates totals usage)
+      (let ((input (get usage 'input)) (cached (get usage 'cached-input))
+            (input-rate (get rates 'input)) (cache-rate (get rates 'cached-input))
+            (output-cost (* (get usage 'output) (get rates 'output))))
+        (let ((uncached-cost (* input input-rate)) (discount (- input-rate cache-rate)))
+          (let ((low (- uncached-cost (* (if (= cached nil) input cached) discount)))
+                (high (- uncached-cost (* (if (= cached nil) 0 cached) discount))))
+            (dict 'min-nanousd (+ (get totals 'min-nanousd) low output-cost)
+                  'max-nanousd (+ (get totals 'max-nanousd) high output-cost)))))))
+  (def benchmark-writer-estimate
+    (fn (receipts rates)
+      (let ((input (get rates 'input)) (cached (get rates 'cached-input))
+            (output (get rates 'output)) (usage (benchmark-writer-usage receipts)))
+        (require (if (natural? input) (if (natural? cached) (natural? output) #f) #f)
+          "writer rates must be nonnegative nanodollars per token")
+        (require (if (< input cached) #f #t) "cached writer rate exceeds input rate")
+        (if (= (get usage 'calls) (get usage 'metered))
+          (let ((estimate (foldl (fn (totals receipt) (estimate-writer-call rates totals receipt))
+                            (dict 'min-nanousd 0 'max-nanousd 0) receipts)))
+            (dict 'basis 'supplied-rates 'min-nanousd (get estimate 'min-nanousd)
+                  'max-nanousd (get estimate 'max-nanousd)))
+          (dict 'basis 'supplied-rates 'min-nanousd nil 'max-nanousd nil)))))
+  (def add-charge
+    (fn (totals charge)
+      (let ((cost (get charge 'cost-nanousd)) (kind (get charge 'kind)))
+        (require (if (= kind 'judge) #t (= kind 'model)) "invalid charge kind")
+        (require (if (= cost nil) #t (natural? cost)) "invalid charge cost")
+        (let ((next (assoc (assoc totals 'calls (+ (get totals 'calls) 1))
+                      'judge-calls (+ (get totals 'judge-calls) (if (= kind 'judge) 1 0)))))
+          (if (= cost nil)
+            (assoc next 'unknown (+ (get next 'unknown) 1))
+            (assoc (assoc next 'known-nanousd (+ (get next 'known-nanousd) cost))
+              'judge-nanousd (+ (get next 'judge-nanousd) (if (= kind 'judge) cost 0))))))))
+
+  (def benchmark-run
+    (fn (record)
+      (let ((elapsed (get record 'elapsed-us))
+            (correct (get record 'correct))
+            (complete (get record 'billing-complete))
+            (before (get record 'coins-before))
+            (after (get record 'coins-after)))
+        (require (natural? elapsed) "elapsed time must be a nonnegative integer")
+        (require (= (type-of correct) 'bool) "a task needs a correctness verdict")
+        (require (has-key? record 'charges) "charge observations must be explicit")
+        (require (= (type-of complete) 'bool) "billing coverage must be explicit")
+        (require (if (= before nil) (= after nil) (if (natural? before) (natural? after) #f))
+          "coin observations must be both present or both absent")
+        (let ((charges (foldl add-charge (dict 'calls 0 'judge-calls 0 'known-nanousd 0 'judge-nanousd 0 'unknown 0)
+                         (get record 'charges))))
+          (let ((cost (if (if complete (= (get charges 'unknown) 0) #f) (get charges 'known-nanousd) nil))
+                (coins (if (= before nil) nil (- after before))))
+            (dict 'correct correct 'elapsed-us elapsed 'charges charges
+              'cost-status (if complete (if (= cost nil) 'unpriced 'known) 'incomplete)
+              'cost-nanousd cost 'coins coins
+              'coins-per-dollar
+              (if (if correct (if cost (< 0 cost) #f) #f)
+                (if (= coins nil) nil (dict 'coins coins 'nanousd cost))
+                nil)))))))
+
+  (def pair-outcome
+    (fn (control candidate time cost)
+      (if (get control 'correct)
+        (if (get candidate 'correct)
+          (if (= cost nil) 'cost-unknown
+            (if (= time 0)
+              (if (= cost 0) 'tie (if (< cost 0) 'adaptive-dominates 'fixed-dominates))
+              (if (< time 0)
+                (if (< 0 cost) 'trade-off 'adaptive-dominates)
+                (if (< cost 0) 'trade-off 'fixed-dominates))))
+          'fixed-only-correct)
+        (if (get candidate 'correct) 'adaptive-only-correct 'both-failed))))
+  (def benchmark-pair
+    (fn (fixed adaptive)
+      (require (if (= (get fixed 'arm) 'fixed) (= (get adaptive 'arm) 'adaptive) #f)
+        "pair must contain a fixed and an adaptive arm")
+      (require (if (get fixed 'comparison) (= (get fixed 'comparison) (get adaptive 'comparison)) #f)
+        "arms differ in task, starting policy or environment")
+      (require (if (get fixed 'account) (if (get adaptive 'account)
+        (if (= (get fixed 'account) (get adaptive 'account)) #f #t) #f) #f)
+        "arms require distinct accounts")
+      (let ((control (benchmark-run fixed)) (candidate (benchmark-run adaptive)))
+        (let ((a (get candidate 'cost-nanousd)) (b (get control 'cost-nanousd)))
+          (let ((time (- (get candidate 'elapsed-us) (get control 'elapsed-us)))
+                (cost (if (if a b #f) (- a b) nil)))
+            (dict 'comparison (get fixed 'comparison) 'fixed control 'adaptive candidate
+              'elapsed-delta-us time 'cost-delta-nanousd cost
+              'cost-time-outcome (pair-outcome control candidate time cost)))))))
+
+  (def benchmark-transfer-time
+    (fn (pair recovery-us)
+      (require (natural? recovery-us) "transfer recovery time must be nonnegative")
+      (let ((control (get pair 'fixed)) (candidate (get pair 'adaptive)))
+        (let ((elapsed (+ (get candidate 'elapsed-us) recovery-us)))
+          (let ((delta (- elapsed (get control 'elapsed-us))))
+            (assoc (assoc pair 'transfer-recovery-us recovery-us)
+              'recovery-inclusive-time (dict 'adaptive-elapsed-us elapsed 'elapsed-delta-us delta
+                'cost-time-outcome (pair-outcome control candidate delta (get pair 'cost-delta-nanousd)))))))))
+  (def benchmark-transfer
+    (fn (prior fresh)
+      (require (if (get prior 'account) (if (get fresh 'account)
+        (if (= (get prior 'account) (get fresh 'account)) #f #t) #f) #f)
+        "transfer requires a distinct account")
+      (require (= (get fresh 'fresh-account) #t) "transfer requires an independent fresh-account check")
+      (require (if (get prior 'retained-state)
+        (= (get prior 'retained-state) (get fresh 'initial-state)) #f)
+        "transfer did not retain the recorded policy and history")
+      (benchmark-run fresh))))

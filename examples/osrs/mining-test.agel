@@ -1,0 +1,240 @@
+(module agel/osrs-mining-test
+  (import agel/sequence)
+  (import agel/osrs-game)
+  (export mine-first-copper smelt-first-bronze sell-first-bronze first-bronze-sale first-bronze-sale-using)
+  (def require
+    (fn (ok message) (if ok #t (signal 'osrs/mining-test message))))
+  (def tutor
+    (fn (state)
+      (let ((matches (filter (fn (npc) (= (get npc 'type) 3222)) (osrs-nearby-npcs state))))
+        (if matches (car matches) nil))))
+  (def observe-live
+    (fn (state predicate batches)
+      (if (if (predicate state) #t (= batches 0)) state
+        (observe-live (osrs-observe-bounded (osrs-keepalive state) predicate 5) predicate (- batches 1)))))
+  (def tutor-state
+    (fn (state)
+      (dict 'route (osrs-map-route state) 'npc (tutor state)
+        'active-world (get state 'active-world)
+        'menu-open (osrs-open-interface? state 219)
+        'menu-opens (osrs-interface-opens state 219)
+        'menu-pauses (osrs-pause-events state 219 1))))
+  (def walk-to-tutor
+    (fn (state x z batches observe)
+      (let ((walked (osrs-walk state x z)))
+        (let ((arrived (observe-live walked
+                         (fn (g) (if (osrs-route-cleared? g state x z) (tutor g) #f)) batches)))
+          (observe (assoc (tutor-state arrived) 'phase 'tutor-approach))
+          arrived))))
+  (def approach-tutor
+    (fn (state observe)
+      (let ((waypoint (observe-live (osrs-walk state 3227 3176)
+                        (fn (g) (osrs-route-cleared? g state 3227 3176)) 13)))
+        (observe (assoc (tutor-state waypoint) 'phase 'tutor-waypoint))
+        (let ((first (walk-to-tutor waypoint 3229 3149 13 observe)))
+          (if (tutor first) first
+            (let ((second (walk-to-tutor first 3227 3149 13 observe)))
+              (if (tutor second) second
+                (signal 'osrs/mining-test "mining tutor was not visible after two approaches"
+                  (dict 'nearby-types (map (fn (npc) (get npc 'type)) (osrs-nearby-npcs second))
+                        'observation (tutor-state second))))))))))
+  (def wait-live
+    (fn (state predicate batches)
+      (let ((observed (observe-live state predicate batches)))
+        (if (predicate observed) observed
+          (signal 'osrs/mining-test "live observation timed out")))))
+  (def pickaxes (fn (g) (osrs-inventory-count g 93 1265)))
+  (def ores (fn (g) (osrs-inventory-count g 93 436)))
+  (def mining-xp (fn (g) (get (osrs-stat g 14) 'xp)))
+  (def fresh-dialogue?
+    (fn (state previous interface component)
+      (if (osrs-open-interface? state interface)
+        (if (< (osrs-interface-opens previous interface) (osrs-interface-opens state interface))
+          (< (osrs-pause-events previous interface component) (osrs-pause-events state interface component))
+          #f)
+        #f)))
+  (def observe-dialogue
+    (fn (state ready)
+      (let ((bounded (observe-live state ready 12)))
+        (if (ready bounded) bounded (osrs-observe-ready bounded ready 128)))))
+  (def observe-interface
+    (fn (state previous interface component)
+      (observe-dialogue state (fn (g) (fresh-dialogue? g previous interface component)))))
+  (def require-interface
+    (fn (observed previous interface component)
+      (if (fresh-dialogue? observed previous interface component) observed
+        (signal 'osrs/mining-test "expected actionable tutor dialogue"
+          (dict 'interface interface 'component component
+            'opens-before (osrs-interface-opens previous interface)
+            'opens-after (osrs-interface-opens observed interface)
+            'pauses-before (osrs-pause-events previous interface component)
+            'pauses-after (osrs-pause-events observed interface component)
+            'tutor (tutor-state observed))))))
+  (def await-interface
+    (fn (state previous interface component)
+      (require-interface (observe-interface state previous interface component)
+        previous interface component)))
+  (def fresh-tutor-menu?
+    (fn (state previous) (fresh-dialogue? state previous 219 1)))
+  (def talk-to-tutor
+    (fn (state observe)
+      (require (tutor state) "mining tutor left before dialogue")
+      (observe (assoc (tutor-state state) 'phase 'tutor-interaction))
+      (let ((talked (osrs-talk state (get (tutor state) 'index)))
+            (ready (fn (g) (fresh-tutor-menu? g state))))
+        (let ((bounded (observe-live talked ready 13)))
+          (let ((route (osrs-map-route bounded)) (before (osrs-map-route state)))
+            (let ((settled (if (if (ready bounded) #f
+                                  (if route (< (if before (get before 'sequence) 0) (get route 'sequence)) #f))
+                               (observe-live bounded ready 13)
+                               bounded)))
+              (let ((observed (if (ready settled) settled (osrs-observe-ready settled ready 128))))
+                (let ((fresh (ready observed)))
+                  (observe (assoc (assoc (tutor-state observed) 'menu fresh) 'phase 'tutor-response))
+                  (dict 'state observed 'fresh fresh)))))))))
+  (def tutor-menu
+    (fn (state observe)
+      (let ((first (talk-to-tutor (approach-tutor state observe) observe)))
+        (if (get first 'fresh) (get first 'state)
+          (let ((nearby (walk-to-tutor (get first 'state) 3229 3149 13 observe)))
+            (let ((second (talk-to-tutor nearby observe)))
+              (if (get second 'fresh) (get second 'state)
+                (signal 'osrs/mining-test "mining tutor did not open a menu after two talks"
+                  (tutor-state (get second 'state))))))))))
+  (def advice-page
+    (fn (menu observe)
+      (let ((first (observe-interface (osrs-resume-dialogue menu 219 1 1) menu 217 5)))
+        (if (fresh-dialogue? first menu 217 5) first
+          (begin
+            (observe "tutor advice choice did not open a page, asking again")
+            (let ((reply (talk-to-tutor first observe)))
+              (if (get reply 'fresh)
+                (let ((fresh-menu (get reply 'state)))
+                  (await-interface (osrs-resume-dialogue fresh-menu 219 1 1) fresh-menu 217 5))
+                (require-interface (get reply 'state) menu 217 5))))))))
+  (def advice-object
+    (fn (player observe retry?)
+      (let ((ready (fn (g) (if (fresh-dialogue? g player 193 0) #t
+                            (if retry? (fresh-tutor-menu? g player) #f)))))
+        (let ((next (observe-dialogue (osrs-resume-dialogue player 217 5 -1) ready)))
+          (if (fresh-dialogue? next player 193 0) next
+            (if (if retry? (fresh-tutor-menu? next player) #f)
+              (begin
+                (observe "mining tutor reopened the menu, selecting advice again")
+                (advice-object (advice-page next observe) observe #f))
+              (require-interface next player 193 0)))))))
+  (def copper-ready? (fn (g) (if (= (ores g) 1) (< 0 (mining-xp g)) #f)))
+  (def mine-copper-rock
+    (fn (state observe)
+      (let ((first (observe-live (osrs-use-location state 10943 3230 3147) copper-ready? 12)))
+        (if (copper-ready? first) first
+          (begin
+            (require (= (list (ores first) (mining-xp first)) '(0 0))
+              "first copper interaction left inconsistent mining state")
+            (observe "retrying copper rock after no ore or XP")
+            (wait-live (osrs-use-location first 10943 3230 3147) copper-ready? 18))))))
+  (def first-copper-state
+    (fn (state observe)
+      (let ((ready (osrs-await state (fn (g) (if (osrs-stat g 14) (has-key? (get g 'inventories) 93) #f)))))
+        (require (= (list (mining-xp ready) (pickaxes ready) (ores ready)) '(0 0 0))
+          "expected a fresh account without a pickaxe or ore")
+        (let ((menu (tutor-menu ready observe)))
+          (let ((player (advice-page menu observe)))
+            (observe "mining tutor accepted the advice choice")
+            (let ((object (advice-object player observe #t)))
+              (observe "mining tutor showed the mining site icon")
+              (let ((gift (await-interface (osrs-resume-dialogue object 193 0 0) object 231 5)))
+                (require (= (pickaxes gift) 1) "the mining tutor did not provide a bronze pickaxe")
+                (observe "mining tutor gave the bronze pickaxe")
+                (let ((continued (osrs-resume-dialogue gift 231 5 -1)))
+                  (let ((mined (with-handler (* problem) (signal 'osrs/mining-test "waiting for copper ore and Mining XP" problem)
+                                 (mine-copper-rock continued observe))))
+                    (require (= (list (pickaxes mined) (ores mined) (mining-xp mined)) '(1 1 17))
+                      "unexpected mining outcome")
+                    mined)))))))))
+  (def mine-first-copper
+    (fn (state)
+      (let ((mined (first-copper-state state (fn (_) nil))))
+        (dict 'test 'first-copper 'passed #t 'tutor 3222
+          'pickaxes (pickaxes mined) 'copper (ores mined) 'mining-xp (mining-xp mined)))))
+  (def tin (fn (g) (osrs-inventory-count g 93 438)))
+  (def bronze (fn (g) (osrs-inventory-count g 93 2349)))
+  (def smithing-xp (fn (g) (get (osrs-stat g 13) 'xp)))
+  (def walk-ticks
+    (fn (state batches)
+      (if (= batches 0) state
+        (walk-ticks (osrs-wait-ticks (osrs-keepalive state) 5) (- batches 1)))))
+  (def first-tin
+    (fn (state)
+      (let ((ready (fn (g) (if (= (tin g) 1) (= (mining-xp g) 35) #f))))
+        (let ((attempt (observe-live (osrs-use-location state 11360 3225 3148) ready 6)))
+          (if (ready attempt) attempt
+            (wait-live (osrs-use-location attempt 11360 3224 3146) ready 18))))))
+  (def furnace-open? (fn (state) (osrs-open-interface? state 270)))
+  (def approach-furnace
+    (fn (state)
+      (observe-live (osrs-walk state 3226 3255)
+        (fn (g) (osrs-route-cleared? g state 3226 3255)) 10)))
+  (def try-furnace
+    (fn (state)
+      (if (furnace-open? state) state
+        (observe-live (osrs-use-location-option state 24009 3226 3256 2) furnace-open? 6))))
+  (def open-furnace
+    (fn (state)
+      (let ((first (try-furnace (approach-furnace state))))
+        (if (furnace-open? first) first
+          (let ((second (try-furnace (approach-furnace first))))
+            (if (furnace-open? second) second
+              (signal 'osrs/mining-test "furnace did not open after two approaches"
+                (dict 'route (osrs-map-route second)))))))))
+  (def first-bronze
+    (fn (state observe)
+      (let ((copper (first-copper-state state observe)))
+        (observe "mined copper with the tutor's pickaxe")
+        (require (= (list (tin copper) (bronze copper) (smithing-xp copper)) '(0 0 0))
+          "expected no tin, bronze or Smithing XP")
+        (let ((stock (with-handler (* problem) (signal 'osrs/mining-test "waiting for tin ore" problem)
+                       (first-tin copper))))
+          (observe "mined tin, returning to the furnace")
+          (require (= (list (ores stock) (tin stock) (bronze stock)) '(1 1 0)) "unexpected furnace stock")
+          (let ((returned (walk-ticks (osrs-walk (walk-ticks stock 1) 3221 3218) 15)))
+            (let ((menu (open-furnace returned)))
+              (let ((smelted (with-handler (* problem) (signal 'osrs/mining-test "waiting for bronze bar and Smithing XP" problem)
+                               (wait-live (osrs-resume-dialogue menu 270 15 1)
+                                 (fn (g) (if (= (bronze g) 1) (< 0 (smithing-xp g)) #f)) 12))))
+                (require (= (list (pickaxes smelted) (ores smelted) (tin smelted) (bronze smelted)
+                  (mining-xp smelted) (smithing-xp smelted)) '(1 0 0 1 35 6))
+                  "unexpected smelting outcome")
+                (observe "smelted one bronze bar")
+                (dict 'state smelted 'report
+                  (dict 'test 'first-bronze 'passed #t 'pickaxes (pickaxes smelted)
+                    'copper-before (ores stock) 'tin-before (tin stock) 'bronze-before (bronze stock)
+                    'copper-after (ores smelted) 'tin-after (tin smelted) 'bronze-after (bronze smelted)
+                    'mining-xp (mining-xp smelted) 'smithing-xp (smithing-xp smelted))))))))))
+  (def smelt-first-bronze (fn (state) (get (first-bronze state (fn (_) nil)) 'report)))
+  (def coins (fn (g) (osrs-inventory-count g 93 995)))
+  (def shopkeeper
+    (fn (state)
+      (let ((matches (filter (fn (npc) (if (= (get npc 'type) 2813) #t (= (get npc 'type) 2814)))
+                       (osrs-nearby-npcs state))))
+        (if matches (car matches) nil))))
+  (def first-bronze-sale-using
+    (fn (state observe)
+      (let ((production (first-bronze state observe)))
+        (let ((arrived (with-handler (* problem) (signal 'osrs/mining-test "walking to the general store" problem)
+                         (wait-live (osrs-walk (get production 'state) 3211 3244) shopkeeper 14))))
+          (let ((shop (with-handler (* problem) (signal 'osrs/mining-test "waiting for both shop interfaces" problem)
+                        (wait-live (osrs-trade arrived (get (shopkeeper arrived) 'index))
+                          (fn (g) (if (osrs-open-interface? g 300) (osrs-open-interface? g 301) #f)) 12))))
+            (require (= (list (bronze shop) (coins shop)) '(1 0)) "expected one bar and zero coins before sale")
+            (let ((sold (with-handler (* problem) (signal 'osrs/mining-test "waiting for sale and coins" problem)
+                          (wait-live (osrs-click-inventory-item shop 301 0 93 2349 2)
+                            (fn (g) (if (= (bronze g) 0) (< 0 (coins g)) #f)) 12))))
+              (require (= (list (pickaxes sold) (ores sold) (tin sold) (mining-xp sold) (smithing-xp sold)) '(1 0 0 35 6))
+                "sale changed unrelated inventory or XP")
+              (observe "sold the bronze bar and observed the proceeds")
+              (dict 'state sold 'report
+                (assoc (assoc (assoc (assoc (get production 'report) 'test 'first-sale)
+                  'bronze-after-sale (bronze sold)) 'coins-before (coins shop)) 'coins-after (coins sold)))))))))
+  (def first-bronze-sale (fn (state) (first-bronze-sale-using state (fn (_) nil))))
+  (def sell-first-bronze (fn (state) (get (first-bronze-sale state) 'report))))

@@ -1,0 +1,254 @@
+(module agel/evolution
+  (import agel/sequence)
+  (import agel/meta)
+  (export evolution-new evolution-current evolution-source evolution-edit
+          evolution-revert evolution-revert-with-activation evolution-retry evolution-retry-with-activation
+          evolution-replay evolution-replay-version evolution-cost
+          evolution-edit-with-activation evolution-valid?)
+
+  (def evolution-new
+    (fn () (dict 'versions (dict) 'active (dict) 'history nil 'next 1)))
+  (def evolution-current
+    (fn (state kind name)
+      (let ((objects (get (get state 'active) kind)))
+        (if objects (get objects name) nil))))
+  (def evolution-source
+    (fn (state version)
+      (let ((entry (get (get state 'versions) version)))
+        (if entry (get entry 'source) nil))))
+  (def record
+    (fn (state event)
+      (assoc state 'history (append (get state 'history) (list event)))))
+  (def valid-kind?
+    (fn (kind)
+      (if (= kind 'cell) #t
+      (if (= kind 'program) #t
+      (if (= kind 'domain) #t (= kind 'kernel-slot))))))
+  (def evolution-replay
+    (fn (source cases)
+      (with-handler (* problem)
+        (dict 'passed #f 'reason (get problem 'message))
+        (if (= cases nil)
+            (dict 'passed #f 'reason "replay corpus is empty")
+            (let ((candidate (meta-eval source (meta-base-env))))
+              (replay-cases candidate cases 0))))))
+  (def replay-cases
+    (fn (candidate cases checked)
+      (if (= cases nil)
+          (dict 'passed #t 'checked checked 'reason "recorded steps agree")
+          (let ((case (car cases)))
+            (if (if (= (type-of case) 'map)
+                    (if (has-key? case 'expected)
+                        (if (= (get case 'arguments) nil) #t
+                            (= (type-of (get case 'arguments)) 'list)) #f) #f)
+              (let ((execution (with-handler (* problem)
+                                 (dict 'problem problem)
+                                 (dict 'actual (meta-apply candidate (get case 'arguments))))))
+                (if (has-key? execution 'problem)
+                  (let ((problem (get execution 'problem)))
+                    (dict 'passed #f 'checked checked 'reason (get problem 'message)
+                          'condition (get problem 'kind)))
+                  (let ((actual (get execution 'actual)))
+                    (if (= actual (get case 'expected))
+                      (replay-cases candidate (cdr cases) (+ checked 1))
+                      (dict 'passed #f 'checked checked 'reason "recorded step differs"
+                            'arguments (get case 'arguments)
+                            'expected (get case 'expected) 'actual actual)))))
+              (dict 'passed #f 'checked checked 'reason "invalid recorded step"))))))
+  (def committed-replay
+    (fn (events version)
+      (if (= events nil) nil
+        (let ((event (car events)) (prior (cdr events)))
+          (if (if (= (get event 'event) 'commit) (= (get event 'version) version) #f)
+            (if (= (get (car prior) 'event) 'activation) (car (cdr prior)) (car prior))
+            (committed-replay prior version))))))
+  (def evolution-replay-version
+    (fn (state version)
+      (if (get (get state 'versions) version)
+        (let ((event (committed-replay (reverse (get state 'history)) version)))
+          (if (if (= (get event 'event) 'replay) (has-key? event 'cases) #f)
+            (evolution-replay (evolution-source state version)
+              (map (fn (step) (dict 'arguments (car step) 'expected (car (cdr step)))) (get event 'cases)))
+            (dict 'passed #f 'reason "version has no retained replay corpus")))
+        (dict 'passed #f 'reason "version does not exist"))))
+  (def ask
+    (fn (judge request)
+      (with-handler (* problem)
+        (dict 'allowed #f 'reason (get problem 'message) 'cost-microusd nil
+              'status 'error)
+        (let ((answer (judge request)))
+          (if (= (type-of answer) 'map)
+              (if (= (type-of (get answer 'reason)) 'string)
+                  answer
+                  (assoc (assoc (assoc answer 'allowed #f)
+                           'reason "judge omitted its reason") 'status 'invalid))
+              (dict 'allowed #f 'reason "judge returned no receipt"
+                    'response answer 'cost-microusd nil 'status 'invalid))))))
+  (def activate
+    (fn (state kind name version)
+      (assoc state 'active
+        (assoc (get state 'active) kind
+          (assoc (if (get (get state 'active) kind)
+                     (get (get state 'active) kind) (dict)) name version)))))
+  (def evolution-edit
+    (fn (state kind name before after cases judge)
+      (evolution-edit-with-activation state kind name before after cases judge nil)))
+  (def commit-version
+    (fn (state request version activation)
+      (record
+        (activate
+          (assoc (assoc state 'next (+ version 1)) 'versions
+            (assoc (get state 'versions) version
+              (let ((entry (assoc request 'source (get request 'after))))
+                (if activation (assoc entry 'activation activation) entry))))
+          (get request 'kind) (get request 'name) version)
+        (dict 'event 'commit 'kind (get request 'kind) 'name (get request 'name) 'version version))))
+  (def prepare-commit
+    (fn (state request cases hook)
+      (let ((version (get state 'next)))
+        (if hook
+          (let ((receipt
+                  (with-handler (* problem) (dict 'passed #f 'reason (get problem 'message))
+                    (let ((result (hook (assoc (assoc request 'version version) 'attempt (count (get state 'history))) cases)))
+                      (if (= (type-of result) 'map)
+                        (if (= (type-of (get result 'reason)) 'string) result
+                          (dict 'passed #f 'reason "activation omitted its reason"))
+                        (dict 'passed #f 'reason "activation returned no receipt"))))))
+            (let ((staged (record state (dict 'event 'activation 'version version 'result receipt))))
+              (if (= (get receipt 'passed) #t)
+                (commit-version staged request version receipt)
+                (record staged (dict 'event 'rollback 'reason (get receipt 'reason))))))
+          (commit-version state request version nil)))))
+  (def evolution-edit-with-activation
+    (fn (state kind name before after cases judge hook)
+      (if (valid-kind? kind)
+        (if (if (= kind 'kernel-slot) (= hook nil) #f)
+          (record state (dict 'event 'refused 'reason "kernel slot requires a trial activation"))
+          (let ((current (evolution-current state kind name)))
+            (if (= before (evolution-source state current))
+                (let ((request (dict 'kind kind 'name name 'base current
+                                     'before before 'after after)))
+                  (let ((receipt (ask judge request)))
+                    (let ((judged (record state
+                            (dict 'event 'judge 'request request 'receipt receipt))))
+                      (if (= (get receipt 'allowed) #t)
+                          (let ((replay (evolution-replay after cases)))
+                            (let ((event (dict 'event 'replay 'result replay)))
+                              (if (= (get replay 'passed) #t)
+                                (prepare-commit (record judged (assoc event 'cases
+                                  (map (fn (case) (list (get case 'arguments) (get case 'expected))) cases)))
+                                  request cases hook)
+                                (record (record judged event)
+                                  (dict 'event 'rollback 'reason (get replay 'reason))))))
+                          (record judged (dict 'event 'refused 'reason (get receipt 'reason)))))))
+                (record state (dict 'event 'conflict 'reason "diff base is stale")))))
+          (signal 'evolution/kind "unknown versioned object kind" kind))))
+  (def evolution-revert
+    (fn (state kind name version cases judge)
+      (evolution-revert-with-activation state kind name version cases judge nil)))
+  (def evolution-revert-with-activation
+    (fn (state kind name version cases judge hook)
+      (let ((old (get (get state 'versions) version)))
+        (if (if old (if (= (get old 'kind) kind) (= (get old 'name) name) #f) #f)
+            (evolution-edit-with-activation state kind name
+              (evolution-source state (evolution-current state kind name))
+              (get old 'source) cases judge hook)
+            (record state (dict 'event 'refused 'reason "version belongs to another object"))))))
+  (def evolution-retry
+    (fn (state kind name cases judge propose remaining)
+      (evolution-retry-with-activation state kind name cases judge propose remaining nil)))
+  (def evolution-retry-with-activation
+    (fn (state kind name cases judge propose remaining hook)
+      (if (< 0 remaining)
+          (let ((current (evolution-current state kind name)))
+            (let ((after (propose state)))
+              (let ((next (evolution-edit-with-activation state kind name
+                            (evolution-source state current) after cases judge hook)))
+                (if (= current (evolution-current next kind name))
+                    (evolution-retry-with-activation next kind name cases judge propose (- remaining 1) hook)
+                    next))))
+          state)))
+  (def ensure-state (fn (ok) (if ok #t (signal 'evolution/state "invalid version store"))))
+  (def valid-entries
+    (fn (state version)
+      (if (= version (get state 'next)) #t
+        (let ((entry (get (get state 'versions) version)))
+          (begin
+            (ensure-state (= (type-of entry) 'map))
+            (ensure-state (valid-kind? (get entry 'kind)))
+            (ensure-state (has-key? entry 'source))
+            (ensure-state (= (get entry 'source) (get entry 'after)))
+            (let ((base (get entry 'base)))
+              (if (= base nil) (ensure-state (= (get entry 'before) nil))
+                (begin
+                  (ensure-state (= (type-of base) 'int))
+                  (ensure-state (if (< 0 base) (< base version) #f))
+                  (let ((old (get (get state 'versions) base)))
+                    (ensure-state (= (get old 'kind) (get entry 'kind)))
+                    (ensure-state (= (get old 'name) (get entry 'name)))
+                    (ensure-state (= (get old 'source) (get entry 'before))))))
+            (valid-entries state (+ version 1))))))))
+  (def valid-commits
+    (fn (state events expected rebuilt last previous earlier)
+      (if (= events nil)
+        (begin
+          (ensure-state (= expected (get state 'next)))
+          (ensure-state (= (get rebuilt 'active) (get state 'active))))
+        (let ((event (car events)))
+          (if (= (get event 'event) 'commit)
+            (begin
+              (ensure-state (= (get event 'version) expected))
+              (let ((entry (get (get state 'versions) expected))
+                    (kind (get event 'kind)) (name (get event 'name))
+                    (has-activation (= (get last 'event) 'activation)))
+                (let ((judged (if has-activation earlier previous))
+                      (replayed (if has-activation previous last))
+                      (activation (if has-activation (get last 'result) nil)))
+                  (let ((request (get judged 'request)) (replay (get replayed 'result)))
+                    (ensure-state (= (get judged 'event) 'judge))
+                    (ensure-state (= (get (get judged 'receipt) 'allowed) #t))
+                    (ensure-state (= (get replayed 'event) 'replay))
+                    (ensure-state (= (get replay 'passed) #t))
+                    (ensure-state (< 0 (get replay 'checked)))
+                    (if (has-key? replayed 'cases)
+                      (ensure-state (= (count (get replayed 'cases)) (get replay 'checked))) nil)
+                    (if (= kind 'kernel-slot) (ensure-state has-activation) nil)
+                    (if has-activation
+                      (begin
+                        (ensure-state (= (get last 'version) expected))
+                        (ensure-state (= (get activation 'passed) #t)))
+                      nil)
+                    (ensure-state (= (get request 'kind) kind))
+                    (ensure-state (= (get request 'name) name))
+                    (ensure-state (= (get request 'base) (evolution-current rebuilt kind name)))
+                    (let ((source (assoc request 'source (get request 'after))))
+                      (ensure-state (= entry (if has-activation (assoc source 'activation activation) source))))
+                    (valid-commits state (cdr events) (+ expected 1)
+                      (activate rebuilt kind name expected) nil nil nil)))))
+            (valid-commits state (cdr events) expected rebuilt event last previous))))))
+  (def evolution-valid?
+    (fn (state)
+      (with-handler (* problem) #f
+        (begin
+          (ensure-state (= (type-of state) 'map))
+          (ensure-state (= (type-of (get state 'versions)) 'map))
+          (ensure-state (= (type-of (get state 'active)) 'map))
+          (ensure-state (= (type-of (get state 'next)) 'int))
+          (ensure-state (< 0 (get state 'next)))
+          (ensure-state (= (count (get state 'versions)) (- (get state 'next) 1)))
+          (valid-entries state 1)
+          (valid-commits state (get state 'history) 1 (evolution-new) nil nil nil)
+          #t))))
+  (def evolution-cost
+    (fn (state)
+      (foldl
+        (fn (total event)
+          (if (= (get event 'event) 'judge)
+              (let ((cost (get (get event 'receipt) 'cost-microusd)))
+                (if (= (type-of cost) 'int)
+                    (if (< cost 0)
+                        (assoc total 'unknown (+ 1 (get total 'unknown)))
+                        (assoc total 'microusd (+ cost (get total 'microusd))))
+                    (assoc total 'unknown (+ 1 (get total 'unknown)))))
+              total))
+        (dict 'microusd 0 'unknown 0) (get state 'history)))))

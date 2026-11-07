@@ -5,7 +5,631 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.2.** A tool the agent built for itself, through the gate. The `builder` agent asks the host's model, once, for an Agel program that charts the player's route; the desktop admits it cell by cell on the yes of Jev, TypeSafe's System One model, asked per cell whether it may run here; and the chart is then an agent like any other, painting from the player's own summary beside the player and its reviewer. The player follows a plan step by step by typed questions. The OS runs no model and has no network; the model writes, the judge admits, the desktop runs. DOOM is the instrument; the loop, the needs, the sentence, the reviewer, the lookup and the gate are general, per [`docs/real-work.md`](docs/real-work.md). See [`docs/release-v0.3.2.md`](docs/release-v0.3.2.md), [`docs/computer-use.md`](docs/computer-use.md) and [`docs/parallel-agents.md`](docs/parallel-agents.md). What is done, partial and open is in
+**Current release: v0.3.218.** Agel waits for both bank interfaces to
+close before continuing. See the [release notes](docs/release-v0.3.218.md).
+
+v0.3.217 adds a private-world bank round-trip scenario.
+See the [release notes](docs/release-v0.3.217.md).
+
+v0.3.216 adds observed bank deposits and withdrawals.
+See the [release notes](docs/release-v0.3.216.md).
+
+v0.3.215 checks the saved inventory and XP before and after smelting.
+See the [release notes](docs/release-v0.3.215.md).
+
+v0.3.214 smelts batches from raw ore and coal.
+See the [release notes](docs/release-v0.3.214.md).
+
+v0.3.213 checks for late stance contradictions during XP confirmation.
+See the [release notes](docs/release-v0.3.213.md).
+
+v0.3.212 distinguishes stale stance observations from fresh updates.
+See the [release notes](docs/release-v0.3.212.md).
+
+v0.3.211 shows which stance fallbacks were confirmed by XP.
+See the [release notes](docs/release-v0.3.211.md).
+
+v0.3.210 includes saved XP and stance for both melee arms.
+See the [release notes](docs/release-v0.3.210.md).
+
+v0.3.209 lets melee training confirm a missing stance update through
+skill XP. See the [release notes](docs/release-v0.3.209.md).
+
+v0.3.208 reads more queued packets when confirming a stance.
+See the [release notes](docs/release-v0.3.208.md).
+
+v0.3.207 reports encoder service calls avoided during live policy use.
+See the [release notes](docs/release-v0.3.207.md).
+
+v0.3.206 handles disappearing melee targets and delayed XP.
+See the [release notes](docs/release-v0.3.206.md).
+
+v0.3.205 verifies the donor's installed melee policy before scoring
+fresh-account transfer. See the [release notes](docs/release-v0.3.205.md).
+
+v0.3.204 feeds measured cadence and service calls into optimizer retries.
+See the [release notes](docs/release-v0.3.204.md).
+
+v0.3.203 selects a replay workload within the optimizer's supported size.
+See the [release notes](docs/release-v0.3.203.md).
+
+v0.3.202 verifies the timing of native melee adaptation.
+See the [release notes](docs/release-v0.3.202.md).
+
+v0.3.201 starts three-skill melee adaptation after Attack training.
+See the [release notes](docs/release-v0.3.201.md).
+
+v0.3.200 reports replay savings and live use in a second native one-rat
+pair. See the [release notes](docs/release-v0.3.200.md).
+
+v0.3.199 lets the repair driver stop between proposal, judgment, and
+replay. See the [release notes](docs/release-v0.3.199.md).
+
+v0.3.198 stops optimizer preparation when an observation proves the task
+complete. See the [release notes](docs/release-v0.3.198.md).
+
+v0.3.197 reports a matched native one-rat run that measures replay
+savings and the cost of a policy that saw no live use. See the
+[release notes](docs/release-v0.3.197.md).
+
+v0.3.196 moves the OSRS host harness and legacy DOOM bridge into the
+examples. See the [release notes](docs/release-v0.3.196.md).
+
+Agel's language, standard library, and OS provide reusable capabilities for
+programs to compose, including networking, research, inspection, live edits,
+and replay. Game protocols, guides, policies, and scoring belong with the
+examples in [examples/osrs](examples/osrs) and [examples/doom](examples/doom).
+
+v0.3.195 stops native combat optimization before inference when the task
+completes during preparation. See the [release notes](docs/release-v0.3.195.md).
+
+v0.3.194 separates task source from adaptive bookkeeping. See the [release notes](docs/release-v0.3.194.md).
+
+v0.3.193 checks installed combat policy against the run manifest. See the [release notes](docs/release-v0.3.193.md).
+
+v0.3.192 skips one-rat inference when queued packets confirm completion. See the [release notes](docs/release-v0.3.192.md).
+
+v0.3.191 reports the replay count needed to recover optimizer setup time. See the [release notes](docs/release-v0.3.191.md).
+
+v0.3.190 decodes optimizer tapes with the compact Agel decoder. See the [release notes](docs/release-v0.3.190.md).
+
+v0.3.189 reports a completed native one-rat comparison. See the [release notes](docs/release-v0.3.189.md).
+
+v0.3.188 consumes live one-rat observations during inference. See the [release notes](docs/release-v0.3.188.md).
+
+v0.3.187 stops donor scans once the required complete records are found. See the [release notes](docs/release-v0.3.187.md).
+
+v0.3.186 uses numeric lookup values in Agel checksum loops. See the [release notes](docs/release-v0.3.186.md).
+
+v0.3.185 scores native transfer against a fresh fixed control. See the [release notes](docs/release-v0.3.185.md).
+
+v0.3.184 refuses malformed kernel selectors before staging. See the [release notes](docs/release-v0.3.184.md).
+
+v0.3.183 compares transfer time with and without donor recovery. See the [release notes](docs/release-v0.3.183.md).
+
+v0.3.182 accepts explicit writer-rate scenarios in native pair scoring. See the [release notes](docs/release-v0.3.182.md).
+
+v0.3.181 estimates writer cost from metered tokens and supplied rates. See the [release notes](docs/release-v0.3.181.md).
+
+v0.3.180 scores retained native crafting and bronze-sale pairs. See the [release notes](docs/release-v0.3.180.md).
+
+v0.3.179 adds matched one-rat adaptation comparisons. See the [release notes](docs/release-v0.3.179.md).
+
+v0.3.178 clears the old kernel candidate before overwriting its slot. See the [release notes](docs/release-v0.3.178.md).
+
+v0.3.177 observes and retries the OSRS furnace approach. See the [release notes](docs/release-v0.3.177.md).
+
+v0.3.176 waits for a tick between stance reset and retry. See the [release notes](docs/release-v0.3.176.md).
+
+v0.3.175 shows native melee stance and quest milestones in the viewer. See the [release notes](docs/release-v0.3.175.md).
+
+v0.3.174 streams hosted OSRS quest phases. See the [release notes](docs/release-v0.3.174.md).
+
+v0.3.173 advances the OSRS quest on fresh route completion observations. See the [release notes](docs/release-v0.3.173.md).
+
+v0.3.172 retries the castle pot pickup when the pot is still visible. See the [release notes](docs/release-v0.3.172.md).
+
+v0.3.171 reports adaptive policy use on native task failures. See the [release notes](docs/release-v0.3.171.md).
+
+v0.3.170 classifies benchmark cost and time outcomes. See the [release notes](docs/release-v0.3.170.md).
+
+v0.3.169 recovers from a reopened mining tutor menu. See the [release notes](docs/release-v0.3.169.md).
+
+v0.3.168 sends single-byte carrier writes without chunk assembly. See the [release notes](docs/release-v0.3.168.md).
+
+v0.3.167 skips unrelated state observers on OSRS player ticks. See the [release notes](docs/release-v0.3.167.md).
+
+v0.3.166 verifies donor source compatibility before either transfer arm starts. See the [release notes](docs/release-v0.3.166.md).
+
+v0.3.165 bounds carrier replies before decoding. See the [release notes](docs/release-v0.3.165.md).
+
+v0.3.164 preserves the transfer audit snapshot and reduces fragmented-read work. See the [release notes](docs/release-v0.3.164.md).
+
+v0.3.163 records byte counts and end-of-stream observations. See the [release notes](docs/release-v0.3.163.md).
+
+v0.3.162 retains timed native one-rat failures and the server save. See the [release notes](docs/release-v0.3.162.md).
+
+v0.3.161 can reach the first training XP target while the rat remains visible. See the [release notes](docs/release-v0.3.161.md).
+
+v0.3.160 separates native guest outcomes, saved progress and live policy use. See the [release notes](docs/release-v0.3.160.md).
+
+v0.3.159 retains replay progress when a candidate raises a condition. See the [release notes](docs/release-v0.3.159.md).
+
+v0.3.158 distinguishes replay failure stages when revising a proposal. See the [release notes](docs/release-v0.3.158.md).
+
+v0.3.157 returns live tool gate outcomes to the proposing agent. See the [release notes](docs/release-v0.3.157.md).
+
+v0.3.156 advances the OSRS bronze-sale example on the expected game packet. See the [release notes](docs/release-v0.3.156.md).
+
+v0.3.155 reports reaching the melee XP goal separately from observing target removal. See the [release notes](docs/release-v0.3.155.md).
+
+v0.3.154 requires an observed stance change before training the next skill. See the [release notes](docs/release-v0.3.154.md).
+
+v0.3.153 lets agents replay a retained tool version while their current tools stay active. See the [release notes](docs/release-v0.3.153.md).
+
+v0.3.152 verifies judge receipt order in native benchmark scoring. See the [release notes](docs/release-v0.3.152.md).
+
+v0.3.151 supports either native benchmark arm order.
+See the [release notes](docs/release-v0.3.151.md).
+
+v0.3.150 records native melee skill phases and stance retries.
+See the [release notes](docs/release-v0.3.150.md).
+
+v0.3.149 selects a visible alternative when a melee target disappears.
+See the [release notes](docs/release-v0.3.149.md).
+
+v0.3.148 checks queued stance updates before retrying.
+See the [release notes](docs/release-v0.3.148.md).
+
+v0.3.147 records native melee and crafting optimizer interruptions.
+See the [release notes](docs/release-v0.3.147.md).
+
+v0.3.146 reuses owned map values in the bootstrap evaluator.
+See the [release notes](docs/release-v0.3.146.md).
+
+v0.3.145 traces inventory packets and checks queued pickup updates.
+See the [release notes](docs/release-v0.3.145.md).
+
+v0.3.144 skips cadence evaluation when only the fixed cadence can apply.
+See the [release notes](docs/release-v0.3.144.md).
+
+v0.3.143 retries tutor advice on a fresh menu.
+See the [release notes](docs/release-v0.3.143.md).
+
+v0.3.142 reads up to 1 KiB per native carrier request.
+See the [release notes](docs/release-v0.3.142.md).
+
+v0.3.141 seals history in smaller chunks.
+See the [release notes](docs/release-v0.3.141.md).
+
+v0.3.140 waits for each mining tutor page to accept input.
+See the [release notes](docs/release-v0.3.140.md).
+
+v0.3.139 uses the benchmark’s guest memory size for scoring.
+See the [release notes](docs/release-v0.3.139.md).
+
+v0.3.138 increases guest evaluator yields and reuses list storage.
+See the [release notes](docs/release-v0.3.138.md).
+
+v0.3.137 reports donor recovery time in native transfer scores.
+See the [release notes](docs/release-v0.3.137.md).
+
+v0.3.136 scans the combat donor audit log once.
+See the [release notes](docs/release-v0.3.136.md).
+
+v0.3.135 maintains the connection during melee observation.
+See the [release notes](docs/release-v0.3.135.md).
+
+v0.3.134 runs matched three-skill melee and transfer benchmarks.
+See the [release notes](docs/release-v0.3.134.md).
+
+v0.3.133 packs RSA output bytes directly from limbs.
+See the [release notes](docs/release-v0.3.133.md).
+
+v0.3.132 verifies the RuneScape quest pot pickup from inventory.
+See the [release notes](docs/release-v0.3.132.md).
+
+v0.3.131 checks hex encoder input length once.
+See the [release notes](docs/release-v0.3.131.md).
+
+v0.3.130 formats structured tutor observations in the native quest.
+See the [release notes](docs/release-v0.3.130.md).
+
+v0.3.129 evaluates native pair scores inside Agel OS.
+See the [release notes](docs/release-v0.3.129.md).
+
+v0.3.128 services the RuneScape connection between packet chunks.
+See the [release notes](docs/release-v0.3.128.md).
+
+v0.3.127 assembles fragmented packets by chunk.
+See the [release notes](docs/release-v0.3.127.md).
+
+v0.3.126 scores optimizer interruptions in native economy and quest runs.
+See the [release notes](docs/release-v0.3.126.md).
+
+v0.3.125 keeps observing while preparing replay input.
+See the [release notes](docs/release-v0.3.125.md).
+
+v0.3.124 reduces the work needed to prepare an RSA public context.
+See the [release notes](docs/release-v0.3.124.md).
+
+v0.3.123 waits for a tutor response after a route change.
+See the [release notes](docs/release-v0.3.123.md).
+
+v0.3.122 reduces the shared stream buffer’s single-byte read steps.
+See the [release notes](docs/release-v0.3.122.md).
+
+v0.3.121 reports pot and tutor observations during the native quest.
+See the [release notes](docs/release-v0.3.121.md).
+
+v0.3.120 decodes adjacent hex pairs in fewer evaluation steps.
+See the [release notes](docs/release-v0.3.120.md).
+
+v0.3.119 loads optional desktop application registrations from disk.
+See the [release notes](docs/release-v0.3.119.md).
+
+v0.3.118 checks already available Cook’s Assistant packets before retrying
+dialogue. See the [release notes](docs/release-v0.3.118.md).
+
+v0.3.117 removes repeated list scans from RuneScape NPC decoding.
+See the [release notes](docs/release-v0.3.117.md).
+
+v0.3.116 reduces the Agel work in RuneScape exact reads.
+See the [release notes](docs/release-v0.3.116.md).
+
+v0.3.115 pins the host harness and journal reader for native pairs.
+See the [release notes](docs/release-v0.3.115.md).
+
+v0.3.114 paces keepalives in native one-rat transfer pairs.
+See the [release notes](docs/release-v0.3.114.md).
+
+v0.3.113 reduces the byte encoder’s evaluation steps.
+See the [release notes](docs/release-v0.3.113.md).
+
+v0.3.112 verifies transfer donors and reports learning cost separately.
+See the [release notes](docs/release-v0.3.112.md).
+
+v0.3.111 requires a fresh mining tutor menu and input event.
+See the [release notes](docs/release-v0.3.111.md).
+
+v0.3.110 verifies protected judge approval before scoring adaptation.
+See the [release notes](docs/release-v0.3.110.md).
+
+v0.3.109 adds matched fixed and adaptive Cook’s Assistant arms.
+See the [release notes](docs/release-v0.3.109.md).
+
+v0.3.108 extends the first actionable dialogue window for Cook’s Assistant.
+See the [release notes](docs/release-v0.3.108.md).
+
+v0.3.107 pins the donor and fixed control for native transfer.
+See the [release notes](docs/release-v0.3.107.md).
+
+v0.3.106 observes native economy packets while waiting for inference.
+See the [release notes](docs/release-v0.3.106.md).
+
+v0.3.105 leaves time to drain judge receipts after a bridge deadline.
+See the [release notes](docs/release-v0.3.105.md).
+
+v0.3.104 checks the origin of external repair completion and probe messages.
+See the [release notes](docs/release-v0.3.104.md).
+
+v0.3.103 requires recorded replay before external activation probes.
+See the [release notes](docs/release-v0.3.103.md).
+
+v0.3.102 preserves judge receipts in a host recovery journal.
+See the [release notes](docs/release-v0.3.102.md).
+
+v0.3.101 records optimizer refusals and projects cadence from the measured bound.
+See the [release notes](docs/release-v0.3.101.md).
+
+v0.3.100 distinguishes known, unpriced, and incomplete benchmark costs.
+See the [release notes](docs/release-v0.3.100.md).
+
+v0.3.99 adds a mining waypoint and a bounded copper retry.
+See the [release notes](docs/release-v0.3.99.md).
+
+v0.3.98 retains the replay cases for committed Agel versions.
+See the [release notes](docs/release-v0.3.98.md).
+
+v0.3.97 records mining tutor approaches and dialogue in native first-sale runs.
+See the [release notes](docs/release-v0.3.97.md).
+
+v0.3.96 drains native judge receipts on process exit without further retries.
+See the [release notes](docs/release-v0.3.96.md).
+
+v0.3.95 separates source judgment from measured replay in repair prompts.
+See the [release notes](docs/release-v0.3.95.md).
+
+v0.3.94 scores measured crafting failures with unchanged stock and XP.
+See the [release notes](docs/release-v0.3.94.md).
+
+v0.3.93 verifies matching starting stock and Smithing XP in native crafting.
+See the [release notes](docs/release-v0.3.93.md).
+
+v0.3.92 moves the legacy DOOM port under examples.
+See the [release notes](docs/release-v0.3.92.md).
+
+v0.3.91 supports separate staged accounts for fixed and adaptive native crafting.
+See the [release notes](docs/release-v0.3.91.md).
+
+RuneScape and DOOM are example workloads. Keep game protocols, commands,
+agent prompts, task definitions and scoring in the examples or their test
+harnesses. The language, standard library and default OS expose shared
+capabilities such as transport, inspection, replay and live versioning.
+The DOOM port and its agents live in [examples/doom](examples/doom).
+The optional legacy DOOM build still has kernel launch and display hooks.
+
+v0.3.90 scores optimization separately from gameplay.
+See the [release notes](docs/release-v0.3.90.md).
+
+v0.3.89 retains measured probe receipts in accepted versions.
+See the [release notes](docs/release-v0.3.89.md).
+
+v0.3.88 uses fresh server route flags for the Cook approach.
+See the [release notes](docs/release-v0.3.88.md).
+
+v0.3.87 observes server route flags.
+See the [release notes](docs/release-v0.3.87.md).
+
+v0.3.86 pins the runtime and task sources for economy pairs.
+See the [release notes](docs/release-v0.3.86.md).
+
+v0.3.85 lets the optimizer propose a cadence below the measured limit.
+See the [release notes](docs/release-v0.3.85.md).
+
+v0.3.84 gives checked spawn a separate kernel operation.
+See the [release notes](docs/release-v0.3.84.md).
+
+v0.3.83 binds native spawn to the activated image.
+See the [release notes](docs/release-v0.3.83.md).
+
+v0.3.82 checks activated artifacts before native dispatch.
+See the [release notes](docs/release-v0.3.82.md).
+
+v0.3.81 approaches the furnace before smelting.
+See the [release notes](docs/release-v0.3.81.md).
+
+v0.3.80 scores verified native economy pairs.
+See the [release notes](docs/release-v0.3.80.md).
+
+v0.3.79 adds fixed and adaptive arms to the native economy task.
+See the [release notes](docs/release-v0.3.79.md).
+
+v0.3.78 rechecks signed kernel bytes before promotion.
+See the [release notes](docs/release-v0.3.78.md).
+
+v0.3.77 pins the Agel trial during kernel admission.
+See the [release notes](docs/release-v0.3.77.md).
+
+v0.3.76 replays an isolated Agel trial before kernel promotion.
+See the [release notes](docs/release-v0.3.76.md).
+
+v0.3.75 requires a trial result for Agel kernel-slot versions.
+See the [release notes](docs/release-v0.3.75.md).
+
+v0.3.74 reports writer token coverage in the melee scorer.
+See the [release notes](docs/release-v0.3.74.md).
+
+v0.3.73 records writer token usage by job.
+See the [release notes](docs/release-v0.3.73.md).
+
+v0.3.72 waits for the server to enable quest dialogue input.
+See the [release notes](docs/release-v0.3.72.md).
+
+v0.3.71 retries tutor dialogue and records the live melee pair.
+See the [release notes](docs/release-v0.3.71.md).
+
+v0.3.70 routes the quest hand-in through the castle.
+See the [release notes](docs/release-v0.3.70.md).
+
+v0.3.69 retries the mining tutor from a second tile.
+See the [release notes](docs/release-v0.3.69.md).
+
+v0.3.68 brackets each candidate replay with fixed controls.
+See the [release notes](docs/release-v0.3.68.md).
+
+v0.3.67 responds to the first observed quest dialogue page.
+See the [release notes](docs/release-v0.3.67.md).
+
+v0.3.66 verifies checkpoint gate history.
+See the [release notes](docs/release-v0.3.66.md).
+
+v0.3.65 verifies the donor’s judge journal.
+See the [release notes](docs/release-v0.3.65.md).
+
+v0.3.64 dispatches and reverts a macro-built tool in the native evaluation.
+See the [release notes](docs/release-v0.3.64.md).
+
+v0.3.63 replays the retained workload before fresh-account transfer.
+See the [release notes](docs/release-v0.3.63.md).
+
+v0.3.62 retains signed kernel versions for restaging after slot reuse.
+See the [release notes](docs/release-v0.3.62.md).
+
+v0.3.61 gates and reverts native domain launches.
+See the [release notes](docs/release-v0.3.61.md).
+
+v0.3.60 verifies the requested melee skill through XP gains.
+See the [release notes](docs/release-v0.3.60.md).
+
+v0.3.59 drives repair from the actor’s state.
+See the [release notes](docs/release-v0.3.59.md).
+
+v0.3.58 retains measured failures in the paired melee scorer.
+See the [release notes](docs/release-v0.3.58.md).
+
+v0.3.57 retries the cook interaction from adjacent tiles.
+See the [release notes](docs/release-v0.3.57.md).
+
+v0.3.56 records dialogue packets and continuation actions.
+See the [release notes](docs/release-v0.3.56.md).
+
+v0.3.55 reaches the cook dialogue from the castle entrance.
+See the [release notes](docs/release-v0.3.55.md).
+
+v0.3.54 retries an unconfirmed combat stance.
+See the [release notes](docs/release-v0.3.54.md).
+
+v0.3.53 isolates a native quest hand-in on a saved account.
+See the [release notes](docs/release-v0.3.53.md).
+
+v0.3.52 gives repair retries the judge score, threshold, and reported defect.
+See the [release notes](docs/release-v0.3.52.md).
+
+v0.3.51 keeps RuneScape client code in its example and makes DOOM opt-in.
+See the [release notes](docs/release-v0.3.51.md).
+
+v0.3.50 preserves outstanding judge receipts after the requesting process
+exits. See the [release notes](docs/release-v0.3.50.md).
+
+v0.3.49 services the game connection during replay setup.
+See the [release notes](docs/release-v0.3.49.md).
+
+v0.3.48 verifies judge receipts against the guest disk.
+See the [release notes](docs/release-v0.3.48.md).
+
+v0.3.47 adds configured HTTPS search to the standard research tools.
+See the [release notes](docs/release-v0.3.47.md).
+
+v0.3.46 shows native test milestones in the Agel OS graphical console.
+See the [release notes](docs/release-v0.3.46.md).
+
+v0.3.45 reads allowlisted HTTPS documents through the byte carrier.
+See the [release notes](docs/release-v0.3.45.md).
+
+v0.3.44 verifies the installed
+Agel program and judge dispatches. See the [release notes](docs/release-v0.3.44.md).
+
+v0.3.43 retries a missing
+cook dialogue and records the pages it observes. See the [release notes](docs/release-v0.3.43.md).
+
+v0.3.42 retains boot output and
+supports a bounded deadline. See the [release notes](docs/release-v0.3.42.md).
+
+v0.3.41 reuses the active Agel
+callable across packets. See the [release notes](docs/release-v0.3.41.md).
+
+In v0.3.40, a fresh account earned three coins by mining,
+smelting and selling a bar inside Agel OS. See the [release notes](docs/release-v0.3.40.md).
+
+v0.3.39 uses the QEMU memory map to enlarge
+its x86 frame pool. See the [release notes](docs/release-v0.3.39.md).
+
+v0.3.38 returns malformed repair proposals to the
+writer with the syntax error. See the [release notes](docs/release-v0.3.38.md).
+
+v0.3.37 smelted an adamant bar from ore and coal.
+See the [release notes](docs/release-v0.3.37.md).
+
+In v0.3.36, a fresh account reached level 2 in three
+melee skills inside Agel OS. See the [release notes](docs/release-v0.3.36.md).
+
+v0.3.35 moved byte carrier frames off the desktop terminal.
+See the [release notes](docs/release-v0.3.35.md).
+
+v0.3.34 trained Attack, Strength and Defence
+on one fresh account. See the [release notes](docs/release-v0.3.34.md).
+
+v0.3.33 added research and source inspection to the standard live-tool registry.
+See the [release notes](docs/release-v0.3.33.md).
+
+v0.3.32 trained a fresh account to Attack level 2
+across ten observed encounters, with server-verified XP. See the
+[release notes and evidence](docs/release-v0.3.32.md).
+
+v0.3.31 records the [fresh-account combat comparison](docs/release-v0.3.31.md)
+and the uninterrupted quest retry.
+
+v0.3.30 first [restored a native policy and its audit history](docs/release-v0.3.30.md)
+on a fresh account without new inference.
+
+v0.3.29 adds [Agel benchmark scoring](docs/release-v0.3.29.md) and
+records an uninterrupted Cook's Assistant run.
+
+v0.3.28 first completed Cook's Assistant with ingredients earned in
+ordinary gameplay. See the [quest evidence](docs/release-v0.3.28.md).
+
+v0.3.27 verifies ground-item observations before and after a live pickup.
+See the [observation evidence](docs/release-v0.3.27.md).
+
+v0.3.26 verifies a fresh account buying a bucket with coins earned from
+its first bronze-bar sale. See the [container evidence](docs/release-v0.3.26.md).
+
+v0.3.25 verifies Cook's Assistant completion and rewards through ordinary
+dialogue with staged ingredients. See the [quest evidence](docs/release-v0.3.25.md).
+
+v0.3.24 verified the first coins from a fresh account's bronze-bar sale.
+See the [economy evidence](docs/release-v0.3.24.md).
+
+v0.3.21 forged an adamant platebody inside Agel OS with normal account rights.
+See the [staged crafting evidence](docs/release-v0.3.21.md).
+
+v0.3.20 compared fixed and adaptive native combat.
+See the [paired traces](docs/release-v0.3.20.md).
+
+v0.3.18 installed an agent-written service policy on a live connection
+after text judgment and recorded replay. See the
+[optimization evidence](docs/release-v0.3.18.md).
+
+v0.3.15 added bounded source-store checkpoint recovery across reboots.
+See the [release notes](docs/release-v0.3.15.md).
+
+v0.3.14 added an Agel-written subset evaluator whose language forms can change
+without recreating existing closures. See the [release notes](docs/release-v0.3.14.md).
+
+v0.3.13 connected real model repair to native compilation and activation,
+with protected judge accounting. See the [release notes](docs/release-v0.3.13.md).
+
+v0.3.12 added Agel compilation, program-table installation, contained native
+canaries, activation and revert, with retained images after reboot.
+See the [release notes](docs/release-v0.3.12.md).
+
+v0.3.11 added general model-written repairs, predictions, text judgment,
+held-out replay and control evals. Run `sh scripts/test-repair.sh` or
+`python3 scripts/demo-repair.py`. Connecting that model loop to native
+activation and completing cost accounting remain open. RuneScape is an
+application adapter, not part of these mechanisms.
+
+v0.3.8 added live RuneScape tests that log in, walk, set one
+skill and grant items through an Agel client. Agel owns RSA/XTEA/ISAAC,
+packet parsing, observations, action history and the smoke-test assertions.
+Run `sh scripts/test-osrs-game.sh` against the private world. Native transport,
+combat/crafting/quest benchmarks and Exo comparisons remain unfinished.
+See the [release notes](docs/release-v0.3.8.md) and [setup](docs/osrs-client.md).
+
+v0.3.7 added a private revision-241 OSRS world and the first
+Agel wire client: live JS5 negotiation, cache requests and login challenges.
+The world runs at 1× XP with automatic admin grants disabled. Player login,
+gameplay and replacing the DOOM workload remain unfinished. See the
+[release notes](docs/release-v0.3.7.md) and [setup](docs/osrs-client.md).
+
+v0.3.6 added a protected 64 MiB judge ledger with Agel
+framing, torn-write recovery and result-space reservation before dispatch.
+Existing bytes survive resume and interrupted appends; ordinary writers
+cannot consume reserved space. See the [release notes](docs/release-v0.3.6.md)
+for the tested scope and remaining guardian/client work.
+
+v0.3.5 made Jev requests and results reach the guest's
+protected log before dispatch and delivery, including retries. Agel owns
+record construction and published-rate cost arithmetic. One live call's
+usage and cost survived guest reboot. Existing run disks require `--resume`
+or a new output directory. See the [release notes](docs/release-v0.3.5.md)
+for storage limits and the unfinished guardian integration.
+
+v0.3.4 added protected append-only OS log storage and an
+Agel judge wrapper that records requests before dispatch and receipts before
+returning. Overwrite, truncation, deletion and rename are refused; the log
+survives reboot. See the
+[release notes](docs/release-v0.3.4.md).
+
+v0.3.3 added an evolution gate written in Agel: source diffs,
+judge receipts, recorded-case replay, version retention, guarded revert and
+bounded retries carrying refusal reasons. The same Lisp contract runs hosted
+and inside an OS protection domain. Canonical history recovery,
+actual OS service replacement and the private OSRS client remain in
+the [release programme](docs/exo-programme.md). See the
+[v0.3.3 release notes](docs/release-v0.3.3.md). The previous desktop tool-building
+demo is documented in [v0.3.2](docs/release-v0.3.2.md). What is done, partial and open is in
 [`docs/roadmap.md`](docs/roadmap.md); every release is one milestone with
 honest notes, and the whole line is in [`docs/versioning.md`](docs/versioning.md).
 
@@ -104,6 +728,16 @@ Inside the REPL, `:help` lists the commands; `:propose FILE`, `:promote` and
 
 The division error leaves both definitions uncommitted.
 
+### Workloads and platform code
+
+Keep game clients, policies, task definitions and scoring in
+[examples/osrs](examples/osrs), [examples/doom](examples/doom) and
+[examples/benchmarks](examples/benchmarks), with their launchers in
+`scripts/`. The language, standard library and OS expose reusable
+capabilities such as I/O, program inspection, research, live tool edits,
+judgment, replay and rollback. Each workload supplies its own protocol,
+observations, prompts and success criteria.
+
 ### The native desktop
 
 The boot scripts need `qemu-system-x86_64`, `clang`, GNU `objcopy` and the
@@ -115,12 +749,10 @@ C programs need a clang with `lld` (`brew install llvm lld`).
 ```
 
 QEMU opens its own window at 1920×1080 on a persistent desktop disk with the
-game, the hosted runtime and the browser's site installed. The pointer is
-your own, nothing is captured; `--web` adds a host-side console with layout
-composition and paste. Click the desktop to open the workbench. A sentence
-typed at the prompt summons the desktop agent, which needs a judge on the
-host to answer it: `--agent` runs the window with the judge attached
-(`TYPESAFEAI_API_KEY` in the environment; `set -a; . ./.env; set +a`).
+Agel runtime and browser examples. Click the desktop to open the workbench.
+`--web` adds a host-side console with layout composition and paste.
+`--doom-demo` loads the legacy DOOM example. `--agent` adds that demo's
+host judge using `TYPESAFEAI_API_KEY` from the environment.
 `python3 scripts/record-demo.py OUT.mp4` records the video above, live. Try:
 
 ```lisp
@@ -231,6 +863,7 @@ the compiler bootstrap and the opt-in integer JIT (`cargo run --release -q
 
 ## Documents
 
+- [Exo benchmark progress report](docs/exo-progress-report.md)
 - [`docs/roadmap.md`](docs/roadmap.md): what is done, partial and open, line by line, with the test that proves each.
 - [`docs/review-v0.2.20-v0.2.88.md`](docs/review-v0.2.20-v0.2.88.md): cross-system review, regression fixes, remaining boundaries and research priorities.
 - [`docs/architecture.md`](docs/architecture.md): the trust boundaries and the bootstrap ladder, one rung per milestone.

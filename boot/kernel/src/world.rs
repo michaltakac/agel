@@ -549,6 +549,15 @@ pub mod process {
     /// and per process; a blit record (operation 11: x, y, scale 1 to 4)
     /// shows it inside the content. Graphics only; `-ENODEV` elsewhere.
     pub const CANVAS: u64 = 22;
+    pub const LEDGER_RESERVE: u64 = 23;
+    pub const LEDGER_RELEASE: u64 = 24;
+    pub const LEDGER_APPEND: u64 = 25;
+    pub const PROGRAM_READ: u64 = 26;
+    pub const PROGRAM_WRITE: u64 = 27;
+    pub const PROGRAM_FLUSH: u64 = 28;
+    pub const PROGRAM_INFO: u64 = 29;
+    /// Spawn with a matching start sector, length and CRC in the final twelve payload bytes.
+    pub const SPAWN_CHECKED: u64 = 30;
     #[cfg(feature = "native-graphics")]
     pub const CANVAS_MAX: (u32, u32) = (640, 400);
     pub const CANVAS_BYTES: u64 = 0x0010_0000;
@@ -603,6 +612,8 @@ pub mod process {
     /// A descriptor argument that names none.
     pub const NO_DESCRIPTOR: u64 = 0xffff;
     pub const SPAWN_READ_ONLY: u64 = 1;
+    pub const SPAWN_NO_FILES: u64 = 2;
+    pub const SPAWN_MATCH_IMAGE: u64 = 4; // compatibility with v0.3.83
     /// Set in a `wait` answer when the child did not exit but was stopped:
     /// the low byte is then the signal a POSIX parent would see.
     pub const WAIT_SIGNALED: u64 = 0x100;
@@ -639,6 +650,14 @@ pub mod process {
 /// inside the region it was told it owns.
 #[cfg(feature = "process")]
 pub mod fs {
+    pub const LEDGER_FIRST: u32 = 131072;
+    pub const LEDGER_SECTORS: u32 = 131072;
+    pub const LEDGER_DATA: u32 = LEDGER_FIRST + 2;
+    pub const LEDGER_CAPACITY: u32 = LEDGER_SECTORS - 2;
+    pub const LEDGER_ENTRY: usize = 0x7fff;
+    pub const COMMAND_RESERVE: u64 = 0xb800;
+    pub const COMMAND_RELEASE: u64 = 0xb900;
+    pub const RESERVED_OFFSET: u64 = 1 << 62;
     /// The data region: large read-only files installed from the host
     /// (`scripts/install-program.py --region data`), a table sector like
     /// the program region's and the bytes after it, which the service
@@ -751,6 +770,7 @@ pub const OBSERVATION_OFFSET: usize = 2048;
 pub const OBSERVATION_BYTES: usize = 2048;
 const _: () = assert!(OBSERVATION_OFFSET + OBSERVATION_BYTES <= 4096);
 const _: () = assert!(crate::native::LOOK_BYTES <= OBSERVATION_BYTES);
+const _: () = assert!(crate::native::EFFECT_BYTES <= OBSERVATION_BYTES);
 /// One compositor record: the unit the display driver reads and a window holds.
 #[cfg(feature = "process")]
 pub const RECORD_BYTES: usize = 64;

@@ -1,0 +1,24 @@
+RuneScape crafting: staging one hammer and five bars on the dedicated fixture
+RuneScape crafting: normal-account anvil and platebody button
+Evidence: target/native-network-1794024862930319000
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-craft: sending anvil interaction
+native-craft: smithing interface and stock observed, sending platebody button
+native-craft: {test adamant-platebody passed #t bars-before 5 bars-after 0 platebody-before 0 platebody-after 1 smithing-xp-before 4385776 smithing-xp-after 4386088}
+native-craft: task-us 222388092
+native-network: keepalives 154
+native-network: client completed: login, observations and adamant platebody inside Agel OS
+agel: 1 forms, 38449077 steps, revision 1
+process agel exited with status 0
+Elapsed seconds: 280.112
+Saved Smithing fine XP: 43857760 -> 43860885
+Saved inventory: five bars consumed, one hammer retained, one adamant platebody produced
+RuneScape PASS: adamant platebody forged through the anvil interface, saved at normal rights and 1x XP
+
+byte-bridge: request 1 operation open at-ms 1844 duration-ms 0 status ok
+byte-bridge: request 6 operation close at-ms 5203 duration-ms 0 status ok
+byte-bridge: request 9 operation open at-ms 37405 duration-ms 0 status ok
+byte-bridge: request 247 operation close at-ms 273786 duration-ms 0 status ok

@@ -1,0 +1,2 @@
+(import agel/osrs-wire)
+(osrs-js5-open 241 '(1 2 3 4))

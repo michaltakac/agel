@@ -149,6 +149,7 @@ impl FrameLedger {
 /// so nothing a dead domain wrote reaches its successor.
 pub struct FramePool {
     next: u64,
+    end: u64,
     freed: [u64; POOL_WORDS],
     free_count: u64,
     ledger: Option<FrameLedger>,
@@ -159,16 +160,23 @@ impl FramePool {
     pub const fn new() -> Self {
         Self {
             next: arch::POOL_START,
+            end: arch::POOL_END,
             freed: [0; POOL_WORDS],
             free_count: 0,
             ledger: None,
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    pub fn limit_to(&mut self, end: u64) {
+        debug_assert!(self.next == arch::POOL_START && end <= arch::POOL_END);
+        self.end = end;
+    }
+
     /// Frames still available: never handed out, plus given back.
     #[cfg(not(any(feature = "isolated-repl", feature = "native-graphics")))]
     pub fn remaining(&self) -> u64 {
-        (arch::POOL_END - self.next) / PAGE + self.free_count
+        (self.end - self.next) / PAGE + self.free_count
     }
 
     /// Take one zeroed frame, a given-back one first.
@@ -208,7 +216,7 @@ impl FramePool {
     }
 
     fn bump(&mut self) -> Result<u64, MemoryError> {
-        if self.next >= arch::POOL_END {
+        if self.next >= self.end {
             return Err(MemoryError::OutOfFrames);
         }
         let frame = self.next;

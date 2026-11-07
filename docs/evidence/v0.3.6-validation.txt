@@ -1,0 +1,24 @@
+v0.3.6 validation, 2026-11-06
+
+Passed: cargo test --workspace
+Passed: cargo clippy --workspace --all-targets -- -D warnings
+Passed: cargo fmt --all -- --check
+Passed: kernel and POSIX formatting and Clippy
+Passed: legacy judge-log and ordinary filesystem native regressions
+Passed: sh scripts/test-ledger.sh (exit 0)
+
+ledger: native judge request/result decoded in Agel
+ledger: resumed history exceeds the old 64 KiB limit
+ledger: torn append sectors remain immutable; later records recover
+ledger: torn metadata recovers through the other head and tail scan
+ledger: insufficient result reservation prevents the network call
+ledger: POSIX Agel judge transport passed
+ledger: interrupted first reservation recovers without a valid checkpoint
+ledger: ordinary writers cannot consume reserved result space; stale tokens fail
+ledger: undersized disk refuses reservations; bridge growth preserves its history
+
+An earlier full run stopped during compositor startup with a tick-budget
+failure while the external game-server build was also active. The final
+full run above was performed without that competing build and passed.
+These are synthetic provider and sector-prefix interruption fixtures,
+not physical-device power-loss or live OSRS results.

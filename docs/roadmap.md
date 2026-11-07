@@ -1,14 +1,95 @@
 # Roadmap
 
-What Agel has, what it is in the middle of, and what it has not begun. No
-dates and no ordering beyond dependence: an item is **done** only when the
-code exists on every surface the line names and a test in this repository
-proves it; **partial** names exactly what is missing; **open** means no
-code. Each release moves lines here; the release-by-release history is in
-[`versioning.md`](versioning.md) and the trust story in
-[`threat-model.md`](threat-model.md).
+An item is **done** when the code exists on every surface the row names
+and a repository test proves it. **Partial** identifies the remaining work,
+and **open** marks work yet to start. The release history and trust model
+are maintained separately. [Versioning](versioning.md) · [Threat model](threat-model.md)
+
+## Exo evaluation and OS evolution
+
+The [progress report](exo-progress-report.md) records the benchmark results
+through v0.3.218. The work below is ordered by what the next measured run
+depends on.
+
+| Work | Status | Evidence required to close |
+| --- | --- | --- |
+| Reconcile live observations with saved outcomes | Partial | Replay the missing melee updates from the wire, then complete both matched 16 XP arms with agreement between guest observations and server saves. Record failures and timeouts in the score. |
+| Measure useful in-session adaptation | Partial | Compare the same starting model, policy and tools with editing enabled or disabled. Require the edit to serve subsequent work and report task-level correctness, elapsed time and cost including retries. Record replay gains separately from live gains. |
+| Complete adamant production from a fresh account | Partial | Verify staged ore smelting and the bank round trip live, then join banking, transport, smelting and anvil work. Add normal-account resource acquisition and Smithing progression. Verify the finished item's provenance in both arms. |
+| Scale combat, currency and quests to the Exo workloads | Partial | Train all required combat stats to the objective, measure coin accumulation over a matched active-time window, and run a multi-quest campaign with quest points and cost recorded for both arms. |
+| Verify retained-policy transfer at task scale | Partial | Repeat completed tasks on distinct fresh accounts using verified donor lineage. Charge donor learning separately and include recipient recovery in elapsed time. |
+| Complete model accounting | Partial | Reconcile provider dispatches, token usage, cached input, prices, retries and interrupted attempts against the protected guest journal. Publish coins per dollar only when the denominator is known and positive. |
+| Expand the Agel-owned runtime | Partial | Extend the Agel evaluator and native backend beyond their demonstrated subsets. Verify guarded activation and reboot recovery for cells, programs, domains and kernel slots, then reduce the Rust runtime to the bootstrap and byte boundary. Keep game-specific policies in examples. |
+| Compare directly with Exo | Open | Run a matched Exo arm with equivalent objectives, server access, tools, model settings and budgets. Repeat with recorded run order and report correctness, time, total cost and uncertainty. |
 
 ## The language and the hosted runtime
+
+The current OSRS and runtime evolution work is tracked in
+[`exo-programme.md`](exo-programme.md). Its first step, the Agel-written
+version/diff/judge/replay/retry policy, is tested hosted and in an OS process
+by `sh scripts/test-evolution.sh`. Protected `judge-log` bytes and an opt-in
+Agel dispatch wrapper are tested by `sh scripts/test-judge-log.sh`.
+Provider-wide Jev attempt accounting reaches guest storage in v0.3.5;
+`sh scripts/test-judge-bridge.sh` checks reboot, resume and full-log denial.
+`sh scripts/test-ledger.sh` adds framed recovery, growth beyond 64 KiB and
+reserved result capacity in v0.3.6. Complete accounting after in-flight
+crashes/device failure, guardian-only append authority
+and full game experiments are still open; v0.3.12 adds native program activation
+for new child executions, while durable guarded activation remains open.
+The private OpenRune world and pre-login/cache wire client are verified
+in v0.3.7. v0.3.8 adds Agel password login, game ciphers, movement,
+stat/inventory observations and skill/item setup. `sh scripts/test-osrs-game.sh`
+checks those live with a normal account and a separate administrator.
+A native relay arrives in v0.3.16. v0.3.17 combines polling inference,
+Agel stream services and a retained repair actor during a live connection.
+The seeded planner probe has real-provider evidence; full task benchmarks remain open;
+see [the setup and precise scope](osrs-client.md).
+v0.3.18 adds a generic work profiler and a precommit probe for an agent-written
+service cadence. The same Agel process records, measures and replays packet
+bytes before an existing client uses the new policy. See the
+[measured scope](release-v0.3.18.md).
+`sh scripts/test-osrs-combat.sh` adds a live rat kill in v0.3.9, using Agel
+NPC observations and attack packets, with exact Attack XP and persisted
+Hitpoints XP checks. It does not complete the maximum-combat-stats workload.
+`sh scripts/test-live-tools.sh` adds replay-gated tool activation in v0.3.10.
+One running actor dispatches the new version without losing its mailbox or
+history, and a live RuneScape connection survives the edit. Diagnosis and
+the judge remain scripted fixtures; this does not measure model understanding.
+v0.3.11 adds the application-neutral `agel/repair` actor. Real model-written
+tools pass separate text judgments and held-out replay before activation.
+Recorded controls, diagnoses, predictions, failures and judge costs are linked
+in [the release notes](release-v0.3.11.md). It does not yet rewrite native
+services or measure Exo task performance.
+v0.3.12 adds Agel program-table management and real compiled program activation.
+`sh scripts/test-native-evolution.sh` verifies contained native replay, refusal,
+revert and retained executable images after reboot. The controller remains
+running during edits. Existing service-domain state migration, canonical
+activation recovery remain open. v0.3.13 connects the real model repair loop
+to native activation in the same Agel controller. Its scheduler example
+improves from 3/6 to 6/6 cases after independent judgment and compiled replay.
+Paid attempts reach protected guest storage; complete model costs and Exo
+comparisons remain open. See [the evidence and limits](release-v0.3.13.md).
+
+v0.3.14 adds an Agel-written subset evaluator with versioned form dispatch.
+A real model repairs a language form inside the OS; an existing closure sees
+the new form while retaining its lexical value. Refusal/retry, runtime replay,
+equivalent versions and guarded revert are verified. The version store is
+archived in protected OS storage, without automatic canonical recovery.
+See [the runtime contract](live-runtime.md) and [real evidence](release-v0.3.14.md).
+
+v0.3.15 adds inert source-store checkpoints and explicit recovery in Agel.
+Three native processes across three boots preserve active forms and old
+versions, refuse a torn successor and an unsafe revert, then commit a safe
+successor and guarded revert. This bounded example does not provide automatic
+service discovery or domain/kernel recovery. See [the API](checkpoints.md) and
+[native evidence and limits](release-v0.3.15.md).
+
+v0.3.16 runs the Agel wire client inside its OS over a general TCP byte relay.
+A fresh normal account logs in, observes skills/inventory and saves a walk at
+1× XP. Agel owns buffering, keepalive policy and reusable standard crypto;
+Rust supplies bootstrap memory and byte transport. This is a headless scripted
+smoke, not an integrated model episode or Exo comparison. See
+[the evidence](release-v0.3.16.md) and [byte-stream API](byte-stream.md).
 
 | Line | Status | Proof and limits |
 |---|---|---|
@@ -156,7 +237,7 @@ trained on it.
 | The drive loop asks again after a judge's error reply | done | `scripts/test-drive.sh`: an error reply is waited on and the next step asks again; the programs' `number` checks a field exists before reading it |
 | The agent reads its own metrics and changes its own cells by typed questions, nobody at the keyboard | done | v0.2.99: `review` beside `doom-agent-judge` under `:agents`: one live run, six reviews, two typed questions, the judge chose `nothing` twice; the apply path is tested in `scripts/test-drive.sh` ([`parallel-agents.md`](parallel-agents.md)) |
 | Agents side by side on the desktop, each declaring what it needs, a second sentence heard while the first plays | done | v0.2.99: `:agents STEPS`, `NAME-needs` facts (file, window, process, done, after), `scripts/test-drive.sh` |
-| Changing the OS from inside: a program installed through a gated effect, a domain replaced by a gated proposal, the kernel image last | open | the program region is written only by host scripts; the change protocol is a description ([`parallel-agents.md`](parallel-agents.md)) |
+| Changing the OS from inside: a program installed through a gated effect, a domain replaced by a gated proposal, the kernel image last | partial | v0.3.12 adds Agel-managed ELF installation, canary replay, activation and revert; running-domain and kernel-image replacement remain open ([`parallel-agents.md`](parallel-agents.md)) |
 
 ## Not started
 

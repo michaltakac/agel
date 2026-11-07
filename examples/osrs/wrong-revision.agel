@@ -1,0 +1,4 @@
+(import agel/osrs-wire)
+(with-handler (osrs/rejected refusal)
+  (dict 'phase 'rejected 'reason (get refusal 'message) 'detail (get refusal 'data))
+  (osrs-js5-open 240 '(1 2 3 4)))

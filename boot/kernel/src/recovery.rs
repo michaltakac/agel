@@ -24,6 +24,16 @@ use agel_integrity::{Sha512, Signature, VerifyingKey};
 #[cfg(target_arch = "x86_64")]
 include!(concat!(env!("OUT_DIR"), "/kernel-signing-key.rs"));
 
+#[cfg(target_arch = "x86_64")]
+pub const KERNEL_TRIAL: &[u8] = include_bytes!("../agel/kernel-trial.agel");
+
+#[cfg(target_arch = "x86_64")]
+fn kernel_trial_digest() -> [u8; 64] {
+    let mut digest = Sha512::new();
+    digest.update(KERNEL_TRIAL);
+    digest.finish()
+}
+
 /// Boots a candidate may take without reaching a healthy state before the
 /// trusted generation is booted instead.
 pub const ATTEMPT_BUDGET: u32 = 3;
@@ -241,13 +251,15 @@ impl KernelRecovery {
     }
 
     /// Check a staged candidate's signature and either admit it, so the boot
-    /// stage may load it, or clear it. Runs on every boot of any slot; a
-    /// candidate is only ever staged from the host, and only a kernel built
-    /// with the matching public key can let it run.
+    /// stage may load it, or clear it. The trusted slot checks the signature
+    /// and pins its replay source before the candidate can run.
     pub fn admit(&mut self, storage: &mut ServiceDomain) -> Result<Admission, &'static str> {
         let selector = self.selector;
         if selector.candidate == NO_CANDIDATE || selector.admitted {
             return Ok(Admission::Nothing);
+        }
+        if self.booted != Some(selector.trusted) {
+            return Err("only the running trusted slot can admit a kernel");
         }
         match verify_slot(
             storage,
@@ -257,6 +269,7 @@ impl KernelRecovery {
         ) {
             Ok(()) => {
                 self.selector.admitted = true;
+                self.selector.trial_digest = kernel_trial_digest();
                 save_selector(storage, &self.selector)?;
                 Ok(Admission::Admitted(selector.candidate))
             }
@@ -292,20 +305,48 @@ impl KernelRecovery {
         Ok(Some(self.selector.candidate))
     }
 
-    /// Make the verified candidate slot the one the stage loads by default.
+    /// Replay on the verified candidate before making it the default slot.
     #[cfg(feature = "isolated-repl")]
-    pub fn promote(&mut self, storage: &mut ServiceDomain) -> Result<(u8, u8), &'static str> {
+    pub fn promote(
+        &mut self,
+        storage: &mut ServiceDomain,
+        replay: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<(u8, u8), &'static str> {
         if self.selector.candidate == NO_CANDIDATE {
             return Err("denied: no candidate kernel slot");
         }
         if !self.selector.verified {
             return Err("denied: the candidate kernel has not completed a healthy boot");
         }
+        if self.booted != Some(self.selector.candidate) {
+            return Err("denied: promotion must replay on the running candidate");
+        }
+        if self.selector.trial_digest != kernel_trial_digest() {
+            self.fault(storage)?;
+            return Err("denied: Agel kernel replay differs from the admitted trial");
+        }
+        if let Err(reason) = replay() {
+            self.fault(storage)?;
+            return Err(reason);
+        }
+        if verify_slot(
+            storage,
+            self.selector.candidate,
+            self.selector.length,
+            &self.selector.signature,
+        )
+        .is_err()
+        {
+            self.fault(storage)?;
+            return Err("denied: candidate signature could not be reverified before promotion");
+        }
         let previous = self.selector.trusted;
-        self.selector.trusted = self.selector.candidate;
-        self.selector.clear_candidate();
-        save_selector(storage, &self.selector)?;
-        Ok((self.selector.trusted, previous))
+        let mut promoted = self.selector;
+        promoted.trusted = promoted.candidate;
+        promoted.clear_candidate();
+        save_selector(storage, &promoted)?;
+        self.selector = promoted;
+        Ok((promoted.trusted, previous))
     }
 
     /// Exhaust the candidate's budget so the next boot loads the trusted slot.
@@ -315,10 +356,12 @@ impl KernelRecovery {
         if self.selector.candidate == NO_CANDIDATE {
             return Err("denied: no candidate kernel slot to give up");
         }
-        self.selector.attempts = ATTEMPT_BUDGET as u8;
-        self.selector.verified = false;
-        save_selector(storage, &self.selector)?;
-        Ok(self.selector.trusted)
+        let mut faulted = self.selector;
+        faulted.attempts = ATTEMPT_BUDGET as u8;
+        faulted.verified = false;
+        save_selector(storage, &faulted)?;
+        self.selector = faulted;
+        Ok(faulted.trusted)
     }
 }
 

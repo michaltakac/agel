@@ -1,0 +1,15 @@
+Default observation bound
+Evidence: target/native-network-1794021424485010000
+native-combat: searching for a rat
+agel: error: evaluation error: osrs/wait: observation did not arrive within the bound
+process agel exited with status 1
+
+Expanded observation bound with flat history
+Evidence: target/native-network-1794021786591318000
+native-combat: searching for a rat
+native-combat: target {index 20014 type 2854 spawn-dx 1 spawn-dz 1 direction 6 jump #t extended #f movement nil}
+agel: out of memory: heap growth failed after 50 free pages
+agel: allocation bytes 299008
+agel: cached large-run pages 130
+agel: cached class bytes 5709792
+process agel exited with status 12

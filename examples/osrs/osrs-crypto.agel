@@ -1,0 +1,21 @@
+(module agel/osrs-crypto
+  (import agel/crypto)
+  (export rsa-context rsa-encrypt xtea-encrypt isaac-new isaac-next isaac-bytes-new isaac-bytes-available)
+  (def context rsa-context)
+  (def encrypt rsa-encrypt)
+  (def xtea xtea-encrypt)
+  (def initialize isaac-new)
+  (def next isaac-next)
+  (def next-byte isaac-bytes-next)
+  (def legacy-error
+    (fn (problem)
+      (let ((kind (get problem 'kind)))
+        (signal (if (= kind 'crypto/rsa) 'osrs/rsa
+                 (if (= kind 'crypto/xtea) 'osrs/xtea
+                  (if (= kind 'crypto/isaac) 'osrs/isaac kind)))
+          (get problem 'message) (get problem 'data)))))
+  (def rsa-context (fn (modulus) (with-handler (* problem) (legacy-error problem) (context modulus))))
+  (def rsa-encrypt (fn (bytes parameters) (with-handler (* problem) (legacy-error problem) (encrypt bytes parameters))))
+  (def xtea-encrypt (fn (bytes key) (with-handler (* problem) (legacy-error problem) (xtea bytes key))))
+  (def isaac-new (fn (seed) (with-handler (* problem) (legacy-error problem) (initialize seed))))
+  (def isaac-next (fn (state) (with-handler (* problem) (legacy-error problem) (if (isaac-bytes-available state) (next-byte state) (next state))))))

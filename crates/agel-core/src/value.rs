@@ -43,6 +43,7 @@ pub enum Builtin {
     TypeOf,
     TextBytes,
     TextByte,
+    TextFromBytes,
     TextSlice,
     TextConcat,
     TextSymbol,

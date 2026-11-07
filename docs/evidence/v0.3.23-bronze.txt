@@ -1,0 +1,8 @@
+RuneScape mining: fresh account walking to the tutor for a pickaxe and ores for a bronze bar
+{test first-bronze passed #t pickaxes 1 copper-before 1 tin-before 1 bronze-before 0 copper-after 0 tin-after 0 bronze-after 1 mining-xp 35 smithing-xp 6}
+stat=13 base=1 visible=1 fine_xp=62
+stat=14 base=1 visible=1 fine_xp=350
+inv=inv.inv item=obj.bronze_bar count=1
+inv=inv.inv item=obj.bronze_pickaxe count=1
+Elapsed seconds: 118.389
+RuneScape PASS: fresh account mined both ores and smelted one bronze bar at normal rights

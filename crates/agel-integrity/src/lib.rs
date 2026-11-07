@@ -12,6 +12,7 @@ extern crate alloc;
 #[cfg(feature = "alloc")]
 use alloc::string::String;
 
+pub mod append;
 pub mod ed25519;
 
 #[cfg(feature = "alloc")]

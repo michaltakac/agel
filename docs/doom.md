@@ -1,5 +1,9 @@
 # Does it run DOOM?
 
+Launch the legacy desktop demo with `./scripts/run-graphics.sh --doom-demo`.
+For a seed image, use `./scripts/build-boot.sh --features doom-demo`.
+The Agel demo sources live in `examples/doom`.
+
 **Yes, since v0.2.71.** The shareware episode's demo plays in a window
 on the Agel desktop at 49 frames per second under QEMU's emulation, the
 engine an ordinary C program in a protection domain, the data a
@@ -104,10 +108,10 @@ is listed here exactly.
    domains, the FPU state saved and restored around every domain entry,
    and a small `math.h`. On AArch64 and RISC-V the same switch, when the
    port reaches them.
-5. **The port.** `boot/posix/c/doom/`: `doomgeneric` unmodified as a
+5. **The port.** `examples/doom/c/doom/`: `doomgeneric` unmodified as a
    third-party source (GPL v2, its licence kept beside it) plus one
    platform file implementing `DG_*` over `agel/window.h`: the surface,
-   the keys, the clock. Built by `scripts/build-c-program.sh doom`,
+   the keys, the clock. Built by `scripts/build-c-program.sh doom x86_64 examples/doom/c`,
    installed with the WAD, started with `:exec c-doom`. The proof is a
    demo played back to a checksum: DOOM's own `-timedemo` reports its
    frame rate, and the test requires the title screen's pixels.
@@ -163,7 +167,7 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
 
 ## How it runs (v0.2.71)
 
-`boot/posix/c/doom/` is `doomgeneric` (the platform-free Chocolate Doom
+`examples/doom/c/doom/` is `doomgeneric` (the platform-free Chocolate Doom
 fork, GPL v2, its licence beside it) unmodified: eighty sources listed in
 `c/doom.deps`, compiled with the defines in `c/doom.cflags`.
 `c/doom.c` is the platform: `DG_Init` asks for a 640×400 window and a
@@ -202,7 +206,7 @@ Agel's model-provider effect, and leaves a dataset of every step.
 
 ![DOOM paused in its window while Agel decides; the engine's state lines in the terminal, at v0.2.72](images/native-desktop-v0.2.72.png)
 
-`crates/agel-play` is the agent, a Rust program on the host (Tier 2 in
+`examples/doom/host` is the agent, a Rust program on the host (Tier 2 in
 [`deployment-targets.md`](deployment-targets.md)): it boots the desktop
 image in QEMU with the monitor and serial sockets the tests use, formats
 the region, starts the engine from the workshop (`-warp 1 -skill 2`), and
@@ -256,7 +260,7 @@ it. No steering while it runs, no speech.
 ## The loop in the OS (v0.2.74)
 
 Now the loop is Agel, in the OS. The perceive-decide-act cycle is an Agel
-program, [`boot/desktop/doom-agent.agel`](../boot/desktop/doom-agent.agel),
+program, [`examples/doom/doom-agent.agel`](../examples/doom/doom-agent.agel),
 loaded into the desktop's own native evaluator with `:load doom-agent`
 and run with `:play STEPS [HOLD]`. The desktop is the substrate the
 language cannot be: each step it pauses the game with the key
@@ -290,12 +294,12 @@ reaches the workshop while the game holds the keyboard, because it opens
 with a colon, so `:play` can be typed at a game in focus.
 
 A model decides through the same words, in
-[`doom-agent-model.agel`](../boot/desktop/doom-agent-model.agel): each
+[`doom-agent-model.agel`](../examples/doom/doom-agent-model.agel): each
 step it `model-request`s what it saw, and until an answer arrives it
 holds nothing. The desktop prints the request, the state line and the
 window as shades on the serial console between `model-request N:` and
 `model-request end`, and reads the answer back as `:model-reply N <action>
-<reason>`. `crates/agel-play` is now only that bridge: it boots the image,
+<reason>`. `examples/doom/host` is now only that bridge: it boots the image,
 loads the program, runs `:play`, and answers each request by calling a
 provider through `agel-model`'s typed, audited `model/infer` effect,
 recording every step to `steps.jsonl`; a `--policy echo` answers
@@ -306,7 +310,7 @@ with its observation and the reply are proven; driving a whole model
 episode is by hand, not yet a tested path.
 
 A System One model judges through the same words since v0.2.91, in
-[`doom-agent-judge.agel`](../boot/desktop/doom-agent-judge.agel): each
+[`doom-agent-judge.agel`](../examples/doom/doom-agent-judge.agel): each
 step it sends typed questions as a `(judge ...)` form — the best next
 move among six, whether an enemy is in view, how dangerous it is — and
 `agel-play --policy jev` carries them with the state line and the window

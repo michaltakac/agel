@@ -8,6 +8,12 @@ puts into the program region for `:exec` to run. It runs where the rest of
 the toolchain runs since v0.2.80: in the loaded runtime, in a protection
 domain, in the OS.
 
+Since v0.3.12, `agel/program-store` can also register those bytes from an
+Agel process through bounded program-region sector operations. The
+`agel/native-program` adapter gates activation on judgment, metacircular replay
+and native stdout/status checks, retaining prior named images for revert.
+See [the native activation evidence and limits](release-v0.3.12.md).
+
 ## What it compiles
 
 The IR's integer subset: integer, boolean and nil constants; two-argument

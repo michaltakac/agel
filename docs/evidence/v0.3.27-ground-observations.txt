@@ -1,0 +1,19 @@
+Hosted fresh-account pickup and shop purchase
+RuneScape quest: obtaining the pot and earning coins for the bucket without admin setup
+{test cook-containers passed #t pot 1 bucket 1 coins-earned 3 coins-left 1 pot-on-ground-before 1 pot-on-ground-after 0}
+Saved supplies: one empty pot, one empty bucket, and one coin at normal rights and 1× XP
+Acquisition and verification elapsed seconds: 165.199
+RuneScape PASS: fresh normal account picked up a pot and bought a bucket with earned coins
+
+Native movement regression after reusing the packed packet header
+native-network: observations {smithing-level 1 coins 0}
+native-network: keepalives 119
+native-network: client completed: login, observations, walking packet and tick consumption inside Agel OS
+PASS: native client movement saved with normal rights and 1x XP
+Elapsed seconds: 204.015
+
+Exploratory farm survey, quantities by tile, plane 0
+((((3226 3301) 1) ((3229 3299) 1)) (((3185 3297) 1) ((3172 3301) 1) ((3175 3305) 1) ((3169 3291) 1)))
+
+Alternate eastern approach, observed counts before movement, before pickup, inventory after pickup, and ground counts after pickup
+((((3226 3301) 1) ((3229 3299) 1)) (((3226 3301) 1) ((3229 3299) 1)) 0 (((3226 3301) 1) ((3229 3299) 1)))
