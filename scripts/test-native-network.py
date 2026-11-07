@@ -7,7 +7,9 @@ from pathlib import Path
 import secrets
 import shutil
 import re
-from native_provider_support import provider_environment, decode_judge_ledger
+from native_provider_support import (
+    decode_judge_ledger, judge_frames, judge_receipts_for_trace, provider_environment, verified_judge_ledger,
+)
 import subprocess
 import sys
 import tempfile
@@ -156,6 +158,9 @@ if options.transfer_from:
         donor_xp = combat_xp(donor_trace)
     if not combat_xp_saved(donor_xp, donor_saved):
         raise SystemExit('donor saved combat XP differs from the observed outcome')
+    donor_ledger, donor_frames = verified_judge_ledger(donor)
+    if not judge_receipts_for_trace(donor_ledger, donor_trace):
+        raise SystemExit('donor judge journal has no verified receipts')
     for field in ('image', 'manifest', 'combat_policy_sha256'):
         if previous[field] != manifest[field]:
             raise SystemExit('donor differs from current combat contract: '+field)
@@ -165,6 +170,7 @@ if options.transfer_from:
     manifest['scope']+=' with retained policy and workload'
     manifest['encoder_policy']='transferred'
     manifest['donor_disk_sha256']=donor_hash
+    manifest['donor_judge_frames_sha256']=hashlib.sha256(donor_frames).hexdigest()
 
 if shared_carrier:
     for name in ['meta','judgment','browse']:
@@ -514,6 +520,7 @@ if options.transfer_from:
     assert 'native-transfer: tape replay {bytes ' in output
     assert 'native-transfer: score {correct #t ' in output
     assert re.search(r'native-transfer: retained policy uses [1-9][0-9]*',output)
+    assert judge_frames(disk)==donor_frames,'transferred judge journal changed'
 if options.combat:
     assert re.search(r'native-combat: \{test rat-combat passed #t .*target-removed #t\}',output)
     assert output.count('operation open ') == output.count('operation close ') == 2

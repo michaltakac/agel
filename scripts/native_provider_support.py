@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import tempfile
 
 
 def provider_environment(directory, live, delay=0, proposal=None):
@@ -69,6 +70,37 @@ def decode_judge_frames(framed):
     if decoded.stderr.strip() != 'journal health: (0 #f)':
         raise ValueError('incomplete or corrupt guest judge journal')
     return decoded.stdout
+
+
+def verified_judge_ledger(directory):
+    frames = judge_frames(directory / 'disk.img')
+    if frames != (directory / 'judge.frames').read_bytes():
+        raise ValueError(f'{directory}: judge frames differ from the guest journal')
+    with tempfile.TemporaryDirectory(prefix='agel-judge-') as scratch:
+        path = Path(scratch) / 'judge.frames'
+        path.write_bytes(frames)
+        records = decode_judge_frames(path)
+    if records != (directory / 'judge.agel').read_text():
+        raise ValueError(f'{directory}: judge records differ from the guest journal')
+    return records, frames
+
+
+def judge_receipts_for_trace(ledger, trace):
+    starts = re.findall(r'^\(judge-start .*$', ledger, re.M)
+    receipts = re.findall(r'^\(judge-result .*$', ledger, re.M)
+    identity = re.compile(r'^\(judge-(?:start|result) id "([^"]+)".*? attempt (\d+)\b')
+    started = [identity.match(line) for line in starts]
+    completed = [identity.match(line) for line in receipts]
+    if not all(started) or not all(completed):
+        raise ValueError('missing judge call identity')
+    keys = [match.groups() for match in started]
+    if len(set(keys)) != len(keys) or sorted(keys) != sorted(match.groups() for match in completed):
+        raise ValueError('unmatched or duplicate judge receipts')
+    dispatched = re.findall(r'^inference-bridge: started job (\d+) provider jev ', trace, re.M)
+    jobs = {name.rsplit('/', 1)[-1] for name, _ in keys}
+    if len(set(dispatched)) != len(dispatched) or jobs != set(dispatched):
+        raise ValueError('judge ledger differs from bridge dispatches')
+    return receipts
 
 
 def judge_cost(receipt):

@@ -6,9 +6,7 @@ from pathlib import Path
 import re
 import runpy
 import sys
-import tempfile
-
-from native_provider_support import decode_judge_frames, judge_cost, judge_frames
+from native_provider_support import judge_cost, judge_frames, judge_receipts_for_trace, verified_judge_ledger
 
 sys.path.insert(0, str(Path(__file__).with_name('osrs')))
 from test_support import combat_xp, combat_xp_saved, form, melee_failure_saved, melee_levels_saved, melee_xp
@@ -40,19 +38,6 @@ def installed_client(directory, read_table):
     require(source == (directory / 'client.agel').read_bytes(),
             f'{directory}: installed Agel program differs from recorded source')
     return source.decode()
-
-
-def installed_judge_ledger(directory):
-    frames = judge_frames(directory / 'disk.img')
-    require(frames == (directory / 'judge.frames').read_bytes(),
-            f'{directory}: judge frames differ from the guest journal')
-    with tempfile.TemporaryDirectory(prefix='agel-judge-') as scratch:
-        path = Path(scratch) / 'judge.frames'
-        path.write_bytes(frames)
-        ledger = decode_judge_frames(path)
-    require(ledger == (directory / 'judge.agel').read_text(),
-            f'{directory}: judge records differ from the guest journal')
-    return ledger
 
 
 def load_arm(directory, policy, read_table):
@@ -91,21 +76,8 @@ def load_arm(directory, policy, read_table):
                     f'{directory}: no verified in-session policy use')
         require((directory / 'mode.txt').read_text().strip() == 'live',
                 f'{directory}: adaptive scoring requires live providers')
-        ledger = installed_judge_ledger(directory)
-        starts = re.findall(r'^\(judge-start .*$', ledger, re.M)
-        receipts = re.findall(r'^\(judge-result .*$', ledger, re.M)
-        identity_pattern = re.compile(r'^\(judge-(?:start|result) id "([^"]+)".*? attempt (\d+)\b')
-        started = [identity_pattern.match(line) for line in starts]
-        completed = [identity_pattern.match(line) for line in receipts]
-        dispatched = re.findall(r'^inference-bridge: started job (\d+) provider jev ', trace, re.M)
-        require(all(started) and all(completed), f'{directory}: missing judge call identity')
-        keys = [match.groups() for match in started]
-        require(len(set(keys)) == len(keys) and sorted(keys) == sorted(match.groups() for match in completed),
-                f'{directory}: unmatched or duplicate judge receipts')
-        receipt_jobs = {identity.rsplit('/', 1)[-1] for identity, _ in keys}
-        require(len(set(dispatched)) == len(dispatched) and receipt_jobs == set(dispatched),
-                f'{directory}: judge ledger differs from bridge dispatches')
-        for receipt in receipts:
+        ledger, _ = verified_judge_ledger(directory)
+        for receipt in judge_receipts_for_trace(ledger, trace):
             charges.append(('judge', judge_cost(receipt)))
         writers = re.findall(r'^inference-bridge: started job \d+ provider codex ', trace, re.M)
         require(writers, f'{directory}: no writer dispatch')
@@ -122,6 +94,10 @@ def load_arm(directory, policy, read_table):
         require(re.search(r'^native-transfer: retained policy uses [1-9]\d*$', trace, re.M)
                 and 'native-transfer: score {correct #t ' in trace,
                 f'{directory}: no successful live use of the retained policy')
+        if 'donor_judge_frames_sha256' in manifest:
+            frames = judge_frames(directory / 'disk.img')
+            require(frames and hashlib.sha256(frames).hexdigest() == manifest['donor_judge_frames_sha256'],
+                    f'{directory}: transferred judge journal differs from the donor')
     timings = re.findall(r'^native-combat: task-us (\d+)$', trace, re.M)
     require(len(timings) == 1, f'{directory}: expected one task clock')
     source = installed_client(directory, read_table)
