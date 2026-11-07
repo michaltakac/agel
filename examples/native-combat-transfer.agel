@@ -44,8 +44,14 @@
 (def retained-checks
   (list (dict 'arguments '(64) 'expected 64) (dict 'arguments '(128) 'expected 128)
     (dict 'arguments '(65) 'expected 64) (dict 'arguments '(191) 'expected 128)))
-(check (= (get (evolution-replay (evolution-source retained-policy 2) retained-checks) 'passed) #t)
+(def original-replay (evolution-replay-version retained-policy 2))
+(def legacy-replay (= (get original-replay 'reason) "version has no retained replay corpus"))
+(check (= (get (if legacy-replay
+            (evolution-replay (evolution-source retained-policy 2) retained-checks)
+            original-replay) 'passed) #t)
   "retained policy failed the transfer replay")
+(console-log (text-concat "native-transfer: corpus "
+  (if legacy-replay "legacy compatibility cases" "retained version cases")))
 (def retained-quantum-replay
   (meta-apply (meta-eval (evolution-source retained-policy 2) (meta-base-env)) (list retained-bound)))
 (check (if (= (type-of retained-quantum-replay) 'int)

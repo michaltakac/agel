@@ -98,6 +98,9 @@ def load_arm(directory, policy, read_table):
         charges, decision, usage = adaptation_evidence(directory, trace, correct)
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: evaluation incurred inference')
+        if policy == 'fixed':
+            require(not judge_frames(directory / 'disk.img'),
+                    f'{directory}: fixed control inherited a judge journal')
     if correct:
         require(combat_xp_saved(expected, saved, minimum=goal is not None),
                 f'{directory}: saved XP does not corroborate observations')

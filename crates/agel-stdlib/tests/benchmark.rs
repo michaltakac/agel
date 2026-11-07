@@ -57,7 +57,9 @@ fn retained_combat_policy_replays_with_a_cap_below_the_measured_bound() {
     world.evaluate(include_str!("../benchmark.agel")).unwrap();
     world.evaluate(include_str!("../bytes.agel")).unwrap();
     world.evaluate(include_str!("../services.agel")).unwrap();
-    world.evaluate(include_str!("../work-profile.agel")).unwrap();
+    world
+        .evaluate(include_str!("../work-profile.agel"))
+        .unwrap();
     let history = world
         .evaluate(
             r#"(import agel/evolution)
@@ -104,10 +106,10 @@ fn retained_combat_policy_replays_with_a_cap_below_the_measured_bound() {
         .unwrap();
     assert_eq!(
         world
-            .evaluate("(list retained-bound retained-quantum-replay (get retained-lineage 'version))")
+            .evaluate("(list retained-bound retained-quantum-replay (get retained-lineage 'version) legacy-replay)")
             .unwrap()
             .values
             .pop(),
-        Some(Value::List(vec![Value::Int(327), Value::Int(192), Value::Int(2)]))
+        Some(Value::List(vec![Value::Int(327), Value::Int(192), Value::Int(2), Value::Bool(false)]))
     );
 }
