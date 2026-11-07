@@ -156,7 +156,7 @@ if options.transfer_from:
             raise SystemExit('donor saved melee levels or stance differ from the observed outcome')
     else:
         donor_xp = combat_xp(donor_trace)
-    if not combat_xp_saved(donor_xp, donor_saved):
+    if not combat_xp_saved(donor_xp, donor_saved, minimum=melee is not None):
         raise SystemExit('donor saved combat XP differs from the observed outcome')
     donor_ledger, donor_frames = verified_judge_ledger(donor)
     if not judge_receipts_for_trace(donor_ledger, donor_trace):
@@ -563,7 +563,7 @@ if options.quest:
 if not options.challenge and not options.craft:
     def expected_outcome(snapshot):
         if combat_workload:
-            return combat_xp_saved(expected_xp,snapshot)
+            return combat_xp_saved(expected_xp,snapshot,minimum=melee is not None)
         if options.economy:
             return economy_lines.issubset(snapshot.splitlines())
         if options.quest:

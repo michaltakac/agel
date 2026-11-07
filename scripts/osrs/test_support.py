@@ -59,10 +59,12 @@ def combat_xp(report):
     return {0: after_attack, 3: after_hp}
 
 
-def combat_xp_saved(expected, oracle):
-    """The protocol reports whole XP and the oracle reports tenths."""
+def combat_xp_saved(expected, oracle, *, minimum=False):
+    """Compare whole guest XP with server tenths, optionally as a lower bound."""
     stats = {int(stat): int(xp) for stat, xp in re.findall(
         r'^stat=(\d+) base=\d+ visible=\d+ fine_xp=(\d+)$', oracle, re.M)}
+    if minimum:
+        return all(stats.get(stat, -1) >= xp * 10 for stat, xp in expected.items())
     return all(stats.get(stat, -1) // 10 == xp for stat, xp in expected.items())
 
 

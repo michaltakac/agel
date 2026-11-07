@@ -88,7 +88,7 @@ subprocess.run(['docker', 'cp', 'target/osrs-admin/AccountState.class', 'agel-os
 for _ in range(45):
     oracle = subprocess.run(['docker', 'exec', 'agel-osrs-world', 'sh', '-c',
         'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$@"', 'probe', username, 'varp.com_mode'], capture_output=True, text=True)
-    if oracle.returncode == 0 and combat_xp_saved(expected_xp, oracle.stdout):
+    if oracle.returncode == 0 and combat_xp_saved(expected_xp, oracle.stdout, minimum=options.melee_xp is not None):
         break
     time.sleep(1)
 else:

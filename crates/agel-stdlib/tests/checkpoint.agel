@@ -70,6 +70,16 @@
 (check (if (evolution-valid? (assoc versions 'next 3)) #f #t) "missing retained version rejected")
 (check (if (evolution-valid? (assoc versions 'active (dict 'cell (dict 'other 1)))) #f #t) "foreign active pointer rejected")
 (check (if (evolution-valid? (assoc versions 'history nil)) #f #t) "missing commit history rejected")
+(def events (get versions 'history))
+(def judged (car events))
+(def committed (car (reverse events)))
+(check (= (evolution-valid? (assoc versions 'history (list judged committed))) #f)
+  "commit without replay rejected")
+(check (= (evolution-valid? (assoc versions 'history
+  (cons (assoc judged 'receipt (assoc (get judged 'receipt) 'allowed #f)) (cdr events)))) #f)
+  "commit after a refused judgment rejected")
+(check (= (evolution-valid? (assoc versions 'active (dict))) #f)
+  "missing active pointer rejected")
 (check (= (data-read (data-pack versions render)) versions) "full version store roundtrip")
 (import agel/live-runtime)
 (def macro-old '(fn (parts) (cons 'begin parts)))
@@ -80,5 +90,8 @@
 (def repaired (runtime-edit (runtime-new macros) 'unless macro-old macro-new
   (list (dict 'arguments '((#f 42)) 'expected '(if #f nil (begin 42))))
   (list (dict 'expression '(unless #t (/ 1 0)) 'bindings (dict) 'expected nil)) judge))
+(check (evolution-valid? (get repaired 'versions)) "activation and commit validate")
+(check (= (evolution-valid? (assoc (get repaired 'versions) 'active (get macros 'active))) #f)
+  "stale active generation rejected")
 (check (= (data-read (data-pack (get repaired 'versions) render)) (get repaired 'versions)) "runtime activation roundtrip")
 #t

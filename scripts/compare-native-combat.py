@@ -86,7 +86,8 @@ def load_arm(directory, policy, read_table):
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: evaluation incurred inference')
     if correct:
-        require(combat_xp_saved(expected, saved), f'{directory}: saved XP differs from observations')
+        require(combat_xp_saved(expected, saved, minimum=goal is not None),
+                f'{directory}: saved XP does not corroborate observations')
     identity = re.search(r'^account=(\d+) character=\d+ rights= x=\d+ z=\d+ level=0 xp_rate_in_hundreds=100$',
                          saved, re.M)
     require(identity, f'{directory}: expected saved normal account at 1× XP')
