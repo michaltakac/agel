@@ -15,15 +15,19 @@
                (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
                    (+ (* n 256) byte)
                    (signal 'osrs/byte "invalid wire byte"))) 0 bytes)))
+  (def join-read-chunks
+    (fn (chunks out)
+      (if (= chunks nil) out
+        (join-read-chunks (cdr chunks)
+          (foldl (fn (tail byte) (cons byte tail)) out (reverse (car chunks)))))))
   (def read-loop
-    (fn (remaining out)
+    (fn (remaining chunks)
       (let ((bytes (wire-read remaining)))
         (if (= bytes nil) (signal 'osrs/eof "connection ended inside packet")
           (let ((missing (- remaining (count bytes))))
             (if (< missing 0) (signal 'osrs/length "transport exceeded the requested read length")
-              (if (if (= missing 0) (= out nil) #f) bytes
-                (let ((received (foldl (fn (all byte) (cons byte all)) out bytes)))
-                  (if (= missing 0) (reverse received) (read-loop missing received))))))))))
+              (if (= missing 0) (join-read-chunks chunks bytes)
+                (read-loop missing (cons bytes chunks)))))))))
   (def osrs-read-exact
     (fn (length)
       (if (if (= (type-of length) 'int) (if (< -1 length) (< length 65537) #f) #f)

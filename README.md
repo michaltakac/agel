@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.126.** Native economy and quest runs can score
-optimizer interruptions. See the [release notes](docs/release-v0.3.126.md).
+**Current release: v0.3.127.** The RuneScape client assembles fragmented
+packets by chunk. See the [release notes](docs/release-v0.3.127.md).
+
+v0.3.126 scores optimizer interruptions in native economy and quest runs.
+See the [release notes](docs/release-v0.3.126.md).
 
 v0.3.125 keeps observing while preparing replay input.
 See the [release notes](docs/release-v0.3.125.md).
