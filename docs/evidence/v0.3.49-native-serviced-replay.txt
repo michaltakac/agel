@@ -1,0 +1,13 @@
+native-opt: observation {bytes 4614 baseline {elapsed-us 8921214 service-us 358015 work-max-us 208104 gap-max-us 213208 calls 73} bound 230 work-budget-us 3000000 gap-budget-us 6000000 margin 4 record "REBUILD_NORMAL_V2"}
+inference-bridge: started job 56 provider codex at-ms 109923
+inference-bridge: completed job 56 at-ms 119217 status ok
+inference-bridge: started job 71 provider jev at-ms 122097
+inference-bridge: completed job 71 at-ms 138545 status ok
+inference-bridge: started job 92 provider codex at-ms 141504
+inference-bridge: completed job 92 at-ms 151118 status ok
+inference-bridge: started job 107 provider jev at-ms 154648
+inference-bridge: completed job 107 at-ms 173194 status ok
+native-opt: last refusal text judge returned: patch noul 760 reason choice 5 none 390 510 50 30 370 40
+native-opt: continued with fixed policy after exhausted retries
+native-opt: optimization-stage service writes 21
+native-combat: training three melee skills

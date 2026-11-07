@@ -3,7 +3,15 @@
 (def observed-length (/ (text-bytes recorded-hex) 2))
 (check (if (< 1023 observed-length) (< observed-length 8193) #f) "no suitably sized recorded workload")
 ((get stream 'pulse))
-(def replay-bytes (bytes-from-hex recorded-hex))
+(def replay-chunks
+  (fn (at chunks)
+    (if (= at (text-bytes recorded-hex)) chunks
+      (let ((end (+ at (if (< 256 (- (text-bytes recorded-hex) at))
+                          256 (- (text-bytes recorded-hex) at)))))
+        (let ((chunk (bytes-from-hex (text-slice recorded-hex at end))))
+          ((get stream 'pulse))
+          (replay-chunks end (cons chunk chunks)))))))
+(def replay-bytes (foldl (fn (body chunk) (append chunk body)) nil (replay-chunks 0 nil)))
 (def run-profile
   (fn (quantum)
     (profile-work (fn (service) (bytes-hex-quantum replay-bytes service quantum))
