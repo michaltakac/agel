@@ -291,6 +291,7 @@ else:
     if combat_workload or options.economy or options.craft or options.quest:
         source+='(def task-start (clock-us))\n'
     if options.optimize:
+        source+="(def optimization-skipped #f)\n"
         source+=f"(def continue-after-refusal {'#t' if task_adaptation else '#f'})\n"
     observation_hooks='''(def inference-packets 0)
 (def preparation-packets 0)
@@ -365,8 +366,7 @@ else:
 '''
         if options.optimize:
             source+=observation_hooks
-            source+='''(def combat-after-attack (fn (attacking target)
-  (report-target target)
+            source+='''(def optimize-during-combat (fn (attacking)
   (with-handler (* problem)
     (begin
       (console-log (text-concat "native-combat: optimizer failure " (print-form problem)))
@@ -379,6 +379,23 @@ else:
             source+=(examples / 'native-service-optimize-run.agel').read_text()+'\n'
             source+=observation_finish
             source+="(def policy-uses 0) (osrs-service-stop ready)))))\n"
+            source+="(def allow-combat-skip "+("#t" if options.live else "#f")+")\n"
+            source+='''(def combat-after-attack
+  (fn (attacking target)
+    (report-target target)
+    (if allow-combat-skip
+      (let ((attack-before (get (osrs-stat attacking 0) 'xp))
+            (hp-before (get (osrs-stat attacking 3) 'xp)))
+        (let ((complete (fn (g) (rat-combat-complete? g target attack-before hp-before))))
+          (let ((observed (osrs-observe-ready attacking complete 32)))
+            (if (complete observed)
+              (begin
+                (def optimization-skipped #t)
+                (console-log "native-opt: skipped because combat already completed")
+                observed)
+              (optimize-during-combat observed)))))
+      (optimize-during-combat attacking))))
+'''
         else:
             source+="(def combat-after-attack (fn (attacking target) (report-target target) attacking))\n"
         source+='''
@@ -535,7 +552,7 @@ else:
 '''
     if options.optimize:
         if task_adaptation:
-            source+='''(if policy-activated #t
+            source+='''(if (if optimization-skipped #t policy-activated) #t
   (check (= policy-uses 0) "refused policy served live packets"))
 '''
         else:
@@ -549,9 +566,10 @@ else:
 '''
     source+='(wire-close)\n'
     if options.optimize:
-        source+='''(check (= (text-slice (file-read "judge-log") tape-offset (+ tape-offset (text-bytes replay-tape))) replay-tape)
+        source+='''(if optimization-skipped nil (begin
+(check (= (text-slice (file-read "judge-log") tape-offset (+ tape-offset (text-bytes replay-tape))) replay-tape)
   "recorded workload differed in protected storage")
-(console-log "native-opt: recorded workload verified in append-only log")
+(console-log "native-opt: recorded workload verified in append-only log")))
 '''
     completion = 'login, observations and rat combat' if options.combat else 'login, observations, walking packet and tick consumption'
     if melee is not None:completion='login, observations and melee training'
@@ -643,7 +661,12 @@ if not passed and options.craft and re.search(r'^native-craft: (?:optimizer )?fa
     capture_account(lambda snapshot: craft_stock(snapshot, at_anvil=False) == craft_before, [])
 if not passed and fresh_quest and re.search(r'^native-quest: (?:optimizer )?failure \{', output, re.M):
     capture_account(quest_unfinished, ['varp.cookquest', 'varp.qp'])
-if editing:
+skipped = 'native-opt: skipped because combat already completed' in output
+if skipped:
+    assert passed and options.combat and options.optimize and options.live
+    assert 'inference-bridge: started job ' not in output
+    assert 'native-opt: live uses 0' in output and not judge_frames(disk)
+if editing and not skipped:
     assert passed, 'native session failed; disk, serial log and judge records retained'
     if options.optimize:
         activated='native-opt: policy committed after text judgment and measured replay' in output

@@ -88,6 +88,16 @@ def optimizer_charges(directory, trace, *, interrupted=False):
 
 
 def adaptation_evidence(directory, trace, correct):
+    skips = re.findall(r'^native-opt: skipped because combat already completed$', trace, re.M)
+    if skips:
+        require(len(skips) == 1 and correct and (directory / 'mode.txt').read_text().strip() == 'live'
+                and 'native-opt: policy committed' not in trace
+                and 'native-combat: {test rat-combat passed #t ' in trace
+                and 'inference-bridge: started job ' not in trace
+                and re.findall(r'^native-opt: live uses (\d+)$', trace, re.M) == ['0']
+                and not judge_frames(directory / 'disk.img'),
+                f'{directory}: invalid combat optimization skip evidence')
+        return [], 'skipped-completed', []
     activated = 'native-opt: policy committed after text judgment and measured replay' in trace
     rolled_back = 'native-opt: continued with fixed policy after exhausted retries' in trace
     interrupted = not correct and bool(re.search(r'^native-(?:combat|craft|economy|quest): optimizer failure \{', trace, re.M))
