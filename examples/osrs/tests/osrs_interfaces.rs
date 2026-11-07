@@ -693,3 +693,41 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         Some("((1) 0 0 8 8 (1 3) 1 (1) 2 (1 2) #t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
     );
 }
+
+#[test]
+fn bank_open_waits_for_both_interfaces_and_fresh_stock() {
+    let mut world = World::default();
+    world
+        .evaluate(
+            r#"
+      (module agel/osrs-game
+        (export osrs-interface-opens osrs-inventory-updates osrs-await osrs-use-location-option
+          osrs-open-interface? osrs-inventory-count osrs-click-inventory-item osrs-close-modal)
+        (def osrs-interface-opens (fn (state id) (get state id)))
+        (def osrs-inventory-updates (fn (state id) (get state id)))
+        (def osrs-open-interface? (fn (state id) (< 0 (get state id))))
+        (def osrs-use-location-option (fn (state booth x z option) (assoc state 12 2)))
+        (def osrs-inventory-count (fn (state inventory item) 0))
+        (def osrs-click-inventory-item (fn (state interface component inventory item option) state))
+        (def osrs-close-modal (fn (state) state))
+        (def osrs-await (fn (state ready)
+          (let ((stocked (assoc state 95 2)) (opened (assoc state 15 1)))
+            (if (if (ready stocked) #t (ready opened))
+              (signal 'test "bank opened before both interfaces and stock were fresh")
+              (let ((complete (assoc stocked 15 1)))
+                (if (ready complete) complete (signal 'test "bank refused fresh state"))))))))
+        "#,
+        )
+        .unwrap();
+    world.evaluate(include_str!("../osrs-bank.agel")).unwrap();
+    let result = world
+        .evaluate(
+            "(import agel/osrs-bank)
+             (osrs-bank-open (dict 12 1 15 0 95 1) osrs-bank-layout-241 10583 3186 3438)",
+        )
+        .unwrap();
+    assert_eq!(
+        result.values.last().map(Value::to_string).as_deref(),
+        Some("{12 2 15 1 95 2}")
+    );
+}

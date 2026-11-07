@@ -1,0 +1,49 @@
+(module agel/osrs-adamant-production
+  (import agel/osrs-game)
+  (import agel/osrs-bank)
+  (import agel/osrs-crafting-test)
+  (export stage-adamant-production forge-adamant-from-staged-ore)
+  (def require
+    (fn (ok message) (if ok #t (signal 'osrs/craft-test message))))
+  (def stage-adamant-production
+    (fn (state)
+      (let ((layout osrs-bank-layout-241) (second (stage-adamant-ore-batch state 2)))
+        (let ((near-bank (osrs-wait-ticks (osrs-command second "tele 3185 3436") 4)))
+          (let ((bank (osrs-bank-open near-bank layout 10583 3186 3438)))
+            (require (= (list (osrs-inventory-count bank 95 449)
+                              (osrs-inventory-count bank 95 453)) '(0 0))
+              "fixture bank already contains adamant materials")
+            (let ((ore (osrs-bank-deposit (osrs-bank-deposit bank layout 449 1) layout 449 1)))
+              (let ((stored (osrs-bank-deposit
+                              (osrs-bank-deposit (osrs-bank-deposit ore layout 453 10) layout 453 1)
+                              layout 453 1)))
+                (let ((first (stage-adamant-ore-batch (osrs-bank-close stored layout) 3)))
+                  (osrs-await (osrs-command first "item 2347 1")
+                    (fn (g) (= (osrs-inventory-count g 93 2347) 1)))))))))))
+  (def forge-adamant-from-staged-ore
+    (fn (state visit-bank return-to-furnace visit-anvil)
+      (let ((ready (osrs-await state
+                     (fn (g)
+                       (if (osrs-stat g 13) (has-key? (get g 'inventories) 93) #f)))))
+        (require (= (list (osrs-inventory-count ready 93 2361)
+                          (osrs-inventory-count ready 93 2347)) '(0 1))
+          "expected one hammer and no pre-existing bars")
+        (let ((first (smelt-adamant-bars ready 3)))
+          (let ((bank (visit-bank (get first 'state))) (layout osrs-bank-layout-241))
+            (require (= (list (osrs-inventory-count bank 95 449)
+                              (osrs-inventory-count bank 95 453)
+                              (osrs-inventory-count bank 95 2361)
+                              (osrs-inventory-count bank 95 1123)) '(2 12 0 0))
+              "expected exact adamant stock in the bank")
+            (let ((ore (osrs-bank-withdraw (osrs-bank-withdraw bank layout 449 1) layout 449 1)))
+              (let ((stocked (osrs-bank-withdraw
+                               (osrs-bank-withdraw (osrs-bank-withdraw ore layout 453 10) layout 453 1)
+                               layout 453 1)))
+                (let ((second (smelt-adamant-bars
+                                (return-to-furnace (osrs-bank-close stocked layout)) 2)))
+                  (let ((forged (forge-adamant-platebody-using
+                                  (visit-anvil (get second 'state)) osrs-await (fn (_) nil))))
+                    (dict 'state (get forged 'state)
+                      'smelting (list (get first 'report) (get second 'report))
+                      'report (get forged 'report)))))))))))
+)

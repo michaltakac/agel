@@ -6,15 +6,21 @@
           'bank-inventory 95))
   (def require
     (fn (ok message) (if ok #t (signal 'osrs/bank message))))
+  (def fresh-interface?
+    (fn (state interface opens)
+      (if (osrs-open-interface? state interface)
+        (< opens (osrs-interface-opens state interface)) #f)))
   (def osrs-bank-open
     (fn (state layout booth x z)
-      (let ((interface (get layout 'main-interface)) (inventory (get layout 'bank-inventory)))
-        (let ((opens (osrs-interface-opens state interface))
+      (let ((main (get layout 'main-interface)) (side (get layout 'side-interface))
+            (inventory (get layout 'bank-inventory)))
+        (let ((main-opens (osrs-interface-opens state main))
+              (side-opens (osrs-interface-opens state side))
               (updates (osrs-inventory-updates state inventory)))
           (osrs-await (osrs-use-location-option state booth x z 2)
             (fn (g)
-              (if (osrs-open-interface? g interface)
-                (if (< opens (osrs-interface-opens g interface))
+              (if (fresh-interface? g main main-opens)
+                (if (fresh-interface? g side side-opens)
                   (< updates (osrs-inventory-updates g inventory)) #f)
                 #f)))))))
   (def osrs-bank-close

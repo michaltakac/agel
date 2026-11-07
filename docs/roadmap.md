@@ -8,7 +8,7 @@ are maintained separately. [Versioning](versioning.md) · [Threat model](threat-
 ## Exo evaluation and OS evolution
 
 The [progress report](exo-progress-report.md) records the benchmark results
-through v0.3.218. Subsequent releases check queued XP before switching
+through v0.3.223. Recent releases check queued XP before switching
 targets, read game updates between replay measurements, restore the
 native reader self-rebuild, and score saved goals separately from guest
 verdicts. A live fixed guest reported a stalled encounter while its server
@@ -22,7 +22,7 @@ The work below is ordered by what the next measured run depends on.
 | --- | --- | --- |
 | Reconcile live observations with saved outcomes | Partial | Capture and replay the missing melee updates, then validate the queued-XP and replay-observation changes in both matched 16 XP arms. Preserve separate guest and server verdicts, including failures and timeouts. |
 | Measure useful in-session adaptation | Partial | Compare the same starting model, policy and tools with editing enabled or disabled. Require the edit to serve subsequent work and report task-level correctness, elapsed time and cost including retries. Record replay gains separately from live gains. |
-| Complete adamant production from a fresh account | Partial | Verify staged ore smelting and the bank round trip live, then join banking, transport, smelting and anvil work. Add normal-account resource acquisition and Smithing progression. Verify the finished item's provenance in both arms. |
+| Complete adamant production from a fresh account | Partial | Staged smelting and banking through the anvil passed live. Join smelting and transport to the bank-and-forge route. Add normal-account resource acquisition and Smithing progression. Verify the finished item's provenance in both arms. |
 | Scale combat, currency and quests to the Exo workloads | Partial | Train all required combat stats to the objective, measure coin accumulation over a matched active-time window, and run a multi-quest campaign with quest points and cost recorded for both arms. |
 | Verify retained-policy transfer at task scale | Partial | Repeat completed tasks on distinct fresh accounts using verified donor lineage. Charge donor learning separately and include recipient recovery in elapsed time. |
 | Complete model accounting | Partial | Reconcile provider dispatches, token usage, cached input, prices, retries and interrupted attempts against the protected guest journal. Publish coins per dollar only when the denominator is known and positive. |
