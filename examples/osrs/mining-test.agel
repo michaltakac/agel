@@ -40,9 +40,9 @@
                         'observation (tutor-state second))))))))))
   (def wait-live
     (fn (state predicate batches)
-      (if (predicate state) state
-        (if (= batches 0) (signal 'osrs/mining-test "live observation timed out")
-          (wait-live (osrs-wait-ticks (osrs-keepalive state) 5) predicate (- batches 1))))))
+      (let ((observed (observe-live state predicate batches)))
+        (if (predicate observed) observed
+          (signal 'osrs/mining-test "live observation timed out")))))
   (def pickaxes (fn (g) (osrs-inventory-count g 93 1265)))
   (def ores (fn (g) (osrs-inventory-count g 93 436)))
   (def mining-xp (fn (g) (get (osrs-stat g 14) 'xp)))
@@ -154,7 +154,7 @@
   (def first-tin
     (fn (state)
       (let ((ready (fn (g) (if (= (tin g) 1) (= (mining-xp g) 35) #f))))
-        (let ((attempt (walk-ticks (osrs-use-location state 11360 3225 3148) 6)))
+        (let ((attempt (observe-live (osrs-use-location state 11360 3225 3148) ready 6)))
           (if (ready attempt) attempt
             (wait-live (osrs-use-location attempt 11360 3224 3146) ready 18))))))
   (def furnace-open? (fn (state) (osrs-open-interface? state 270)))
