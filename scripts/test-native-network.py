@@ -352,6 +352,12 @@ else:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
         if task_label:
             source+=observation_hooks
+        if melee_transition and options.optimize:
+            source+='''(def replay-observed-packets 0)
+(def between-replays
+  (fn ()
+    (def replay-observed-packets (+ replay-observed-packets (observe-ready-packets)))))
+'''
         if options.optimize:
             if melee is not None or options.economy or options.craft or fresh_quest:
                 source+="(def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get ready 'history)))\n"
@@ -367,6 +373,10 @@ else:
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
         if melee_transition:
+            if options.optimize:
+                source += '''(console-log (text-concat "native-opt: packets observed between replay measurements "
+  (print-form replay-observed-packets)))
+'''
             source += "ready)))))\n"
         elif task_label:
             source += "))\n"

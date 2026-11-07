@@ -8,6 +8,7 @@
 (def routes (dict 'writer "codex" 'judge "jev"))
 (def inference-observe (fn () nil))
 (def preparation-observe (fn () nil))
+(def between-replays (fn () nil))
 (def infer
   (fn (provider prompt)
     (let ((result (inference-serviced routes model-request provider prompt
