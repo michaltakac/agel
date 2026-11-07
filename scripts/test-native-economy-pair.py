@@ -122,10 +122,26 @@ def main():
                         help='use two distinct accounts staged with --prepare-only')
     parser.add_argument('--order', choices=('fixed-first', 'adaptive-first'), default='fixed-first',
                         help='choose the order of the two sequential arms')
+    parser.add_argument('--source-root', type=Path, default=Path('.'),
+                        help='Agel source tree to pin for both arms')
     args = parser.parse_args()
+    for source in ('crates/agel-stdlib/stdlib.agel', 'examples/osrs/osrs-wire.agel'):
+        if not (args.source_root / source).is_file():
+            parser.error(f'source tree is missing {source}: {args.source_root}')
     melee_goal = args.melee_xp
     if args.transfer:
-        melee_goal = json.loads((args.transfer / 'world.json').read_text()).get('goal_xp')
+        donor_manifest = json.loads((args.transfer / 'world.json').read_text())
+        melee_goal = donor_manifest.get('goal_xp')
+        policy_sources = [('combat_policy_sha256', 'examples/osrs/combat-test.agel')]
+        if melee_goal is not None:
+            policy_sources.extend([
+                ('training_policy_sha256', 'examples/osrs/combat-training.agel'),
+                ('service_policy_sha256', 'examples/native-service-optimize.agel'),
+            ])
+        for field, source in policy_sources:
+            path = args.source_root / source
+            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != donor_manifest.get(field):
+                parser.error(f'donor policy differs from {path}; select its matching source tree')
     if melee_goal is not None and (type(melee_goal) is not int or not 1 <= melee_goal <= 512):
         parser.error('melee goal must be between 1 and 512 XP')
     task = ('melee' if melee_goal is not None else 'combat' if args.transfer else
@@ -158,7 +174,7 @@ def main():
     for area in (Path('crates/agel-stdlib'), Path('examples'), Path('examples/osrs')):
         destination = sources / area
         destination.mkdir(parents=True, exist_ok=True)
-        for source in area.glob('*.agel'):
+        for source in (args.source_root / area).glob('*.agel'):
             copy = destination / source.name
             shutil.copy2(source, copy)
             digests[str(copy.relative_to(output))] = hashlib.sha256(copy.read_bytes()).hexdigest()

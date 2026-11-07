@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.165.** Agel checks native carrier reply sizes before
-decoding their byte payloads. See the [release notes](docs/release-v0.3.165.md).
+**Current release: v0.3.166.** Native transfer pairs verify donor source
+compatibility before either arm starts. See the [release notes](docs/release-v0.3.166.md).
+
+v0.3.165 bounds carrier replies before decoding. See the [release notes](docs/release-v0.3.165.md).
 
 v0.3.164 preserves the transfer audit snapshot and reduces fragmented-read work. See the [release notes](docs/release-v0.3.164.md).
 
