@@ -67,6 +67,11 @@ environment=provider_environment(directory, options.live, delay=20, proposal=pro
 environment['AGEL_BYTE_ENDPOINT']='127.0.0.1:43594'
 if melee is not None:
     environment['AGEL_GUEST_TIMEOUT_SECONDS']='1680'
+if shared_carrier:
+    # Give the bridge time to drain an in-flight judge receipt after its deadline.
+    bridge_timeout = int(environment.get('AGEL_GUEST_TIMEOUT_SECONDS', '900')) + 240
+else:
+    bridge_timeout = 1800 if options.quest else 960
 if editing:print('Providers:', 'real' if options.live else 'fixtures; writer delayed 20 seconds', flush=True)
 manifest=json.loads(subprocess.run(['python3','scripts/osrs/world_manifest.py'],capture_output=True,text=True,check=True).stdout)
 manifest['scope']='native OS login, live observations, seeded general tool repair and saved movement; no Exo task score' if options.repair else 'native OS login, live observations and movement smoke test; no Exo task score'
@@ -514,14 +519,21 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
             if 'evaluation_fuel' in manifest:
                 guest_command=f":exec agel -- --no-stdlib --fuel {manifest['evaluation_fuel']} /data/client"
             command=[str(options.inference_bridge),str(serial),str(directory.resolve()),'process agel exited with status',*setup,guest_command] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',guest_command]
-            result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=1800 if melee is not None or options.quest else 960)
+            try:
+                status = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
+                                        env=environment, timeout=bridge_timeout).returncode
+            except subprocess.TimeoutExpired:
+                status = None
+                log.write(f'runner: bridge exceeded its {bridge_timeout}-second hard deadline\n')
+                print(f'Native bridge exceeded its {bridge_timeout}-second hard deadline; '
+                      'checking retained evidence', flush=True)
     finally:
         machine.terminate();machine.wait(timeout=10)
-output=(directory/'serial.log').read_text()
+output=(directory/'serial.log').read_text(errors='replace' if status is None else 'strict')
 if not options.challenge:assert account['password'] not in output,'credential appeared in serial output'
 print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'native-transfer:' in line or 'native-craft:' in line or 'native-economy:' in line or 'native-quest:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
 marker='native-network: PASS:' if options.challenge else 'native-network: client completed:'
-passed=result.returncode==0 and marker in output and 'process agel exited with status 0' in output
+passed=status==0 and marker in output and 'process agel exited with status 0' in output
 
 
 if editing:

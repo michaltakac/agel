@@ -9,7 +9,7 @@ from graphical_console import prepared_image
 from native_provider_support import decode_judge_ledger, provider_environment
 
 
-def verify_exit(status, cost, *, lose_guest=False):
+def verify_exit(status, cost, *, lose_guest=False, expire_bridge=False):
     with tempfile.TemporaryDirectory(prefix='agel-judge-exit-', dir='/tmp') as root:
         directory = Path(root)
         disk = prepared_image('target/boot/agel-v1.img', directory, blank_sectors=1024)
@@ -44,6 +44,9 @@ def verify_exit(status, cost, *, lose_guest=False):
                 'target/release/examples/guest_inference', str(socket), root,
                 'process agel exited with status', ':exec agel -- --no-stdlib /data/async',
             ]
+            if expire_bridge:
+                bridge[3] = 'completion marker deliberately absent'
+                environment['AGEL_GUEST_TIMEOUT_SECONDS'] = '1'
             if lose_guest:
                 with subprocess.Popen(bridge, env=environment, text=True, stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT) as run:
@@ -59,10 +62,13 @@ def verify_exit(status, cost, *, lose_guest=False):
                     assert run.returncode != 0, output
             else:
                 run = subprocess.run(bridge, env=environment, text=True, capture_output=True, timeout=90)
-                assert run.returncode == 0, (run.stdout, run.stderr)
-                assert 'provider jev' in run.stdout and 'pending ' in run.stdout
-                assert 'process agel exited with status 0' in run.stdout
-                assert 'completed job' not in run.stdout
+                if expire_bridge:
+                    assert run.returncode != 0 and '1-second deadline' in run.stderr, run.stderr
+                else:
+                    assert run.returncode == 0, (run.stdout, run.stderr)
+                    assert 'provider jev' in run.stdout and 'pending ' in run.stdout
+                    assert 'process agel exited with status 0' in run.stdout
+                    assert 'completed job' not in run.stdout
         finally:
             if machine.poll() is None:
                 machine.terminate()
@@ -78,7 +84,7 @@ def verify_exit(status, cost, *, lose_guest=False):
             assert recovery == records
         assert records.count('(judge-start ') == records.count('(judge-result ') == 1
         assert f'status {status} ' in records and f'cost-nanousd {cost} ' in records, records
-        outcome = 'guest power loss' if lose_guest else 'guest process exit'
+        outcome = 'guest power loss' if lose_guest else 'bridge deadline' if expire_bridge else 'guest process exit'
         print(f'PASS: judge status {status} and its cost survived {outcome} without another call')
 
 
@@ -86,3 +92,4 @@ if __name__ == '__main__':
     verify_exit(200, 4200)
     verify_exit(429, 0)
     verify_exit(200, 4200, lose_guest=True)
+    verify_exit(429, 0, expire_bridge=True)
