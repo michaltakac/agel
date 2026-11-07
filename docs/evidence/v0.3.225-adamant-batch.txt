@@ -1,0 +1,3 @@
+{test adamant-bar passed #t ore-before 3 ore-after 0 coal-before 18 coal-after 0 bars-before 0 bars-after 3 smithing-xp-before 4385776 smithing-xp-after 4385888}
+Saved Smithing fine XP: 43857760 -> 43858885
+RuneScape PASS: 3 ore and 18 coal consumed, 3 adamant bars saved at normal rights and 1x XP
