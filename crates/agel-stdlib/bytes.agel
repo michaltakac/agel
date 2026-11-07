@@ -81,6 +81,25 @@
     (fn (pieces)
       (if (= (count pieces) 0) ""
         (if (= (count pieces) 1) (car pieces) (hex-join (hex-pairs pieces nil))))))
+  (def hex-byte-table
+    (foldl text-concat ""
+      '(
+        "000102030405060708090a0b0c0d0e0f"
+        "101112131415161718191a1b1c1d1e1f"
+        "202122232425262728292a2b2c2d2e2f"
+        "303132333435363738393a3b3c3d3e3f"
+        "404142434445464748494a4b4c4d4e4f"
+        "505152535455565758595a5b5c5d5e5f"
+        "606162636465666768696a6b6c6d6e6f"
+        "707172737475767778797a7b7c7d7e7f"
+        "808182838485868788898a8b8c8d8e8f"
+        "909192939495969798999a9b9c9d9e9f"
+        "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"
+        "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+        "c0c1c2c3c4c5c6c7c8c9cacbcccdcecf"
+        "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
+        "e0e1e2e3e4e5e6e7e8e9eaebecedeeef"
+        "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff")))
   (def encode-bytes
     (fn (bytes part size pieces service quantum since)
       (if (= (count bytes) 0) (hex-join (reverse (if (= size 0) pieces (cons part pieces))))
@@ -90,11 +109,10 @@
             (encode-bytes bytes "" 0 (cons part pieces) service quantum (if (= since quantum) 0 since)))
           (let ((byte (car bytes)))
             (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
-              (encode-bytes (cdr bytes)
-                (text-concat part (text-concat
-                  (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
-                  (text-slice "0123456789abcdef" (rem byte 16) (+ 1 (rem byte 16)))))
-                (+ size 1) pieces service quantum (+ since 1))
+              (let ((offset (* byte 2)))
+                (encode-bytes (cdr bytes)
+                  (text-concat part (text-slice hex-byte-table offset (+ offset 2)))
+                  (+ size 1) pieces service quantum (+ since 1)))
               (signal 'bytes/value "expected byte")))))))
   (def bytes-hex-quantum
     (fn (bytes service quantum)
