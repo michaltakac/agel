@@ -26,7 +26,9 @@ The private OpenRune world and pre-login/cache wire client are verified
 in v0.3.7. v0.3.8 adds Agel password login, game ciphers, movement,
 stat/inventory observations and skill/item setup. `sh scripts/test-osrs-game.sh`
 checks those live with a normal account and a separate administrator.
-A native relay arrives in v0.3.16; integrated model-control and task benchmarks remain open;
+A native relay arrives in v0.3.16. v0.3.17 combines polling inference,
+Agel stream services and a retained repair actor during a live connection.
+The seeded planner probe has real-provider evidence; full task benchmarks remain open;
 see [the setup and precise scope](osrs-client.md).
 `sh scripts/test-osrs-combat.sh` adds a live rat kill in v0.3.9, using Agel
 NPC observations and attack packets, with exact Attack XP and persisted
@@ -217,7 +219,7 @@ trained on it.
 | The drive loop asks again after a judge's error reply | done | `scripts/test-drive.sh`: an error reply is waited on and the next step asks again; the programs' `number` checks a field exists before reading it |
 | The agent reads its own metrics and changes its own cells by typed questions, nobody at the keyboard | done | v0.2.99: `review` beside `doom-agent-judge` under `:agents`: one live run, six reviews, two typed questions, the judge chose `nothing` twice; the apply path is tested in `scripts/test-drive.sh` ([`parallel-agents.md`](parallel-agents.md)) |
 | Agents side by side on the desktop, each declaring what it needs, a second sentence heard while the first plays | done | v0.2.99: `:agents STEPS`, `NAME-needs` facts (file, window, process, done, after), `scripts/test-drive.sh` |
-| Changing the OS from inside: a program installed through a gated effect, a domain replaced by a gated proposal, the kernel image last | open | the program region is written only by host scripts; the change protocol is a description ([`parallel-agents.md`](parallel-agents.md)) |
+| Changing the OS from inside: a program installed through a gated effect, a domain replaced by a gated proposal, the kernel image last | partial | v0.3.12 adds Agel-managed ELF installation, canary replay, activation and revert; running-domain and kernel-image replacement remain open ([`parallel-agents.md`](parallel-agents.md)) |
 
 ## Not started
 

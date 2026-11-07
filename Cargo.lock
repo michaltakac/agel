@@ -90,6 +90,7 @@ name = "agel-stdlib"
 version = "0.2.97"
 dependencies = [
  "agel-core",
+ "agel-effects",
  "agel-model",
  "serde_json",
 ]

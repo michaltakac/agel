@@ -1,7 +1,7 @@
 (module agel/inference
   (import agel/sequence)
   (import agel/bytes)
-  (export inference-call)
+  (export inference-call inference-start inference-poll inference-serviced)
   (def check-name
     (fn (text at)
       (if (= at (text-bytes text)) #t
@@ -9,16 +9,66 @@
           (if (if (if (< 96 c) (< c 123) #f) #t
                   (if (if (< 47 c) (< c 58) #f) #t (if (= c 45) #t (= c 95))))
             (check-name text (+ at 1)) (signal 'inference/provider "invalid provider route"))))))
-  (def inference-call
-    (fn (routes ask provider prompt)
+  (def route-for
+    (fn (routes provider)
       (let ((route (get routes provider)))
         (if (= (type-of route) 'string)
+          (begin (if (< 0 (text-bytes route)) (check-name route 0) (signal 'inference/provider "empty provider route")) route)
+          (signal 'inference/provider "provider route is not configured")))))
+  (def decode-reply
+    (fn (reply)
+      (if (= reply "ok") (dict 'status 'done 'text "")
+      (if (if (< 2 (text-bytes reply)) (= (text-slice reply 0 3) "ok ") #f)
+        (dict 'status 'done 'text (text-from-hex (text-slice reply 3 (text-bytes reply))))
+        (if (if (< 7 (text-bytes reply)) (= (text-slice reply 0 8) "pending ") #f)
+          (let ((job (text-slice reply 8 (text-bytes reply))))
+            (begin
+              (if (if (< 0 (text-bytes job)) (< (text-bytes job) 21) #f) #t (signal 'inference/protocol "invalid inference job"))
+              (if (if (< 48 (text-byte job 0)) (< (text-byte job 0) 58) #f) #t (signal 'inference/protocol "noncanonical inference job"))
+              ((fn (walk) (walk walk 0)) (fn (self at)
+                (if (= at (text-bytes job)) #t
+                  (let ((c (text-byte job at)))
+                    (if (if (< 47 c) (< c 58) #f) (self self (+ at 1))
+                      (signal 'inference/protocol "invalid inference job"))))))
+              (dict 'status 'pending 'job job)))
+          (if (if (< 5 (text-bytes reply)) (= (text-slice reply 0 6) "error ") #f)
+            (signal 'inference/provider (text-from-hex (text-slice reply 6 (text-bytes reply))))
+            (signal 'inference/protocol "invalid inference response")))))))
+  (def inference-start
+    (fn (routes ask provider prompt)
+      (decode-reply (ask (text-concat "AGEL-INFER/2 start "
+        (text-concat (route-for routes provider) (text-concat "\n" (text-hex prompt))))))))
+  (def inference-poll
+    (fn (ask pending)
+      (begin
+        (if (= (get pending 'status) 'pending) #t (signal 'inference/protocol "expected pending job"))
+        (let ((job (get pending 'job)))
           (begin
-            (if (< 0 (text-bytes route)) (check-name route 0) (signal 'inference/provider "empty provider route"))
-            (let ((reply (ask (text-concat "AGEL-INFER/1 " (text-concat route (text-concat "\n" (text-hex prompt)))))))
-              (if (if (< 2 (text-bytes reply)) (= (text-slice reply 0 3) "ok ") #f)
-                (text-from-hex (text-slice reply 3 (text-bytes reply)))
-                (if (if (< 5 (text-bytes reply)) (= (text-slice reply 0 6) "error ") #f)
-                  (signal 'inference/provider (text-from-hex (text-slice reply 6 (text-bytes reply))))
-                  (signal 'inference/protocol "invalid inference response")))))
-          (signal 'inference/provider "provider route is not configured"))))))
+            (decode-reply (text-concat "pending " job))
+            (let ((reply (decode-reply (ask (text-concat "AGEL-INFER/2 poll " job)))))
+              (if (= (get reply 'status) 'pending)
+                (if (= (get reply 'job) job) reply (signal 'inference/protocol "inference job changed")) reply)))))))
+  (def serviced-step
+    (fn (ask reply service state)
+      (with-handler (* problem) (dict 'error problem 'reply reply 'state state)
+        (let ((prepared (service state)))
+          (with-handler (* problem) (dict 'error problem 'reply reply 'state prepared)
+            (dict 'reply (inference-poll ask reply) 'state prepared))))))
+  (def serviced-loop
+    (fn (ask reply service state remaining polls)
+      (if (= (get reply 'status) 'done) (dict 'reply reply 'state state 'polls polls)
+        (if (= remaining 0) (dict 'reply reply 'state state 'polls polls)
+          (let ((step (serviced-step ask reply service state)))
+            (if (get step 'error) (assoc step 'polls (+ polls 1))
+              (serviced-loop ask (get step 'reply) service (get step 'state) (- remaining 1) (+ polls 1))))))))
+  (def inference-serviced
+    (fn (routes ask provider prompt service state polls)
+      (begin
+        (if (if (= (type-of polls) 'int) (if (< -1 polls) (< polls 4097) #f) #f) #t
+          (signal 'inference/protocol "poll budget must be between zero and 4096"))
+        (serviced-loop ask (inference-start routes ask provider prompt) service state polls 0))))
+  (def inference-call
+    (fn (routes ask provider prompt)
+      (let ((reply (decode-reply (ask (text-concat "AGEL-INFER/1 "
+        (text-concat (route-for routes provider) (text-concat "\n" (text-hex prompt))))))))
+        (if (= (get reply 'status) 'done) (get reply 'text) (signal 'inference/protocol "unexpected asynchronous reply"))))))

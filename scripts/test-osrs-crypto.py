@@ -56,3 +56,36 @@ for vector in vectors['vectors']:
     result = evaluate(source)
     assert result.returncode == 0 and result.stdout.strip() == form(vector['draws']), result.stderr
 print("OSRS cipher: two 600-draw ISAAC sequences match the pinned server reference, including refill")
+for vector in vectors['vectors']:
+    for capacity in [1, 7, 256, 512]:
+        source = "(import agel/crypto) (import agel/sequence) "
+        source += "(def draw (fn (state n out) (if (= n 0) (reverse out) "
+        source += "(let ((next (isaac-bytes-next state))) (draw (get next 'state) (- n 1) (cons (get next 'value) out)))))) "
+        source += "(draw (isaac-bytes-new '" + form(vector['seed']) + " " + str(capacity) + ") 600 nil)"
+        result = evaluate(source)
+        assert result.returncode == 0 and result.stdout.strip() == form([n % 256 for n in vector['draws']]), result.stderr
+for capacity in [0, 513]:
+    result = evaluate("(import agel/crypto) (isaac-bytes-new '(1 2 3 4) " + str(capacity) + ")")
+    assert result.returncode != 0 and 'crypto/isaac' in result.stderr, result.stderr
+print("General ISAAC byte buffers: capacities 1/7/256/512 match 600 pinned oracle bytes for both seeds, including refill")
+vector = vectors['vectors'][0]
+source = '''(import agel/sequence) (import agel/osrs-crypto) (import agel/osrs-game)
+(def packets nil)
+(def wire-write (fn (bytes) (begin (def packets (append packets (list bytes))) (count bytes))))
+(def service nil) (def progress nil)
+(def maintenance (dict
+  'start (fn (function initial) (begin (def service function) (def progress initial) #t))
+  'stop (fn () progress)))
+(def pulse-service (fn () (let ((result (service progress)))
+  (begin (wire-write (get result 'bytes)) (def progress (get result 'state)) #t))))
+'''
+source += "(def state (assoc (osrs-game-state '" + form(vector['seed']) + ") 'maintenance maintenance)) "
+source += '''(osrs-service-start state) (pulse-service) (pulse-service)
+(def state (osrs-service-stop state)) (def state (osrs-walk state 3223 3218))
+(osrs-service-start state) (pulse-service) (pulse-service)
+(def state (osrs-service-stop state))
+(list (map car packets) (get state 'keepalives) (isaac-bytes-available (get state 'out)))'''
+result = evaluate(source)
+expected = [[(word + opcode) % 256 for word, opcode in zip(vector['draws'], [75, 75, 55, 75, 75])], 4, 507]
+assert result.returncode == 0 and result.stdout.strip() == form(expected), result.stderr + result.stdout
+print("OSRS adapter: repeated service start/stop and walking preserve the independent cipher sequence")

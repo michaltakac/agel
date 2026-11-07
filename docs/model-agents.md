@@ -156,3 +156,49 @@ See [the native example, real records and limits](release-v0.3.13.md).
 `--scenario runtime` exercises the same controller against versioned language
 forms in v0.3.14. An existing runtime closure uses a repaired form without
 recreation. See [the runtime API](live-runtime.md) and [native evidence](release-v0.3.14.md).
+
+## Polling inference during a live byte session
+
+The optional `agel/inference` module also exports `inference-start`,
+`inference-poll` and `inference-serviced`. Start sends
+`AGEL-INFER/2 start ROUTE\nHEX-PROMPT` and receives either a completed reply
+or `{status pending, job "ID"}`. Poll sends `AGEL-INFER/2 poll ID` and checks
+that a pending response retains the same ID. A job is submitted once; polling
+never resubmits the prompt. The native companion admits one outstanding job,
+refuses a second start, and consumes a result only on a matching poll. A
+wrong or already-consumed ID is an error. Provider work remains bounded by
+the existing 90-second process timeout and 1900-byte native reply limit.
+
+`inference-serviced(routes, ask, provider, prompt, service, state, polls)`
+invokes the Agel callback `(service state)` before each poll. It returns
+`{reply, state, polls}` or an additional `error` field. State acknowledged by
+a successful callback survives a subsequent poll error. The callback owns
+all maintenance decisions and effects. At budget exhaustion the pending job
+is returned, so a caller can continue with `inference-poll` rather than submit
+again. The poll budget is 0–4096. A service callback that fails after a partial
+external effect cannot promise rollback; close or reconcile that resource.
+
+The combined `guest_inference` companion accepts an optional numeric endpoint
+in `AGEL_BYTE_ENDPOINT`. It shares the same bounded TCP/entropy carrier as
+`byte_bridge`, runs the selected provider job on a worker thread, and waits up
+to 250 ms for a result per poll. Agel chooses when to poll and which service
+bytes to send. The carrier has no heartbeat timer, game policy, diagnosis or
+activation logic. Both waiting bootstrap words relay protected-ledger requests,
+so receipts can be committed while Agel waits for a byte acknowledgment.
+
+This is cooperative servicing, not preemption. Long Agel computation or an
+ordinary blocking model call can still starve a connection. Jobs are owned by
+one live broker and are not recoverable after a broker crash or OS reboot.
+
+For a mailbox-driven repair, set `model-dispatch` to `external` in
+`make-repair-agent` options. The retained actor then creates logical pending
+requests in its heap without dispatching a second runtime model effect.
+After its `repair/start` turn, a top-level controller calls
+`repair-agent-exchange(actor, infer, append-record)`. This logs the exchange,
+invokes the caller's inference adapter, delivers the completion to the same
+actor, and schedules until that actor changes state. Other actors can run
+between those turns. With deferred activation the judge result leaves the
+actor `approved`; a following exchange executes the separately queued
+activation turn. Existing implicit hosted model dispatch remains the default.
+The repair actor can have no effect capabilities; the controller owns provider
+and audit I/O. Nested scheduler calls from inside a behavior remain refused.

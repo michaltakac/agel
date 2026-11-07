@@ -5,7 +5,7 @@
   (import agel/osrs-wire)
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
-  (export osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack)
+  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -13,8 +13,8 @@
   (def nth (fn (xs n) (if (= n 0) (car xs) (nth (cdr xs) (- n 1)))))
   (def map-or-empty (fn (v) (if v v (dict))))
   (def osrs-game-state
-    (fn (seed) (dict 'out (isaac-new seed)
-                     'in (isaac-new (map (fn (n) (rem (+ n 50) 4294967296)) seed))
+    (fn (seed) (dict 'out (isaac-bytes-new seed 512)
+                     'in (isaac-bytes-new (map (fn (n) (rem (+ n 50) 4294967296)) seed) 512)
                      'stats (dict) 'inventories (dict) 'active-world 0 'npc-worlds (dict) 'history nil)))
   (def full-items
     (fn (bytes capacity slot out)
@@ -88,6 +88,12 @@
       (if (= bytes nil) (dict 'bytes (reverse out) 'cipher cipher)
           (let ((next (decipher (car bytes) cipher)))
             (encrypted-body (cdr bytes) (get next 'cipher) (cons (get next 'byte) out))))))
+  (def retain-packet
+    (fn (state packet)
+      (let ((maintenance (get state 'maintenance)))
+        (if (if maintenance (get maintenance 'pulse) nil)
+          (bytes-pack-field-serviced packet 'bytes (get maintenance 'pulse))
+          (bytes-pack-field packet 'bytes)))))
   (def read-payload
     (fn (state opcode cipher)
       (let ((spec (osrs-server-packet opcode)))
@@ -100,7 +106,7 @@
                                   (dict 'bytes raw 'cipher cipher))))
                     (let ((packet (dict 'opcode opcode 'name (get spec 'name) 'bytes (get body 'bytes))))
                       (dict 'state (assoc (observe (assoc state 'in (get body 'cipher)) packet) 'history
-                                          (cons packet (get state 'history))) 'packet packet))))))
+                                          (cons (retain-packet state packet) (get state 'history))) 'packet packet))))))
             (signal 'osrs/opcode "unknown revision-241 server packet" opcode)))))
   (def osrs-next-packet
     (fn (state)
@@ -116,33 +122,31 @@
               (let ((next (osrs-next-packet state)))
                 (wait-ticks (get next 'state)
                   (- ticks (if (= (get (get next 'packet) 'name) "PLAYER_INFO") 1 0)) (- remaining 1)))))))
-  (def keepalive-codes
-    (fn (cipher remaining out)
-      (if (= remaining 0) (bytes-hex (reverse out))
-        (let ((next (isaac-next cipher)))
-          (keepalive-codes (get next 'state) (- remaining 1) (cons (rem (+ 75 (get next 'value)) 256) out))))))
-  (def keeper
-    (fn (codes)
-      (fn (used)
-        (begin
-          (if (< (* used 2) (text-bytes codes)) #t (signal 'osrs/wait "keepalive service budget exhausted"))
-          (dict 'state (+ used 1) 'bytes (bytes-from-hex (text-slice codes (* used 2) (* (+ used 1) 2))))))))
-  (def advance-cipher
-    (fn (cipher n) (if (= n 0) cipher (advance-cipher (get (isaac-next cipher) 'state) (- n 1)))))
+  (def keepalive-service
+    (fn (progress)
+      (let ((next (isaac-next (get progress 'cipher))))
+        (dict 'state (dict 'cipher (get next 'state) 'used (+ 1 (get progress 'used)))
+              'bytes (list (rem (+ 75 (get next 'value)) 256))))))
+  (def osrs-service-start
+    (fn (state)
+      (let ((maintenance (get state 'maintenance)))
+        (if maintenance ((get maintenance 'start) keepalive-service (dict 'cipher (get state 'out) 'used 0))
+          (signal 'osrs/wait "no maintenance service configured")))))
+  (def osrs-service-stop
+    (fn (state)
+      (let ((progress ((get (get state 'maintenance) 'stop))))
+        (assoc (assoc state 'out (get progress 'cipher)) 'keepalives
+          (+ (if (get state 'keepalives) (get state 'keepalives) 0) (get progress 'used))))))
   (def maintained-read
     (fn (state action)
-      (let ((maintenance (get state 'maintenance)))
-        (if maintenance
-          (begin
-            ((get maintenance 'start) (keeper (keepalive-codes (get state 'out) 512 nil)) 0)
-            (with-handler (* problem)
-              (begin (with-handler (* ignored) nil ((get maintenance 'stop)))
-                (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
-              (let ((result (action state)))
-                (let ((used ((get maintenance 'stop))))
-                  (assoc (assoc result 'out (advance-cipher (get state 'out) used)) 'keepalives
-                    (+ (if (get state 'keepalives) (get state 'keepalives) 0) used))))))
-          (action state)))))
+      (if (get state 'maintenance)
+        (begin
+          (osrs-service-start state)
+          (with-handler (* problem)
+            (begin (with-handler (* ignored) nil ((get (get state 'maintenance) 'stop)))
+              (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+            (osrs-service-stop (action state))))
+        (action state))))
   (def osrs-wait-ticks
     (fn (state ticks)
       (if (if (= (type-of ticks) 'int) (if (< -1 ticks) (< ticks 33) #f) #f)

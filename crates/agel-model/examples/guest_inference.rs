@@ -1,4 +1,5 @@
 use agel_core::{Digest, ModelRequest};
+use agel_effects::byte_carrier::Carrier;
 use agel_model::{
     guest_journal::GuestJudgeJournal, CodexProvider, CommandLimits, JevProvider, ProviderRegistry,
 };
@@ -10,6 +11,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{self, Receiver, RecvTimeoutError},
         Arc, Mutex,
     },
     thread,
@@ -70,7 +72,7 @@ impl Wire {
     }
     fn raw(&self, line: &str) -> Result<(), String> {
         let mut out = self.output.lock().map_err(|e| e.to_string())?;
-        out.write_all(b":stdin ")
+        out.write_all(b"\x1d")
             .and_then(|()| out.write_all(line.as_bytes()))
             .and_then(|()| out.write_all(b"\n"))
             .map_err(|e| e.to_string())
@@ -118,10 +120,8 @@ impl Wire {
                 }
             }
             if self.closed.load(Ordering::Relaxed) || Instant::now() > deadline {
-                let input = self.input.lock().map_err(|e| e.to_string())?;
                 return Err(format!(
-                    "guest ledger acknowledgement unavailable: {}",
-                    String::from_utf8_lossy(&input[start..])
+                    "guest ledger acknowledgement unavailable for request {id}"
                 ));
             }
             thread::sleep(Duration::from_millis(5));
@@ -146,6 +146,58 @@ fn decode(hex: &str) -> Result<String, String> {
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|e| e.to_string()))
         .collect::<Result<Vec<_>, _>>()?;
     String::from_utf8(bytes).map_err(|e| e.to_string())
+}
+
+struct Job {
+    id: u64,
+    result: Receiver<String>,
+}
+fn outcome_reply(outcome: Result<String, agel_model::ProviderError>) -> String {
+    let (status, text) = match outcome {
+        Ok(text) if text.len() <= 1900 => ("ok", text),
+        Ok(_) => (
+            "error",
+            "inference reply exceeded native transport limit".into(),
+        ),
+        Err(e) if e.to_string().len() <= 1900 => ("error", e.to_string()),
+        Err(_) => (
+            "error",
+            "provider error exceeded native transport limit".into(),
+        ),
+    };
+    format!("{status} {}", encode(text.as_bytes()))
+}
+fn poll_job(slot: &mut Option<Job>, id: u64) -> Result<String, String> {
+    let job = slot
+        .as_ref()
+        .filter(|job| job.id == id)
+        .ok_or("unknown inference job")?;
+    match job.result.recv_timeout(Duration::from_millis(250)) {
+        Ok(reply) => {
+            *slot = None;
+            Ok(reply)
+        }
+        Err(RecvTimeoutError::Timeout) => Ok(format!("pending {id}")),
+        Err(RecvTimeoutError::Disconnected) => {
+            *slot = None;
+            Err("inference worker ended without a result".into())
+        }
+    }
+}
+fn request(id: u64, header: &str, body: &str) -> Result<ModelRequest, String> {
+    if body.len() > 128 * 1024 {
+        return Err("inference prompt exceeds carrier bound".into());
+    }
+    Ok(ModelRequest {
+        id,
+        world_id: 0,
+        requester: 1,
+        reply_to: 1,
+        provider: header.into(),
+        prompt: decode(body)?,
+        prompt_digest: Digest::ZERO,
+        effect_key: Digest::ZERO,
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -174,6 +226,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .with_journal(journal.clone()),
     );
+    let providers = Arc::new(providers);
+    let mut carrier = env::var("AGEL_BYTE_ENDPOINT")
+        .ok()
+        .map(|s| s.parse().map(Carrier::new))
+        .transpose()?;
+    let mut job: Option<Job> = None;
     wire.wait(0, b"live-desktop> ", 120)?;
     for command in &args[3..args.len() - 1] {
         let start = wire.len();
@@ -184,54 +242,98 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     wire.command(args.last().ok_or("missing command")?)?;
     let mut number = None;
     let mut block = String::new();
-    let deadline = Instant::now() + Duration::from_secs(900);
+    let mut byte_number = None;
+    let mut byte_block = String::new();
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(900);
     loop {
         let lines = wire.lines(&mut cursor);
         for line in lines.lines() {
-            println!("{line}");
+            if number.is_none()
+                && byte_number.is_none()
+                && !line.starts_with("model-request ")
+                && !line.starts_with("byte-request ")
+            {
+                println!("{line}");
+            }
             let line = line.trim_start_matches("live-desktop> ");
+            if let Some(process) = args[2].split_once(" exited").map(|(prefix, _)| prefix) {
+                if line == format!("{process} never yielded; tick budget exhausted; stopped") {
+                    return Err("guest watchdog stopped the requested process".into());
+                }
+            }
+            if line == "byte-input refused" {
+                return Err("guest process input queue refused a frame".into());
+            }
             if line.starts_with(&args[2]) {
                 return Ok(());
             }
             if line == "model-request end" {
                 let id = number.take().ok_or("inference block has no request id")?;
-                let (header, body) = block
-                    .trim_end()
-                    .split_once('\n')
-                    .ok_or("inference block has no payload")?;
-                let provider = header
-                    .strip_prefix("AGEL-INFER/1 ")
-                    .ok_or("unknown inference framing")?;
-                let request = ModelRequest {
-                    id,
-                    world_id: 0,
-                    requester: 1,
-                    reply_to: 1,
-                    provider: provider.into(),
-                    prompt: decode(body)?,
-                    prompt_digest: Digest::ZERO,
-                    effect_key: Digest::ZERO,
-                };
-                let outcome = providers.infer(&request);
-                if let Err(problem) = journal.check() {
-                    return Err(format!("{problem}; provider outcome: {outcome:?}").into());
-                }
-                let (status, text) = match outcome {
-                    Ok(text) if text.len() <= 1900 => ("ok", text),
-                    Ok(_) => (
-                        "error",
-                        "inference reply exceeded native transport limit".into(),
-                    ),
-                    Err(e) if e.to_string().len() <= 1900 => ("error", e.to_string()),
-                    Err(_) => (
-                        "error",
-                        "provider error exceeded native transport limit".into(),
-                    ),
-                };
-                wire.raw(&format!(
-                    ":model-reply {id} {status} {}",
-                    encode(text.as_bytes())
-                ))?;
+                let reply: Result<String, String> = (|| {
+                    let text = block.strip_suffix('\n').unwrap_or(&block);
+                    if let Some(id) = text.strip_prefix("AGEL-INFER/2 poll ") {
+                        let result = poll_job(&mut job, id.parse().map_err(|_| "invalid job id")?);
+                        if let Ok(reply) = &result {
+                            if !reply.starts_with("pending ") {
+                                println!(
+                                    "inference-bridge: completed job {id} at-ms {} status {}",
+                                    started.elapsed().as_millis(),
+                                    reply.split_whitespace().next().unwrap_or("invalid")
+                                );
+                            }
+                        }
+                        return result;
+                    }
+                    let (header, body) = text
+                        .split_once('\n')
+                        .ok_or("inference block has no payload")?;
+                    let (route, asynchronous) =
+                        if let Some(route) = header.strip_prefix("AGEL-INFER/2 start ") {
+                            (route, true)
+                        } else {
+                            (
+                                header
+                                    .strip_prefix("AGEL-INFER/1 ")
+                                    .ok_or("unknown inference framing")?,
+                                false,
+                            )
+                        };
+                    if job.is_some() {
+                        return Err("an inference job is already outstanding".into());
+                    }
+                    if !providers.is_enabled(route) {
+                        return Err("provider route is not configured".into());
+                    }
+                    let request = request(id, route, body)?;
+                    if asynchronous {
+                        println!(
+                            "inference-bridge: started job {id} provider {route} at-ms {}",
+                            started.elapsed().as_millis()
+                        );
+                        let providers = Arc::clone(&providers);
+                        let journal = Arc::clone(&journal);
+                        let (sender, result) = mpsc::channel();
+                        thread::spawn(move || {
+                            let outcome = providers.infer(&request);
+                            // A failed durable receipt never becomes an accepted model result.
+                            let reply = match journal.check() {
+                                Ok(()) => outcome_reply(outcome),
+                                Err(problem) => format!("error {}", encode(problem.as_bytes())),
+                            };
+                            let _ = sender.send(reply);
+                        });
+                        job = Some(Job { id, result });
+                        Ok(format!("pending {id}"))
+                    } else {
+                        let outcome = providers.infer(&request);
+                        journal.check()?;
+                        Ok(outcome_reply(outcome))
+                    }
+                })();
+                let reply =
+                    reply.unwrap_or_else(|error| format!("error {}", encode(error.as_bytes())));
+                wire.raw(&format!(":model-reply {id} {reply}"))?;
                 block.clear();
             } else if let Some(id) = line
                 .strip_prefix("model-request ")
@@ -240,7 +342,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 number = Some(id);
                 block.clear();
+            } else if let Some(id) = line
+                .strip_prefix("byte-request ")
+                .and_then(|s| s.strip_suffix(':'))
+                .and_then(|s| s.parse::<u64>().ok())
+            {
+                byte_number = Some(id);
+                byte_block.clear();
+            } else if line == "byte-request end" {
+                let id = byte_number.take().ok_or("byte block has no request id")?;
+                let arrived = started.elapsed().as_millis();
+                let result = carrier
+                    .as_mut()
+                    .ok_or("byte endpoint is not configured".to_owned())
+                    .and_then(|c| c.exchange(&byte_block));
+                let reply =
+                    result.unwrap_or_else(|error| format!("error {}", encode(error.as_bytes())));
+                println!(
+                    "byte-bridge: request {id} operation {} at-ms {arrived} duration-ms {} status {}",
+                    byte_block.split_whitespace().nth(1).unwrap_or("invalid"),
+                    started.elapsed().as_millis() - arrived,
+                    reply.split_whitespace().next().unwrap_or("invalid")
+                );
+                wire.raw(&format!(":byte-reply {id} {reply}"))?;
+            } else if byte_number.is_some() {
+                if !byte_block.is_empty() || line.len() > 1024 {
+                    return Err("byte block exceeds framing".into());
+                }
+                byte_block.push_str(line);
             } else if number.is_some() {
+                if block.len() + line.len() > 128 * 1024 + 128 {
+                    return Err("model block exceeds framing".into());
+                }
                 block.push_str(line);
                 block.push('\n');
             }
@@ -257,6 +390,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn polling_retains_work_until_the_matching_job_claims_its_result() {
+        let (sender, result) = mpsc::channel();
+        let mut slot = Some(Job { id: 19, result });
+        assert!(poll_job(&mut slot, 20).is_err());
+        assert_eq!(poll_job(&mut slot, 19).unwrap(), "pending 19");
+        sender.send("ok 6162".into()).unwrap();
+        assert_eq!(poll_job(&mut slot, 19).unwrap(), "ok 6162");
+        assert!(poll_job(&mut slot, 19).is_err());
+        let (sender, result) = mpsc::channel();
+        slot = Some(Job { id: 20, result });
+        drop(sender);
+        assert!(poll_job(&mut slot, 20).is_err());
+        assert!(slot.is_none());
+    }
+
+    #[test]
     fn process_replies_use_the_queue_and_preserve_large_payloads() {
         let (writer, mut reader) = UnixStream::pair().unwrap();
         let wire = Wire {
@@ -267,7 +416,7 @@ mod tests {
         };
         let line = format!(":model-reply 1 ok {}", encode("x".repeat(1900).as_bytes()));
         wire.raw(&line).unwrap();
-        let expected = format!(":stdin {line}\n");
+        let expected = format!("\x1d{line}\n");
         assert!(expected.len() <= 4096);
         let mut received = vec![0; expected.len()];
         reader.read_exact(&mut received).unwrap();

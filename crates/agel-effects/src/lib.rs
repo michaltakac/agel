@@ -1087,3 +1087,5 @@ mod tests {
         assert_eq!(sandbox.audit_log().records().len(), 3);
     }
 }
+
+pub mod byte_carrier;

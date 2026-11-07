@@ -258,3 +258,197 @@ fn hex_text_decoder_preserves_utf8_across_chunk_boundaries() {
     assert_eq!(result.values.last(), Some(&agel_core::Value::String(text)));
     assert!(world.evaluate("(text-from-hex \"c080\")").is_err());
 }
+
+#[test]
+fn polling_inference_services_agel_between_polls_and_retains_acknowledged_state() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world.evaluate(include_str!("../bytes.agel")).unwrap();
+    world.evaluate(include_str!("../inference.agel")).unwrap();
+    let result = world
+        .evaluate(
+            r#"
+(import agel/inference)
+(def polls 0)
+(def ask (fn (request)
+  (if (= request "AGEL-INFER/2 start writer\n6869") "pending 19"
+    (if (= request "AGEL-INFER/2 poll 19")
+      (begin (def polls (+ polls 1)) (if (= polls 2) "ok 410acebb" "pending 19"))
+      (signal 'test/request "unexpected request")))))
+(def result (inference-serviced (dict 'writer "writer") ask 'writer "hi" (fn (n) (+ n 1)) 0 8))
+(list (get (get result 'reply) 'text) (get result 'state) (get result 'polls))
+"#,
+        )
+        .unwrap();
+    assert_eq!(result.values.last().unwrap().to_string(), "(\"A\\nλ\" 2 2)");
+    assert_eq!(world.evaluate(r#"(def pending (dict 'status 'pending 'job "19")) (with-handler (* e) (get e 'message) (inference-poll (fn (r) "pending 20") pending))"#).unwrap().values.last().unwrap().to_string(), "\"inference job changed\"");
+    let result = world
+        .evaluate(
+            r#"
+(def result (inference-serviced (dict 'writer "writer")
+  (fn (r) (if (= r "AGEL-INFER/2 poll 19") "error 646f776e" "pending 19"))
+  'writer "hi" (fn (n) (+ n 1)) 7 8))
+(list (get result 'state) (get result 'polls) (get (get result 'error) 'message))
+"#,
+        )
+        .unwrap();
+    assert_eq!(result.values.last().unwrap().to_string(), "(8 1 \"down\")");
+    let result = world.evaluate(r#"(inference-serviced (dict 'writer "writer") (fn (r) "pending 19") 'writer "hi" (fn (n) (signal 'test/service "must not run")) 7 0)"#).unwrap();
+    assert!(result
+        .values
+        .last()
+        .unwrap()
+        .to_string()
+        .contains("status pending"));
+    assert_eq!(
+        world
+            .evaluate(r#"(inference-call (dict 'writer "writer") (fn (r) "ok") 'writer "")"#)
+            .unwrap()
+            .values
+            .last(),
+        Some(&agel_core::Value::String(String::new()))
+    );
+    let long = world.evaluate_with(r#"(inference-serviced (dict 'writer "writer") (fn (r) "pending 19") 'writer "hi" (fn (n) (+ n 1)) 0 600)"#, &EvaluationOptions { budget: agel_core::Budget { fuel: 5_000_000, ..Default::default() }, ..Default::default() }).unwrap();
+    assert!(long
+        .values
+        .last()
+        .unwrap()
+        .to_string()
+        .contains("state 600"));
+    for reply in [
+        "pending ",
+        "pending 0",
+        "pending 019",
+        "pending 1x",
+        "pending 19\n20",
+    ] {
+        let source = format!(
+            "(inference-start (dict 'writer \"writer\") (fn (r) {}) 'writer \"hi\")",
+            agel_core::Value::String(reply.into())
+        );
+        assert!(world.evaluate(&source).is_err(), "{reply:?}");
+    }
+}
+
+#[test]
+fn external_dispatch_drives_a_retained_repair_actor_without_runtime_model_effects() {
+    let (mut world, options) = setup();
+    world.evaluate_with("(def external (make-repair-agent \"external-repair\" (assoc (assoc (repair-state worker) 'model-dispatch 'external) 'defer-activation #t) nil)) (send external '(repair/start)) (run)", &options).unwrap();
+    assert_eq!(
+        world.pending_model_requests().len(),
+        1,
+        "only the original hosted control may dispatch implicitly"
+    );
+    let call = format!("(def external-events nil) (def next (repair-agent-exchange external (fn (provider prompt) {}) (fn (record) (def external-events (append external-events (list (get record 'event))))))) (list (get next 'status) external-events)", agel_core::Value::String(GOOD.into()));
+    assert_eq!(
+        world
+            .evaluate_with(&call, &options)
+            .unwrap()
+            .values
+            .last()
+            .unwrap()
+            .to_string(),
+        "(judging (inference-start inference-result))"
+    );
+    world.evaluate_with(r#"(repair-agent-exchange external (fn (provider prompt) "patch noul 100 reason choice 5 boundary 900 25 25 900 25 25") (fn (record) #t))"#, &options).unwrap();
+    assert_eq!(
+        world
+            .evaluate("(get (repair-state external) 'status)")
+            .unwrap()
+            .values
+            .last()
+            .unwrap()
+            .to_string(),
+        "proposing"
+    );
+    assert!(world
+        .evaluate("(repair-prompt (repair-state external))")
+        .unwrap()
+        .values
+        .last()
+        .unwrap()
+        .to_string()
+        .contains("boundary"));
+    let retry = format!(
+        "(repair-agent-exchange external (fn (provider prompt) {}) (fn (record) #t))",
+        agel_core::Value::String(GOOD.into())
+    );
+    world.evaluate_with(&retry, &options).unwrap();
+    world.evaluate_with("(repair-agent-exchange external (fn (provider prompt) \"patch noul 950 reason choice 5 none 900 900 25 25 25 25\") (fn (record) #t))", &options).unwrap();
+    assert_eq!(world.evaluate("(list (get (repair-state external) 'status) (evolution-current (get (repair-state external) 'versions) 'cell 'batches))").unwrap().values.last().unwrap().to_string(), "(approved 1)");
+    world.evaluate_with("(repair-agent-exchange external (fn (provider prompt) (signal 'test/infer \"must not dispatch during activation\")) (fn (record) #t))", &options).unwrap();
+    assert_eq!(world.evaluate("(list (get (repair-state external) 'status) (get (repair-evaluate (repair-state external) 2) 'correct))").unwrap().values.last().unwrap().to_string(), "(done 6)");
+    assert_eq!(world.pending_model_requests().len(), 1);
+}
+
+#[test]
+fn native_session_example_retains_its_repair_actor_and_controller() {
+    let mut world = World::default();
+    let options = EvaluationOptions {
+        budget: agel_core::Budget {
+            fuel: 5_000_000,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    agel_stdlib::install(&mut world, &options).unwrap();
+    for source in [
+        include_str!("../bytes.agel"),
+        include_str!("../inference.agel"),
+        include_str!("../live-tools.agel"),
+        include_str!("../repair.agel"),
+    ] {
+        world.evaluate_with(source, &options).unwrap();
+    }
+    world.evaluate_with("(def file-append (fn (name text) #t)) (def console-log (fn (text) #t)) (def stream (dict 'owner (spawn \"test-stream\")))", &options).unwrap();
+    world
+        .evaluate_with(
+            "(def print-form (fn (value) \"test-serialized-record\"))",
+            &options,
+        )
+        .unwrap();
+    world
+        .evaluate_with(
+            include_str!("../../../examples/native-session-repair.agel"),
+            &options,
+        )
+        .unwrap();
+    let fixture = format!("(def infer (fn (provider prompt) (if (= provider 'writer) {} \"patch noul 950 reason choice 5 none 900 900 25 25 25 25\")))", agel_core::Value::String(GOOD.into()));
+    world.evaluate_with(&fixture, &options).unwrap();
+    world
+        .evaluate_with(
+            include_str!("../../../examples/native-session-repair-run.agel"),
+            &options,
+        )
+        .unwrap();
+    assert!(world.pending_model_requests().is_empty());
+    assert_eq!(world.evaluate_with("(list (retained-plan 5 3) (= worker (get controller 'repair-owner)) (get (agent-info worker) 'status))", &options).unwrap().values.last().unwrap().to_string(), "(2 #t running)");
+}
+
+#[test]
+fn batches_report_unexecuted_work_and_use_the_repaired_plan() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world.evaluate(include_str!("../batches.agel")).unwrap();
+    let result = world.evaluate("(import agel/batches) (def actions '(1 2 3 4 5)) (def old (run-batches (fn (n size) (/ n size)) + 0 actions 3)) (def new (run-batches (fn (n size) (if (= n 0) 0 (+ (/ (- n 1) size) 1))) + 0 actions 3)) (list (get old 'state) (get old 'remaining) (get new 'state) (get new 'remaining) (get new 'completed))").unwrap();
+    assert_eq!(
+        result.values.last().unwrap().to_string(),
+        "(6 (4 5) 15 nil 2)"
+    );
+    assert!(world
+        .evaluate("(run-batches (fn (n size) -1) + 0 actions 3)")
+        .is_err());
+    assert!(world
+        .evaluate("(run-batches (fn (n size) 2) + 0 actions 0)")
+        .is_err());
+    assert_eq!(
+        world
+            .evaluate("(get (run-batches (fn (n size) 0) + 0 (keys (dict)) 3) 'processed)")
+            .unwrap()
+            .values
+            .last()
+            .unwrap()
+            .to_string(),
+        "0"
+    );
+}

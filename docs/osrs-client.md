@@ -133,7 +133,7 @@ python3 scripts/osrs/watch.py VIEWER_URL
 The viewer shows the real QEMU framebuffer. The watcher copies the gameplay
 runner's status text into a `runescape-status` binding evaluated by the guest.
 It does not render RuneScape and does not move the hosted client into the OS.
-The full game scene and native byte transport remain unfinished. The current
+Native client tests run in a separate headless VM. The full game scene renderer remains unfinished. The current
 OS image can be built with `scripts/build-boot.sh --features native-graphics`
 if no graphical image exists yet.
 
@@ -143,9 +143,10 @@ There is a rat-combat smoke test, but no maximum-stats, crafting, quest,
 money-making or transfer score yet. The rat test requires exactly 8 Attack
 XP, increased Hitpoints XP and removal of the selected observed NPC index,
 then checks saved XP on the server. It does not read a separate kill counter.
-The agent policies, prompts, tool selection, persisted history, guarded policy
-activation and paired cost/time evaluation remain to be connected to this
-client. The DOOM demonstration still exists until its replacement is ready.
+v0.3.17 connects a retained repair actor to polling inference and the native
+client. It repairs a seeded planner and executes five queued game actions on
+the same connection. Full gameplay policy, durable episode history and paired
+cost/time task evaluation remain open. The DOOM demonstration still exists until its replacement is ready.
 
 The client implements password login against the explicit private profile,
 not proof-of-work, MFA, token login or reconnect packets. It starts a fresh
@@ -159,3 +160,22 @@ reconstructed. Extended masks, health/death animations, transformations and
 player movement still need semantic decoding. Combat currently uses the
 root world only. The client retains its observed packets
 and actions as Agel state; durable native OS history remains a later stage.
+
+
+The current game adapter keeps packet byte fields in its retained `history`
+as the lossless `agel/bytes` tagged hex representation. Use
+`bytes-unpack-field(event, 'bytes)` to obtain the raw list; it also reads old
+raw history entries. The packet returned directly by `osrs-next-packet` still
+has its raw byte list. No observations are pruned by this packing step.
+Outgoing and incoming opcode ciphers use the general ISAAC byte buffers.
+Maintenance owns the updated outgoing context, and stopping it transfers that
+context back before the next game action. It no longer prepares a long
+keepalive schedule while the connection is idle.
+
+
+Use `sh scripts/test-native-network.sh --repair` for the delayed-provider
+fixture, or `--repair --live` for real Codex/Jev providers. The native runner
+uses `agel/services` and `agel/service-stream` for serialized I/O state.
+The repair actor still uses the bootstrap actor mechanism. Real providers
+require the existing Codex login and `TYPESAFEAI_API_KEY`. The server-saved
+position, normal rights and 1× XP remain mandatory completion checks.

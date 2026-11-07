@@ -1,6 +1,6 @@
 (module agel/bytes
   (import agel/sequence)
-  (export bytes-from-hex bytes-crc32 text-hex text-from-hex bytes-hex-chunks bytes-crc32-feed bytes-crc32-finish text-crc32 bytes-hex)
+  (export bytes-from-hex bytes-crc32 text-hex text-from-hex bytes-hex-chunks bytes-crc32-feed bytes-crc32-finish text-crc32 bytes-hex bytes-pack-field bytes-unpack-field bytes-hex-serviced bytes-pack-field-serviced)
   (def byte-drop (fn (xs n) (if (= n 0) xs (byte-drop (cdr xs) (- n 1)))))
   (def byte-take
     (fn (xs n out) (if (= n 0) (reverse out) (byte-take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -72,14 +72,59 @@
   (def bytes-from-hex
     (fn (text)
       (decode text 0 nil nil)))
-  (def bytes-hex
-    (fn (bytes)
-      (foldl (fn (out byte)
-        (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
-          (text-concat out
-            (text-concat (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
-              (text-slice "0123456789abcdef" (rem byte 16) (+ 1 (rem byte 16)))))
-          (signal 'bytes/value "expected byte"))) "" bytes)))
+  (def hex-pairs
+    (fn (pieces out)
+      (if (= (count pieces) 0) (reverse out)
+        (if (= (count pieces) 1) (reverse (cons (car pieces) out))
+          (hex-pairs (cdr (cdr pieces)) (cons (text-concat (car pieces) (car (cdr pieces))) out))))))
+  (def hex-join
+    (fn (pieces)
+      (if (= (count pieces) 0) ""
+        (if (= (count pieces) 1) (car pieces) (hex-join (hex-pairs pieces nil))))))
+  (def encode-bytes
+    (fn (bytes part size pieces service)
+      (if (= (count bytes) 0) (hex-join (reverse (if (= size 0) pieces (cons part pieces))))
+        (if (= size 64) (begin (service) (encode-bytes bytes "" 0 (cons part pieces) service))
+          (let ((byte (car bytes)))
+            (if (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f)
+              (encode-bytes (cdr bytes)
+                (text-concat part (text-concat
+                  (text-slice "0123456789abcdef" (/ byte 16) (+ 1 (/ byte 16)))
+                  (text-slice "0123456789abcdef" (rem byte 16) (+ 1 (rem byte 16)))))
+                (+ size 1) pieces service)
+              (signal 'bytes/value "expected byte")))))))
+  (def bytes-hex-serviced
+    (fn (bytes service)
+      (begin (if (< (count bytes) 64) nil (service))
+        (encode-bytes bytes "" 0 nil service))))
+  (def bytes-hex (fn (bytes) (bytes-hex-serviced bytes (fn () #t))))
+  (def field-require (fn (ok reason) (if ok #t (signal 'bytes/field reason))))
+  (def bytes-pack-field-serviced
+    (fn (record key service)
+      (begin
+        (field-require (has-key? record key) "missing byte field")
+        (let ((values (get record key)))
+          (begin
+            (field-require (if (= values nil) #t (= (type-of values) 'list)) "expected byte list")
+            (assoc record key (dict 'encoding 'hex 'nil? (= values nil) 'data (bytes-hex-serviced values service))))))))
+  (def bytes-pack-field (fn (record key) (bytes-pack-field-serviced record key (fn () #t))))
+  (def bytes-unpack-field
+    (fn (record key)
+      (begin
+        (field-require (has-key? record key) "missing byte field")
+        (let ((encoded (get record key)))
+          (if (= (type-of encoded) 'map)
+            (begin
+              (field-require (if (= (count encoded) 3) (if (= (get encoded 'encoding) 'hex)
+                (= (type-of (get encoded 'nil?)) 'bool) #f) #f) "invalid byte field encoding")
+              (let ((values (bytes-from-hex (get encoded 'data))))
+                (begin
+                  (field-require (if (get encoded 'nil?) (= (count values) 0) #t) "nonempty nil byte field")
+                  (assoc record key (if (get encoded 'nil?) nil
+                    (if (= (count values) 0) (keys (dict)) values))))))
+            (begin
+              (field-require (if (= encoded nil) #t (= (type-of encoded) 'list)) "expected byte field")
+              (bytes-hex encoded) record))))))
   (def xor-table "0123456789abcdef1032547698badcfe23016745ab89efcd32107654ba98fedc45670123cdef89ab54761032dcfe98ba67452301efcdab8976543210fedcba9889abcdef0123456798badcfe10325476ab89efcd23016745ba98fedc32107654cdef89ab45670123dcfe98ba54761032efcdab8967452301fedcba9876543210")
   (def xor24
     (fn (a b place out)

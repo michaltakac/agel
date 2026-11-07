@@ -1,0 +1,54 @@
+(module agel/stream-buffer
+  (import agel/bytes)
+  (export buffer-new buffer-request buffer-check-count)
+  (def require (fn (ok reason) (if ok #t (signal 'stream/buffer reason))))
+  (def buffer-check-count
+    (fn (n) (require (if (= (type-of n) 'int) (if (< 0 n) (< n 65537) #f) #f) "invalid read count")))
+  (def buffer-new
+    (fn (stream size)
+      (begin
+        (require (if (= (type-of size) 'int) (if (< 0 size) (< size 257) #f) #f) "invalid buffer size")
+        (dict 'read (get stream 'read) 'write (get stream 'write)
+          'buffer "" 'ended #f 'reads 0 'size size 'service-fn nil 'service-state nil 'failed nil))))
+  (def service
+    (fn (state)
+      (if (get state 'service-fn)
+        (let ((effect ((get state 'service-fn) (get state 'service-state))))
+          (begin
+            (require (has-key? effect 'state) "service omitted its state")
+            (let ((bytes (get effect 'bytes)))
+              (require (= ((get state 'write) bytes) (count bytes)) "short service write"))
+            (assoc state 'service-state (get effect 'state)))) state)))
+  (def result (fn (state reply) (dict 'state state 'reply reply)))
+  (def failed (fn (state problem) (result (assoc state 'failed problem) (dict 'error problem))))
+  (def read-step
+    (fn (state message)
+      (let ((refill (if (= (text-bytes (get state 'buffer)) 0) (if (get state 'ended) #f #t) #f)))
+        (let ((prepared (if refill (service state) state)))
+          (with-handler (* problem) (failed prepared problem)
+            (let ((bytes (if refill (bytes-hex ((get prepared 'read) (get prepared 'size))) (get prepared 'buffer))))
+              (let ((n (if (< (/ (text-bytes bytes) 2) (get message 'count)) (/ (text-bytes bytes) 2) (get message 'count))))
+                (result
+                  (assoc (assoc (assoc prepared 'buffer (text-slice bytes (* n 2) (text-bytes bytes))) 'ended (= (text-bytes bytes) 0))
+                    'reads (+ (get prepared 'reads) (if refill 1 0)))
+                  (dict 'bytes (bytes-from-hex (text-slice bytes 0 (* n 2))))))))))))
+  (def buffer-request
+    (fn (state message)
+      (with-handler (* problem) (failed state problem)
+        (if (= (get message 'operation) 'reset)
+          (result (assoc (assoc (assoc (assoc (assoc state 'buffer "") 'ended #f) 'service-fn nil) 'service-state nil) 'failed nil)
+            (dict 'ok #t))
+          (if (= (get message 'operation) 'stop-service)
+            (result (assoc (assoc state 'service-fn nil) 'service-state nil) (dict 'state (get state 'service-state)))
+            (begin
+              (if (get state 'failed) (signal 'stream/failed "stream failed; close and reopen before reuse") nil)
+              (if (= (get message 'operation) 'pulse) (result (service state) (dict 'ok #t))
+                (if (= (get message 'operation) 'start-service)
+                  (begin
+                    (require (if (get state 'service-fn) #f #t) "service already active; stop it before replacement")
+                    (result (assoc (assoc state 'service-fn (get message 'function)) 'service-state (get message 'state)) (dict 'ok #t)))
+                  (begin
+                    (require (= (get message 'operation) 'read) "unknown buffer operation")
+                    (buffer-check-count (get message 'count))
+                    (read-step state message))))))))))
+)

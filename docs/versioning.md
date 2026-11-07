@@ -559,7 +559,13 @@ promise.
   RSA limbs; bootstrap allocation/framing fixes support the path. The codec
   adds an explicit empty-list tag refused by older readers. Model-controlled
   native episodes, visual rendering and Exo comparisons remain unfinished.
-  Minor releases may make
+  `v0.3.17` combines native polling inference and byte I/O with Agel-owned
+  serialized services. A retained actor repairs a seeded planner with real
+  providers, passes text/replay gates, and resumes five game actions on the
+  same connection. Packet history uses lossless tagged byte fields, readable
+  through `bytes-unpack-field`; direct packet returns remain raw lists. Load
+  `stream-buffer.agel` before either buffer adapter. Full self-hosting and
+  paired Exo tasks remain open. Minor releases may make
   deliberate breaking changes while Agel is still experimental; those changes
   must be documented and migration-tested.
 - `v1.0.0` is reserved for the first production-ready Agel system.

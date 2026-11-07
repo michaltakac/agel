@@ -164,7 +164,29 @@ unsafe fn carve(heap: &mut Heap, bytes: usize, align: usize) -> *mut u8 {
             process.report(2, b"agel: allocation bytes ", bytes as i64, b"\n");
             let cached = heap.runs.cached_pages();
             process.report(2, b"agel: cached large-run pages ", cached as i64, b"\n");
+            let mut class_bytes = 0;
+            for class in 0..CLASSES {
+                let mut block = heap.free[class];
+                while block != 0 {
+                    class_bytes += 1 << (class as u32 + CLASS_FIRST);
+                    block = *(block as *const usize);
+                }
+            }
+            process.report(2, b"agel: cached class bytes ", class_bytes, b"\n");
             process.exit(12);
+        }
+    }
+}
+
+unsafe fn release_page_classes(heap: &mut Heap) {
+    for class in (PAGE.trailing_zeros() - CLASS_FIRST) as usize..CLASSES {
+        let class_pages = (1 << (class as u32 + CLASS_FIRST)) / PAGE;
+        let mut head = heap.free[class];
+        heap.free[class] = 0;
+        while head != 0 {
+            let next = *(head as *const usize);
+            heap.runs.insert(head, class_pages);
+            head = next;
         }
     }
 }
@@ -179,10 +201,13 @@ unsafe impl GlobalAlloc for Allocator {
                     heap.free[class] = *(head as *const usize);
                     return head as *mut u8;
                 }
-                if let Some(address) = heap
-                    .runs
-                    .take(bytes.div_ceil(PAGE), layout.align().max(PAGE))
-                {
+                let pages = bytes.div_ceil(PAGE);
+                let align = layout.align().max(PAGE);
+                let address = heap.runs.take(pages, align).or_else(|| {
+                    release_page_classes(heap);
+                    heap.runs.take(pages, align)
+                });
+                if let Some(address) = address {
                     if bytes < PAGE {
                         let blocks = PAGE / bytes;
                         for offset in (1..blocks).rev() {
@@ -200,16 +225,7 @@ unsafe impl GlobalAlloc for Allocator {
                 if let Some(address) = heap.runs.take(pages, layout.align()) {
                     return address as *mut u8;
                 }
-                for class in (PAGE.trailing_zeros() - CLASS_FIRST) as usize..CLASSES {
-                    let class_pages = (1 << (class as u32 + CLASS_FIRST)) / PAGE;
-                    let mut head = heap.free[class];
-                    heap.free[class] = 0;
-                    while head != 0 {
-                        let next = *(head as *const usize);
-                        heap.runs.insert(head, class_pages);
-                        head = next;
-                    }
-                }
+                release_page_classes(heap);
                 if let Some(address) = heap.runs.take(pages, layout.align()) {
                     return address as *mut u8;
                 }
@@ -826,6 +842,14 @@ fn byte_request(arguments: &[Value]) -> Result<Value, HostError> {
                 "console ended before byte reply".into(),
             ));
         };
+        if let Some(rest) = line.strip_prefix(b":audit ") {
+            relay_audit(rest);
+            continue;
+        }
+        if line.starts_with(b":ledger") {
+            relay_ledger(&line);
+            continue;
+        }
         if let Some(reply) = line.strip_prefix(prefix.as_bytes()) {
             return Ok(Value::String(String::from_utf8_lossy(reply).trim().into()));
         }

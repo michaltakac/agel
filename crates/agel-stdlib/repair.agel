@@ -5,7 +5,7 @@
   (import agel/evolution)
   (import agel/judgment)
   (export make-repair-agent repair-state repair-prompt repair-evaluate
-          repair-new repair-start repair-pending repair-complete repair-fail repair-exchange repair-advance)
+          repair-new repair-start repair-pending repair-complete repair-fail repair-exchange repair-advance repair-agent-exchange)
 
   (def repair-state (fn (agent) (get (agent-info agent) 'heap)))
   (def nth (fn (values n) (if (= n 0) (car values) (nth (cdr values) (- n 1)))))
@@ -13,7 +13,8 @@
   (def object-kind (fn (state) (if (get state 'kind) (get state 'kind) 'cell)))
   (def request-id
     (fn (self state provider prompt)
-      (if self (model-request provider prompt self) (+ 1 (count (get state 'history))))))
+      (if (if self (= (get state 'model-dispatch) 'external) #t) (+ 1 (count (get state 'history)))
+        (model-request provider prompt self))))
   (def evaluate-cases
     (fn (candidate cases report)
       (if (= cases nil) report
@@ -169,7 +170,8 @@
           (signal 'repair/threshold "threshold must be in 0..1000")))))
   (def make-repair-agent
     (fn (name options capabilities)
-      (spawn name behavior (repair-new options) nil nil 'stop 0 capabilities)))
+      (if (= (count capabilities) 0) (spawn name behavior (repair-new options) nil)
+        (spawn name behavior (repair-new options) nil nil 'stop 0 capabilities))))
   (def repair-start
     (fn (state) (if (= (get state 'status) 'idle) (propose nil state) state)))
   (def repair-pending
@@ -182,6 +184,34 @@
   (def repair-fail
     (fn (state id provider message) (result nil state (list 'system/model-error id provider 'provider/error message))))
   (def repair-advance (fn (state) (advance nil state)))
+  (def wait-agent-change
+    (fn (agent before remaining)
+      (let ((info (agent-info agent)))
+        (if (= (get info 'status) 'running)
+          (if (= (get info 'heap) before)
+            (begin
+              (if (< 0 remaining) #t (signal 'repair/scheduler "repair actor did not complete"))
+              (run 1) (wait-agent-change agent before (- remaining 1))) (get info 'heap))
+          (signal 'repair/agent "repair actor stopped")))))
+  (def repair-agent-exchange
+    (fn (agent infer append-record)
+      (let ((state (repair-state agent)))
+        (begin
+          (if (= (get state 'model-dispatch) 'external) #t
+            (signal 'repair/dispatch "repair actor requires external model dispatch"))
+          (let ((request (repair-pending state)))
+            (if request
+              (begin
+                (append-record (dict 'event 'inference-start 'request request 'cost-microusd nil))
+                (let ((answer (with-handler (* problem) (dict 'error (get problem 'message))
+                                (dict 'text (infer (get request 'provider) (get request 'prompt))))))
+                  (begin
+                    (append-record (dict 'event 'inference-result 'id (get request 'id) 'answer answer 'cost-microusd nil))
+                    (send agent (if (get answer 'error)
+                      (list 'system/model-error (get request 'id) (get request 'provider) 'provider/error (get answer 'error))
+                      (list 'system/model-result (get request 'id) (get request 'provider) (get answer 'text))))
+                    (wait-agent-change agent state 8192))))
+              (if (= (get state 'status) 'approved) (wait-agent-change agent state 8192) state)))))))
   (def repair-exchange
     (fn (state infer append-record)
       (let ((request (repair-pending state)))

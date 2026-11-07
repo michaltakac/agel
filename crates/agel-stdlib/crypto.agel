@@ -1,6 +1,6 @@
 (module agel/crypto
   (import agel/sequence)
-  (export rsa-context rsa-encrypt xtea-encrypt isaac-new isaac-next)
+  (export rsa-context rsa-encrypt xtea-encrypt isaac-new isaac-next isaac-bytes-new isaac-bytes-next isaac-bytes-available)
 
   (def rem (fn (n divisor) (- n (* divisor (/ n divisor)))))
   (def mod (fn (n divisor) (let ((r (rem n divisor))) (if (< r 0) (+ r divisor) r))))
@@ -224,4 +224,33 @@
     (fn (state)
       (if (= (get state 'count) 0) (isaac-next (isaac-generate state))
           (let ((i (- (get state 'count) 1)))
-            (dict 'value (get (get state 'rsl) i) 'state (assoc state 'count i)))))))
+            (dict 'value (get (get state 'rsl) i) 'state (assoc state 'count i))))))
+  (def byte-refill
+    (fn (raw size) (fn () (byte-fill raw size size ""))))
+  (def byte-fill
+    (fn (raw size remaining out)
+      (if (= remaining 0)
+        (dict 'format 'isaac/bytes 'bytes out 'offset 0 'size size 'next (byte-refill raw size))
+        (let ((next (isaac-next raw)))
+          (let ((byte (rem (get next 'value) 256)))
+            (byte-fill (get next 'state) size (- remaining 1)
+              (text-concat out (text-concat
+                (text-slice "0123456789abcdef" (/ byte 16) (+ (/ byte 16) 1))
+                (text-slice "0123456789abcdef" (rem byte 16) (+ (rem byte 16) 1))))))))))
+  (def isaac-bytes-new
+    (fn (seed size)
+      (if (if (= (type-of size) 'int) (if (< 0 size) (< size 513) #f) #f)
+        (byte-fill (isaac-new seed) size size "")
+        (signal 'crypto/isaac "byte buffer size must be between 1 and 512"))))
+  (def isaac-bytes-available
+    (fn (state)
+      (if (= (get state 'format) 'isaac/bytes) (- (get state 'size) (get state 'offset)) nil)))
+  (def isaac-bytes-next
+    (fn (state)
+      (if (= (get state 'format) 'isaac/bytes)
+        (if (= (isaac-bytes-available state) 0) (isaac-bytes-next ((get state 'next)))
+          (let ((at (* 2 (get state 'offset))))
+            (dict 'value (+ (* 16 (hex-digit (text-byte (get state 'bytes) at)))
+                            (hex-digit (text-byte (get state 'bytes) (+ at 1))))
+              'state (assoc state 'offset (+ 1 (get state 'offset))))))
+        (signal 'crypto/isaac "expected a byte-buffer context")))))

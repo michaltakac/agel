@@ -1,0 +1,115 @@
+Development trials for v0.3.17. All used scripted provider fixtures; no paid inference.
+Experimental slab allocator was not shipped. Private disks, generated credentials and full source stay under target/.
+
+Evidence: target/native-network-1794014323066015000
+Pure repair session; tool repaired; post-action allocation failed.
+live-desktop> native-session: seeded planner failure reproduced; controller and byte-stream owner retained
+native-session: serviced inference polls 16
+native-session: serviced inference polls 8
+native-session: candidate {diagnosis "division truncates partial batches" after (fn (n size) (/ (+ n (- size 1)) size)) predictions (2 0)}
+native-session: tool repaired: text judge, prediction and held-out replay; frozen 3/6 to repaired 6/6; same controller and stream owner
+native-session: inference service writes 52
+agel: out of memory: heap growth failed after 0 free pages
+agel: allocation bytes 16
+agel: cached large-run pages 0
+process agel exited with status 12
+
+Evidence: target/native-network-1794014568678582000
+Tail-safe polling; tool repaired; post-action allocation failed.
+live-desktop> native-session: seeded planner failure reproduced; controller and byte-stream owner retained
+native-session: serviced inference polls 15
+native-session: serviced inference polls 8
+native-session: candidate {diagnosis "division truncates partial batches" after (fn (n size) (/ (+ n (- size 1)) size)) predictions (2 0)}
+native-session: tool repaired: text judge, prediction and held-out replay; frozen 3/6 to repaired 6/6; same controller and stream owner
+native-session: inference service writes 51
+agel: out of memory: heap growth failed after 0 free pages
+agel: allocation bytes 32768
+agel: cached large-run pages 21
+process agel exited with status 12
+
+Evidence: target/native-network-1794014777902954000
+Whole-page cache reuse; tool repaired; post-action allocation failed.
+live-desktop> native-session: seeded planner failure reproduced; controller and byte-stream owner retained
+native-session: serviced inference polls 16
+native-session: serviced inference polls 8
+native-session: candidate {diagnosis "division truncates partial batches" after (fn (n size) (/ (+ n (- size 1)) size)) predictions (2 0)}
+native-session: tool repaired: text judge, prediction and held-out replay; frozen 3/6 to repaired 6/6; same controller and stream owner
+native-session: inference service writes 52
+agel: out of memory: heap growth failed after 80 free pages
+agel: allocation bytes 335872
+agel: cached large-run pages 37
+agel: cached class bytes 2606144
+process agel exited with status 12
+
+Evidence: target/native-network-1794015160695485000
+Retained repair actor with experimental slabs; connection failed before judgment.
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+native-session: serviced inference polls 5
+agel: error: evaluation error: session/repair-test: repair exhausted or failed
+process agel exited with status 1
+
+Evidence: target/native-network-1794015531624369000
+Byte cipher buffering with experimental slabs; schedule preparation exceeded idle window.
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+native-session: serviced inference polls 5
+agel: error: evaluation error: session/repair-test: repair exhausted or failed
+process agel exited with status 1
+
+Evidence: target/native-network-1794015794333192000
+Progressive cipher service with experimental slabs; guest watchdog stopped execution. Broker terminated only after terminal guest event.
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+process agel never yielded; tick budget exhausted; stopped
+
+Evidence: target/native-network-1794016064074270000
+Existing allocator and progressive cipher service; repaired tool; post-action allocation failed.
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+native-session: serviced inference polls 13
+native-session: serviced inference polls 8
+native-session: candidate {diagnosis "division truncates partial batches" after (fn (n size) (/ (+ n (- size 1)) size)) predictions (2 0)}
+native-session: tool repaired: text judge, prediction and held-out replay; frozen 3/6 to repaired 6/6; same repair actor, controller and stream owner
+native-session: inference service writes 49
+agel: out of memory: heap growth failed after 16 free pages
+agel: allocation bytes 335872
+agel: cached large-run pages 125
+process agel exited with status 12
+
+Evidence: target/native-network-1794016435207443000
+Packed observations and single-result entry; slow encoding exceeded idle window.
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+agel: error: evaluation error: stream/io: Broken pipe (os error 32)
+process agel exited with status 1
+
+Evidence: target/native-network-1794016651411211000
+Chunked encoding without service callbacks; combined packet work exceeded idle window.
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+agel: error: evaluation error: stream/io: Broken pipe (os error 32)
+process agel exited with status 1
+
+Evidence: target/native-network-1794016909982787000
+Cooperative encoding; repair and five actions completed; post-action allocation failed.
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+native-session: serviced inference polls 14
+native-session: serviced inference polls 8
+native-session: candidate {diagnosis "division truncates partial batches" after (fn (n size) (/ (+ n (- size 1)) size)) predictions (2 0)}
+native-session: tool repaired: text judge, prediction and held-out replay; frozen 3/6 to repaired 6/6; same repair actor, controller and stream owner
+native-session: inference service writes 131
+native-session: executed batches 2
+agel: out of memory: heap growth failed after 0 free pages
+agel: allocation bytes 16
+agel: cached large-run pages 0
+process agel exited with status 12
+
+Evidence: target/native-network-1794017299270714000
+Whole-page reuse plus cooperative encoding; repair and five actions completed; retained bootstrap heaps still exhausted memory.
+live-desktop> native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained
+native-session: serviced inference polls 15
+native-session: serviced inference polls 8
+native-session: candidate {diagnosis "division truncates partial batches" after (fn (n size) (/ (+ n (- size 1)) size)) predictions (2 0)}
+native-session: tool repaired: text judge, prediction and held-out replay; frozen 3/6 to repaired 6/6; same repair actor, controller and stream owner
+native-session: model-wait service writes 23
+native-session: executed batches 2
+agel: out of memory: heap growth failed after 0 free pages
+agel: allocation bytes 16
+agel: cached large-run pages 0
+agel: cached class bytes 164768
+process agel exited with status 12

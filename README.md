@@ -5,12 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.16.** The Agel client now logs in, observes skills and
-inventory, and walks inside Agel OS over a general TCP byte relay. The server
-independently confirms the saved position, normal rights and 1× XP. Buffering,
-keepalive policy and standard crypto are Agel code. Integrated model-controlled
-native episodes and Exo comparisons remain open.
-See the [release notes and native evidence](docs/release-v0.3.16.md).
+**Current release: v0.3.17.** An Agel actor repairs a seeded planner through
+real inference, text judgment and replay, then uses it for game actions during
+the same native OS session. The server confirms the saved result at normal
+rights and 1× XP. Serialized services, buffering, cooperative byte encoding and
+repair policy are general Agel code. Exo task comparisons and full self-hosting
+remain open. See the [release notes and native evidence](docs/release-v0.3.17.md).
 
 v0.3.15 added bounded source-store checkpoint recovery across reboots.
 See the [release notes](docs/release-v0.3.15.md).

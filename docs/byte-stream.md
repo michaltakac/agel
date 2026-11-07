@@ -7,15 +7,15 @@ console. The external `byte_bridge` executable owns a TCP socket to an explicit
 CLI-selected numeric endpoint and returns bounded byte transfers. Neither
 layer recognizes a game packet, account, skill, item, cipher or agent policy.
 
-Load `bytes.agel`, `byte-stream.agel` and `buffered-stream.agel` in a standard
-Agel world before importing these optional modules. In the native process:
+Load `bytes.agel`, `byte-stream.agel`, `stream-buffer.agel`, `services.agel`
+and `service-stream.agel` in a standard Agel world before importing these
+optional modules. In the native process:
 
 ```lisp
 (import agel/byte-stream)
-(import agel/buffered-stream)
+(import agel/service-stream)
 (def stream
-  (buffered-stream (byte-stream byte-request) 256
-    (list (request-capability "byte/relay" "*"))))
+  (service-stream (byte-stream byte-request) 256))
 ((get stream 'open))
 ((get stream 'write) '(0 255 10 128))
 ((get stream 'read) 4)
@@ -29,20 +29,36 @@ sending it in 256-byte pieces. Entropy reads are 1–256 bytes. Short acknowledg
 invalid replies and wrong lengths signal errors. Writes and socket operations
 are external effects, so a later Agel failure cannot undo already sent bytes.
 
-`buffered-stream` owns its receive buffer in an Agel agent. Its synchronous
-facade runs that agent from the top-level controller; it is not a concurrent
-multi-reader protocol. The returned `agent` handle supports inspection of its
-heap and physical-read counter. Buffer bytes are retained as compact hex text,
-avoiding repeated large byte-vector copies in actor history. Small application
-reads consume buffered data before issuing another transport request. Open and
-close clear the buffer and EOF latch. An I/O/service failure latches failure;
-close/reopen is required before the stream can be read again.
+`service-stream` keeps its buffer in an Agel service. The `agel/services`
+registry, serialized calls, state updates, nested-call handling, reentrancy
+check and explicit fault recovery are Agel code. A service keeps its current
+state, last request and call count. Application observations, actions and
+version histories remain the application's responsibility. These services run
+at the top level under the controller's authority; they share its protection
+domain. Calling their mutation operations from a bootstrap actor is refused.
+
+The returned `owner`/`service` handle identifies the service; `info()` returns
+its state and counters. Buffer bytes are compact hex text. Small reads reuse
+the buffer. Open/close clear it and the EOF latch. An I/O/service failure
+latches failure; close/reopen is required before the stream can be read again.
+These are serialized single-owner streams.
+
+The optional `buffered-stream` adapter still provides the bootstrap actor
+backend. Load `stream-buffer.agel` before it. It retains its `agent` handle
+and adds the same `owner` and `info()` interfaces. Both adapters execute the
+same `agel/stream-buffer` state machine and the same behavior tests. The
+native runner uses Agel services to avoid retaining an opaque bootstrap heap
+snapshot for every small buffered read. The service tests verify that this
+backend creates no bootstrap actor events.
 
 `start-service(function, state)` installs an Agel callback before physical
 receive refills. It returns `{state ..., bytes ...}`; the worker writes those
 bytes, checks the acknowledgment, then keeps the new service state. The callback
 is not called for reads served from the buffer. `stop-service()` returns its
-current state and removes it. If the following read fails, acknowledged service
+current state and removes it. `pulse()` explicitly invokes the same service
+without reading; this lets an Agel controller maintain a connection between
+inference polls. Stop a service before installing a replacement. If the
+following read fails, acknowledged service
 state remains available. Callers must not transparently replay a failed write.
 This is a general maintenance hook, not a scheduler that runs while the whole
 process is blocked elsewhere or performing a long computation.
@@ -64,7 +80,37 @@ usual foreground console and older `:stdin` mechanism remain available. This
 requires the matching v0.3.16 native runtime/kernel. It is a single-owner
 bootstrap transport, not a native NIC or TCP stack inside Agel OS.
 
-The model-inference broker remains separate. Simultaneous inference and live
-socket ownership still need integration; the byte companion does not invoke
-providers or append fabricated judge costs. Request timing lines are carrier
-diagnostics. Application observations and decisions remain Agel's responsibility.
+The combined `guest_inference` broker can own the same carrier when given
+`AGEL_BYTE_ENDPOINT=127.0.0.1:PORT`. Its polling protocol lets Agel call
+`pulse()` between model polls; see [the inference API](model-agents.md#polling-inference-during-a-live-byte-session).
+The carrier does not invoke application policy or fabricate judge costs.
+Request diagnostics contain operation/status information, excluding byte
+payloads and credentials. Application observations and decisions remain Agel's
+responsibility.
+
+`bytes-pack-field(record, key)` stores a byte-list field as a tagged hex value;
+`bytes-unpack-field(record, key)` restores it and also accepts legacy raw byte
+lists. Metadata stays in the record. The codec preserves the difference between
+nil and an explicit empty list and refuses malformed tagged values. This keeps
+large retained observations compact without discarding their bytes. Hex
+encoding uses bounded chunks and pairwise joins rather than repeatedly copying
+the entire growing output. A 4096-byte pack/unpack probe fits two million
+Agel evaluation steps.
+
+`agel/crypto` additionally exports `isaac-bytes-new(seed, capacity)`,
+`isaac-bytes-next(context)` and `isaac-bytes-available(context)`. Capacities
+are 1–512. These return the low byte of each ordinary ISAAC word in the same
+order, and refill as needed. They are separate from the full-word API. A
+refill closure shares the immutable future cipher state, so ordinary byte
+contexts and service histories avoid repeatedly copying the large raw maps.
+The byte buffers are opaque contexts containing a callable, not inert data
+for `data-codec`. Reconstruct them from the appropriate seed/position when
+restoring a protocol; live network authority is not restored by a source
+checkpoint.
+
+For long encodes, `bytes-hex-serviced(bytes, service)` and
+`bytes-pack-field-serviced(record, key, service)` invoke a no-argument Agel
+callback before the first 64-byte chunk and between later chunks. Shorter
+inputs need no callback. Native clients use this to service a connection during
+CPU work, in addition to servicing between inference polls. A callback's external
+effects remain acknowledged even if later validation or encoding fails.

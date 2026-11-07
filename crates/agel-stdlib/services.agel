@@ -1,0 +1,44 @@
+(module agel/services
+  (export service-new service-call service-info service-restart)
+  (def registry (dict))
+  (def next-id 0)
+  (def require (fn (ok reason) (if ok #t (signal 'service/state reason))))
+  (def entry
+    (fn (id)
+      (begin (require (has-key? registry id) "unknown service") (get registry id))))
+  (def service-new
+    (fn (name behavior state)
+      (begin
+        (require (= (type-of name) 'string) "service name must be text")
+        (require (= (type-of behavior) 'callable) "service behavior must be callable")
+        (def next-id (+ next-id 1))
+        (def registry (assoc registry next-id
+          (dict 'name name 'behavior behavior 'state state 'calls 0 'busy #f 'fault nil 'request nil)))
+        next-id)))
+  (def service-info
+    (fn (id) (dissoc (entry id) 'behavior)))
+  (def service-restart
+    (fn (id)
+      (let ((before (entry id)))
+        (begin
+          (require (if (get before 'busy) #f #t) "service is busy")
+          (def registry (assoc registry id (assoc before 'fault nil))) #t))))
+  (def service-call
+    (fn (id request)
+      (let ((before (entry id)))
+        (begin
+          (require (if (get before 'busy) #f #t) "reentrant service call")
+          (require (if (get before 'fault) #f #t) "service faulted; inspect and explicitly restart")
+          (def registry (assoc registry id (assoc (assoc before 'busy #t) 'request request)))
+          (let ((result (with-handler (* problem) (dict 'state (get before 'state) 'reply (dict 'error problem) 'fault problem)
+                          (let ((answer ((get before 'behavior) (get before 'state) request)))
+                            (begin
+                              (require (has-key? answer 'state) "service omitted its state")
+                              (require (has-key? answer 'reply) "service omitted its reply")
+                              answer)))))
+            (begin
+              (def registry (assoc registry id
+                (assoc (assoc (assoc (assoc (entry id) 'busy #f) 'state (get result 'state))
+                  'calls (+ 1 (get before 'calls))) 'fault (get result 'fault))))
+              (get result 'reply)))))))
+)

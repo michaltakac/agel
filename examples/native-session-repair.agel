@@ -1,0 +1,39 @@
+(import agel/repair)
+(import agel/inference)
+(import agel/live-tools)
+(import agel/evolution)
+(import agel/judge-log)
+(def check (fn (ok label) (if ok #t (signal 'session/repair-test label))))
+(def audit (fn (record) (file-append "judge-log" (text-concat (print-form record) "\n"))))
+(def before '(fn (n size) (/ n size)))
+(def versions (evolution-edit (evolution-new) 'cell 'batches nil before
+  (list (dict 'arguments '(6 3) 'expected 2))
+  (fn (request) (judge-with-log 'bootstrap request
+    (fn (diff) (dict 'allowed #t 'reason "frozen control initialization" 'cost-microusd 0)) audit))))
+(def routes (dict 'writer "codex" 'judge "jev"))
+(def infer
+  (fn (provider prompt)
+    (let ((result (inference-serviced routes model-request provider prompt
+                    (fn (n) (begin ((get stream 'pulse)) (+ n 1))) 0 1024)))
+      (begin
+        (console-log (text-concat "native-session: serviced inference polls " (print-form (get result 'polls))))
+        (if (get result 'error)
+          (let ((problem (get result 'error))) (signal (get problem 'kind) (get problem 'message)))
+          (if (= (get (get result 'reply) 'status) 'done) (get (get result 'reply) 'text)
+            (signal 'inference/pending "poll budget exhausted; outstanding job retained")))))))
+(def repair-options
+  (dict 'versions versions 'tool 'batches 'before-text "(fn (n size) (/ n size))"
+    'context "A controller chunks an action sequence into batches. Integers n range from 0 through 1000 and size from 1 through 1000. Return the minimum whole batches needed. Observed failure: (5 3) returned 1, leaving two actions unplanned; expected 2. Displayed probes: (5 3) -> 2 and (0 3) -> 0. Preserve all valid inputs. This seeded defect tests tool repair while the controller retains a live external byte stream."
+    'examples (list (dict 'arguments '(5 3) 'expected 2) (dict 'arguments '(0 3) 'expected 0))
+    'held-out (list (dict 'arguments '(9 3) 'expected 3) (dict 'arguments '(10 3) 'expected 4)
+                    (dict 'arguments '(1 7) 'expected 1) (dict 'arguments '(6 3) 'expected 2))
+    'max-attempts 2 'threshold 800 'proposal-provider 'writer 'judge-provider 'judge 'defer-activation #t))
+(def worker (make-repair-agent "session-repair" (assoc repair-options 'model-dispatch 'external) nil))
+(send worker '(repair/start)) (run 1)
+(def controller (dict 'tool 'batches 'continuation '(walk observe save)
+  'stream-owner (get stream 'owner) 'repair-owner worker))
+(check (get controller 'stream-owner) "missing stream owner")
+(def frozen-controller controller)
+(def retained-plan (fn (n size) (get (live-tools-call (repair-state worker) (get controller 'tool) (list n size)) 'value)))
+(check (= (retained-plan 5 3) 1) "seeded control failure was not reproduced")
+(console-log "native-session: seeded planner failure reproduced; repair actor, controller and byte-stream owner retained")
