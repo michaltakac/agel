@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.185.** Agel OS scores a completed native transfer
-against the fresh fixed control. See the [release notes](docs/release-v0.3.185.md).
+**Current release: v0.3.186.** Agel checksum loops read numeric lookup
+values directly. See the [release notes](docs/release-v0.3.186.md).
+
+v0.3.185 scores native transfer against a fresh fixed control. See the [release notes](docs/release-v0.3.185.md).
 
 v0.3.184 refuses malformed kernel selectors before staging. See the [release notes](docs/release-v0.3.184.md).
 

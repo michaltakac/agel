@@ -175,12 +175,29 @@
             (begin
               (field-require (if (= encoded nil) #t (= (type-of encoded) 'list)) "expected byte field")
               (bytes-hex encoded) record))))))
-  (def xor-table "0123456789abcdef1032547698badcfe23016745ab89efcd32107654ba98fedc45670123cdef89ab54761032dcfe98ba67452301efcdab8976543210fedcba9889abcdef0123456798badcfe10325476ab89efcd23016745ba98fedc32107654cdef89ab45670123dcfe98ba54761032efcdab8967452301fedcba9876543210")
+  (def xor-table (text-from-bytes
+    '(
+      0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+      1 0 3 2 5 4 7 6 9 8 11 10 13 12 15 14
+      2 3 0 1 6 7 4 5 10 11 8 9 14 15 12 13
+      3 2 1 0 7 6 5 4 11 10 9 8 15 14 13 12
+      4 5 6 7 0 1 2 3 12 13 14 15 8 9 10 11
+      5 4 7 6 1 0 3 2 13 12 15 14 9 8 11 10
+      6 7 4 5 2 3 0 1 14 15 12 13 10 11 8 9
+      7 6 5 4 3 2 1 0 15 14 13 12 11 10 9 8
+      8 9 10 11 12 13 14 15 0 1 2 3 4 5 6 7
+      9 8 11 10 13 12 15 14 1 0 3 2 5 4 7 6
+      10 11 8 9 14 15 12 13 2 3 0 1 6 7 4 5
+      11 10 9 8 15 14 13 12 3 2 1 0 7 6 5 4
+      12 13 14 15 8 9 10 11 4 5 6 7 0 1 2 3
+      13 12 15 14 9 8 11 10 5 4 7 6 1 0 3 2
+      14 15 12 13 10 11 8 9 6 7 4 5 2 3 0 1
+      15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0)))
   (def xor24
     (fn (a b place out)
       (if (= place 16777216) out
         (xor24 (/ a 16) (/ b 16) (* place 16)
-          (+ out (* place (digit (text-byte xor-table (+ (* (rem a 16) 16) (rem b 16))))))))))
+          (+ out (* place (text-byte xor-table (+ (* (rem a 16) 16) (rem b 16)))))))))
   (def crc-byte-table
     (dict 0 0 1 1996959894 2 3993919788 3 2567524794 4 124634137 5 1886057615 6 3915621685 7 2657392035
           8 249268274 9 2044508324 10 3772115230 11 2547177864 12 162941995 13 2125561021 14 3887607047 15 2428444049
@@ -216,8 +233,8 @@
           248 3009837614 249 3294710456 250 1567103746 251 711928724 252 3020668471 253 3272380065 254 1510334235 255 755167117))
   (def xor-byte
     (fn (a b)
-      (+ (digit (text-byte xor-table (+ (* (rem a 16) 16) (rem b 16))))
-         (* 16 (digit (text-byte xor-table (+ (* (/ a 16) 16) (/ b 16))))))))
+      (+ (text-byte xor-table (+ (* (rem a 16) 16) (rem b 16)))
+         (* 16 (text-byte xor-table (+ (* (/ a 16) 16) (/ b 16)))))))
   ; The shifted accumulator has 24 bits; the table entry supplies the high byte.
   (def crc-step
     (fn (crc byte)
@@ -231,10 +248,10 @@
             (crc-loop (cdr bytes) (crc-step crc byte))
             (signal 'bytes/value "expected byte"))))))
   (def text-crc-loop
-    (fn (text at crc)
-      (if (= at (text-bytes text)) (- 4294967295 crc)
-        (text-crc-loop text (+ at 1) (crc-step crc (text-byte text at))))))
-  (def text-crc32 (fn (text) (text-crc-loop text 0 4294967295)))
+    (fn (text at length crc)
+      (if (= at length) (- 4294967295 crc)
+        (text-crc-loop text (+ at 1) length (crc-step crc (text-byte text at))))))
+  (def text-crc32 (fn (text) (text-crc-loop text 0 (text-bytes text) 4294967295)))
   (def bytes-crc32-feed (fn (crc bytes) (crc-loop bytes crc)))
   (def bytes-crc32-finish (fn (crc) (- 4294967295 crc)))
   (def bytes-crc32 (fn (bytes) (bytes-crc32-finish (crc-loop bytes 4294967295)))))
