@@ -5,9 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.27.** Agel observes a ground item, picks it up,
-and verifies the removal in live server packets. See the
-[release notes and evidence](docs/release-v0.3.27.md).
+**Current release: v0.3.28.** A fresh normal account completed Cook's
+Assistant with ingredients acquired through gameplay, after reconnecting
+to recover a stalled route. See the [release notes and evidence](docs/release-v0.3.28.md).
+
+v0.3.27 verifies ground-item observations before and after a live pickup.
+See the [observation evidence](docs/release-v0.3.27.md).
 
 v0.3.26 verifies a fresh account buying a bucket with coins earned from
 its first bronze-bar sale. See the [container evidence](docs/release-v0.3.26.md).

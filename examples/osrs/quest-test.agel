@@ -2,7 +2,7 @@
   (import agel/sequence)
   (import agel/osrs-game)
   (import agel/osrs-mining-test)
-  (export stage-cook-ingredients finish-cooks-assistant acquire-cook-containers)
+  (export stage-cook-ingredients finish-cooks-assistant acquire-cook-containers gather-and-finish-cooks-assistant)
   (def require (fn (ok reason) (if ok #t (signal 'osrs/quest-test reason))))
   (def xp (fn (g) (get (osrs-stat g 7) 'xp)))
   (def ingredients
@@ -58,7 +58,7 @@
       (with-handler (* problem) (signal 'osrs/quest-test "waiting for gathered item" (list item problem))
         (wait-live state (fn (g) (= (inventory g item) 1)) 24))))
   (def castle-pot (fn (state) (osrs-ground-count state 1931 3209 3214 0)))
-  (def acquire-cook-containers
+  (def cook-containers
     (fn (state)
       (let ((initial (ready state)))
         (require (= (list (inventory initial 1931) (inventory initial 1925) (inventory initial 995)) '(0 0 0))
@@ -73,9 +73,73 @@
                 (require (= (list (inventory bucket 1931) (inventory bucket 1925)) '(1 1))
                   "expected the empty pot and bucket")
                 (require (= (- (inventory sold 995) (inventory bucket 995)) 2) "bucket price changed")
-                (dict 'test 'cook-containers 'passed #t 'pot 1 'bucket 1
-                  'coins-earned (inventory sold 995) 'coins-left (inventory bucket 995)
-                  'pot-on-ground-before (castle-pot visible) 'pot-on-ground-after (castle-pot pot)))))))))
+                (dict 'state bucket 'report
+                  (dict 'test 'cook-containers 'passed #t 'pot 1 'bucket 1
+                    'coins-earned (inventory sold 995) 'coins-left (inventory bucket 995)
+                    'pot-on-ground-before (castle-pot visible) 'pot-on-ground-after (castle-pot pot))))))))))
+  (def acquire-cook-containers (fn (state) (get (cook-containers state) 'report)))
+  (def travel
+    (fn (state batches)
+      (if (= batches 0) state
+        (travel (osrs-wait-ticks (osrs-keepalive state) 5) (- batches 1)))))
+  (def gather-egg
+    (fn (state)
+      (let ((road (travel (osrs-walk state 3197 3270) 8)))
+        (let ((farm (travel (osrs-walk road 3181 3288) 8)))
+          (let ((opened (travel (osrs-use-location farm 1558 3181 3289) 2)))
+            (let ((inside (travel (osrs-walk opened 3181 3291) 3)))
+              (require (= (osrs-ground-count inside 1944 3185 3297 0) 1) "egg was not observed")
+              (wait-item (osrs-take-ground-item inside 1944 3185 3297) 1944)))))))
+  (def gather-milk
+    (fn (state)
+      (let ((gate (travel (osrs-walk state 3181 3291) 4)))
+        (let ((open (travel (osrs-use-location gate 1558 3181 3289) 2)))
+          (let ((road (travel (osrs-walk open 3181 3288) 2)))
+            (let ((north (travel (osrs-walk road 3176 3314) 9)))
+              (let ((opened (travel (osrs-use-location north 883 3176 3315) 2)))
+                (let ((inside (travel (osrs-walk opened 3176 3317) 3)))
+                  (wait-item (osrs-use-location inside 8689 3172 3317) 1927)))))))))
+  (def gather-grain
+    (fn (state)
+      (let ((outside (travel (osrs-walk state 3163 3289) 8)))
+        (let ((opened (travel (osrs-use-location outside 1558 3163 3290) 2)))
+          (let ((inside (travel (osrs-walk opened 3163 3291) 2)))
+            (let ((grain (wait-item (osrs-use-location-option inside 15506 3162 3294 2) 1947)))
+              (let ((gate (travel (osrs-walk grain 3163 3291) 3)))
+                (let ((opened (travel (osrs-use-location gate 1558 3163 3290) 2)))
+                  (travel (osrs-walk opened 3163 3289) 3)))))))))
+  (def gather-flour
+    (fn (state)
+      (let ((grain (gather-grain state)))
+        (let ((road (travel (osrs-walk grain 3166 3291) 3)))
+          (let ((front (travel (osrs-walk road 3166 3301) 4)))
+            (let ((door (travel (osrs-use-location front 1521 3166 3302) 2)))
+              (let ((entrance (travel (osrs-walk door 3166 3304) 3)))
+                (let ((first-floor (travel (osrs-use-location entrance 12964 3164 3307) 4)))
+                  (let ((top (travel (osrs-use-location-option first-floor 12965 3164 3307 2) 2)))
+                    (let ((filled (with-handler (* problem) (signal 'osrs/quest-test "filling the hopper" problem)
+                                    (wait-live (osrs-use-location top 24961 3166 3307)
+                                      (fn (g) (= (inventory g 1947) 0)) 10))))
+                      (let ((milled (travel (osrs-use-location (osrs-wait-ticks filled 2) 24964 3166 3305) 2)))
+                        (let ((middle (travel (osrs-use-location milled 12966 3164 3307) 2)))
+                          (let ((ground (travel (osrs-use-location-option middle 12965 3164 3307 3) 2)))
+                            (wait-item (osrs-use-location ground 1781 3166 3306) 1933))))))))))))))
+  (def return-to-cook
+    (fn (state)
+      (let ((door (travel (osrs-use-location state 1521 3166 3302) 4)))
+        (let ((outside (travel (osrs-walk door 3166 3301) 4)))
+          (let ((road (travel (osrs-walk outside 3172 3290) 5)))
+            (travel (osrs-walk road 3204 3260) 12))))))
+  (def gather-and-finish-cooks-assistant
+    (fn (state)
+      (let ((initial (ready state)))
+        (require (= (ingredients initial) '(0 0 0)) "fresh route started with ingredients")
+        (let ((containers (get (cook-containers initial) 'state)))
+          (let ((supplies (gather-flour (gather-milk (gather-egg containers)))))
+            (require (= (list (inventory supplies 1925) (inventory supplies 1931) (inventory supplies 1947)) '(0 0 0))
+              "ingredient production left unused containers or wheat")
+            (assoc (finish-cooks-assistant (return-to-cook supplies)) 'source 'gathered))))))
+
   (def finish-cooks-assistant
     (fn (state)
       (let ((stock (ready state)))

@@ -1,0 +1,22 @@
+Normal-account completion after a reconnect at the milk checkpoint
+{test cooks-assistant passed #t choices 2 quest-points 1 cooking-xp 300 ingredients-after (0 0 0)}
+Recovered no-admin quest from the milk checkpoint in 369.982 seconds
+stat=7 base=4 visible=4 fine_xp=3000
+varp.cookquest=2
+varp.qp=1
+varp.cooks_assistant_ingredients=7
+
+Staged hand-in regression on a separate fresh account
+RuneScape quest: staging one milk bucket, egg, and pot of flour
+RuneScape quest: accepting and finishing Cook's Assistant under normal rights
+{test cooks-assistant passed #t choices 2 quest-points 1 cooking-xp 300 ingredients-after (0 0 0)}
+stat=7 base=4 visible=4 fine_xp=3000
+varp.cookquest=2
+varp.qp=1
+varp.cooks_assistant_ingredients=7
+Saved Cook's Assistant state: stage 2, all three hand-ins, one quest point and 300 Cooking XP
+Quest and verification elapsed seconds: 32.046
+RuneScape PASS: Cook's Assistant completion and reward saved at normal rights
+
+Independent normal-rights return from the mill after staging ingredients
+{test cooks-assistant passed #t choices 2 quest-points 1 cooking-xp 300 ingredients-after (0 0 0)}

@@ -57,7 +57,9 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
       (def operated (osrs-use-location-option original 24009 3226 3256 2))
       (def second-location-body (cdr sent))
       (def invalid-option (with-handler (* problem) (get problem 'kind)
-        (osrs-use-location-option original 24009 3226 3256 3)))
+        (osrs-use-location-option original 24009 3226 3256 4)))
+      (def climbed (osrs-use-location-option original 12965 3164 3307 3))
+      (def third-location-body (cdr sent))
       (def gathered (osrs-take-ground-item original 1944 3226 3301))
       (def take-body (cdr sent))
       (def invalid-ground (with-handler (* problem) (get problem 'kind)
@@ -99,7 +101,7 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
       (def large (decode small 40 '(157 0 255 255 255 254)))
       (def wide (decode large 24 '(0 128 0 0 0 0 1 0 0 29)))
       (def reset (decode wide 30 nil))
-      (list location-body second-location-body invalid-option take-body invalid-ground (osrs-open-interface? opened 312) button-body
+      (list location-body second-location-body invalid-option third-location-body take-body invalid-ground (osrs-open-interface? opened 312) button-body
         (osrs-open-interface? moved 312) (osrs-open-interface? closed 312) refused
         (osrs-open-interface? resynced 42) (osrs-open-interface? resynced 313)
         (osrs-open-interface? resynced 312) talk-body invalid-talk
@@ -109,6 +111,6 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     "#, &options).unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil (nil 1 3 0 0 3 nil nil))")
+        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (235 12 92 12 0 37 50 128) (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil (nil 1 3 0 0 3 nil nil))")
     );
 }

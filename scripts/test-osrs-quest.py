@@ -16,7 +16,9 @@ WORLD = "agel-osrs-world"
 ACCOUNT = "aq" + secrets.token_hex(4)
 password = secrets.token_hex(12)
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--containers", action="store_true", help="acquire the empty pot and bucket through ordinary gameplay")
+mode = parser.add_mutually_exclusive_group()
+mode.add_argument("--containers", action="store_true", help="acquire the empty pot and bucket through ordinary gameplay")
+mode.add_argument("--gather", action="store_true", help="complete Cook's Assistant with ingredients acquired through gameplay")
 options = parser.parse_args()
 VARPS = ("varp.cookquest", "varp.qp", "varp.cooks_assistant_ingredients")
 
@@ -72,7 +74,7 @@ def execute(action=None):
       {action or '#t'}
     )"""
     for _ in range(12):
-        result = evaluate(source, 43594, timeout=300 if options.containers else 120)
+        result = evaluate(source, 43594, timeout=650 if options.gather else 300 if options.containers else 120)
         assert password not in result.stdout + result.stderr
         if result.returncode == 0:
             return result.stdout.strip()
@@ -114,7 +116,7 @@ assert all(inventory(initial, name) == 0 for name in items), initial
 assert all(varp(initial, key) == 0 for key in VARPS), initial
 assert "stat=7 base=1 visible=1 fine_xp=0" in initial, initial
 
-if not options.containers:
+if not options.containers and not options.gather:
     notice("RuneScape quest: staging one milk bucket, egg, and pot of flour")
     oracle_program("SetupAccount", "quest-grant", ACCOUNT)
     try:
@@ -141,8 +143,13 @@ if options.containers:
     notice("RuneScape PASS: fresh normal account picked up a pot and bought a bucket with earned coins")
     raise SystemExit(0)
 
-notice("RuneScape quest: accepting and finishing Cook's Assistant under normal rights")
-report = execute("(finish-cooks-assistant game)")
+if options.gather:
+    notice("RuneScape quest: gathering all ingredients and completing Cook's Assistant without admin setup")
+    report = execute("(gather-and-finish-cooks-assistant game)")
+    assert "source gathered" in report, report
+else:
+    notice("RuneScape quest: accepting and finishing Cook's Assistant under normal rights")
+    report = execute("(finish-cooks-assistant game)")
 assert "test cooks-assistant passed #t" in report, report
 after = await_saved(lambda s: varp(s, "varp.cookquest") % 4 == 2
                     and varp(s, "varp.qp") == 1

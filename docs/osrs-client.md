@@ -88,6 +88,7 @@ sh scripts/test-osrs-mining.sh --bronze
 sh scripts/test-osrs-mining.sh --sell
 sh scripts/test-osrs-quest.sh
 sh scripts/test-osrs-quest.sh --containers
+sh scripts/test-osrs-quest.sh --gather
 sh scripts/test-osrs-crafting.sh
 sh scripts/test-osrs-crafting.sh --native
 sh scripts/test-native-network.sh --combat
@@ -163,7 +164,10 @@ The quest fixture verifies Cook's Assistant completion and rewards with
 staged ingredients. Its container mode picks up a pot and buys a bucket
 with coins earned on the same fresh account. The pot pickup requires a
 ground-item observation and verifies the item disappears from that tile.
-Full ingredient acquisition and a multi-quest comparison remain open.
+One fresh account acquired all ingredients through gameplay and completed
+the quest after a reconnect. The combined `--gather` route exercises the
+same mechanics. Uninterrupted verification and a multi-quest comparison
+remain open.
 v0.3.17 connects a retained repair actor to polling inference and the native
 client. It repairs a seeded planner and executes five queued game actions on
 the same connection. Full gameplay policy, durable episode history and paired
