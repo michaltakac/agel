@@ -489,7 +489,7 @@ def verify_transfer_donor(donor, recipient, evaluation_accounts, read_table):
     return elapsed, charges, usage
 
 
-def melee_progress_form(directory):
+def melee_progress_form(directory, goal):
     saved = saved_outcome(directory)
     fields = []
     for skill, label in ((0, 'attack'), (2, 'strength'), (1, 'defence'), (3, 'hitpoints')):
@@ -513,8 +513,12 @@ def melee_progress_form(directory):
         confirmed = encounter is not None and int(encounter[2]) > int(encounter[1])
         fallback.append(f"(dict 'mode {mode} 'confirmed {'#t' if confirmed else '#f'})")
     evidence = f"(list {' '.join(fallback)})" if fallback else 'nil'
-    return (f"(dict 'xp-tenths (dict {' '.join(fields)}) 'saved-stance {int(stance[0]) if stance else 'nil'} "
-            f"'stance-xp-evidence {evidence})")
+    stance_value = int(stance[0]) if stance else 'nil'
+    return (f"(let ((xp (dict {' '.join(fields)})) (stance {stance_value}) (goal (* {goal} 10))) "
+            f"(dict 'xp-tenths xp 'saved-stance stance 'stance-xp-evidence {evidence} "
+            f"'saved-goal-met (if (= stance 3) (if (< 11540 (get xp 'hitpoints)) "
+            f"(if (< (get xp 'attack) goal) #f (if (< (get xp 'strength) goal) #f "
+            f"(if (< (get xp 'defence) goal) #f #t))) #f) #f)))")
 
 
 def transfer_recovery_time(directory, read_table):
@@ -590,8 +594,10 @@ def main():
             f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision})) "
             f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
     if args.melee:
-        pair = (f"(assoc {pair} 'melee-progress (dict 'goal-xp {fixed['goal_xp']} "
-                f"'fixed {melee_progress_form(args.fixed)} 'adaptive {melee_progress_form(args.candidate)}))")
+        goal = fixed['goal_xp']
+        pair = (f"(assoc {pair} 'melee-progress (dict 'goal-xp {goal} "
+                f"'fixed {melee_progress_form(args.fixed, goal)} "
+                f"'adaptive {melee_progress_form(args.candidate, goal)}))")
     if args.writer_rates is not None:
         pair = f"(assoc {pair} 'writer-estimate {writer_estimate_form(usage, args.writer_rates)})"
     if donor_score:

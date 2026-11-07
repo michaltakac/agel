@@ -5,8 +5,20 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.218.** Agel waits for both bank interfaces to
-close before continuing. See the [release notes](docs/release-v0.3.218.md).
+**Current release: v0.3.222.** Melee scores distinguish the saved goal
+from the guest verdict. See the [release notes](docs/release-v0.3.222.md).
+
+v0.3.221 restores the native reader and compiler self-rebuild.
+See the [release notes](docs/release-v0.3.221.md).
+
+v0.3.220 reads game observations between replay measurements.
+See the [release notes](docs/release-v0.3.220.md).
+
+v0.3.219 checks queued combat XP before retargeting.
+See the [release notes](docs/release-v0.3.219.md).
+
+v0.3.218 waits for both bank interfaces to close before continuing.
+See the [release notes](docs/release-v0.3.218.md).
 
 v0.3.217 adds a private-world bank round-trip scenario.
 See the [release notes](docs/release-v0.3.217.md).

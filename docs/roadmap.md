@@ -8,12 +8,19 @@ are maintained separately. [Versioning](versioning.md) · [Threat model](threat-
 ## Exo evaluation and OS evolution
 
 The [progress report](exo-progress-report.md) records the benchmark results
-through v0.3.218. The work below is ordered by what the next measured run
-depends on.
+through v0.3.218. Subsequent releases check queued XP before switching
+targets, read game updates between replay measurements, restore the
+native reader self-rebuild, and score saved goals separately from guest
+verdicts. A live fixed guest reported a stalled encounter while its server
+save met the full 16 XP melee goal. [Queued XP](release-v0.3.219.md) ·
+[Replay observations](release-v0.3.220.md) · [Reader rebuild](release-v0.3.221.md) ·
+[Saved goal](release-v0.3.222.md)
+
+The work below is ordered by what the next measured run depends on.
 
 | Work | Status | Evidence required to close |
 | --- | --- | --- |
-| Reconcile live observations with saved outcomes | Partial | Replay the missing melee updates from the wire, then complete both matched 16 XP arms with agreement between guest observations and server saves. Record failures and timeouts in the score. |
+| Reconcile live observations with saved outcomes | Partial | Capture and replay the missing melee updates, then validate the queued-XP and replay-observation changes in both matched 16 XP arms. Preserve separate guest and server verdicts, including failures and timeouts. |
 | Measure useful in-session adaptation | Partial | Compare the same starting model, policy and tools with editing enabled or disabled. Require the edit to serve subsequent work and report task-level correctness, elapsed time and cost including retries. Record replay gains separately from live gains. |
 | Complete adamant production from a fresh account | Partial | Verify staged ore smelting and the bank round trip live, then join banking, transport, smelting and anvil work. Add normal-account resource acquisition and Smithing progression. Verify the finished item's provenance in both arms. |
 | Scale combat, currency and quests to the Exo workloads | Partial | Train all required combat stats to the objective, measure coin accumulation over a matched active-time window, and run a multi-quest campaign with quest points and cost recorded for both arms. |
