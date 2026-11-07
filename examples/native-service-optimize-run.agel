@@ -1,7 +1,8 @@
 (def optimizer-started (clock-us))
 (check recorded-field "no recorded byte field")
 (def recorded-hex (get (get recorded-field 'bytes) 'data))
-(def observed-length (/ (text-bytes recorded-hex) 2))
+(def recorded-hex-length (text-bytes recorded-hex))
+(def observed-length (/ recorded-hex-length 2))
 (check (if (< 1023 observed-length) (< observed-length 8193) #f) "no suitably sized recorded workload")
 (def next-preparation-observation optimizer-started)
 (def prepare-service
@@ -15,10 +16,9 @@
 (prepare-service)
 (def replay-chunks
   (fn (at chunks)
-    (if (= at (text-bytes recorded-hex)) chunks
-      (let ((end (+ at (if (< 256 (- (text-bytes recorded-hex) at))
-                          256 (- (text-bytes recorded-hex) at)))))
-        (let ((chunk (bytes-from-hex (text-slice recorded-hex at end))))
+    (if (= at recorded-hex-length) chunks
+      (let ((end (if (< (+ at 256) recorded-hex-length) (+ at 256) recorded-hex-length)))
+        (let ((chunk (bytes-from-compact-hex (text-slice recorded-hex at end))))
           (prepare-service)
           (replay-chunks end (cons chunk chunks)))))))
 (def replay-bytes
@@ -48,10 +48,11 @@
 (check (< 127 policy-bound) "recorded work profile does not justify a larger quantum")
 (def replay-tape (text-concat (print-form (list 'recorded-workload observed-length recorded-hex)) "\n"))
 (def tape-offset (text-bytes (file-read "judge-log")))
+(def tape-length (text-bytes replay-tape))
 (def append-tape
   (fn (at)
-    (if (= at (text-bytes replay-tape)) #t
-      (let ((end (if (< (+ at 2048) (text-bytes replay-tape)) (+ at 2048) (text-bytes replay-tape))))
+    (if (= at tape-length) #t
+      (let ((end (if (< (+ at 2048) tape-length) (+ at 2048) tape-length)))
         (begin
           (prepare-service)
           (file-append "judge-log" (text-slice replay-tape at end))

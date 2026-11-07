@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.189.** Agel OS reports a completed fixed versus
-adaptive one-rat comparison. See the [release notes](docs/release-v0.3.189.md).
+**Current release: v0.3.190.** The native optimizer decodes its recorded
+tape with the compact Agel decoder. See the [release notes](docs/release-v0.3.190.md).
+
+v0.3.189 reports a completed native one-rat comparison. See the [release notes](docs/release-v0.3.189.md).
 
 v0.3.188 consumes live one-rat observations during inference. See the [release notes](docs/release-v0.3.188.md).
 
