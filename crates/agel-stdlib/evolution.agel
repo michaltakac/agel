@@ -3,7 +3,7 @@
   (import agel/meta)
   (export evolution-new evolution-current evolution-source evolution-edit
           evolution-revert evolution-revert-with-activation evolution-retry evolution-retry-with-activation
-          evolution-replay evolution-cost
+          evolution-replay evolution-replay-version evolution-cost
           evolution-edit-with-activation evolution-valid?)
 
   (def evolution-new
@@ -48,6 +48,22 @@
                         'arguments (get case 'arguments)
                         'expected (get case 'expected) 'actual actual)))
               (dict 'passed #f 'checked checked 'reason "invalid recorded step"))))))
+  (def committed-replay
+    (fn (events version)
+      (if (= events nil) nil
+        (let ((event (car events)) (prior (cdr events)))
+          (if (if (= (get event 'event) 'commit) (= (get event 'version) version) #f)
+            (if (= (get (car prior) 'event) 'activation) (car (cdr prior)) (car prior))
+            (committed-replay prior version))))))
+  (def evolution-replay-version
+    (fn (state version)
+      (if (get (get state 'versions) version)
+        (let ((event (committed-replay (reverse (get state 'history)) version)))
+          (if (if (= (get event 'event) 'replay) (has-key? event 'cases) #f)
+            (evolution-replay (evolution-source state version)
+              (map (fn (step) (dict 'arguments (car step) 'expected (car (cdr step)))) (get event 'cases)))
+            (dict 'passed #f 'reason "version has no retained replay corpus")))
+        (dict 'passed #f 'reason "version does not exist"))))
   (def ask
     (fn (judge request)
       (with-handler (* problem)
@@ -110,10 +126,13 @@
                             (dict 'event 'judge 'request request 'receipt receipt))))
                       (if (= (get receipt 'allowed) #t)
                           (let ((replay (evolution-replay after cases)))
-                            (let ((tested (record judged (dict 'event 'replay 'result replay))))
+                            (let ((event (dict 'event 'replay 'result replay)))
                               (if (= (get replay 'passed) #t)
-                                  (prepare-commit tested request cases hook)
-                                  (record tested (dict 'event 'rollback 'reason (get replay 'reason))))))
+                                (prepare-commit (record judged (assoc event 'cases
+                                  (map (fn (case) (list (get case 'arguments) (get case 'expected))) cases)))
+                                  request cases hook)
+                                (record (record judged event)
+                                  (dict 'event 'rollback 'reason (get replay 'reason))))))
                           (record judged (dict 'event 'refused 'reason (get receipt 'reason)))))))
                 (record state (dict 'event 'conflict 'reason "diff base is stale")))))
           (signal 'evolution/kind "unknown versioned object kind" kind))))
@@ -184,6 +203,8 @@
                     (ensure-state (= (get replayed 'event) 'replay))
                     (ensure-state (= (get replay 'passed) #t))
                     (ensure-state (< 0 (get replay 'checked)))
+                    (if (has-key? replayed 'cases)
+                      (ensure-state (= (count (get replayed 'cases)) (get replay 'checked))) nil)
                     (if (= kind 'kernel-slot) (ensure-state has-activation) nil)
                     (if has-activation
                       (begin

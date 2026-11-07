@@ -84,7 +84,7 @@ fn recovery_scenario_fits_each_native_controller_budget() {
     let options = EvaluationOptions {
         host: STORAGE,
         budget: Budget {
-            fuel: 50_000_000,
+            fuel: 65_000_000,
             ..Default::default()
         },
         ..Default::default()

@@ -24,6 +24,8 @@
         (check (evolution-valid? versions) "invalid recovered history")
         (check (= (evolution-current versions 'cell 'unless) expected) "wrong active source")
         (check (= (evolution-source versions 1) before) "old source was lost")
+        (check (= (get (evolution-replay-version versions 1) 'passed) #t)
+          "old replay cases were lost")
         (let ((runtime (runtime-new versions)))
           (let ((receipt ((runtime-activation runtime behavior)
                           (dict 'kind 'cell 'name 'unless 'after (evolution-source versions expected)) nil)))

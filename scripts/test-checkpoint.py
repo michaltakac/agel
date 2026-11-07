@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='agel-checkpoint-', dir='/tmp') as socke
         try:
             if index == 0:
                 assert 'formatted' in machine.submit(':fs-format')
-            run(machine, ':exec agel -- --no-stdlib /data/' + phase)
+            run(machine, ':exec agel -- --no-stdlib --fuel 65000000 /data/' + phase)
             assert 'refused the effect' in machine.submit('(file-write "judge-log" "erased")')
         finally:
             machine.close()

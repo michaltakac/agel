@@ -84,6 +84,11 @@
 (check (= (evolution-source restored 3) source))
 (check (= (evolution-source restored 2) replacement))
 (check (= (count (get restored 'history)) 9))
+(check (= (evolution-replay-version restored 1) (evolution-replay source cases)))
+(check (= (get (evolution-replay-version restored 999) 'reason) "version does not exist"))
+(def legacy (assoc first 'history (map (fn (event) (dissoc event 'cases)) (get first 'history))))
+(check (evolution-valid? legacy))
+(check (= (get (evolution-replay-version legacy 1) 'reason) "version has no retained replay corpus"))
 (def wrong-object (evolution-revert restored 'program 'other 1 cases yes))
 (check (= (evolution-current wrong-object 'program 'other) nil))
 (def missing (evolution-revert restored 'cell 'tool 999 cases yes))
@@ -120,6 +125,8 @@
 (check (= (evolution-source restored-kernel 5) source))
 (check (= (evolution-current restored-kernel 'kernel-slot 'tool) 5))
 (check (evolution-valid? restored-kernel))
+(check (= (evolution-replay-version restored-kernel 3) (evolution-replay source cases)))
+(check (= (evolution-replay-version restored-kernel 5) (evolution-replay source cases)))
 (def retried-kernel
   (evolution-retry-with-activation restored-kernel 'kernel-slot 'tool cases yes
     (fn (state)
