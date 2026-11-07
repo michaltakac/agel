@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.32.** A fresh account trained to Attack level 2
+**Current release: v0.3.33.** The standard live-tool registry includes
+research and source inspection. See the [release notes](docs/release-v0.3.33.md).
+
+v0.3.32 trained a fresh account to Attack level 2
 across ten observed encounters, with server-verified XP. See the
 [release notes and evidence](docs/release-v0.3.32.md).
 

@@ -10,12 +10,9 @@ fn setup() -> (World, EvaluationOptions) {
         ..Default::default()
     };
     agel_stdlib::install(&mut world, &options).unwrap();
-    for source in [
-        include_str!("../live-tools.agel"),
-        include_str!("../repair.agel"),
-    ] {
-        world.evaluate_with(source, &options).unwrap();
-    }
+    world
+        .evaluate_with(include_str!("../repair.agel"), &options)
+        .unwrap();
     world
         .evaluate_with(include_str!("repair.agel"), &options)
         .unwrap();
@@ -395,7 +392,6 @@ fn native_session_example_retains_its_repair_actor_and_controller() {
     for source in [
         include_str!("../bytes.agel"),
         include_str!("../inference.agel"),
-        include_str!("../live-tools.agel"),
         include_str!("../repair.agel"),
     ] {
         world.evaluate_with(source, &options).unwrap();

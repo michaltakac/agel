@@ -90,11 +90,11 @@ if options.transfer_from:
     manifest['donor_disk_sha256']=donor_hash
 
 if shared_carrier:
-    for name in ['meta','judgment']:
+    for name in ['meta','judgment','browse']:
         a=catalog.index('(module agel/'+name+'\n');b=catalog.find('\n(module ',a+1)
         source+=catalog[a:b if b>=0 else len(catalog)]+'\n'
     source+='(module agel/native-reader (export native-read) (def native-read '+Path('crates/agel-stdlib/native-reader.agel').read_text()+'))\n'
-    source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in ['evolution','judge-log','repair','inference','live-tools','batches'])
+    source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in ['evolution','judge-log','repair','inference','research','live-tools','batches'])
     source+=Path('examples/native-session-support.agel').read_text()+'\n'
     if options.optimize or options.combat:
         source+=Path('crates/agel-stdlib/work-profile.agel').read_text()+'\n'

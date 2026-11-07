@@ -42,6 +42,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.30 | Live fresh-account transfer | The guest restores the accepted policy and recorded workload from its donor disk, uses that version in live combat, and saves XP on a fresh account without new inference. One historical fixed sample provides timing context. |
 | v0.3.31 | Fresh fixed control and quest retries | Agel scores two native combat runs with matching world, guest, adapter and task code. The transferred arm is faster in this sample. The updated hosted quest route passes in one session. |
 | v0.3.32 | Bounded combat progression | The hosted fixed policy trains a fresh account to Attack level 2, retaining per-encounter observations and verifying saved Attack and Hitpoints XP. |
+| v0.3.33 | Standard research tools | The live-tool registry exposes research and Agel source inspection. A recorded page read feeds replay for a new tool in the same actor. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
@@ -104,6 +105,14 @@ search, browser, video and program-inspection capabilities and budgets.
 Report that experiment separately from an RS-SDK-style baseline. Record
 retrieval and model costs, retain the source evidence, and run proposed
 strategies through replay and live checks before activation.
+
+Research starts in the standard live-tool registry. Use local observations
+for cheap checks, search when a missing fact blocks progress, and verify
+source claims against the running app. A research provider supplies data.
+The agent decides what to trust, what to record and whether to propose code.
+The first release tests search and retrieval with recorded providers. Live
+browser transport, transcript discovery, frame retrieval and broader runtime
+inspection are separate capabilities to wire into the same path.
 
 ## Server inspection
 

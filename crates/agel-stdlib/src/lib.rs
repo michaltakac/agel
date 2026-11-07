@@ -14,7 +14,11 @@ pub const NATIVE_X86: &str = include_str!("../native-x86.agel");
 pub const SOURCE: &str = concat!(
     include_str!("../stdlib.agel"),
     "\n",
+    include_str!("../research.agel"),
+    "\n",
     include_str!("../evolution.agel"),
+    "\n",
+    include_str!("../live-tools.agel"),
     "\n",
     include_str!("../judge-log.agel"),
     "\n",

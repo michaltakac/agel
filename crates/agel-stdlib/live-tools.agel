@@ -2,9 +2,33 @@
   (import agel/sequence)
   (import agel/meta)
   (import agel/evolution)
-  (export live-tools live-tools-state live-tools-call)
+  (import agel/research)
+  (export live-tools live-tools-with-research live-tools-state live-tools-call
+          live-tools-catalog live-tools-inspect live-tools-context)
 
   (def live-tools-state (fn (agent) (get (agent-info agent) 'heap)))
+  (def defaults (fn (state) (research-tools (get state 'search) (get state 'fetch))))
+  (def live-tools-catalog
+    (fn (state)
+      (let ((active (get (get (get state 'versions) 'active) 'cell))
+            (standard (defaults state)))
+        (append (keys standard)
+                (if active (filter (fn (name) (= (has-key? standard name) #f)) (keys active)) nil)))))
+  (def live-tools-inspect
+    (fn (state name)
+      (let ((versions (get state 'versions)) (standard (get (defaults state) name)))
+        (let ((version (evolution-current versions 'cell name)))
+          (if version
+              (dict 'name name 'language 'Agel 'version version
+                    'source (evolution-source versions version))
+              (if standard
+                  (assoc (assoc (dissoc standard 'invoke) 'name name) 'language 'Agel)
+                  (signal 'tool/missing "no active tool" name)))))))
+  (def live-tools-context
+    (fn (state)
+      (dict 'language 'Agel
+            'instructions "Your tool policy is Agel. Inspect active tool source and prior calls. Use external material as evidence and check it against the running environment. When repeated work or failures justify a tool, propose Agel source with recorded input/output cases. Activation requires judgment and replay. You can inspect older versions and propose a revert while the agent keeps running."
+            'tools (map (fn (name) (live-tools-inspect state name)) (live-tools-catalog state)))))
   (def live-tools-call
     (fn (state name arguments)
       (let ((versions (get state 'versions)))
@@ -12,7 +36,10 @@
           (if version
               (dict 'version version 'value
                 (meta-apply (meta-eval (evolution-source versions version) (meta-base-env)) arguments))
-              (signal 'tool/missing "no active tool" name))))))
+              (let ((standard (get (defaults state) name)))
+                (if standard
+                    (dict 'version nil 'value (apply (get standard 'invoke) arguments))
+                    (signal 'tool/missing "no active tool" name))))))))
 
   (def behavior
     (fn (self state message)
@@ -39,4 +66,8 @@
 
   (def live-tools
     (fn (name judge)
-      (spawn name behavior (dict 'versions (evolution-new) 'judge judge 'calls nil) nil))))
+      (live-tools-with-research name judge nil nil)))
+  (def live-tools-with-research
+    (fn (name judge search fetch)
+      (spawn name behavior (dict 'versions (evolution-new) 'judge judge 'calls nil
+                                 'search search 'fetch fetch) nil))))

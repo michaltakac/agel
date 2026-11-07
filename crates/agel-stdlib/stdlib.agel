@@ -2512,7 +2512,7 @@
 (module agel/browse
   (export browse-use browse-open browse-link browse-fill browse-submit browse-back
           browse-tree browse-state browse-page
-          browse-parse browse-questions browse-decide browse-act browse-drive quoted-part)
+          browse-parse browse-document browse-questions browse-decide browse-act browse-drive quoted-part)
   (import agel/judgment)
 
   (def rev (fn (values acc) (if (= values nil) acc (rev (cdr values) (cons (car values) acc)))))
@@ -2706,14 +2706,18 @@
   (def browse-last "opened nothing")
   (def loader nil)
   (def browse-use (fn (read) (def loader read)))
-  (def browse-parse
+  (def browse-document
     (fn (html url)
       (let ((built (build (tokenize html) nil nil "" nil nil "" nil)))
+        (dict 'url url 'title (nth built 1) 'elements (car built) 'form (nth built 2)))))
+  (def browse-parse
+    (fn (html url)
+      (let ((document (browse-document html url)))
         (begin
           (def browse-url url)
-          (def browse-elements (car built))
-          (def browse-title (car (cdr built)))
-          (def browse-form (car (cdr (cdr built))))
+          (def browse-elements (get document 'elements))
+          (def browse-title (get document 'title))
+          (def browse-form (get document 'form))
           (len browse-elements 0)))))
   (def load
     (fn (url)

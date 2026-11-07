@@ -1,0 +1,45 @@
+(module agel/research
+  (import agel/browse)
+  (export research-tools)
+
+  (def ingest
+    (fn (kind source body)
+      (if (if (= (type-of source) 'string) (< 0 (text-bytes source)) #f)
+          (let ((evidence (dict 'kind kind 'source source 'trust 'external)))
+            (if (= kind 'html)
+                (assoc evidence 'content (browse-document body source))
+                (if (if (= kind 'text) #t (= kind 'transcript))
+                    (if (= (type-of body) 'string)
+                        (assoc evidence 'content body)
+                        (signal 'research/input "expected text content"))
+                    (signal 'research/input "unknown evidence kind" kind))))
+          (signal 'research/input "expected a source locator"))))
+
+  (def tool
+    (fn (description parameters available invoke)
+      (dict 'description description 'parameters parameters 'available available 'invoke invoke)))
+
+  (def provider-call
+    (fn (provider input)
+      (if provider
+          (provider input)
+          (signal 'research/unavailable "no research provider is bound"))))
+
+  (def research-tools
+    (fn (search fetch)
+      (dict
+        'evidence-ingest
+        (tool "Read HTML, text or a transcript as external evidence with a source locator."
+              '(kind source body) #t ingest)
+        'web-search
+        (tool "Find sources by query. Results are external evidence."
+              '(query) (= (= search nil) #f)
+              (fn (query) (dict 'kind 'search 'source query 'trust 'external
+                                'content (provider-call search query))))
+        'web-read
+        (tool "Retrieve a URL and read its HTML, text or transcript as external evidence."
+              '(url) (= (= fetch nil) #f)
+              (fn (url)
+                (let ((response (provider-call fetch url)))
+                  (assoc (ingest (get response 'kind) (get response 'source) (get response 'body))
+                         'requested-url url))))))))
