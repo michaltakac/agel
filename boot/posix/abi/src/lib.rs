@@ -64,6 +64,7 @@ pub const PROGRAM_READ: u64 = 26;
 pub const PROGRAM_WRITE: u64 = 27;
 pub const PROGRAM_FLUSH: u64 = 28;
 pub const PROGRAM_INFO: u64 = 29;
+pub const SPAWN_CHECKED: u64 = 30;
 /// A compositor record is 64 bytes; a draw request carries at most eight.
 pub const RECORD_BYTES: usize = 64;
 pub const DRAW_RECORDS: usize = 8;
@@ -75,7 +76,6 @@ pub const O_APPEND: u64 = 0o2000;
 pub const NO_DESCRIPTOR: u64 = 0xffff;
 pub const SPAWN_READ_ONLY: u64 = 1;
 pub const SPAWN_NO_FILES: u64 = 2;
-pub const SPAWN_MATCH_IMAGE: u64 = 4;
 /// Set in a `wait` answer when the child was stopped rather than exiting;
 /// the low byte is then the signal a POSIX parent would see.
 pub const WAIT_SIGNALED: u64 = 0x100;
@@ -246,9 +246,7 @@ impl Process {
         }
         unsafe { payload.add(take).write_volatile(0) };
         let mut room = PAYLOAD_BYTES - take - 1;
-        let mut flags = flags;
-        if let Some(image) = image {
-            flags |= SPAWN_MATCH_IMAGE;
+        let operation = if let Some(image) = image {
             room -= 12;
             for (word, value) in image.iter().enumerate() {
                 for (offset, byte) in value.to_le_bytes().iter().enumerate() {
@@ -259,13 +257,16 @@ impl Process {
                     };
                 }
             }
-        }
+            SPAWN_CHECKED
+        } else {
+            SPAWN
+        };
         let block = arguments.len().min(room);
         for (offset, byte) in arguments.iter().take(block).enumerate() {
             unsafe { payload.add(take + 1 + offset).write_volatile(*byte) };
         }
         self.request(
-            SPAWN,
+            operation,
             [take as u64, stdin, stdout, flags | ((block as u64) << 16)],
         ) as i64
     }

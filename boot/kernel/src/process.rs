@@ -1070,7 +1070,14 @@ fn step(machine: &mut arch::Machine, services: &mut Services<'_>, table: &mut Ta
         process::CLOSE => close(table, index, arguments[0]),
         process::PIPE => pipe(table, index),
         process::SEEK => seek(table, index, arguments[0], arguments[1], arguments[2]),
-        process::SPAWN => spawn(machine, services, table, index, arguments),
+        process::SPAWN | process::SPAWN_CHECKED => spawn(
+            machine,
+            services,
+            table,
+            index,
+            arguments,
+            kind == process::SPAWN_CHECKED,
+        ),
         process::WINDOW => window(table, index, services, arguments),
         process::CANVAS => canvas(machine, table, index, services, arguments),
         process::DRAW => draw(table, index, services, arguments),
@@ -1889,6 +1896,7 @@ fn spawn(
     table: &mut Table,
     index: usize,
     arguments: [u64; 4],
+    checked: bool,
 ) -> u64 {
     let Some(free) = table.processes.iter().position(|slot| slot.is_none()) else {
         return error(EAGAIN);
@@ -1906,7 +1914,7 @@ fn spawn(
         // `arguments[3]`'s upper bits say how many bytes. Without any, the
         // child's one argument is its name.
         let mut room = PAYLOAD_BYTES - length - 1;
-        let image = if arguments[3] & process::SPAWN_MATCH_IMAGE != 0 {
+        let image = if checked || arguments[3] & process::SPAWN_MATCH_IMAGE != 0 {
             room -= 12;
             let core = parent.domain.core();
             Some(core::array::from_fn(|word| {

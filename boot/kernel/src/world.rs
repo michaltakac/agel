@@ -556,6 +556,8 @@ pub mod process {
     pub const PROGRAM_WRITE: u64 = 27;
     pub const PROGRAM_FLUSH: u64 = 28;
     pub const PROGRAM_INFO: u64 = 29;
+    /// Spawn with a matching start sector, length and CRC in the final twelve payload bytes.
+    pub const SPAWN_CHECKED: u64 = 30;
     #[cfg(feature = "native-graphics")]
     pub const CANVAS_MAX: (u32, u32) = (640, 400);
     pub const CANVAS_BYTES: u64 = 0x0010_0000;
@@ -611,7 +613,7 @@ pub mod process {
     pub const NO_DESCRIPTOR: u64 = 0xffff;
     pub const SPAWN_READ_ONLY: u64 = 1;
     pub const SPAWN_NO_FILES: u64 = 2;
-    pub const SPAWN_MATCH_IMAGE: u64 = 4;
+    pub const SPAWN_MATCH_IMAGE: u64 = 4; // compatibility with v0.3.83
     /// Set in a `wait` answer when the child did not exit but was stopped:
     /// the low byte is then the signal a POSIX parent would see.
     pub const WAIT_SIGNALED: u64 = 0x100;
