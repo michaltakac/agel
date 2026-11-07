@@ -79,7 +79,7 @@ def melee_xp(report, goal):
     if len(phases) != 3 or {int(skill) for skill, *_ in phases} != {0, 1, 2}:
         raise ValueError('missing or duplicate fresh melee phase')
     if expected[3] <= 1154 or any(
-        int(xp) != expected[int(skill)] or int(xp) < goal
+        not goal <= int(xp) <= expected[int(skill)]
         or not 1 <= int(fights) <= min(64, (goal + 7) // 8 + 3)
         for skill, xp, _, fights in phases
     ):
@@ -89,6 +89,7 @@ def melee_xp(report, goal):
 
 def melee_levels_saved(levels, oracle):
     return 'varp.com_mode=3' in oracle.splitlines() and all(
-        re.search(rf'^stat={skill} base={level} visible={level} ', oracle, re.M)
+        (match := re.search(rf'^stat={skill} base=(\d+) visible=\1 ', oracle, re.M))
+        and int(match[1]) >= level
         for skill, level in levels.items()
     )

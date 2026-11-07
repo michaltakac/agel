@@ -99,6 +99,7 @@ sh scripts/test-native-network.sh --combat --optimize --live
 sh scripts/test-native-network.sh --combat --transfer-from DONOR_EVIDENCE_DIRECTORY
 sh scripts/test-native-network.sh --melee-xp 83
 sh scripts/test-native-network.sh --melee-xp 83 --optimize --live
+sh scripts/test-native-network.sh --economy
 ```
 
 The native melee commands use the same fresh-account XP goal. The

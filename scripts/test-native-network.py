@@ -20,6 +20,7 @@ from test_support import combat_xp, combat_xp_saved, melee_levels_saved, melee_x
 parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
 scenario.add_argument('--melee-xp', type=int, help='train three melee skills inside Agel OS')
+scenario.add_argument('--economy', action='store_true', help='mine, smelt and sell a bar inside Agel OS')
 scenario.add_argument('--challenge', action='store_true')
 scenario.add_argument('--craft', action='store_true', help='forge staged adamant stock; use test-osrs-crafting.sh --native')
 parser.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
@@ -31,14 +32,14 @@ options=parser.parse_args()
 melee=options.melee_xp
 if melee is not None and (not 1 <= melee <= 512 or options.combat):
     parser.error('--melee-xp requires a goal of 1..512 and is separate from --combat')
-if options.optimize and (options.challenge or options.repair or options.craft):
+if options.optimize and (options.challenge or options.repair or options.craft or options.economy):
     parser.error('--optimize can be combined with --combat or --melee-xp')
 editing=options.repair or options.optimize
 combat_workload=options.combat or melee is not None
 shared_carrier=editing or combat_workload
-if options.combat and (options.challenge or options.repair or options.craft):parser.error('--combat can only be combined with --optimize')
-if options.transfer_from and (not options.combat or editing):
-    parser.error('--transfer-from requires --combat without --optimize or --repair')
+if options.combat and (options.challenge or options.repair or options.craft or options.economy):parser.error('--combat can only be combined with --optimize')
+if options.transfer_from and (not combat_workload or editing):
+    parser.error('--transfer-from requires --combat or --melee-xp without editing')
 if options.live and not editing:parser.error('--live requires --repair or --optimize')
 directory=Path('target')/('native-network-'+str(time.time_ns()))
 directory.mkdir(mode=0o700)
@@ -60,8 +61,14 @@ if melee is not None:
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
     manifest['evaluation_fuel']=250_000_000
     manifest['keepalive_interval_us']=3_000_000
+    manifest['guest_memory_mib']=1024
 
 if options.craft:manifest['scope']='native adamant platebody from staged bars on a normal account'
+if options.economy:
+    manifest['scope']='native first bronze bar sale on a fresh normal account'
+    manifest['encoder_policy']='fixed'
+    manifest['evaluation_fuel']=250_000_000
+    manifest['keepalive_interval_us']=3_000_000
 
 catalog=Path('crates/agel-stdlib/stdlib.agel').read_text()
 a=catalog.index('(module agel/sequence\n');b=catalog.find('\n(module ',a+1)
@@ -76,10 +83,15 @@ source+='''(import agel/byte-stream)
 '''
 modules=['osrs-wire'] if options.challenge else ['osrs-wire','crypto','osrs-crypto','osrs-login','osrs-packets','osrs-bits','osrs-npcs','osrs-game']
 source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in modules)
-if options.combat or options.craft or melee is not None:
+if combat_workload or options.craft or options.economy:
     source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
 if options.craft:
     source+=Path('examples/osrs/crafting-test.agel').read_text()+'\n'
+if options.economy:
+    economy_policy=Path('examples/osrs/mining-test.agel').read_bytes()
+    manifest['economy_policy_sha256']=hashlib.sha256(economy_policy).hexdigest()
+    source+=economy_policy.decode()+'\n'
+    source+=Path('crates/agel-stdlib/benchmark.agel').read_text()+'\n'
 if options.combat or melee is not None:
     combat_module=Path('examples/osrs/combat-test.agel').read_bytes()
     manifest['combat_policy_sha256']=hashlib.sha256(combat_module).hexdigest()
@@ -93,17 +105,30 @@ if options.transfer_from:
     previous = json.loads((donor/'world.json').read_text())
     donor_trace = (donor/'serial.log').read_text()
     if not (previous.get('encoder_policy') == 'adaptive'
+            and previous.get('goal_xp') == melee
             and 'native-opt: policy committed after text judgment and measured replay' in donor_trace
-            and 'process agel exited with status 0' in donor_trace
-            and combat_xp_saved(combat_xp(donor_trace), (donor/'saved-account.txt').read_text())):
+            and 'native-opt: recorded workload verified in append-only log' in donor_trace
+            and re.search(r'^native-opt: live uses [1-9]\d*$', donor_trace, re.M)
+            and 'process agel exited with status 0' in donor_trace):
         raise SystemExit('donor must have a verified adaptive combat outcome')
+    donor_saved = (donor/'saved-account.txt').read_text()
+    if 'rights= ' not in donor_saved or 'xp_rate_in_hundreds=100' not in donor_saved:
+        raise SystemExit('donor must have normal rights and 1x XP')
+    if melee is not None:
+        donor_xp, donor_levels = melee_xp(donor_trace, melee)
+        if not melee_levels_saved(donor_levels, donor_saved):
+            raise SystemExit('donor saved melee levels or stance differ from the observed outcome')
+    else:
+        donor_xp = combat_xp(donor_trace)
+    if not combat_xp_saved(donor_xp, donor_saved):
+        raise SystemExit('donor saved combat XP differs from the observed outcome')
     for field in ('image', 'manifest', 'combat_policy_sha256'):
         if previous[field] != manifest[field]:
             raise SystemExit('donor differs from current combat contract: '+field)
     donor_account = json.loads((donor/'account.json').read_text())['username']
     with (donor/'disk.img').open('rb') as image:
         donor_hash = hashlib.file_digest(image, 'sha256').hexdigest()
-    manifest['scope']='native one-rat combat on a fresh account with retained policy and workload'
+    manifest['scope']+=' with retained policy and workload'
     manifest['encoder_policy']='transferred'
     manifest['donor_disk_sha256']=donor_hash
 
@@ -124,6 +149,11 @@ if shared_carrier:
         service_policy=Path('examples/native-service-optimize.agel').read_bytes()
         if melee is not None:
             manifest['service_policy_sha256']=hashlib.sha256(service_policy).hexdigest()
+            if options.transfer_from:
+                for field in ('service_policy_sha256', 'training_policy_sha256',
+                              'evaluation_fuel', 'keepalive_interval_us', 'guest_memory_mib'):
+                    if previous.get(field) != manifest[field]:
+                        raise SystemExit('donor differs from current melee contract: '+field)
         source+=service_policy.decode()+'\n'
     else:
         source+=Path('examples/native-session-repair.agel').read_text()+'\n'
@@ -160,9 +190,9 @@ else:
   (dict 'start (get stream 'start-service) 'stop (get stream 'stop-service) 'pulse (get stream 'pulse))))
 (console-log "native-network: cipher state initialized inside Agel OS")
 '''
-    if options.combat or options.craft or melee is not None:
+    if combat_workload or options.craft or options.economy:
         source+="(import agel/record-chain) (def game (assoc game 'history-push record-chain-push))\n"
-    if melee is not None:
+    if melee is not None or options.economy:
         source+=f"""(def game (assoc game 'maintenance
   (assoc (assoc (get game 'maintenance) 'clock-us clock-us)
     'keepalive-interval-us {manifest['keepalive_interval_us']})))
@@ -171,7 +201,7 @@ else:
         source+="(def game (assoc game 'maintenance (assoc (get game 'maintenance) 'quantum retained-quantum)))\n"
     source+='(begin (osrs-login '+json.dumps(account['username'])+' '+json.dumps(account['password'])+' context crcs seed (entropy-read 24)) #t)\n'
     source+='(console-log "native-network: password login accepted")\n'
-    if not options.craft:
+    if not options.craft and not options.economy:
         source+='''(def ready (osrs-await game (fn (g) (if (osrs-stat g 13) (if (get (get g 'inventories) 93) #t #f) #f))))
 (if (= (get (osrs-stat ready 13) 'level) 1) #t (signal 'native/test "unexpected initial Smithing level"))
 (console-log (text-concat "native-network: observations " (print-form
@@ -179,6 +209,8 @@ else:
 '''
     if combat_workload:
         source+='(def task-start (clock-us))\n'
+    if options.optimize:
+        source+=f"(def continue-after-refusal {'#t' if melee is not None else '#f'})\n"
     if editing and not options.combat:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
         if options.optimize:
@@ -236,6 +268,21 @@ else:
 (map (fn (phase) (console-log (text-concat "native-combat: " (print-form phase)))) (get report 'phases))
 (console-log (text-concat "native-combat: task-us " (print-form (- finish task-start))))
 '''
+    elif options.economy:
+        source+='''(import agel/osrs-mining-test) (import agel/benchmark)
+(def started (clock-us))
+(console-log "native-economy: earning first coins through mining, smelting and sale")
+(def sale (first-bronze-sale-using game
+  (fn (phase) (console-log (text-concat "native-economy: " phase)))))
+(def finished (clock-us))
+(def completed (get sale 'state))
+(def sale-report (get sale 'report))
+(console-log (text-concat "native-economy: " (print-form sale-report)))
+(console-log (text-concat "native-economy: score " (print-form
+  (benchmark-run (dict 'correct (get sale-report 'passed) 'elapsed-us (- finished started)
+    'coins-before (get sale-report 'coins-before) 'coins-after (get sale-report 'coins-after)
+    'billing-complete #t 'charges nil)))))
+'''
     elif options.craft:
         source+='''(import agel/osrs-crafting-test)
 (def started (clock-us))
@@ -256,21 +303,26 @@ else:
     else:
         source+='(def completed (osrs-wait-ticks (osrs-walk ready 3223 3218) 3))\n'
     if options.transfer_from:
-        source+='''(check (< 0 policy-uses) "retained policy did not serve this connection")
-(check (= (get (get combat 'report) 'attack-before) 0) "transfer account has prior combat XP")
+        if melee is None:
+            source+='''(check (= (get (get combat 'report) 'attack-before) 0) "transfer account has prior combat XP")
 (check (= (get (get combat 'report) 'hitpoints-before) 1154) "transfer account has prior Hitpoints XP")
+'''
+        report="report" if melee is not None else "(get combat 'report)"
+        source+=f'''(check (< 0 policy-uses) "retained policy did not serve this connection")
 (check (= policy-versions retained-policy) "retained policy changed during transfer")
 (check (= donor-audit (file-read "judge-log")) "retained audit log changed during transfer")
 (def transfer-score
   (benchmark-transfer (dict 'account donor-account 'retained-state retained-lineage)
     (dict 'account fresh-account 'fresh-account #t 'initial-state retained-lineage
-      'correct (get (get combat 'report) 'passed) 'elapsed-us (- finish task-start)
+      'correct (get {report} 'passed) 'elapsed-us (- finish task-start)
       'billing-complete #t 'charges nil)))
 (console-log (text-concat "native-transfer: score " (print-form transfer-score)))
 (console-log (text-concat "native-transfer: retained policy uses " (print-form policy-uses)))
 '''
     if options.optimize:
-        source+='''(check (< 0 policy-uses) "no live packet used the changed cadence")
+        source+='''(if policy-activated
+  (check (< 0 policy-uses) "no live packet used the changed cadence")
+  (check (= policy-uses 0) "refused policy served live packets"))
 (console-log (text-concat "native-opt: live uses " (print-form policy-uses)))
 '''
     source+='''
@@ -286,6 +338,7 @@ else:
     completion = 'login, observations and rat combat' if options.combat else 'login, observations, walking packet and tick consumption'
     if melee is not None:completion='login, observations and melee training'
     if options.craft:completion='login, observations and adamant platebody'
+    if options.economy:completion='login, mining, smelting and first bronze sale'
     source+='(console-log "native-network: client completed: '+completion+' inside Agel OS")\n#t\n'
 (directory/'world.json').write_text(json.dumps(manifest,indent=2)+'\n')
 source='(begin\n'+source+'\n#t)\n'
@@ -303,7 +356,8 @@ for cmd in [['python3','scripts/install-program.py',disk,'agel','boot/posix/targ
 run_started=time.monotonic()
 with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as sockets:
     serial=Path(sockets)/'serial'
-    machine=subprocess.Popen(['qemu-system-x86_64','-machine','pc,accel=tcg','-m','64M','-display','none','-no-reboot','-vga','std',
+    guest_memory=f"{manifest.get('guest_memory_mib',64)}M"
+    machine=subprocess.Popen(['qemu-system-x86_64','-machine','pc,accel=tcg','-m',guest_memory,'-display','none','-no-reboot','-vga','std',
         '-serial',f'unix:{serial},server=on,wait=on','-drive',f'format=raw,file={Path(disk).resolve()},if=ide,index=0,media=disk'],
         stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     try:
@@ -314,7 +368,7 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
         with (directory/'serial.log').open('w') as log:
             setup=[] if options.transfer_from else [':fs-format']
             guest_command=':exec agel -- --no-stdlib /data/client'
-            if melee is not None:
+            if melee is not None or options.economy:
                 guest_command=f":exec agel -- --no-stdlib --fuel {manifest['evaluation_fuel']} /data/client"
             command=['target/release/examples/guest_inference',str(serial),str(directory.resolve()),'process agel exited with status',*setup,guest_command] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',guest_command]
             result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=1800 if melee is not None else 960)
@@ -322,15 +376,21 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
         machine.terminate();machine.wait(timeout=10)
 output=(directory/'serial.log').read_text()
 if not options.challenge:assert account['password'] not in output,'credential appeared in serial output'
-print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'native-transfer:' in line or 'native-craft:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
+print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'native-transfer:' in line or 'native-craft:' in line or 'native-economy:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
 marker='native-network: PASS:' if options.challenge else 'native-network: client completed:'
 passed=result.returncode==0 and marker in output and 'process agel exited with status 0' in output
 if editing:
-    decode_judge_ledger(disk,directory,environment['TYPESAFEAI_API_KEY'],options.live,required=result.returncode==0 and 'process agel exited with status 0' in output)
+    judge_dispatched=bool(re.search(r'^inference-bridge: started job \d+ provider jev ',output,re.M))
+    decode_judge_ledger(disk,directory,environment['TYPESAFEAI_API_KEY'],options.live,
+        required=judge_dispatched and passed)
     assert passed, 'native session failed; disk, serial log and judge records retained'
     if options.optimize:
-        assert 'native-opt: policy committed after text judgment and measured replay' in output
-        assert re.search(r'native-opt: live uses [1-9][0-9]*',output)
+        activated='native-opt: policy committed after text judgment and measured replay' in output
+        if activated:
+            assert re.search(r'^native-opt: live uses [1-9][0-9]*$',output,re.M)
+        else:
+            assert melee is not None and 'native-opt: continued with fixed policy after exhausted retries' in output
+            assert 'native-opt: live uses 0' in output
         assert 'native-opt: recorded workload verified in append-only log' in output
     else:
         assert 'native-session: tool repaired:' in output, 'live tool repair did not complete'
@@ -343,14 +403,14 @@ if editing:
     if not options.live:assert max(durations)>=20000, 'delayed-provider coverage was not exercised'
 
 assert passed,'native network scenario failed; evidence retained'
+if options.transfer_from:
+    assert 'native-transfer: recovered {version 2 ' in output
+    assert 'native-transfer: score {correct #t ' in output
+    assert re.search(r'native-transfer: retained policy uses [1-9][0-9]*',output)
 if options.combat:
     assert re.search(r'native-combat: \{test rat-combat passed #t .*target-removed #t\}',output)
     assert output.count('operation open ') == output.count('operation close ') == 2
     expected_xp=combat_xp(output)
-    if options.transfer_from:
-        assert 'native-transfer: recovered {version 2 ' in output
-        assert 'native-transfer: score {correct #t ' in output
-        assert re.search(r'native-transfer: retained policy uses [1-9][0-9]*',output)
     if not editing:
         assert 'inference-bridge: started job' not in output, 'combat without editing dispatched inference'
         policy_label = 'retained policy' if options.transfer_from else 'fixed scripted policy'
@@ -363,6 +423,14 @@ if melee is not None:
         assert 'inference-bridge: started job' not in output
     assert output.count('operation open ') == output.count('operation close ') == 2
     expected_xp, melee_levels=melee_xp(output,melee)
+if options.economy:
+    sale=re.search(r'^native-economy: \{test first-sale passed #t .*bronze-after-sale 0 coins-before 0 coins-after ([1-9]\d*)\}$',output,re.M)
+    assert sale and 'native-economy: score {correct #t ' in output
+    assert f'cost-nanousd 0 coins {sale[1]} coins-per-dollar nil' in output
+    assert output.count('operation open ') == output.count('operation close ') == 2
+    assert 'inference-bridge: started job' not in output
+    economy_lines={f'inv=inv.inv item=obj.coins count={sale[1]}','inv=inv.inv item=obj.bronze_pickaxe count=1',
+                   'stat=13 base=1 visible=1 fine_xp=62','stat=14 base=1 visible=1 fine_xp=350'}
 if not options.challenge and not options.craft:
     compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
     build=directory/'oracle';build.mkdir()
@@ -376,12 +444,16 @@ if not options.challenge and not options.craft:
         if saved.returncode==0:
             if options.combat or melee is not None:
                 if combat_xp_saved(expected_xp,saved.stdout):break
+            elif options.economy:
+                if economy_lines.issubset(saved.stdout.splitlines()):break
             elif 'x=3223 z=3218 level=0' in saved.stdout:break
         if time.monotonic()>deadline:raise AssertionError('expected state was not saved: '+saved.stdout+saved.stderr)
         time.sleep(1)
     assert 'rights= ' in saved.stdout and 'xp_rate_in_hundreds=100' in saved.stdout,saved.stdout
     if melee is not None:
         assert melee_levels_saved(melee_levels,saved.stdout),saved.stdout
+    if options.economy:
+        assert all(f'item=obj.{item} ' not in saved.stdout for item in ('bronze_bar','copper_ore','tin_ore'))
     (directory/'saved-account.txt').write_text(saved.stdout)
     print('Persisted native client:',saved.stdout.splitlines()[0],flush=True)
     if options.combat:
@@ -389,6 +461,10 @@ if not options.challenge and not options.craft:
     if melee is not None:
         print('Persisted melee XP:', '\n'.join(line for line in saved.stdout.splitlines()
               if line.startswith(('stat=0 ', 'stat=1 ', 'stat=2 ', 'stat=3 ', 'varp.com_mode='))),flush=True)
-    print('PASS: native client '+('combat XP' if options.combat or melee is not None else 'movement')+' saved with normal rights and 1x XP',flush=True)
+    if options.economy:
+        print('Persisted economy:', '\n'.join(line for line in saved.stdout.splitlines()
+              if line in economy_lines),flush=True)
+    saved_outcome='combat XP' if combat_workload else 'sale proceeds and XP' if options.economy else 'movement'
+    print('PASS: native client '+saved_outcome+' saved with normal rights and 1x XP',flush=True)
 
 print('Elapsed seconds:',round(time.monotonic()-run_started,3),flush=True)

@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.39.** Agel uses the QEMU memory map to enlarge
+**Current release: v0.3.40.** A fresh account earned three coins by mining,
+smelting and selling a bar inside Agel OS. See the [release notes](docs/release-v0.3.40.md).
+
+v0.3.39 uses the QEMU memory map to enlarge
 its x86 frame pool. See the [release notes](docs/release-v0.3.39.md).
 
 v0.3.38 returns malformed repair proposals to the

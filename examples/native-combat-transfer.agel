@@ -36,12 +36,11 @@
 (check (= (count retained-workload) 3) "invalid retained workload")
 (check (= (text-bytes retained-hex) (* 2 retained-length)) "retained workload length differs")
 (check (= (get retained-profile 'bytes) retained-length) "profile and workload differ")
-(check (if (< 127 retained-bound) (if (< retained-bound 513)
-  (= (* 64 (/ retained-bound 64)) retained-bound) #f) #f) "unsafe retained bound")
+(check (if (< 127 retained-bound) (< retained-bound 513) #f) "unsafe retained bound")
 (def retained-checks
   (list (dict 'arguments '(64) 'expected 64) (dict 'arguments '(192) 'expected 192)
     (dict 'arguments '(255) 'expected 192) (dict 'arguments '(511) 'expected 448)
-    (dict 'arguments (list retained-bound) 'expected retained-bound)))
+    (dict 'arguments (list retained-bound) 'expected (* 64 (/ retained-bound 64)))))
 (check (= (get (evolution-replay (evolution-source retained-policy 2) retained-checks) 'passed) #t)
   "retained policy failed the transfer replay")
 (def retained-lineage

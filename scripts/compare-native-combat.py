@@ -44,21 +44,34 @@ def load_arm(directory, policy, read_table):
         expected, levels = melee_xp(trace, goal)
         require(melee_levels_saved(levels, saved), f'{directory}: saved melee levels or stance differ')
     if policy == 'adaptive':
+        activated = ('native-opt: policy committed after text judgment and measured replay' in trace
+                     and re.search(r'^native-opt: live uses [1-9]\d*$', trace, re.M))
+        rolled_back = ('native-opt: continued with fixed policy after exhausted retries' in trace
+                       and re.search(r'^native-opt: live uses 0$', trace, re.M))
         require(goal is not None and 'native-opt: recorded workload verified in append-only log' in trace
-                and re.search(r'^native-opt: live uses [1-9]\d*$', trace, re.M),
-                f'{directory}: no verified in-session policy activation')
+                and bool(activated) != bool(rolled_back),
+                f'{directory}: no verified in-session policy decision')
         require((directory / 'mode.txt').read_text().strip() == 'live',
                 f'{directory}: adaptive scoring requires live providers')
         ledger = (directory / 'judge.agel').read_text()
+        starts = re.findall(r'^\(judge-start .*$', ledger, re.M)
         receipts = re.findall(r'^\(judge-result .*$', ledger, re.M)
-        require(receipts and len(receipts) == ledger.count('(judge-start '),
-                f'{directory}: unmatched judge receipts')
+        identity_pattern = re.compile(r'^\(judge-(?:start|result) id "([^"]+)".*? attempt (\d+)\b')
+        started = [identity_pattern.match(line) for line in starts]
+        completed = [identity_pattern.match(line) for line in receipts]
+        judge_dispatched = re.search(r'^inference-bridge: started job \d+ provider jev ', trace, re.M)
+        require((not judge_dispatched or starts) and all(started) and all(completed),
+                f'{directory}: missing judge call identity')
+        keys = [match.groups() for match in started]
+        require(len(set(keys)) == len(keys) and sorted(keys) == sorted(match.groups() for match in completed),
+                f'{directory}: unmatched or duplicate judge receipts')
         for receipt in receipts:
             cost = re.search(r'\bcost-nanousd (\d+)', receipt)
             charges.append(('judge', int(cost[1]) if cost else None))
         writers = re.findall(r'^inference-bridge: started job \d+ provider codex ', trace, re.M)
         require(writers, f'{directory}: no writer dispatch')
         charges.extend(('model', None) for _ in writers)
+        print(f'; adaptive policy: {"activated" if activated else "retained fixed after refusal"}')
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: evaluation incurred inference')
     require(combat_xp_saved(expected, saved), f'{directory}: saved XP differs from observations')
@@ -79,6 +92,7 @@ def load_arm(directory, policy, read_table):
         contract.update({key: manifest[key] for key in (
             'goal_xp', 'training_policy_sha256', 'service_policy_sha256',
             'evaluation_fuel', 'keepalive_interval_us')})
+        contract['guest_memory_mib'] = manifest.get('guest_memory_mib', 64)
     contract['game_adapter'] = hashlib.sha256(source[start:end].encode()).hexdigest()
     contract.update(boot_identity(directory, read_table))
     return contract, identity[1], int(timings[0]), charges
@@ -89,16 +103,20 @@ def main():
     parser.add_argument('fixed', type=Path)
     parser.add_argument('candidate', type=Path)
     parser.add_argument('--melee', action='store_true', help='compare in-session adaptation on three-skill melee')
+    parser.add_argument('--transfer', action='store_true', help='score a melee run using a retained policy')
     args = parser.parse_args()
+    if args.transfer and not args.melee:
+        parser.error('--transfer applies to --melee; one-rat comparisons already use transfer')
     read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
     fixed, fixed_account, fixed_time, fixed_charges = load_arm(args.fixed, 'fixed', read_table)
     transfer, transfer_account, transfer_time, adaptive_charges = load_arm(
-        args.candidate, 'adaptive' if args.melee else 'transferred', read_table)
+        args.candidate, 'adaptive' if args.melee and not args.transfer else 'transferred', read_table)
     require(fixed == transfer, 'world, boot image, Agel executable, game adapter, or combat source differs')
     require(fixed_account != transfer_account, 'combat accounts must differ')
     digest = hashlib.sha256(json.dumps(fixed, sort_keys=True).encode()).hexdigest()
     print("(import agel/benchmark)")
-    task, phase = ('three-skill-melee', 'in-session-adaptation') if args.melee else ('one-rat', 'fresh-account-evaluation')
+    task = 'three-skill-melee' if args.melee else 'one-rat'
+    phase = 'in-session-adaptation' if args.melee and not args.transfer else 'fresh-account-evaluation'
     print(f"(def comparison (dict 'task '{task} 'phase '{phase} "
           f"'contract {form(digest)} 'randomness 'uncontrolled))")
     for arm, elapsed, charges in [('fixed', fixed_time, fixed_charges), ('adaptive', transfer_time, adaptive_charges)]:

@@ -1,7 +1,7 @@
 (module agel/osrs-mining-test
   (import agel/sequence)
   (import agel/osrs-game)
-  (export mine-first-copper smelt-first-bronze sell-first-bronze first-bronze-sale)
+  (export mine-first-copper smelt-first-bronze sell-first-bronze first-bronze-sale first-bronze-sale-using)
   (def require
     (fn (ok message) (if ok #t (signal 'osrs/mining-test message))))
   (def tutor
@@ -58,14 +58,16 @@
           (if (ready attempt) attempt
             (wait-live (osrs-use-location attempt 11360 3224 3146) ready 18))))))
   (def first-bronze
-    (fn (state)
+    (fn (state observe)
       (let ((copper (first-copper-state state)))
+        (observe "mined copper with the tutor's pickaxe")
         (require (= (list (tin copper) (bronze copper) (smithing-xp copper)) '(0 0 0))
           "expected no tin, bronze or Smithing XP")
         (let ((stock (with-handler (* problem) (signal 'osrs/mining-test "waiting for tin ore" problem)
                        (first-tin copper))))
+          (observe "mined tin, returning to the furnace")
           (require (= (list (ores stock) (tin stock) (bronze stock)) '(1 1 0)) "unexpected furnace stock")
-          (let ((returned (walk-ticks (osrs-walk stock 3221 3218) 15)))
+          (let ((returned (walk-ticks (osrs-walk (walk-ticks stock 1) 3221 3218) 15)))
             (let ((menu (with-handler (* problem) (signal 'osrs/mining-test "waiting for furnace interface" problem)
                           (wait-live (osrs-use-location-option returned 24009 3226 3256 2)
                             (fn (g) (osrs-open-interface? g 270)) 18))))
@@ -75,21 +77,22 @@
                 (require (= (list (pickaxes smelted) (ores smelted) (tin smelted) (bronze smelted)
                   (mining-xp smelted) (smithing-xp smelted)) '(1 0 0 1 35 6))
                   "unexpected smelting outcome")
+                (observe "smelted one bronze bar")
                 (dict 'state smelted 'report
                   (dict 'test 'first-bronze 'passed #t 'pickaxes (pickaxes smelted)
                     'copper-before (ores stock) 'tin-before (tin stock) 'bronze-before (bronze stock)
                     'copper-after (ores smelted) 'tin-after (tin smelted) 'bronze-after (bronze smelted)
                     'mining-xp (mining-xp smelted) 'smithing-xp (smithing-xp smelted))))))))))
-  (def smelt-first-bronze (fn (state) (get (first-bronze state) 'report)))
+  (def smelt-first-bronze (fn (state) (get (first-bronze state (fn (_) nil)) 'report)))
   (def coins (fn (g) (osrs-inventory-count g 93 995)))
   (def shopkeeper
     (fn (state)
       (let ((matches (filter (fn (npc) (if (= (get npc 'type) 2813) #t (= (get npc 'type) 2814)))
                        (osrs-nearby-npcs state))))
         (if matches (car matches) nil))))
-  (def first-bronze-sale
-    (fn (state)
-      (let ((production (first-bronze state)))
+  (def first-bronze-sale-using
+    (fn (state observe)
+      (let ((production (first-bronze state observe)))
         (let ((arrived (with-handler (* problem) (signal 'osrs/mining-test "walking to the general store" problem)
                          (wait-live (osrs-walk (get production 'state) 3211 3244) shopkeeper 14))))
           (let ((shop (with-handler (* problem) (signal 'osrs/mining-test "waiting for both shop interfaces" problem)
@@ -101,7 +104,9 @@
                             (fn (g) (if (= (bronze g) 0) (< 0 (coins g)) #f)) 12))))
               (require (= (list (pickaxes sold) (ores sold) (tin sold) (mining-xp sold) (smithing-xp sold)) '(1 0 0 35 6))
                 "sale changed unrelated inventory or XP")
+              (observe "sold the bronze bar and observed the proceeds")
               (dict 'state sold 'report
                 (assoc (assoc (assoc (assoc (get production 'report) 'test 'first-sale)
                   'bronze-after-sale (bronze sold)) 'coins-before (coins shop)) 'coins-after (coins sold)))))))))
+  (def first-bronze-sale (fn (state) (first-bronze-sale-using state (fn (_) nil))))
   (def sell-first-bronze (fn (state) (get (first-bronze-sale state) 'report))))
