@@ -90,7 +90,12 @@ public half in `bootstrap/kernel-signing.pub`, and rebuilds.
 ./scripts/stage-kernel.py target/boot/agel-v1.img some-kernel.bin --key KEY    # signed with KEY
 ./scripts/stage-kernel.py target/boot/agel-v1.img some-kernel.bin --unsigned   # refused at the next boot
 ./scripts/stage-kernel.py target/boot/agel-v1.img --status
+./scripts/stage-kernel.py target/boot/agel-v1.img --restore VERSION
 ```
+
+Staging prints a version ID and retains the exact kernel and signature in
+`IMAGE.kernel-history`. Restoring an archived version stages it as a new
+candidate for normal signature admission and boot verification.
 
 The running kernel reads the selector through the storage driver domain. Its
 first successful evaluation marks a booted candidate verified and prints

@@ -10,8 +10,9 @@
 set -eu
 
 image=$(./scripts/build-boot.sh --features isolated-repl | tail -n 1)
-test_image=$(mktemp "${TMPDIR:-/tmp}/agel-kernel-ab.XXXXXX")
-trap 'rm -f "$test_image"' EXIT HUP INT TERM
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/agel-kernel-ab.XXXXXX")
+trap 'rm -r "$scratch"' EXIT HUP INT TERM
+test_image="$scratch/disk.img"
 cp "$image" "$test_image"
 # Blank the workspace slots, the recovery record, the selector and slot B.
 dd if=/dev/zero of="$test_image" bs=512 seek=1024 count=66 conv=notrunc 2>/dev/null

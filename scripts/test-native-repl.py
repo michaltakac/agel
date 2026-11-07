@@ -526,6 +526,7 @@ def persistence_test(image: str, architecture: str, disk: str) -> None:
 def kernel_rollback_test(image: str, kernel_path: str) -> None:
     import importlib.util
     import os
+    from pathlib import Path
 
     location = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stage-kernel.py")
     spec = importlib.util.spec_from_file_location("stage_kernel", location)
@@ -574,7 +575,10 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
 
     # The same kernel staged as candidate B with a good signature: the stage
     # does not load it until the running kernel has admitted it.
-    assert stage_kernel.stage(image, good_kernel, good_signature) == 1
+    staged = subprocess.run([sys.executable, location, image, kernel_path, "--signature",
+                             good_signature.hex()], check=True, capture_output=True, text=True)
+    archived = staged.stdout.splitlines()[-1].removeprefix("retained kernel version ")
+    assert stage_kernel.archived_candidate(image, archived) == (good_kernel, good_signature)
     assert selector() == {"trusted": 0, "candidate": 1, "attempts": 0, "verified": 0, "admitted": 0}, selector()
     admission_boot("B", "A", "A")
     assert selector() == {"trusted": 0, "candidate": 1, "attempts": 0, "verified": 0, "admitted": 1}, selector()
@@ -685,9 +689,15 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
         rolled.close()
     assert selector() == {"trusted": 1, "candidate": 0, "attempts": 3, "verified": 0, "admitted": 1}, selector()
 
-    # A fresh signed candidate in slot A is admitted, gets a fresh budget and
-    # verifies itself.
-    assert stage_kernel.stage(image, good_kernel, good_signature) == 0
+    # A corrupted archive must leave the slot selector untouched.
+    previous = selector()
+    corrupt = "0" * 128
+    (Path(image + ".kernel-history") / corrupt).write_bytes(good_signature + broken_kernel)
+    bad_restore = subprocess.run([sys.executable, location, image, "--restore", corrupt],
+                                 capture_output=True, text=True)
+    assert bad_restore.returncode and selector() == previous
+    # Restage the exact archived kernel and signature after its slot was reused.
+    subprocess.run([sys.executable, location, image, "--restore", archived], check=True)
     admission_boot("A", "B", "B")
     revived = Harness(image, persistent=True)
     try:
@@ -701,6 +711,7 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     finally:
         revived.close()
     assert selector() == {"trusted": 1, "candidate": 0, "attempts": 0, "verified": 1, "admitted": 1}, selector()
+    print("PASS: archived kernel and signature restored through normal slot admission")
 
 
 def power_cut_test(image: str, architecture: str, disk: str) -> None:
