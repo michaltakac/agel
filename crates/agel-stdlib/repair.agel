@@ -128,14 +128,24 @@
           (begin
             (if self (if (= (get state 'model-dispatch) 'external) nil (send self '(repair/advance))) nil)
             (assoc (assoc state 'approved-receipt receipt) 'status 'approved))
-          (apply-judgment self state receipt)))))
+          (apply-judgment self state receipt nil)))))
+  (def activation-with-probe
+    (fn (activate probe)
+      (if probe
+        (fn (request cases)
+          (if activate
+            (let ((result (activate request cases)))
+              (if (= (type-of result) 'map) (assoc result 'probe probe) result))
+            (dict 'passed #t 'reason (get probe 'reason) 'probe probe)))
+        activate)))
   (def apply-judgment
-    (fn (self state receipt)
+    (fn (self state receipt probe)
       (let ((before (read-one (get state 'before-text))))
         (let ((versions (evolution-edit-with-activation (get state 'versions) (object-kind state) (get state 'tool)
                 before (get (get state 'candidate) 'after)
                 (append (prediction-cases (get state 'examples) (get (get state 'candidate) 'predictions))
-                  (append (get state 'examples) (get state 'held-out))) (fn (request) receipt) (get state 'activate))))
+                  (append (get state 'examples) (get state 'held-out))) (fn (request) receipt)
+                (activation-with-probe (get state 'activate) probe))))
           (let ((next (assoc state 'versions versions)))
             (if (= (evolution-current versions (object-kind state) (get state 'tool))
                    (evolution-current (get state 'versions) (object-kind state) (get state 'tool)))
@@ -144,7 +154,7 @@
   (def advance
     (fn (self state)
       (if (if (= (get state 'status) 'approved) (if (get state 'probe) #f #t) #f)
-        (apply-judgment self state (get state 'approved-receipt)) state)))
+        (apply-judgment self state (get state 'approved-receipt) nil) state)))
   (def probe-result
     (fn (self state message)
       (if (if (= (get state 'status) 'approved)
@@ -152,7 +162,7 @@
         (let ((result (nth message 2)))
           (if (= (type-of (get result 'reason)) 'string)
             (let ((next (note state (dict 'event 'activation-probe 'result result))))
-              (if (= (get result 'passed) #t) (apply-judgment self next (get state 'approved-receipt))
+              (if (= (get result 'passed) #t) (apply-judgment self next (get state 'approved-receipt) result)
                 (retry self next (get result 'reason)))) state)) state)))
   (def result
     (fn (self state message)

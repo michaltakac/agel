@@ -67,7 +67,10 @@ fn retained_combat_policy_replays_with_a_cap_below_the_measured_bound() {
              (def cases (list (dict 'arguments '(64) 'expected 64)))
              (def base (evolution-edit (evolution-new) 'cell 'service-quantum nil old cases judge))
              (dict 'event 'live-policy-versions
-                   'versions (evolution-edit base 'cell 'service-quantum old new cases judge))"#,
+                   'versions (evolution-edit-with-activation base 'cell 'service-quantum old new cases judge
+                     (fn (request steps)
+                       (dict 'passed #t 'reason "fixture probe"
+                         'probe (dict 'passed #t 'quantum 192 'metrics (dict 'calls 6))))))"#,
         )
         .unwrap()
         .values

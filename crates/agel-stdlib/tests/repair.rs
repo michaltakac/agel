@@ -533,10 +533,16 @@ fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
         .evaluate_with(
             r#"
       (repair-agent-drive subject judge audit 2)
+      (def versions (get (repair-state subject) 'versions))
+      (def activation (get (get (get versions 'versions) 2) 'activation))
       (list (get (repair-state subject) 'status) probe-calls
-        (evolution-current (get (repair-state subject) 'versions) 'cell 'batches))"#,
+        (evolution-current versions 'cell 'batches) (evolution-valid? versions)
+        (get (get activation 'probe) 'reason))"#,
             &options,
         )
         .unwrap();
-    assert_eq!(result.values.last().unwrap().to_string(), "(done 2 2)");
+    assert_eq!(
+        result.values.last().unwrap().to_string(),
+        "(done 2 2 #t \"measured replay passed\")"
+    );
 }

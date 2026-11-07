@@ -59,6 +59,15 @@
 (check (= (get retained-replay 'value) retained-hex) "retained policy changed workload bytes")
 (check (< (get (get retained-replay 'metrics) 'calls) (get (get retained-profile 'baseline) 'calls))
   "retained policy no longer reduces service calls")
+(def retained-activation (get (get (get retained-policy 'versions) 2) 'activation))
+(if retained-activation
+  (let ((probe (get retained-activation 'probe)))
+    (check (if probe
+             (if (= (get probe 'passed) #t)
+               (if (= (get probe 'quantum) retained-quantum-replay)
+                 (= (get (get probe 'metrics) 'calls) (get (get retained-replay 'metrics) 'calls)) #f) #f) #f)
+      "retained probe differs from the replayed cadence or call count"))
+  nil)
 (console-log (text-concat "native-transfer: tape replay " (print-form
   (dict 'bytes retained-length 'quantum retained-quantum-replay
         'calls (get (get retained-replay 'metrics) 'calls)))))
