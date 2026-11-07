@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.183.** Native transfer scoring compares task
-time with and without donor recovery. See the [release notes](docs/release-v0.3.183.md).
+**Current release: v0.3.184.** The offline kernel stager refuses malformed
+slot selectors before writing kernel bytes. See the [release notes](docs/release-v0.3.184.md).
+
+v0.3.183 compares transfer time with and without donor recovery. See the [release notes](docs/release-v0.3.183.md).
 
 v0.3.182 accepts explicit writer-rate scenarios in native pair scoring. See the [release notes](docs/release-v0.3.182.md).
 

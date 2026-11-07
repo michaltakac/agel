@@ -50,11 +50,17 @@ def read_selector(image: str) -> dict[str, int | bytes]:
     with open(image, "rb") as disk:
         disk.seek(SELECTOR_SECTOR * SECTOR)
         sector = disk.read(SECTOR)
-    if sector[:4] != MAGIC or sector[4] != VERSION:
+    if not sector or not any(sector):
         return dict(EMPTY)
+    if len(sector) != SECTOR or sector[:4] != MAGIC or sector[4] != VERSION:
+        raise ValueError("unrecognized kernel slot selector")
+    trusted, candidate = sector[5], sector[6]
+    if trusted not in SLOT_BASE or (candidate != NO_CANDIDATE and
+                                    (candidate not in SLOT_BASE or candidate == trusted)):
+        raise ValueError("invalid kernel slot selector")
     return {
-        "trusted": sector[5],
-        "candidate": sector[6],
+        "trusted": trusted,
+        "candidate": candidate,
         "attempts": sector[7],
         "verified": sector[8],
         "admitted": sector[9],
@@ -113,8 +119,8 @@ def sign(kernel: bytes, key: str = DEFAULT_KEY) -> bytes:
 
 
 def stage(image: str, kernel: bytes, signature: bytes) -> int:
-    if len(kernel) > SLOT_SECTORS * SECTOR:
-        raise ValueError(f"kernel is {len(kernel)} bytes; a slot holds {SLOT_SECTORS * SECTOR}")
+    if not 0 < len(kernel) <= SLOT_SECTORS * SECTOR:
+        raise ValueError(f"kernel length must be between 1 and {SLOT_SECTORS * SECTOR} bytes")
     if len(signature) != 64:
         raise ValueError("a signature is 64 bytes")
     selector = read_selector(image)
