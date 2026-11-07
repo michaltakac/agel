@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.227.** The crafting example composes banking,
-two smelting batches, and forging. See the [release notes](docs/release-v0.3.227.md).
+**Current release: v0.3.228.** Native REPL conformance checks the
+current effect-text limit. See the [release notes](docs/release-v0.3.228.md).
+
+v0.3.227 composes banking, two smelting batches, and forging.
+See the [release notes](docs/release-v0.3.227.md).
 
 v0.3.226 verifies live bank-to-anvil crafting with staged bars.
 See the [release notes](docs/release-v0.3.226.md).
