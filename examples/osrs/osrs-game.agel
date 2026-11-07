@@ -5,7 +5,7 @@
   (import agel/osrs-wire)
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
-  (export osrs-observe-bounded osrs-pause-events osrs-map-route osrs-route-cleared?)
+  (export osrs-observe-bounded osrs-observe-ready osrs-pause-events osrs-map-route osrs-route-cleared?)
   (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-take-ground-item osrs-ground-count)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -377,6 +377,20 @@
           (signal 'osrs/wait "observation tick bound must be between one and 512"))))
   (def osrs-observe-bounded
     (fn (state ready ticks) (observe-bounded state ready ticks (fn (last) last))))
+  (def observe-ready-loop
+    (fn (state ready available remaining)
+      (if (if (ready state) #f (if (< 0 remaining) (available) #f))
+        (observe-ready-loop (get (osrs-next-packet state) 'state) ready available (- remaining 1))
+        state)))
+  (def osrs-observe-ready
+    (fn (state ready limit)
+      (if (if (= (type-of limit) 'int) (if (< 0 limit) (< limit 513) #f) #f)
+        (let ((maintenance (get state 'maintenance)))
+          (let ((available (if maintenance (get maintenance 'read-ready) nil)))
+            (if available
+              (maintained-read state (fn (current) (observe-ready-loop current ready available limit)))
+              state)))
+        (signal 'osrs/wait "ready packet bound must be between one and 512"))))
   (def osrs-await-bounded
     (fn (state ready ticks)
       (observe-bounded state ready ticks

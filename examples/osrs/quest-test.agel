@@ -37,13 +37,21 @@
                 nil))
             nil))) nil '(219 217 231 11))))
   (def page-names (dict 219 "219" 217 "217" 231 "231" 11 "11"))
+  (def observe-dialogue
+    (fn (state ready windows)
+      (if (ready state) state
+        (if (= windows 0) (osrs-observe-ready state ready 128)
+          (observe-dialogue (osrs-observe-bounded (osrs-keepalive state) ready 20)
+            ready (- windows 1))))))
   (def run-dialogue
     (fn (state previous choices pages observe)
       (require (< 0 pages) "Cook's Assistant exceeded the dialogue bound")
       (let ((next (with-handler (* problem) (signal 'osrs/quest-test "waiting for the next cook dialogue"
                      (dict 'choices choices 'pages-left pages 'problem problem))
-                    (osrs-await-bounded (osrs-keepalive state)
-                      (fn (g) (if (complete? g) #t (page g previous))) 20))))
+                    (observe-dialogue state (fn (g) (if (complete? g) #t (page g previous))) 3))))
+        (if (if (complete? next) #t (page next previous)) #t
+          (signal 'osrs/quest-test "waiting for the next cook dialogue"
+            (dict 'choices choices 'pages-left pages)))
         (if (complete? next)
           (begin (require (= choices 2) "unexpected cook choice count") next)
           (let ((id (page next previous)))
@@ -170,19 +178,13 @@
         (let ((arrived (osrs-observe-bounded (osrs-keepalive (osrs-walk state x z))
                          (fn (g) (if (osrs-route-cleared? g state x z) (cook g) #f)) 40)))
           (wait-live arrived cook 4)))))
-  (def observe-first-page
-    (fn (state previous windows)
-      (if (if (page state previous) #t (= windows 0)) state
-        (observe-first-page
-          (osrs-observe-bounded (osrs-keepalive state) (fn (g) (page g previous)) 20)
-          previous (- windows 1)))))
   (def start-cook-dialogue
     (fn (state approaches observe)
       (require approaches "cook did not open a dialogue after three approaches")
       (let ((nearby (approach-cook state (car approaches))))
         (observe "talking to the observed cook")
         (let ((asked (osrs-talk nearby (get (cook nearby) 'index))))
-          (let ((attempt (observe-first-page asked nearby 3)))
+          (let ((attempt (observe-dialogue asked (fn (g) (page g nearby)) 3)))
             (if (page attempt nearby)
               (run-dialogue attempt nearby 0 40 observe)
               (begin

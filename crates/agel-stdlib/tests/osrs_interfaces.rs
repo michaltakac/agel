@@ -46,7 +46,7 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                (module agel/osrs-game
                  (export osrs-stat osrs-inventory-count osrs-await osrs-nearby-npcs
                          osrs-varp osrs-open-interface? osrs-interface-opens osrs-pause-events
-                         osrs-await-bounded osrs-observe-bounded osrs-keepalive osrs-resume-dialogue
+                         osrs-await-bounded osrs-observe-bounded osrs-observe-ready osrs-keepalive osrs-resume-dialogue
                          osrs-talk osrs-walk osrs-use-location osrs-wait-ticks osrs-route-cleared?)
                  (def osrs-stat (fn (state _) (dict 'xp (if (= (get state 'page) 3) 300 0))))
                  (def osrs-inventory-count (fn (state inv item) (if (= (get state 'page) 3) 0 1)))
@@ -66,6 +66,12 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                                  (if (ready enabled) enabled (signal 'test/wait "pause event was missed")))))
                            (assoc state 'waited #t))
                          state))))
+                 (def osrs-observe-ready
+                   (fn (state ready limit)
+                     (if (get state 'late)
+                       (let ((enabled (assoc (assoc state 'page 1) 'enabled #t)))
+                         (if (ready enabled) enabled (signal 'test/wait "late page was missed")))
+                       state)))
                  (def osrs-nearby-npcs (fn (state) (list (dict 'type 4626 'index 7))))
                  (def osrs-varp (fn (state varp) (if (= (get state 'page) 3) 1 0)))
                  (def osrs-open-interface?
@@ -79,7 +85,11 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                    (fn (state id component)
                      (if (get state 'enabled) (osrs-interface-opens state id) 0)))
                  (def osrs-keepalive (fn (state) state))
-                 (def osrs-walk (fn (state x z) (assoc (assoc state 'tile (list x z)) 'arrived #f)))
+                 (def osrs-walk
+                   (fn (state x z)
+                     (if (if (get state 'late) (< 0 (get state 'talks)) #f)
+                       (signal 'test/route "late actionable page should prevent another walk")
+                       (assoc (assoc state 'tile (list x z)) 'arrived #f))))
                  (def osrs-route-cleared?
                    (fn (state previous x z)
                      (if (get state 'arrived) (= (get state 'tile) (list x z)) #f)))
@@ -119,12 +129,14 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
         .evaluate(
             "(import agel/osrs-quest-test)
              (def report (finish-cooks-assistant (dict 'page 0 'talks 0)))
-             (list (get report 'passed) (get report 'choices) (get report 'quest-points))",
+             (def late (finish-cooks-assistant (dict 'page 0 'talks 0 'late #t)))
+             (list (get report 'passed) (get report 'choices) (get report 'quest-points)
+                   (get late 'passed))",
         )
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 2 1)")
+        Some("(#t 2 1 #t)")
     );
 }
 
@@ -316,6 +328,24 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     assert_eq!(
         cadence.values.last().map(Value::to_string).as_deref(),
         Some("(#t #t #t #t 2)")
+    );
+    let ready = world
+        .evaluate_with(
+            r#"
+      (def opcode (+ 93 (get (isaac-bytes-next (get original 'in)) 'value)))
+      (def raw (cons (- opcode (* 256 (/ opcode 256))) '(162 0 56 2 0 103 128)))
+      (def maintained (assoc paced 'maintenance (assoc (get paced 'maintenance)
+        'read-ready (fn () (if (= raw nil) #f #t)))))
+      (def opened (osrs-observe-ready maintained (fn (state) (osrs-open-interface? state 231)) 1))
+      (def drained (osrs-observe-ready opened (fn (state) #f) 1))
+      (list (osrs-open-interface? opened 231) (= raw nil) (= drained opened)
+            (= (osrs-observe-ready original (fn (state) #f) 1) original))"#,
+            &options,
+        )
+        .unwrap();
+    assert_eq!(
+        ready.values.last().map(Value::to_string).as_deref(),
+        Some("(#t #t #t #t)")
     );
 }
 

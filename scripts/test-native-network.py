@@ -259,7 +259,8 @@ else:
     source+='''(console-log "native-network: RSA public context computed inside Agel OS")
 (def seed (osrs-random-seed))
 (def game (assoc (osrs-game-state seed) 'maintenance
-  (dict 'start (get stream 'start-service) 'stop (get stream 'stop-service) 'pulse (get stream 'pulse))))
+  (dict 'start (get stream 'start-service) 'stop (get stream 'stop-service)
+        'pulse (get stream 'pulse) 'read-ready (get stream 'read-ready))))
 (console-log "native-network: cipher state initialized inside Agel OS")
 '''
     if combat_workload or options.craft or options.economy or options.quest:
