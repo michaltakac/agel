@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.174.** Hosted OSRS quests stream Agel phase
-observations while they run. See the [release notes](docs/release-v0.3.174.md).
+**Current release: v0.3.175.** The Agel OS viewer shows native melee
+stance changes and quest milestones. See the [release notes](docs/release-v0.3.175.md).
+
+v0.3.174 streams hosted OSRS quest phases. See the [release notes](docs/release-v0.3.174.md).
 
 v0.3.173 advances the OSRS quest on fresh route completion observations. See the [release notes](docs/release-v0.3.173.md).
 

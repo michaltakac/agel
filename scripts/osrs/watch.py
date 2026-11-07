@@ -13,6 +13,10 @@ def native_status(trace):
     xp = dict.fromkeys(("Attack", "Strength", "Defence"), 0)
     names = {"0": "Attack", "2": "Strength", "1": "Defence"}
     milestone = "booting native guest"
+
+    def melee_status(phase):
+        return phase + " | " + " | ".join(f"{name} {value} XP" for name, value in xp.items())
+
     for line in trace.splitlines():
         if line.startswith("native-combat: {test rat-melee passed #t "):
             final = re.search(r" attack-xp (\d+) strength-xp (\d+) defence-xp (\d+) ", line)
@@ -22,9 +26,28 @@ def native_status(trace):
             encounter = re.match(r"native-combat: encounter \(([012]) .*? (?:attack-after|xp-after) (\d+) ", line)
             if encounter:
                 xp[names[encounter[1]]] = int(encounter[2])
-                milestone = " | ".join(f"{name} {value} XP" for name, value in xp.items())
+                milestone = melee_status(f"Observed {names[encounter[1]]} XP")
+        elif line.startswith("native-combat: progress "):
+            training = re.search(r"phase training skill ([012]) ", line)
+            stance = re.search(r"phase stance-(requested|retry) mode ([13]) ", line)
+            if training:
+                milestone = melee_status(f"Training {names[training[1]]}")
+            elif stance:
+                skill = {"1": "Strength", "3": "Defence"}[stance[2]]
+                action = "Retrying" if stance[1] == "retry" else "Requesting"
+                milestone = melee_status(f"{action} {skill} stance")
+        elif line.startswith("native-combat: failure "):
+            failure = re.search(r' message "([^"]+)"', line)
+            if failure:
+                milestone = melee_status(failure[1])
         elif line.startswith(("native-quest: ", "native-economy: ", "native-combat: training ")):
-            milestone = line.split(": ", 1)[1]
+            message = line.split(": ", 1)[1]
+            if message.startswith("{route "):
+                phase = re.search(r" phase ([a-z-]+)", message)
+                if phase:
+                    milestone = phase[1].replace("-", " ").capitalize()
+            elif " trace " not in message:
+                milestone = message
         elif line.startswith("native-opt: continued with fixed policy"):
             milestone = "retained fixed policy after refused edits"
         elif line.startswith("native-opt: policy committed"):
