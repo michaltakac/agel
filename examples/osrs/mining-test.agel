@@ -46,22 +46,28 @@
   (def pickaxes (fn (g) (osrs-inventory-count g 93 1265)))
   (def ores (fn (g) (osrs-inventory-count g 93 436)))
   (def mining-xp (fn (g) (get (osrs-stat g 14) 'xp)))
+  (def fresh-dialogue?
+    (fn (state previous interface component)
+      (if (osrs-open-interface? state interface)
+        (if (< (osrs-interface-opens previous interface) (osrs-interface-opens state interface))
+          (< (osrs-pause-events previous interface component) (osrs-pause-events state interface component))
+          #f)
+        #f)))
   (def await-interface
-    (fn (state interface)
-      (let ((ready (fn (g) (osrs-open-interface? g interface))))
+    (fn (state previous interface component)
+      (let ((ready (fn (g) (fresh-dialogue? g previous interface component))))
         (let ((bounded (observe-live state ready 12)))
           (let ((observed (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))
             (if (ready observed) observed
-              (signal 'osrs/mining-test "expected tutor dialogue"
-                (dict 'interface interface 'opens-before (osrs-interface-opens state interface)
+              (signal 'osrs/mining-test "expected actionable tutor dialogue"
+                (dict 'interface interface 'component component
+                  'opens-before (osrs-interface-opens previous interface)
                   'opens-after (osrs-interface-opens observed interface)
+                  'pauses-before (osrs-pause-events previous interface component)
+                  'pauses-after (osrs-pause-events observed interface component)
                   'tutor (tutor-state observed)))))))))
   (def fresh-tutor-menu?
-    (fn (state previous)
-      (if (osrs-open-interface? state 219)
-        (if (< (osrs-interface-opens previous 219) (osrs-interface-opens state 219))
-          (< (osrs-pause-events previous 219 1) (osrs-pause-events state 219 1)) #f)
-        #f)))
+    (fn (state previous) (fresh-dialogue? state previous 219 1)))
   (def talk-to-tutor
     (fn (state observe)
       (require (tutor state) "mining tutor left before dialogue")
@@ -103,11 +109,11 @@
         (require (= (list (mining-xp ready) (pickaxes ready) (ores ready)) '(0 0 0))
           "expected a fresh account without a pickaxe or ore")
         (let ((menu (tutor-menu ready observe)))
-          (let ((player (await-interface (osrs-resume-dialogue menu 219 1 1) 217)))
+          (let ((player (await-interface (osrs-resume-dialogue menu 219 1 1) menu 217 5)))
             (observe "mining tutor accepted the advice choice")
-            (let ((object (await-interface (osrs-resume-dialogue player 217 5 -1) 193)))
+            (let ((object (await-interface (osrs-resume-dialogue player 217 5 -1) player 193 0)))
               (observe "mining tutor showed the mining site icon")
-              (let ((gift (await-interface (osrs-resume-dialogue object 193 0 0) 231)))
+              (let ((gift (await-interface (osrs-resume-dialogue object 193 0 0) object 231 5)))
                 (require (= (pickaxes gift) 1) "the mining tutor did not provide a bronze pickaxe")
                 (observe "mining tutor gave the bronze pickaxe")
                 (let ((continued (osrs-resume-dialogue gift 231 5 -1)))

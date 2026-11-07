@@ -319,7 +319,7 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     );
     let mining = include_str!("../../../examples/osrs/mining-test.agel").replace(
         "(export mine-first-copper",
-        "(export fresh-tutor-menu? mine-first-copper",
+        "(export fresh-tutor-menu? fresh-dialogue? mine-first-copper",
     );
     world.evaluate(&mining).unwrap();
     let tutor_trace = world
@@ -329,12 +329,16 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
              (def actionable (decode menu 75 '(0 1 0 0 132 0 1 0 0 219 0 1 0 0 0 0)))
              (def dismissed (decode actionable 45 '(0 162 2 56)))
              (list (fresh-tutor-menu? menu original) (fresh-tutor-menu? actionable original)
-                   (fresh-tutor-menu? dismissed original))",
+                   (fresh-tutor-menu? dismissed original)
+                   (fresh-dialogue? cook-opened original 231 5)
+                   (fresh-dialogue? advertised original 231 5)
+                   (fresh-dialogue? unrelated original 231 6)
+                   (fresh-dialogue? advertised advertised 231 5))",
         )
         .unwrap();
     assert_eq!(
         tutor_trace.values.last().map(Value::to_string).as_deref(),
-        Some("(#f #t #f)")
+        Some("(#f #t #f #f #t #f #f)")
     );
     let route = world
         .evaluate(
