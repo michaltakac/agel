@@ -35,6 +35,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.23 | Fresh-account bronze production | Agel obtains its pickaxe, mines both ores, and smelts a bronze bar. The hosted run verifies consumed ores and saved Mining and Smithing XP. |
 | v0.3.24 | First economy outcome | Agel sells a bar it made from freshly mined ores at the Lumbridge General Store. The hosted test checks observed and saved coins and confirms the bar was consumed by the sale. |
 | v0.3.25 | Verified quest completion | Agel accepts and completes Cook's Assistant under normal rights from staged ingredients. The hosted test checks dialogue, the quest scroll, the saved stage and hand-ins, one quest point, and Cooking XP. |
+| v0.3.26 | Quest containers from gameplay | A fresh normal account picks up a pot and buys a bucket with its bronze-bar earnings. The hosted test verifies the saved containers, remaining coin, and unstarted quest. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |
@@ -49,6 +50,14 @@ and recover a failed kernel. Being written in Agel does not confer authority
 to bypass that mechanism.
 
 ## Experiment contract
+
+The OS owns live definitions, version history, text judgment, replay, and
+activation. It receives Agel forms and recorded inputs and outputs through
+the same interfaces for every application. An application supplies tools,
+observations, task objectives, and correctness checks. For RuneScape those
+belong in the protocol adapter and the benchmark fixtures, including map
+coordinates, account setup, and the private server's save-state oracle.
+Keep server-specific checks outside the shared change gate.
 
 The paper uses an emulated RuneScape environment via RS-SDK. Its finite
 objectives are maximum combat stats and directly crafting an adamant
@@ -135,7 +144,8 @@ unfinished. v0.3.9 adds a rat-combat smoke test: a fresh normal account chooses
 an NPC from decoded observations, attacks, observes removal and verifies
 exactly 8 Attack XP plus Hitpoints XP in saved state. NPC extended masks,
 full spatial observations and high-level combat training remain unfinished.
-Crafting, quests and the actual comparative workloads are not yet tested.
+The release sequence above records subsequent crafting and quest fixtures.
+The complete comparative workloads remain open.
 See [the client setup](osrs-client.md).
 
 ## Current boundary

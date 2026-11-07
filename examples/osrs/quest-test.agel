@@ -1,7 +1,8 @@
 (module agel/osrs-quest-test
   (import agel/sequence)
   (import agel/osrs-game)
-  (export stage-cook-ingredients finish-cooks-assistant)
+  (import agel/osrs-mining-test)
+  (export stage-cook-ingredients finish-cooks-assistant acquire-cook-containers)
   (def require (fn (ok reason) (if ok #t (signal 'osrs/quest-test reason))))
   (def xp (fn (g) (get (osrs-stat g 7) 'xp)))
   (def ingredients
@@ -46,12 +47,35 @@
                 (run-dialogue (osrs-resume-dialogue next id 1 1) next (+ choices 1) (- pages 1)))
               (run-dialogue (osrs-resume-dialogue next id (if (= id 11) 4 5) -1)
                 next choices (- pages 1))))))))
+  (def inventory (fn (state item) (osrs-inventory-count state 93 item)))
+  (def wait-live
+    (fn (state predicate batches)
+      (if (predicate state) state
+        (if (= batches 0) (signal 'osrs/quest-test "live observation timed out")
+          (wait-live (osrs-wait-ticks (osrs-keepalive state) 5) predicate (- batches 1))))))
+  (def wait-item
+    (fn (state item)
+      (with-handler (* problem) (signal 'osrs/quest-test "waiting for gathered item" (list item problem))
+        (wait-live state (fn (g) (= (inventory g item) 1)) 24))))
+  (def acquire-cook-containers
+    (fn (state)
+      (let ((initial (ready state)))
+        (require (= (list (inventory initial 1931) (inventory initial 1925) (inventory initial 995)) '(0 0 0))
+          "expected no pot, bucket, or coins on the fresh account")
+        (let ((pot (wait-item (osrs-take-ground-item initial 1931 3209 3214) 1931)))
+          (let ((sold (get (first-bronze-sale pot) 'state)))
+            (let ((bucket (wait-item (osrs-click-inventory-item-offset sold 300 16 3 1925 2 1) 1925)))
+              (require (= (list (inventory bucket 1931) (inventory bucket 1925)) '(1 1))
+                "expected the empty pot and bucket")
+              (require (= (- (inventory sold 995) (inventory bucket 995)) 2) "bucket price changed")
+              (dict 'test 'cook-containers 'passed #t 'pot 1 'bucket 1
+                'coins-earned (inventory sold 995) 'coins-left (inventory bucket 995))))))))
   (def finish-cooks-assistant
     (fn (state)
       (let ((stock (ready state)))
-        (require (= (ingredients stock) '(1 1 1)) "expected exactly one of each staged ingredient")
+        (require (= (ingredients stock) '(1 1 1)) "expected exactly one of each quest ingredient")
         (require (= (xp stock) 0) "expected no starting Cooking XP")
-        (let ((nearby (osrs-await (osrs-walk stock 3211 3218) cook)))
+        (let ((nearby (wait-live (osrs-walk stock 3211 3218) cook 24)))
           (let ((finished (run-dialogue (osrs-talk nearby (get (cook nearby) 'index)) nearby 0 40)))
             (require (= (ingredients finished) '(0 0 0)) "the cook did not consume all ingredients")
             (dict 'test 'cooks-assistant 'passed #t 'choices 2 'quest-points (osrs-varp finished 101)

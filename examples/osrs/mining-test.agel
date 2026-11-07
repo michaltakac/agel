@@ -1,7 +1,7 @@
 (module agel/osrs-mining-test
   (import agel/sequence)
   (import agel/osrs-game)
-  (export mine-first-copper smelt-first-bronze sell-first-bronze)
+  (export mine-first-copper smelt-first-bronze sell-first-bronze first-bronze-sale)
   (def require
     (fn (ok message) (if ok #t (signal 'osrs/mining-test message))))
   (def tutor
@@ -82,7 +82,7 @@
       (let ((matches (filter (fn (npc) (if (= (get npc 'type) 2813) #t (= (get npc 'type) 2814)))
                        (osrs-nearby-npcs state))))
         (if matches (car matches) nil))))
-  (def sell-first-bronze
+  (def first-bronze-sale
     (fn (state)
       (let ((production (first-bronze state)))
         (let ((arrived (with-handler (* problem) (signal 'osrs/mining-test "walking to the general store" problem)
@@ -96,6 +96,7 @@
                             (fn (g) (if (= (bronze g) 0) (< 0 (coins g)) #f)) 12))))
               (require (= (list (pickaxes sold) (ores sold) (tin sold) (mining-xp sold) (smithing-xp sold)) '(1 0 0 35 6))
                 "sale changed unrelated inventory or XP")
-              (assoc (assoc (assoc (assoc (get production 'report) 'test 'first-sale)
-                'bronze-after-sale (bronze sold)) 'coins-before (coins shop)) 'coins-after (coins sold))))))))
-)
+              (dict 'state sold 'report
+                (assoc (assoc (assoc (assoc (get production 'report) 'test 'first-sale)
+                  'bronze-after-sale (bronze sold)) 'coins-before (coins shop)) 'coins-after (coins sold)))))))))
+  (def sell-first-bronze (fn (state) (get (first-bronze-sale state) 'report))))

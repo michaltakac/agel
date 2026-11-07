@@ -42,6 +42,10 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
       (def second-location-body (cdr sent))
       (def invalid-option (with-handler (* problem) (get problem 'kind)
         (osrs-use-location-option original 24009 3226 3256 3)))
+      (def gathered (osrs-take-ground-item original 1944 3226 3301))
+      (def take-body (cdr sent))
+      (def invalid-ground (with-handler (* problem) (get problem 'kind)
+        (osrs-take-ground-item original 65535 3226 3301)))
       (def opened (decode used 93 '(1 2 3 4 1 184 0)))
       (def clicked (osrs-click-interface opened 312 22))
       (def button-body (cdr sent))
@@ -60,6 +64,10 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
         (dict 93 (dict 0 (dict 'item 2349 'count 1)))))
       (def sold (osrs-click-inventory-item stocked 312 22 93 2349 2))
       (def sell-body (cdr sent))
+      (def bought (osrs-click-inventory-item-offset stocked 312 22 93 2349 2 1))
+      (def buy-body (cdr sent))
+      (def invalid-offset (with-handler (* problem) (get problem 'kind)
+        (osrs-click-inventory-item-offset stocked 312 22 93 2349 2 65535)))
       (def absent-item (with-handler (* problem) (get problem 'kind)
         (osrs-click-inventory-item stocked 312 22 93 995 2)))
       (def invalid-sale (with-handler (* problem) (get problem 'kind)
@@ -75,16 +83,16 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
       (def large (decode small 40 '(157 0 255 255 255 254)))
       (def wide (decode large 24 '(0 128 0 0 0 0 1 0 0 29)))
       (def reset (decode wide 30 nil))
-      (list location-body second-location-body invalid-option (osrs-open-interface? opened 312) button-body
+      (list location-body second-location-body invalid-option take-body invalid-ground (osrs-open-interface? opened 312) button-body
         (osrs-open-interface? moved 312) (osrs-open-interface? closed 312) refused
         (osrs-open-interface? resynced 42) (osrs-open-interface? resynced 313)
         (osrs-open-interface? resynced 312) talk-body invalid-talk
-        choice-body continue-body invalid-resume trade-body invalid-trade sell-body absent-item invalid-sale
+        choice-body continue-body invalid-resume trade-body invalid-trade sell-body buy-body invalid-offset absent-item invalid-sale
         (osrs-interface-opens opened 312) (osrs-interface-opens reopened 312)
         (osrs-varp small 101) (osrs-varp large 29) (osrs-varp wide 29) (osrs-varp reset 29))
     "#, &options).unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil)")
+        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil)")
     );
 }

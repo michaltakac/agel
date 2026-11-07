@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Stage ingredients separately, then verify the normal-account quest hand-in."""
+"""Verify the normal-account quest with staged ingredients or acquire containers on a fresh account."""
+import argparse
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,9 @@ from test_support import evaluate, form
 WORLD = "agel-osrs-world"
 ACCOUNT = "aq" + secrets.token_hex(4)
 password = secrets.token_hex(12)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--containers", action="store_true", help="acquire the empty pot and bucket through ordinary gameplay")
+options = parser.parse_args()
 VARPS = ("varp.cookquest", "varp.qp", "varp.cooks_assistant_ingredients")
 
 def run(*args):
@@ -46,6 +50,8 @@ key = run("docker", "exec", WORLD, "cat", "/world/.data/client.key")
 assert key.split("Exponent: ")[1].splitlines()[0].strip() == "10001"
 modulus = key.split("Modulus: ")[1].strip()
 scenario = Path("examples/osrs/quest-test.agel").read_text()
+mining = Path("examples/osrs/mining-test.agel").read_text()
+chain = Path("crates/agel-stdlib/record-chain.agel").read_text()
 
 
 def execute(action=None):
@@ -57,12 +63,16 @@ def execute(action=None):
       (def context (rsa-context {form(modulus)}))
       (def seed (osrs-random-seed)) (def game (osrs-game-state seed))
       (osrs-login {form(ACCOUNT)} {form(password)} context crcs seed (entropy-read 24))
+      {chain}
+      (import agel/record-chain)
+      (def game (assoc game 'history-push record-chain-push))
+      {mining}
       {scenario}
       (import agel/osrs-quest-test)
       {action or '#t'}
     )"""
     for _ in range(12):
-        result = evaluate(source, 43594)
+        result = evaluate(source, 43594, timeout=300 if options.containers else 120)
         assert password not in result.stdout + result.stderr
         if result.returncode == 0:
             return result.stdout.strip()
@@ -104,19 +114,33 @@ assert all(inventory(initial, name) == 0 for name in items), initial
 assert all(varp(initial, key) == 0 for key in VARPS), initial
 assert "stat=7 base=1 visible=1 fine_xp=0" in initial, initial
 
-notice("RuneScape quest: staging one milk bucket, egg, and pot of flour")
-oracle_program("SetupAccount", "quest-grant", ACCOUNT)
-try:
-    execute("(begin (stage-cook-ingredients game) #t)")
-    staged = await_saved(lambda s: all(inventory(s, name) == 1 for name in items))
-    assert all(varp(staged, key) == 0 for key in VARPS), staged
-finally:
-    oracle_program("SetupAccount", "quest-revoke", ACCOUNT)
+if not options.containers:
+    notice("RuneScape quest: staging one milk bucket, egg, and pot of flour")
+    oracle_program("SetupAccount", "quest-grant", ACCOUNT)
+    try:
+        execute("(begin (stage-cook-ingredients game) #t)")
+        staged = await_saved(lambda s: all(inventory(s, name) == 1 for name in items))
+        assert all(varp(staged, key) == 0 for key in VARPS), staged
+    finally:
+        oracle_program("SetupAccount", "quest-revoke", ACCOUNT)
 
 normal = oracle_program("AccountState", ACCOUNT, *VARPS)
 assert "rights= " in normal and "xp_rate_in_hundreds=100" in normal, normal
-notice("RuneScape quest: accepting and finishing Cook's Assistant under normal rights")
 started = time.monotonic()
+if options.containers:
+    notice("RuneScape quest: obtaining the pot and earning coins for the bucket without admin setup")
+    report = execute("(acquire-cook-containers game)")
+    assert "test cook-containers passed #t pot 1 bucket 1 coins-earned 3 coins-left 1" in report, report
+    after = await_saved(lambda s: all(inventory(s, name) == 1 for name in ("pot_empty", "bucket_empty", "coins")))
+    assert "rights= " in after and "xp_rate_in_hundreds=100" in after, after
+    assert all(varp(after, key) == 0 for key in VARPS), after
+    print(report)
+    print("Saved supplies: one empty pot, one empty bucket, and one coin at normal rights and 1× XP")
+    print(f"Acquisition and verification elapsed seconds: {time.monotonic() - started:.3f}")
+    notice("RuneScape PASS: fresh normal account picked up a pot and bought a bucket with earned coins")
+    raise SystemExit(0)
+
+notice("RuneScape quest: accepting and finishing Cook's Assistant under normal rights")
 report = execute("(finish-cooks-assistant game)")
 assert "test cooks-assistant passed #t" in report, report
 after = await_saved(lambda s: varp(s, "varp.cookquest") % 4 == 2

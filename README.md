@@ -5,10 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.25.** Agel completes Cook's Assistant through
-ordinary dialogue on a fresh normal account with staged ingredients. The
-server verifies the quest stage, quest point, and Cooking XP.
-See the [release notes and evidence](docs/release-v0.3.25.md).
+**Current release: v0.3.26.** A fresh normal account picks up an empty
+pot and buys a bucket with coins from its first bronze-bar sale. See the
+[release notes and evidence](docs/release-v0.3.26.md).
+
+v0.3.25 verifies Cook's Assistant completion and rewards through ordinary
+dialogue with staged ingredients. See the [quest evidence](docs/release-v0.3.25.md).
 
 v0.3.24 verified the first coins from a fresh account's bronze-bar sale.
 See the [economy evidence](docs/release-v0.3.24.md).

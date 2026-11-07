@@ -87,6 +87,7 @@ sh scripts/test-osrs-mining.sh
 sh scripts/test-osrs-mining.sh --bronze
 sh scripts/test-osrs-mining.sh --sell
 sh scripts/test-osrs-quest.sh
+sh scripts/test-osrs-quest.sh --containers
 sh scripts/test-osrs-crafting.sh
 sh scripts/test-osrs-crafting.sh --native
 sh scripts/test-native-network.sh --combat
@@ -159,8 +160,9 @@ The sale mode sells the bar and verifies the saved coins.
 Maximum stats, training and material acquisition for the adamant recipe,
 the coins-per-dollar benchmark, and transfer still need their own scores.
 The quest fixture verifies Cook's Assistant completion and rewards with
-staged ingredients. Fresh ingredient acquisition and a multi-quest
-comparison remain open.
+staged ingredients. Its container mode picks up a pot and buys a bucket
+with coins earned on the same fresh account. Full ingredient acquisition
+and a multi-quest comparison remain open.
 v0.3.17 connects a retained repair actor to polling inference and the native
 client. It repairs a seeded planner and executes five queued game actions on
 the same connection. Full gameplay policy, durable episode history and paired

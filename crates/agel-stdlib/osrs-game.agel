@@ -5,7 +5,7 @@
   (import agel/osrs-wire)
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
-  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-interface-opens osrs-varp)
+  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-take-ground-item)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -278,6 +278,13 @@
         (signal 'osrs/location "invalid location id or coordinates"))))
   (def osrs-use-location
     (fn (state id x z) (osrs-use-location-option state id x z 1)))
+  (def osrs-take-ground-item
+    (fn (state item x z)
+      (if (if (ushort? item) (if (< item 65535) (if (coordinate? x) (coordinate? z) #f) #f) #f)
+        (send state 65 (cons 0 (append (u16 x) (append (u16 item)
+          (append (reverse (u16 z)) '(128))))) #f
+          (dict 'action 'take-ground-item 'item item 'x x 'z z))
+        (signal 'osrs/item "invalid ground item or coordinates"))))
   (def osrs-click-interface
     (fn (state interface component)
       (if (if (ushort? interface) (if (ushort? component) (osrs-open-interface? state interface) #f) #f)
@@ -292,20 +299,24 @@
             (let ((entry (get slots slot)))
               (if (if (= (get entry 'item) item) (< 0 (get entry 'count)) #f) slot nil))))
           nil (keys slots)))))
-  (def osrs-click-inventory-item
-    (fn (state interface component inventory item option)
+  (def osrs-click-inventory-item-offset
+    (fn (state interface component inventory item option offset)
+      (if (ushort? offset) #t (signal 'osrs/interface "invalid inventory slot offset"))
       (if (if (ushort? interface) (if (ushort? component) (osrs-open-interface? state interface) #f) #f)
         (if (if (ushort? item) (if (< item 65535) (if (ushort? option) (if (< 0 option) (< option 11) #f) #f) #f) #f)
           (let ((slot (inventory-slot state inventory item)))
-            (if (if (ushort? slot) (< slot 65535) #f)
+            (if (if (ushort? slot) (< (+ slot offset) 65535) #f)
               (send state 38
                 (append (u16 interface) (append (u16 component)
-                  (append (u16 slot) (append (u16 item) (list option))))) #f
+                  (append (u16 (+ slot offset)) (append (u16 item) (list option))))) #f
                 (dict 'action 'click-inventory-item 'interface interface 'component component
-                  'inventory inventory 'slot slot 'item item 'option option))
+                  'inventory inventory 'slot (+ slot offset) 'item item 'option option))
               (signal 'osrs/interface "item is not in the observed inventory")))
           (signal 'osrs/interface "invalid inventory item or interface option"))
         (signal 'osrs/interface "interface is not observed open or component is invalid"))))
+  (def osrs-click-inventory-item
+    (fn (state interface component inventory item option)
+      (osrs-click-inventory-item-offset state interface component inventory item option 0)))
   (def osrs-resume-dialogue
     (fn (state interface component slot)
       (if (if (ushort? interface) (if (ushort? component)
