@@ -2,7 +2,7 @@
   (import agel/sequence)
   (import agel/osrs-game)
   (import agel/osrs-combat-test)
-  (export train-rat-attack train-rat-melee train-rat-melee-result train-rat-melee-with-progress)
+  (export train-rat-attack train-rat-melee train-rat-melee-result train-rat-melee-with-progress train-rat-melee-with-transition)
 
   (def wait-ticks
     (fn (state ready batches)
@@ -134,14 +134,14 @@
               (dict 'skill skill 'xp-before (xp state skill) 'xp-after (xp finished skill)
                 'level (get (osrs-stat finished skill) 'level) 'fights (count (get result 'fights))
                 'encounters (get result 'fights))))))))
-  (def train-rat-melee-with-progress
-    (fn (state goal max-fights observe progress)
+  (def train-rat-melee-with-transition
+    (fn (state goal max-fights observe progress after-attack)
       (check-training-bound goal max-fights)
       (let ((ready (await-combat state (fn (g)
         (if (osrs-stat g 0) (if (osrs-stat g 1) (if (osrs-stat g 2) (osrs-stat g 3) #f) #f) #f)))))
         (if (= (list (xp ready 0) (xp ready 1) (xp ready 2) (hitpoints ready)) '(0 0 0 1154))
           (let ((accurate (phase ready 0 goal max-fights nil observe progress)))
-            (let ((aggressive (phase (stance (get accurate 'state) 10 1 progress) 2 goal max-fights
+            (let ((aggressive (phase (stance (after-attack (get accurate 'state)) 10 1 progress) 2 goal max-fights
                                 (get accurate 'index) observe progress)))
               (let ((defensive (phase (stance (get aggressive 'state) 18 3 progress) 1 goal max-fights
                                  (get aggressive 'index) observe progress)))
@@ -152,6 +152,9 @@
                     'hitpoints-xp (hitpoints finished) 'phases
                     (map (fn (result) (get result 'report)) (list accurate aggressive defensive))))))))
           (signal 'osrs/training "melee training requires fresh combat stats")))))
+  (def train-rat-melee-with-progress
+    (fn (state goal max-fights observe progress)
+      (train-rat-melee-with-transition state goal max-fights observe progress (fn (current) current))))
   (def train-rat-melee-result
     (fn (state goal max-fights observe)
       (train-rat-melee-with-progress state goal max-fights observe (fn (_) nil))))

@@ -599,8 +599,12 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
       (def trained (train-rat-melee-result (dict 0 0 1 0 2 0 3 1154 'npcs (list (dict 'index 1 'type 2854))) 8 2 nil))
       (def report (get trained 'report))
       (def phases nil)
-      (def late (train-rat-melee-with-progress (dict 0 0 1 0 2 0 3 1154 'late #t 'npcs (list (dict 'index 1 'type 2854))) 8 2 nil
-        (fn (phase) (def phases (cons (get phase 'phase) phases)))))
+      (def late (train-rat-melee-with-transition (dict 0 0 1 0 2 0 3 1154 'late #t 'npcs (list (dict 'index 1 'type 2854))) 8 2 nil
+        (fn (phase) (def phases (cons (get phase 'phase) phases)))
+        (fn (state)
+          (begin
+            (def phases (cons 'after-attack phases))
+            (assoc state 'attack-at-transition (get state 0))))))
       (list (get report 'passed) (get report 'defence-xp) (get report 'stance)
         (reverse (get (get trained 'state) 'clicks))
         (reverse (get (get trained 'state) 'attempts))
@@ -609,12 +613,12 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (get (get late 'report) 'stance)
         (reverse (get (get late 'state) 'clicks))
         (next-rat (dict 'npcs (list (dict 'index 2 'type 2854))) 1)
-        (next-rat (dict 'npcs nil) 1) (reverse phases))
+        (next-rat (dict 'npcs nil) 1) (get (get late 'state) 'attack-at-transition) (reverse phases))
     "#,
         )
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 (training stance-requested training stance-requested training))")
+        Some("(#t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 8 (training after-attack stance-requested training stance-requested training))")
     );
 }

@@ -96,6 +96,7 @@ if options.combat:
 if melee is not None:
     manifest['scope']='native three-skill melee training on a fresh normal account'
     manifest['goal_xp']=melee
+    manifest['optimizer_phase']='after-attack'
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
     manifest['evaluation_fuel']=250_000_000
     manifest['keepalive_interval_us']=3_000_000
@@ -325,7 +326,12 @@ else:
     if editing and not options.combat:
         task_label = ('native-combat' if melee is not None else 'native-economy' if options.economy
                       else 'native-craft' if options.craft else 'native-quest' if fresh_quest else None)
-        if task_label:
+        if melee is not None:
+            source += """(def after-attack-phase (fn (state) (begin
+(def ready state)
+(console-log "native-combat: adapting after Attack training")
+"""
+        elif task_label:
             source += f"""(with-handler (* problem)
   (begin
     (console-log (text-concat "{task_label}: optimizer failure " (print-form problem)))
@@ -350,8 +356,12 @@ else:
             source+=observation_finish
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
-        if task_label:
+        if melee is not None:
+            source += "ready)))\n"
+        elif task_label:
             source += "))\n"
+    if melee is not None and not options.optimize:
+        source += "(def after-attack-phase (fn (state) state))\n"
     if options.optimize:
         source+='''(def report-policy-use
   (fn () (console-log (text-concat "native-opt: live uses " (print-form policy-uses)))))
@@ -444,7 +454,7 @@ else:
     (report-policy-use)
     (console-log (text-concat "native-combat: task-us " (print-form (- (clock-us) task-start))))
     (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
-  (train-rat-melee-with-progress ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter log-training)))
+  (train-rat-melee-with-transition ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter log-training after-attack-phase)))
 (def finish (clock-us))
 (def completed (get trained 'state))
 (def report (get trained 'report))

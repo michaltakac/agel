@@ -5,9 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.200.** A second native one-rat pair records the
-gap between replay savings and live use. See the
-[release notes](docs/release-v0.3.200.md).
+**Current release: v0.3.201.** Three-skill melee adaptation starts after
+Attack training. See the [release notes](docs/release-v0.3.201.md).
+
+v0.3.200 reports replay savings and live use in a second native one-rat
+pair. See the [release notes](docs/release-v0.3.200.md).
 
 v0.3.199 lets the repair driver stop between proposal, judgment, and
 replay. See the [release notes](docs/release-v0.3.199.md).

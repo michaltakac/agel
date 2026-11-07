@@ -217,6 +217,8 @@ def load_arm(directory, policy, read_table):
     if goal is not None:
         contract.update({key: manifest[key] for key in (
             'goal_xp', 'training_policy_sha256', 'service_policy_sha256')})
+        if 'optimizer_phase' in manifest:
+            contract['optimizer_phase'] = manifest['optimizer_phase']
         boundaries = (
             ('stream_adapter', '(module agel/byte-stream\n', '(module agel/osrs-wire\n'),
             ('combat_source', '(module agel/osrs-combat-test\n', '(module agel/osrs-combat-training\n'),
