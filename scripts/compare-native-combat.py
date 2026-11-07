@@ -142,6 +142,32 @@ def adaptation_evidence(directory, trace, correct):
     return charges, decision, usage
 
 
+def melee_optimizer_started(directory, trace, goal, correct):
+    transitions = list(re.finditer(r'^native-combat: adapting after Attack training$', trace, re.M))
+    if not transitions and not correct:
+        require((directory / 'mode.txt').read_text().strip() == 'live'
+                and 'inference-bridge: started job ' not in trace
+                and not judge_frames(directory / 'disk.img')
+                and re.findall(r'^native-opt: live uses (\d+)$', trace, re.M) == ['0']
+                and not re.search(r'^native-opt: (?:observation|probe|policy committed)', trace, re.M),
+                f'{directory}: unexpected optimization before Attack completed')
+        return False
+    require(len(transitions) == 1, f'{directory}: expected one Attack-to-optimizer transition')
+    before = trace[:transitions[0].start()]
+    after = trace[transitions[0].end():]
+    xp = re.findall(r'^native-combat: encounter \(0 \{[^\n]*? attack-after (\d+) ', before, re.M)
+    next_phase = r'^native-combat: progress \{phase (?:stance-requested |training skill [12] )'
+    require(xp and int(xp[-1]) >= goal and 'inference-bridge: started job ' not in before
+            and not re.search(next_phase, before, re.M),
+            f'{directory}: optimizer did not start after Attack reached its goal')
+    phase = re.search(next_phase, after, re.M)
+    if phase:
+        require('native-opt: optimization-stage service writes ' in after[:phase.start()]
+                and 'inference-bridge: started job ' not in after[phase.start():],
+                f'{directory}: optimization crossed into the next melee phase')
+    return True
+
+
 def load_arm(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
@@ -171,7 +197,11 @@ def load_arm(directory, policy, read_table):
         expected, levels = melee_xp(trace, goal)
         require(melee_levels_saved(levels, saved), f'{directory}: saved melee levels or stance differ')
     if policy == 'adaptive':
-        charges, decision, usage = adaptation_evidence(directory, trace, correct)
+        after_attack = goal is not None and manifest.get('optimizer_phase') == 'after-attack'
+        if after_attack and not melee_optimizer_started(directory, trace, goal, correct):
+            decision = 'failed-before-optimization'
+        else:
+            charges, decision, usage = adaptation_evidence(directory, trace, correct)
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: evaluation incurred inference')
         if policy == 'fixed':

@@ -330,6 +330,11 @@ else:
             source += """(def after-attack-phase (fn (state) (begin
 (def ready state)
 (console-log "native-combat: adapting after Attack training")
+(with-handler (* problem)
+  (begin
+    (console-log (text-concat "native-combat: optimizer failure " (print-form problem)))
+    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+  (begin
 """
         elif task_label:
             source += f"""(with-handler (* problem)
@@ -357,7 +362,7 @@ else:
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
         if melee is not None:
-            source += "ready)))\n"
+            source += "ready)))))\n"
         elif task_label:
             source += "))\n"
     if melee is not None and not options.optimize:
