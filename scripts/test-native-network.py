@@ -388,7 +388,8 @@ else:
     (console-log (text-concat "native-economy: task-us " (print-form (- (clock-us) task-start))))
     (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
   (first-bronze-sale-using ready
-    (fn (phase) (console-log (text-concat "native-economy: " phase))))))
+    (fn (phase) (console-log (text-concat "native-economy: "
+      (if (= (type-of phase) 'string) phase (print-form phase))))))))
 (def finished (clock-us))
 (def completed (get sale 'state))
 (def sale-report (get sale 'report))
