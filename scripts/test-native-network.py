@@ -51,7 +51,7 @@ if options.live and not editing:parser.error('--live requires --repair or --opti
 directory=Path('target')/('native-network-'+str(time.time_ns()))
 directory.mkdir(mode=0o700)
 print('Evidence:', directory, flush=True)
-proposal="(dict 'diagnosis \"fixed cadence pays for more service calls than the observed work bound requires\" 'after '(fn (limit) (* 64 (/ limit 64))) 'predictions '(64 192))" if options.optimize else None
+proposal="(dict 'diagnosis \"fixed cadence pays for more service calls than the observed work bound requires\" 'after '(fn (limit) (* 64 (/ limit 64))) 'predictions '(64 128))" if options.optimize else None
 environment=provider_environment(directory, options.live, delay=20, proposal=proposal) if shared_carrier else dict(os.environ)
 environment['AGEL_BYTE_ENDPOINT']='127.0.0.1:43594'
 if melee is not None:

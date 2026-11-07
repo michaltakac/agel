@@ -51,7 +51,7 @@ fn paired_scores_keep_unknown_cost_and_check_transfer_provenance() {
 }
 
 #[test]
-fn retained_combat_policy_replays_at_a_non_aligned_measurement_bound() {
+fn retained_combat_policy_replays_with_a_cap_below_the_measured_bound() {
     let mut world = World::default();
     agel_stdlib::install(&mut world, &Default::default()).unwrap();
     world.evaluate(include_str!("../benchmark.agel")).unwrap();
@@ -63,7 +63,7 @@ fn retained_combat_policy_replays_at_a_non_aligned_measurement_bound() {
             r#"(import agel/evolution)
              (def judge (fn (_) (dict 'allowed #t 'reason "fixture")))
              (def old '(fn (limit) 64))
-             (def new '(fn (limit) (* 64 (/ limit 64))))
+             (def new '(fn (limit) (if (< limit 192) (* 64 (/ limit 64)) 192)))
              (def cases (list (dict 'arguments '(64) 'expected 64)))
              (def base (evolution-edit (evolution-new) 'cell 'service-quantum nil old cases judge))
              (dict 'event 'live-policy-versions
@@ -101,10 +101,10 @@ fn retained_combat_policy_replays_at_a_non_aligned_measurement_bound() {
         .unwrap();
     assert_eq!(
         world
-            .evaluate("(list retained-bound (get retained-lineage 'version))")
+            .evaluate("(list retained-bound retained-quantum-replay (get retained-lineage 'version))")
             .unwrap()
             .values
             .pop(),
-        Some(Value::List(vec![Value::Int(327), Value::Int(2)]))
+        Some(Value::List(vec![Value::Int(327), Value::Int(192), Value::Int(2)]))
     );
 }
