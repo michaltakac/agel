@@ -12,12 +12,13 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).with_name("osrs")))
-from test_support import evaluate, form, smelt_saved, smelt_stock
+from test_support import craft_saved, craft_stock, evaluate, form, smelt_saved, smelt_stock
 
 WORLD = "agel-osrs-world"
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
 mode.add_argument("--native", action="store_true", help="run the crafting phase inside Agel OS")
+mode.add_argument("--bank-forge", action="store_true", help="bank staged bars and forge a platebody in one session")
 mode.add_argument("--bank", action="store_true", help="deposit and withdraw staged ore at Varrock West bank")
 mode.add_argument("--smelt", action="store_true", help="smelt adamant bars from staged ore and coal")
 parser.add_argument("--smelt-count", type=int, choices=range(1, 4), default=1)
@@ -73,7 +74,7 @@ key = run("docker", "exec", WORLD, "cat", "/world/.data/client.key")
 assert key.split("Exponent: ")[1].splitlines()[0].strip() == "10001"
 modulus = key.split("Modulus: ")[1].strip()
 scenario = Path("examples/osrs/crafting-test.agel").read_text()
-if options.bank:
+if options.bank or options.bank_forge:
     scenario += "\n" + Path("examples/osrs/osrs-bank.agel").read_text()
 
 
@@ -144,8 +145,13 @@ try:
         await_saved(lambda s: "x=3226 z=3255 level=0" in s
                     and inventory(s, "adamantite_ore") == COUNT and inventory(s, "coal") == 6 * COUNT)
     else:
-        execute("(begin (stage-adamant-stock game) #t)")
-        before = await_saved(lambda s: "x=3187 z=3425 level=0" in s
+        action = "(stage-adamant-stock game)"
+        position = "x=3187 z=3425 level=0"
+        if options.bank_forge:
+            action = '(osrs-wait-ticks (osrs-command (stage-adamant-stock game) "tele 3185 3436") 4)'
+            position = "x=3185 z=3436 level=0"
+        execute(f"(begin {action} #t)")
+        before = await_saved(lambda s: position in s
                          and "stat=13 base=88 visible=88" in s
                          and inventory(s, "hammer") == 1
                          and inventory(s, "adamantite_bar") == 5
@@ -196,6 +202,15 @@ if options.native:
         if status:
             raise subprocess.CalledProcessError(status, command)
     report = "".join(lines)
+elif options.bank_forge:
+    assert craft_stock(normal, at_anvil=False) is not None, normal
+    report = execute("""(begin
+      (import agel/osrs-bank)
+      (def bank (osrs-bank-open game osrs-bank-layout-241 10583 3186 3438))
+      (def stored (osrs-bank-deposit bank osrs-bank-layout-241 2361 5))
+      (def bars (osrs-bank-withdraw stored osrs-bank-layout-241 2361 5))
+      (forge-adamant-platebody (osrs-bank-close bars osrs-bank-layout-241)))""")
+    print(report)
 else:
     report = execute("(forge-adamant-platebody game)")
     print(report)
@@ -204,6 +219,9 @@ after = await_saved(lambda s: inventory(s, "adamant_platebody") == 1
                     and inventory(s, "adamantite_bar") == 0
                     and inventory(s, "hammer") == 1)
 assert "rights= " in after and "xp_rate_in_hundreds=100" in after, after
+if options.bank_forge:
+    assert craft_saved("native-craft: " + report, craft_stock(normal, at_anvil=False),
+                       craft_stock(after, finished=True)), (report, normal, after)
 saved_before, saved_after = xp(before), xp(after)
 assert saved_after - saved_before == 3125, (saved_before, saved_after)
 observed = re.search(r"smithing-xp-before (\d+) smithing-xp-after (\d+)", report)

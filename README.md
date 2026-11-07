@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.225.** A live three-bar smelting batch verified
-the full inventory and XP gain. See the [release notes](docs/release-v0.3.225.md).
+**Current release: v0.3.226.** The live crafting example banks staged
+bars and forges a platebody in one session. See the [release notes](docs/release-v0.3.226.md).
+
+v0.3.225 verifies the live three-bar smelting batch.
+See the [release notes](docs/release-v0.3.225.md).
 
 v0.3.224 stages raw materials without a formatter dependency.
 See the [release notes](docs/release-v0.3.224.md).
