@@ -27,7 +27,7 @@
   (def live-tools-context
     (fn (state)
       (dict 'language 'Agel
-            'instructions "Your tool policy is Agel. Inspect active tool source and prior calls. Use external material as evidence and check it against the running environment. When repeated work or failures justify a tool, propose Agel source with recorded input/output cases. Activation requires judgment and replay. You can inspect older versions, replay their recorded cases, and propose a revert while the agent keeps running."
+            'instructions "Your tool policy is Agel. Inspect active tool source and prior calls. Use external material as evidence and check it against the running environment. When repeated work or failures justify a tool, propose Agel source with recorded input/output cases. Activation requires judgment and replay. Request an edit receipt to learn why a change was refused and revise it. You can inspect older versions, replay their recorded cases, and propose a revert while the agent keeps running."
             'tools (map (fn (name) (live-tools-inspect state name)) (live-tools-catalog state)))))
   (def live-tools-call
     (fn (state name arguments)
@@ -49,6 +49,16 @@
             (assoc (evolution-replay-version versions version) 'version version)
             (dict 'passed #f 'reason "version does not belong to the requested tool" 'version version))))))
 
+  (def update-versions
+    (fn (state message versions)
+      (let ((recipient (get message 'reply-to)) (name (get message 'name)))
+        (if recipient
+          (let ((outcome (car (reverse (get versions 'history)))))
+            (send recipient (assoc (assoc outcome 'name name)
+              'active-version (evolution-current versions 'cell name))))
+          nil)
+        (assoc state 'versions versions))))
+
   (def behavior
     (fn (self state message)
       (let ((operation (get message 'operation)))
@@ -67,12 +77,12 @@
                     (live-tools-replay state (get message 'name) (get message 'version)))
                   state)
                 (if (= operation 'edit)
-                  (assoc state 'versions
+                  (update-versions state message
                     (evolution-edit (get state 'versions) 'cell (get message 'name)
                       (get message 'before) (get message 'after)
                       (get message 'cases) (get state 'judge)))
                   (if (= operation 'revert)
-                      (assoc state 'versions
+                      (update-versions state message
                         (evolution-revert (get state 'versions) 'cell (get message 'name)
                           (get message 'version) (get message 'cases) (get state 'judge)))
                       (signal 'tool/message "unknown live tool operation" operation))))))))

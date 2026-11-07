@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.156.** The OSRS bronze-sale example advances as soon
-as the expected game packet arrives. See the [release notes](docs/release-v0.3.156.md).
+**Current release: v0.3.157.** Live tool edits and reverts can return their
+gate outcome to the proposing agent. See the [release notes](docs/release-v0.3.157.md).
+
+v0.3.156 advances the OSRS bronze-sale example on the expected game packet. See the [release notes](docs/release-v0.3.156.md).
 
 v0.3.155 reports reaching the melee XP goal separately from observing target removal. See the [release notes](docs/release-v0.3.155.md).
 
