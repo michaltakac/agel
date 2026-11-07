@@ -53,6 +53,17 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
       (def talked (osrs-talk tutor-state 500))
       (def talk-body (cdr sent))
       (def invalid-talk (with-handler (* problem) (get problem 'kind) (osrs-talk original 500)))
+      (def traded (osrs-trade tutor-state 500))
+      (def trade-body (cdr sent))
+      (def invalid-trade (with-handler (* problem) (get problem 'kind) (osrs-trade original 500)))
+      (def stocked (assoc opened 'inventories
+        (dict 93 (dict 0 (dict 'item 2349 'count 1)))))
+      (def sold (osrs-click-inventory-item stocked 312 22 93 2349 2))
+      (def sell-body (cdr sent))
+      (def absent-item (with-handler (* problem) (get problem 'kind)
+        (osrs-click-inventory-item stocked 312 22 93 995 2)))
+      (def invalid-sale (with-handler (* problem) (get problem 'kind)
+        (osrs-click-inventory-item closed 312 22 93 2349 2)))
       (def choice (osrs-resume-dialogue opened 312 22 2))
       (def choice-body (cdr sent))
       (def continued (osrs-resume-dialogue opened 312 22 -1))
@@ -63,10 +74,10 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
         (osrs-open-interface? moved 312) (osrs-open-interface? closed 312) refused
         (osrs-open-interface? resynced 42) (osrs-open-interface? resynced 313)
         (osrs-open-interface? resynced 312) talk-body invalid-talk
-        choice-body continue-body invalid-resume)
+        choice-body continue-body invalid-resume trade-body invalid-trade sell-body absent-item invalid-sale)
     "#, &options).unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface)")
+        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) osrs/interface osrs/interface)")
     );
 }

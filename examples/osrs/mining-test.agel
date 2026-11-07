@@ -1,7 +1,7 @@
 (module agel/osrs-mining-test
   (import agel/sequence)
   (import agel/osrs-game)
-  (export mine-first-copper smelt-first-bronze)
+  (export mine-first-copper smelt-first-bronze sell-first-bronze)
   (def require
     (fn (ok message) (if ok #t (signal 'osrs/mining-test message))))
   (def tutor
@@ -51,7 +51,7 @@
     (fn (state batches)
       (if (= batches 0) state
         (walk-ticks (osrs-wait-ticks (osrs-keepalive state) 5) (- batches 1)))))
-  (def smelt-first-bronze
+  (def first-bronze
     (fn (state)
       (let ((copper (first-copper-state state)))
         (require (= (list (tin copper) (bronze copper) (smithing-xp copper)) '(0 0 0))
@@ -70,7 +70,32 @@
                 (require (= (list (pickaxes smelted) (ores smelted) (tin smelted) (bronze smelted)
                   (mining-xp smelted) (smithing-xp smelted)) '(1 0 0 1 35 6))
                   "unexpected smelting outcome")
-                (dict 'test 'first-bronze 'passed #t 'pickaxes (pickaxes smelted)
-                  'copper-before (ores stock) 'tin-before (tin stock) 'bronze-before (bronze stock)
-                  'copper-after (ores smelted) 'tin-after (tin smelted) 'bronze-after (bronze smelted)
-                  'mining-xp (mining-xp smelted) 'smithing-xp (smithing-xp smelted))))))))))
+                (dict 'state smelted 'report
+                  (dict 'test 'first-bronze 'passed #t 'pickaxes (pickaxes smelted)
+                    'copper-before (ores stock) 'tin-before (tin stock) 'bronze-before (bronze stock)
+                    'copper-after (ores smelted) 'tin-after (tin smelted) 'bronze-after (bronze smelted)
+                    'mining-xp (mining-xp smelted) 'smithing-xp (smithing-xp smelted))))))))))
+  (def smelt-first-bronze (fn (state) (get (first-bronze state) 'report)))
+  (def coins (fn (g) (osrs-inventory-count g 93 995)))
+  (def shopkeeper
+    (fn (state)
+      (let ((matches (filter (fn (npc) (if (= (get npc 'type) 2813) #t (= (get npc 'type) 2814)))
+                       (osrs-nearby-npcs state))))
+        (if matches (car matches) nil))))
+  (def sell-first-bronze
+    (fn (state)
+      (let ((production (first-bronze state)))
+        (let ((arrived (with-handler (* problem) (signal 'osrs/mining-test "walking to the general store" problem)
+                         (wait-live (osrs-walk (get production 'state) 3211 3244) shopkeeper 14))))
+          (let ((shop (with-handler (* problem) (signal 'osrs/mining-test "waiting for both shop interfaces" problem)
+                        (wait-live (osrs-trade arrived (get (shopkeeper arrived) 'index))
+                          (fn (g) (if (osrs-open-interface? g 300) (osrs-open-interface? g 301) #f)) 12))))
+            (require (= (list (bronze shop) (coins shop)) '(1 0)) "expected one bar and zero coins before sale")
+            (let ((sold (with-handler (* problem) (signal 'osrs/mining-test "waiting for sale and coins" problem)
+                          (wait-live (osrs-click-inventory-item shop 301 0 93 2349 2)
+                            (fn (g) (if (= (bronze g) 0) (< 0 (coins g)) #f)) 12))))
+              (require (= (list (pickaxes sold) (ores sold) (tin sold) (mining-xp sold) (smithing-xp sold)) '(1 0 0 35 6))
+                "sale changed unrelated inventory or XP")
+              (assoc (assoc (assoc (assoc (get production 'report) 'test 'first-sale)
+                'bronze-after-sale (bronze sold)) 'coins-before (coins shop)) 'coins-after (coins sold))))))))
+)

@@ -1,0 +1,19 @@
+First verified fresh account
+RuneScape mining: fresh account walking to the tutor for a pickaxe and ores for a bronze bar to sell
+{test first-sale passed #t pickaxes 1 copper-before 1 tin-before 1 bronze-before 0 copper-after 0 tin-after 0 bronze-after 1 mining-xp 35 smithing-xp 6 bronze-after-sale 0 coins-before 0 coins-after 3}
+stat=13 base=1 visible=1 fine_xp=62
+stat=14 base=1 visible=1 fine_xp=350
+inv=inv.inv item=obj.bronze_pickaxe count=1
+inv=inv.inv item=obj.coins count=3
+Elapsed seconds: 159.836
+RuneScape PASS: fresh account mined, smelted, and sold a bronze bar for 3 saved coins
+
+Final verifier on another fresh account
+RuneScape mining: fresh account walking to the tutor for a pickaxe and ores for a bronze bar to sell
+{test first-sale passed #t pickaxes 1 copper-before 1 tin-before 1 bronze-before 0 copper-after 0 tin-after 0 bronze-after 1 mining-xp 35 smithing-xp 6 bronze-after-sale 0 coins-before 0 coins-after 3}
+stat=13 base=1 visible=1 fine_xp=62
+stat=14 base=1 visible=1 fine_xp=350
+inv=inv.inv item=obj.bronze_pickaxe count=1
+inv=inv.inv item=obj.coins count=3
+Elapsed seconds: 157.352
+RuneScape PASS: fresh account mined, smelted, and sold a bronze bar for 3 saved coins

@@ -33,6 +33,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.21 | Adamant platebody manufacture | Agel interacts with the anvil and observed smithing interface inside its OS under normal rights. The server verifies that five staged bars became one platebody and saved 312.5 XP. |
 | v0.3.22 | Fresh-account material acquisition | Agel walks to the mining tutor, acquires a pickaxe through ordinary dialogue, and mines copper. The hosted run verifies saved XP and inventory under normal rights. |
 | v0.3.23 | Fresh-account bronze production | Agel obtains its pickaxe, mines both ores, and smelts a bronze bar. The hosted run verifies consumed ores and saved Mining and Smithing XP. |
+| v0.3.24 | First economy outcome | Agel sells a bar it made from freshly mined ores at the Lumbridge General Store. The hosted test checks observed and saved coins and confirms the bar was consumed by the sale. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |

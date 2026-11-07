@@ -85,6 +85,7 @@ sh scripts/test-osrs-game.sh
 sh scripts/test-osrs-combat.sh
 sh scripts/test-osrs-mining.sh
 sh scripts/test-osrs-mining.sh --bronze
+sh scripts/test-osrs-mining.sh --sell
 sh scripts/test-osrs-crafting.sh
 sh scripts/test-osrs-crafting.sh --native
 sh scripts/test-native-network.sh --combat
@@ -153,8 +154,9 @@ anvil manufacture from five staged bars and checks saved inventory and Smithing
 XP. The mining test walks a fresh normal account to the tutor, gets a pickaxe
 through dialogue, and verifies its first copper ore and Mining XP. The
 bronze mode also mines tin and smelts both ores through the furnace menu.
+The sale mode sells the bar and verifies the saved coins.
 Maximum stats, training and material acquisition for the adamant recipe,
-quests, money-making and transfer still need their own scores.
+quests, the coins-per-dollar benchmark, and transfer still need their own scores.
 v0.3.17 connects a retained repair actor to polling inference and the native
 client. It repairs a seeded planner and executes five queued game actions on
 the same connection. Full gameplay policy, durable episode history and paired
