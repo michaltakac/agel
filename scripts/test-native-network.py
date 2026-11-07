@@ -241,7 +241,12 @@ else:
 """
     if options.optimize or combat_workload:
         source+="(def game (assoc game 'maintenance (assoc (get game 'maintenance) 'quantum retained-quantum)))\n"
-    source+='(begin (osrs-login '+json.dumps(account['username'])+' '+json.dumps(account['password'])+' context crcs seed (entropy-read 24)) #t)\n'
+    source+='''(with-handler (osrs/login-refused problem)
+  (begin
+    (console-log (text-concat "native-network: login refusal code " (print-form (get problem 'data))))
+    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+  (begin (osrs-login '''+json.dumps(account['username'])+' '+json.dumps(account['password'])+''' context crcs seed (entropy-read 24)) #t))
+'''
     source+='(console-log "native-network: password login accepted")\n'
     if not (options.craft or options.economy or options.quest):
         source+='''(def ready (osrs-await game (fn (g) (if (osrs-stat g 13) (if (get (get g 'inventories) 93) #t #f) #f))))

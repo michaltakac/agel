@@ -56,6 +56,8 @@ fn retained_combat_policy_replays_at_a_non_aligned_measurement_bound() {
     agel_stdlib::install(&mut world, &Default::default()).unwrap();
     world.evaluate(include_str!("../benchmark.agel")).unwrap();
     world.evaluate(include_str!("../bytes.agel")).unwrap();
+    world.evaluate(include_str!("../services.agel")).unwrap();
+    world.evaluate(include_str!("../work-profile.agel")).unwrap();
     let history = world
         .evaluate(
             r#"(import agel/evolution)
@@ -71,13 +73,15 @@ fn retained_combat_policy_replays_at_a_non_aligned_measurement_bound() {
         .values
         .pop()
         .unwrap();
+    let recorded = "00ff".repeat(512);
     let audit = format!(
-        "{{event runtime-observation profile {{bytes 2 bound 327}}}}\n(recorded-workload 2 \"00ff\")\n{history}\n"
+        "{{event runtime-observation profile {{bytes 1024 bound 327 baseline {{calls 16}}}}}}\n(recorded-workload 1024 \"{recorded}\")\n{history}\n"
     );
     world
         .evaluate(&format!(
             "(def file-read (fn (_) {}))
              (def console-log (fn (_) nil))
+             (def clock-us (fn () 0))
              (def print-form (fn (_) \"retained lineage\"))
              (def check (fn (ok reason) (if ok #t (signal 'test/failure reason))))",
             Value::String(audit)

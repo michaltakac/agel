@@ -6,7 +6,9 @@ from pathlib import Path
 import re
 import runpy
 import sys
-from native_provider_support import judge_cost, judge_frames, judge_receipts_for_trace, verified_judge_ledger
+from native_provider_support import (
+    judge_cost, judge_frames, judge_receipts_for_trace, verified_judge_ledger, writer_usage_for_trace,
+)
 
 sys.path.insert(0, str(Path(__file__).with_name('osrs')))
 from test_support import combat_xp, combat_xp_saved, form, melee_failure_saved, melee_levels_saved, melee_xp
@@ -50,6 +52,7 @@ def load_arm(directory, policy, read_table):
     correct = exits[0] == '0'
     goal = manifest.get('goal_xp')
     charges = []
+    usage = []
     decision = policy
     if not correct:
         require(goal is not None and policy != 'transferred'
@@ -79,7 +82,7 @@ def load_arm(directory, policy, read_table):
         ledger, _ = verified_judge_ledger(directory)
         for receipt in judge_receipts_for_trace(ledger, trace):
             charges.append(('judge', judge_cost(receipt)))
-        writers = re.findall(r'^inference-bridge: started job \d+ provider codex ', trace, re.M)
+        writers, usage = writer_usage_for_trace(trace)
         require(writers, f'{directory}: no writer dispatch')
         charges.extend(('model', None) for _ in writers)
         decision = 'committed' if activated else 'refused-retained-fixed'
@@ -131,7 +134,7 @@ def load_arm(directory, policy, read_table):
             contract[key] = hashlib.sha256(source[begin:stop].encode()).hexdigest()
     contract['game_adapter'] = hashlib.sha256(source[start:end].encode()).hexdigest()
     contract.update(boot_identity(directory, read_table))
-    return contract, identity[1], int(timings[0]), charges, correct, decision
+    return contract, identity[1], int(timings[0]), charges, correct, decision, usage
 
 
 def main():
@@ -144,8 +147,8 @@ def main():
     if args.transfer and not args.melee:
         parser.error('--transfer applies to --melee; one-rat comparisons already use transfer')
     read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
-    fixed, fixed_account, fixed_time, fixed_charges, fixed_correct, fixed_decision = load_arm(args.fixed, 'fixed', read_table)
-    transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct, adaptive_decision = load_arm(
+    fixed, fixed_account, fixed_time, fixed_charges, fixed_correct, fixed_decision, _ = load_arm(args.fixed, 'fixed', read_table)
+    transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct, adaptive_decision, usage = load_arm(
         args.candidate, 'adaptive' if args.melee and not args.transfer else 'transferred', read_table)
     require(fixed == transfer, 'world, boot image, Agel executable, game adapter, or combat source differs')
     require(fixed_account != transfer_account, 'combat accounts must differ')
@@ -161,8 +164,12 @@ def main():
                           for kind, cost in charges)
         print(f"(def {arm} (dict 'arm '{arm} 'comparison comparison 'account '{arm}-account "
               f"'correct {'#t' if correct else '#f'} 'elapsed-us {elapsed} 'billing-complete #t 'charges (list {values})))")
-    print(f"(assoc (benchmark-pair fixed adaptive) 'policy-outcomes "
-          f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision}))")
+    usage_forms = ' '.join('nil' if call is None else
+                           f"(dict 'input {call[0]} 'cached-input {call[1] if call[1] is not None else 'nil'} 'output {call[2]})"
+                           for call in usage)
+    print(f"(assoc (assoc (benchmark-pair fixed adaptive) 'policy-outcomes "
+          f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision})) "
+          f"'writer-usage (benchmark-writer-usage (list {usage_forms})))")
 
 
 if __name__ == '__main__':

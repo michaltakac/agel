@@ -111,6 +111,30 @@ def judge_cost(receipt):
     return int(cost[1]) if cost else None
 
 
+def writer_usage_for_trace(trace):
+    jobs = re.findall(r'^inference-bridge: started job (\d+) provider codex ', trace, re.M)
+    receipts = {}
+    for line in trace.splitlines():
+        if not line.startswith('inference-bridge: writer usage '):
+            continue
+        receipt = re.fullmatch(
+            r'inference-bridge: writer usage job (\d+) (?:unavailable|input (\d+) cached-input (\d+|unknown) output (\d+))',
+            line)
+        if not receipt or receipt[1] not in jobs or receipt[1] in receipts:
+            raise ValueError('invalid or unmatched writer usage receipt')
+        usage = None
+        if receipt[2] is not None:
+            inputs, outputs = int(receipt[2]), int(receipt[4])
+            cached = None if receipt[3] == 'unknown' else int(receipt[3])
+            if cached is not None and cached > inputs:
+                raise ValueError('cached writer tokens exceed input tokens')
+            usage = (inputs, cached, outputs)
+        receipts[receipt[1]] = usage
+    if len(set(jobs)) != len(jobs):
+        raise ValueError('duplicate writer dispatch')
+    return jobs, [receipts.get(job) for job in jobs]
+
+
 def decode_judge_ledger(disk, directory, secret, live, required=True):
     frames = judge_frames(disk)
     framed = directory / 'judge.frames'

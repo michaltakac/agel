@@ -1,11 +1,31 @@
 (module agel/benchmark
   (import agel/sequence)
-  (export benchmark-run benchmark-pair benchmark-transfer)
+  (export benchmark-run benchmark-pair benchmark-transfer benchmark-writer-usage)
 
   (def require
     (fn (ok reason) (if ok #t (signal 'benchmark/invalid reason))))
   (def natural?
     (fn (value) (if (= (type-of value) 'int) (< -1 value) #f)))
+
+  (def add-writer-usage
+    (fn (totals usage)
+      (let ((calls (+ (get totals 'calls) 1)))
+        (if (= usage nil) (assoc totals 'calls calls)
+          (let ((input (get usage 'input)) (cached (get usage 'cached-input)) (output (get usage 'output)))
+            (require (if (natural? input) (natural? output) #f) "invalid writer usage")
+            (require (if (= cached nil) #t (if (natural? cached) (< (- cached 1) input) #f))
+              "invalid cached writer usage")
+            (dict 'calls calls
+                  'metered (+ (get totals 'metered) 1)
+                  'cache-metered (+ (get totals 'cache-metered) (if (= cached nil) 0 1))
+                  'known-input (+ (get totals 'known-input) input)
+                  'known-cached-input (+ (get totals 'known-cached-input) (if (= cached nil) 0 cached))
+                  'known-output (+ (get totals 'known-output) output)))))))
+  (def benchmark-writer-usage
+    (fn (receipts)
+      (foldl add-writer-usage
+        (dict 'calls 0 'metered 0 'cache-metered 0 'known-input 0 'known-cached-input 0 'known-output 0)
+        receipts)))
 
   (def add-charge
     (fn (totals charge)

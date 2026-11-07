@@ -34,4 +34,10 @@
 (check (rejected (fn () (benchmark-transfer prior (assoc fresh 'account 'candidate)))) "transfer reused its account")
 (check (rejected (fn () (benchmark-transfer prior (assoc fresh 'initial-state (dict 'policy "v1"))))) "transfer lost retained state")
 (check (rejected (fn () (benchmark-transfer prior (dissoc fresh 'fresh-account)))) "transfer freshness unverified")
+(check (= (benchmark-writer-usage (list (dict 'input 30 'cached-input 8 'output 12)
+                                      nil (dict 'input 20 'cached-input nil 'output 4)))
+          (dict 'calls 3 'metered 2 'cache-metered 1 'known-input 50 'known-cached-input 8 'known-output 16))
+  "writer totals retain coverage of unavailable receipts and missing cache counts")
+(check (rejected (fn () (benchmark-writer-usage (list (dict 'input 2 'cached-input 3 'output 4)))))
+  "cached writer tokens must be a subset of input")
 #t
