@@ -1,7 +1,8 @@
 use agel_core::{Digest, ModelRequest};
 use agel_effects::byte_carrier::Carrier;
 use agel_model::{
-    guest_journal::GuestJudgeJournal, CodexProvider, CommandLimits, JevProvider, ProviderRegistry,
+    guest_journal::GuestJudgeJournal, journal::FileJudgeJournal, CodexProvider, CommandLimits,
+    JevProvider, ProviderRegistry,
 };
 use std::{
     env,
@@ -249,10 +250,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let wire = Wire::connect(&args[0])?;
     let transport = Arc::clone(&wire);
-    let journal = Arc::new(GuestJudgeJournal::new(move |command| {
-        transport.ledger(command)
-    }));
-    let mut limits = CommandLimits::new(PathBuf::from(&args[1]));
+    let workspace = PathBuf::from(&args[1]);
+    let recovery = Arc::new(FileJudgeJournal::new(workspace.join("judge-recovery.agel")));
+    let journal = Arc::new(
+        GuestJudgeJournal::new(move |command| transport.ledger(command)).with_recovery(recovery),
+    );
+    let mut limits = CommandLimits::new(workspace);
     limits.timeout = Duration::from_secs(90);
     limits.max_output_bytes = 64 * 1024;
     let mut providers = ProviderRegistry::default();

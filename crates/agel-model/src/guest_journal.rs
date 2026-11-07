@@ -1,11 +1,13 @@
 use crate::journal::JudgeJournal;
 use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::Arc;
 
 type Exchange = dyn Fn(&str) -> Result<u64, String> + Send + Sync;
 
 /// Framed guest storage over an acknowledged byte exchange.
 pub struct GuestJudgeJournal {
     exchange: Box<Exchange>,
+    recovery: Option<Arc<dyn JudgeJournal>>,
     failed: AtomicBool,
     retry_allowed: AtomicBool,
     token: AtomicU64,
@@ -21,11 +23,17 @@ impl GuestJudgeJournal {
     pub fn new(exchange: impl Fn(&str) -> Result<u64, String> + Send + Sync + 'static) -> Self {
         Self {
             exchange: Box::new(exchange),
+            recovery: None,
             failed: AtomicBool::new(false),
             retry_allowed: AtomicBool::new(true),
             token: AtomicU64::new(0),
         }
     }
+    pub fn with_recovery(mut self, recovery: Arc<dyn JudgeJournal>) -> Self {
+        self.recovery = Some(recovery);
+        self
+    }
+
     pub fn stop_retries(&self) {
         self.retry_allowed
             .store(false, std::sync::atomic::Ordering::Release);
@@ -97,6 +105,9 @@ impl JudgeJournal for GuestJudgeJournal {
             if token == 0 || token >= (1 << 62) {
                 return Err("judge ledger has no reservation".into());
             }
+            if let Some(recovery) = &self.recovery {
+                recovery.append(bytes)?;
+            }
             for chunk in crate::journal::frames(bytes)? {
                 if chunk.len() != 512
                     || chunk[511] != b'\n'
@@ -163,6 +174,37 @@ mod tests {
         assert!(values[1].starts_with(":ledger 7 AGELJ1 "));
         assert_eq!(values.last().unwrap(), ":ledger-release 7");
         journal.check().unwrap();
+    }
+
+    #[test]
+    fn result_reaches_recovery_when_guest_transport_drops() {
+        #[derive(Debug, Default)]
+        struct Recovery(Mutex<Vec<u8>>);
+
+        impl JudgeJournal for Recovery {
+            fn append(&self, bytes: &[u8]) -> Result<(), String> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(())
+            }
+        }
+
+        let recovery = Arc::new(Recovery::default());
+        let frames = AtomicU64::new(0);
+        let journal = GuestJudgeJournal::new(move |command| {
+            if command.starts_with(":ledger-reserve ") {
+                Ok(7)
+            } else if frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+                Ok(512)
+            } else {
+                Err("guest disconnected".into())
+            }
+        })
+        .with_recovery(recovery.clone());
+        journal.reserve(4096).unwrap();
+        journal.append(b"start\n").unwrap();
+        assert!(journal.append(b"result\n").is_err());
+        assert!(journal.check().is_err());
+        assert_eq!(*recovery.0.lock().unwrap(), b"start\nresult\n");
     }
 
     #[test]

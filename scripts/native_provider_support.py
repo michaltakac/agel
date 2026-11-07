@@ -84,6 +84,9 @@ def verified_judge_ledger(directory):
         records = decode_judge_frames(path)
     if records != (directory / 'judge.agel').read_text():
         raise ValueError(f'{directory}: judge records differ from the guest journal')
+    recovery = directory / 'judge-recovery.agel'
+    if recovery.exists() and recovery.read_text() != records:
+        raise ValueError(f'{directory}: host recovery records differ from the guest journal')
     return records, frames
 
 
@@ -142,6 +145,13 @@ def decode_judge_ledger(disk, directory, secret, live, required=True):
     records = decode_judge_frames(framed)
     assert secret not in records
     (directory / 'judge.agel').write_text(records)
+    recovery = directory / 'judge-recovery.agel'
+    if recovery.exists():
+        recovered = recovery.read_text()
+        assert secret not in recovered
+        if recovered != records:
+            print('Judge recovery file differs from the guest ledger:', recovery, flush=True)
+            assert not required, 'guest ledger did not acknowledge all recovery records'
     receipts = re.findall(r'^\(judge-result .*$', records, re.M)
     costs = [cost for receipt in receipts if (cost := judge_cost(receipt)) is not None]
     calls = len(re.findall(r'^\(judge-start ', records, re.M))
