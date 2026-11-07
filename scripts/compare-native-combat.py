@@ -42,11 +42,39 @@ def installed_client(directory, read_table):
     return source.decode()
 
 
+def verify_optimizer_approval(directory, trace, receipts):
+    commits = list(re.finditer(r'^native-opt: policy committed after text judgment and measured replay$', trace, re.M))
+    probes = list(re.finditer(r'^native-opt: probe \{passed #t .* active 1\}$', trace, re.M))
+    require(len(commits) == len(probes) == 1 and probes[0].end() < commits[0].start(),
+            f'{directory}: expected one successful measured probe before commit')
+    read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
+    source = installed_client(directory, read_table)
+    thresholds = re.findall(r"'max-attempts \d+ 'threshold (\d+) 'proposal-provider 'writer", source)
+    require(len(thresholds) == 1 and receipts, f'{directory}: missing optimizer threshold or judge receipt')
+    job = re.match(r'^\(judge-result id "[^"]*/(\d+)"', receipts[-1])
+    require(job and re.search(rf'^inference-bridge: completed job {job[1]} at-ms \d+ status ok$',
+                              trace[:probes[0].start()], re.M),
+            f'{directory}: no completed judge dispatch before the measured probe')
+    response = re.search(r' status 200 .*? response ("(?:\\.|[^"\\])*")\)$', receipts[-1])
+    require(response, f'{directory}: final judge response was not successful')
+    answers = json.loads(json.loads(response[1])).get('answers', {})
+    patch, reason = answers.get('patch', {}), answers.get('reason', {})
+    probability = patch.get('noul')
+    require(type(probability) in (float, int) and 0 <= probability <= 1
+            and int(probability * 1000 + 0.5) >= int(thresholds[0])
+            and patch.get('type') == 'noul' and reason.get('type') == 'choice'
+            and reason.get('choice') == 'none',
+            f'{directory}: final protected judge receipt did not approve the edit')
+
+
 def optimizer_charges(directory, trace):
     require((directory / 'mode.txt').read_text().strip() == 'live',
             f'{directory}: adaptive scoring requires live providers')
     ledger, _ = verified_judge_ledger(directory)
-    charges = [('judge', judge_cost(receipt)) for receipt in judge_receipts_for_trace(ledger, trace)]
+    receipts = judge_receipts_for_trace(ledger, trace)
+    if 'native-opt: policy committed after text judgment and measured replay' in trace:
+        verify_optimizer_approval(directory, trace, receipts)
+    charges = [('judge', judge_cost(receipt)) for receipt in receipts]
     writers, usage = writer_usage_for_trace(trace)
     require(writers, f'{directory}: no writer dispatch')
     charges.extend(('model', None) for _ in writers)
@@ -308,9 +336,6 @@ def optimizer_score(directory):
     activated = 'native-opt: policy committed after text judgment and measured replay' in trace
     refused = 'native-opt: last refusal ' in trace
     require(activated != refused, f'{directory}: no resolved optimizer decision')
-    if activated:
-        require(re.search(r'^native-opt: probe \{passed #t ', trace, re.M),
-                f'{directory}: missing successful measured probe')
     charges, usage = optimizer_charges(directory, trace)
     clocks = re.findall(r'^native-opt: task-us (\d+)$', trace, re.M)
     require(len(clocks) <= 1, f'{directory}: ambiguous optimizer clock')
