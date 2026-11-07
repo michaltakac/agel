@@ -16,7 +16,8 @@ import tempfile
 import time
 import graphical_console as console
 
-sys.path.insert(0, str(Path(__file__).with_name("osrs")))
+script_dir = Path(__file__).resolve().parent
+sys.path.insert(0, str(script_dir / "osrs"))
 from test_support import combat_xp, combat_xp_saved, craft_saved, craft_stock, economy_saved, melee_failure_saved, melee_levels_saved, melee_xp, quest_saved, quest_unfinished
 
 parser=argparse.ArgumentParser(description=__doc__)
@@ -77,7 +78,7 @@ if shared_carrier:
 else:
     bridge_timeout = 1800 if options.quest else 960
 if editing:print('Providers:', 'real' if options.live else 'fixtures; writer delayed 20 seconds', flush=True)
-manifest=json.loads(subprocess.run(['python3','scripts/osrs/world_manifest.py'],capture_output=True,text=True,check=True).stdout)
+manifest=json.loads(subprocess.run(['python3',str(script_dir / 'osrs/world_manifest.py')],capture_output=True,text=True,check=True).stdout)
 manifest['scope']='native OS login, live observations, seeded general tool repair and saved movement; no Exo task score' if options.repair else 'native OS login, live observations and movement smoke test; no Exo task score'
 if options.optimize:
     manifest['scope']='native measured byte policy optimization, recorded byte replay and saved movement; no Exo task score'
@@ -513,14 +514,14 @@ if options.transfer_from:
         assert hashlib.file_digest(image,'sha256').hexdigest() == donor_hash
 else:
     disk=console.prepared_image(options.boot_image,directory,blank_sectors=1024)
-for cmd in [['python3','scripts/install-program.py',disk,'agel',str(options.agel_executable)],
-            ['python3','scripts/install-program.py','--region','data',disk,'client',str(script)]]:
+for cmd in [['python3',str(script_dir / 'install-program.py'),disk,'agel',str(options.agel_executable)],
+            ['python3',str(script_dir / 'install-program.py'),'--region','data',disk,'client',str(script)]]:
     subprocess.run(cmd,check=True,capture_output=True)
 
 def capture_account(predicate, varps, filename='saved-account.txt'):
     compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
     build=directory/'oracle';build.mkdir(exist_ok=True)
-    subprocess.run([str(compiler) if compiler.is_file() else 'javac','-d',str(build),'scripts/osrs/AccountState.java'],check=True,capture_output=True)
+    subprocess.run([str(compiler) if compiler.is_file() else 'javac','-d',str(build),str(script_dir / 'osrs/AccountState.java')],check=True,capture_output=True)
     subprocess.run(['docker','cp',str(build/'AccountState.class'),'agel-osrs-world:/tmp/AccountState.class'],check=True,capture_output=True)
     deadline=time.monotonic()+45
     while True:

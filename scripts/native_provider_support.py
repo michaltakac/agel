@@ -68,7 +68,9 @@ def judge_frames(disk):
 
 
 def decode_judge_frames(framed):
-    decoded = subprocess.run(['target/debug/examples/journal', str(framed)], capture_output=True, text=True, check=True)
+    pinned = Path(__file__).with_name('journal-reader')
+    reader = pinned if pinned.is_file() else Path('target/debug/examples/journal')
+    decoded = subprocess.run([str(reader), str(framed)], capture_output=True, text=True, check=True)
     if decoded.stderr.strip() != 'journal health: (0 #f)':
         raise ValueError('incomplete or corrupt guest judge journal')
     return decoded.stdout

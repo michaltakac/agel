@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.114.** Native one-rat transfer pairs use paced
-keepalives on both arms. See the [release notes](docs/release-v0.3.114.md).
+**Current release: v0.3.115.** Native benchmark pairs pin the host harness
+and journal reader. See the [release notes](docs/release-v0.3.115.md).
+
+v0.3.114 paces keepalives in native one-rat transfer pairs.
+See the [release notes](docs/release-v0.3.114.md).
 
 v0.3.113 reduces the byte encoder’s evaluation steps.
 See the [release notes](docs/release-v0.3.113.md).

@@ -19,6 +19,12 @@ def require(condition, message):
         raise SystemExit(message)
 
 
+def saved_outcome(directory):
+    path = directory / 'saved-account.txt'
+    require(path.is_file(), f'{directory}: no server outcome was captured; this run cannot be scored')
+    return path.read_text()
+
+
 def boot_identity(directory, read_table):
     disk = directory / 'disk.img'
     program = next(row for row in read_table(disk) if row['name'] == 'agel')
@@ -99,7 +105,7 @@ def adaptation_evidence(directory, trace, correct):
 def load_arm(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
-    saved = (directory / 'saved-account.txt').read_text()
+    saved = saved_outcome(directory)
     require(manifest['encoder_policy'] == policy, f'{directory}: unexpected policy')
     exits = re.findall(r'^process agel exited with status (\d+)$', trace, re.M)
     require(len(exits) == 1, f'{directory}: expected one terminal guest exit')
@@ -181,7 +187,7 @@ def load_arm(directory, policy, read_table):
 def load_economy(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
-    saved = (directory / 'saved-account.txt').read_text()
+    saved = saved_outcome(directory)
     require(manifest['encoder_policy'] == policy, f'{directory}: unexpected economy policy')
     exits = re.findall(r'^process agel exited with status (\d+)$', trace, re.M)
     require(len(exits) == 1, f'{directory}: expected one terminal guest exit')
@@ -229,7 +235,7 @@ def load_economy(directory, policy, read_table):
 def load_quest(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
-    saved = (directory / 'saved-account.txt').read_text()
+    saved = saved_outcome(directory)
     require(manifest['encoder_policy'] == policy, f'{directory}: unexpected quest policy')
     require(manifest['scope'] == "native Cook's Assistant with gathered ingredients on a fresh normal account",
             f'{directory}: quest benchmark requires a fresh gathering run')
@@ -285,7 +291,7 @@ def load_craft(directory, policy, read_table):
     require(len(exits) == 1, f'{directory}: expected one terminal guest exit')
     correct = exits[0] == '0'
     before = craft_stock((directory / 'before-account.txt').read_text())
-    saved = (directory / 'saved-account.txt').read_text()
+    saved = saved_outcome(directory)
     clocks = re.findall(r'^native-craft: task-us ([1-9]\d*)$', trace, re.M)
     require(before is not None and len(clocks) == 1, f'{directory}: missing crafting stock or task clock')
     if correct:
@@ -372,7 +378,7 @@ def verify_transfer_donor(donor, recipient, evaluation_accounts):
     require(frames and frames == judge_frames(recipient / 'disk.img'),
             'recipient does not retain the donor judge journal')
     trace = (donor / 'serial.log').read_text()
-    saved = (donor / 'saved-account.txt').read_text()
+    saved = saved_outcome(donor)
     identity = re.search(r'^account=(\d+) character=\d+ rights= x=\d+ z=\d+ level=0 xp_rate_in_hundreds=100$',
                          saved, re.M)
     require(identity and identity[1] not in evaluation_accounts,

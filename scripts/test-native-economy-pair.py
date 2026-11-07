@@ -11,7 +11,7 @@ import tempfile
 
 
 def run_arm(output, runtime, name, options):
-    command = [sys.executable, 'scripts/test-native-network.py', *runtime, *options]
+    command = [sys.executable, str(output / 'harness/test-native-network.py'), *runtime, *options]
     evidence = None
     with (output / f'{name}.log').open('w', buffering=1) as log, subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -25,6 +25,23 @@ def run_arm(output, runtime, name, options):
     if evidence is None:
         raise SystemExit(f'{name} exited {status} before creating evidence')
     return evidence
+
+
+def pin_harness(output):
+    harness = output / 'harness'
+    (harness / 'osrs').mkdir(parents=True)
+    digests = {}
+    for name in ('test-native-network.py', 'compare-native-combat.py', 'native_provider_support.py',
+                 'graphical_console.py', 'install-program.py', 'osrs/test_support.py',
+                 'osrs/world_manifest.py', 'osrs/AccountState.java'):
+        copy = harness / name
+        shutil.copy2(Path(__file__).resolve().parent / name, copy)
+        digests[f'harness/{name}'] = hashlib.sha256(copy.read_bytes()).hexdigest()
+    reader = harness / 'journal-reader'
+    shutil.copy2('target/debug/examples/journal', reader)
+    with reader.open('rb') as copied:
+        digests['harness/journal-reader'] = hashlib.file_digest(copied, 'sha256').hexdigest()
+    return digests
 
 
 def pin_transfer(output, evidence):
@@ -70,7 +87,7 @@ def main():
     if args.transfer:
         donor, boot_image = pin_transfer(output, args.transfer)
     runtime = []
-    digests = {}
+    digests = pin_harness(output)
     for option, source in (
         ('--boot-image', boot_image),
         ('--agel-executable', 'boot/posix/target/x86_64-unknown-none/release/agel'),
@@ -85,13 +102,15 @@ def main():
     if donor:
         with (donor / 'disk.img').open('rb') as copied:
             digests['donor/disk.img'] = hashlib.file_digest(copied, 'sha256').hexdigest()
-    (output / 'runtime.json').write_text(json.dumps(digests, indent=2) + '\n')
     sources = output / 'sources'
     for area in (Path('crates/agel-stdlib'), Path('examples'), Path('examples/osrs')):
         destination = sources / area
         destination.mkdir(parents=True, exist_ok=True)
         for source in area.glob('*.agel'):
-            shutil.copy2(source, destination / source.name)
+            copy = destination / source.name
+            shutil.copy2(source, copy)
+            digests[str(copy.relative_to(output))] = hashlib.sha256(copy.read_bytes()).hexdigest()
+    (output / 'runtime.json').write_text(json.dumps(digests, indent=2) + '\n')
     runtime.extend(['--source-root', str(sources)])
     fixed_options, adaptive_options = [f'--{task}'], [f'--{task}', '--optimize', '--live']
     if donor:
@@ -103,7 +122,7 @@ def main():
     fixed = run_arm(output, runtime, 'fixed', fixed_options)
     adaptive = run_arm(output, runtime, 'adaptive', adaptive_options)
     scoring_options = ['--donor', str(donor)] if donor else [f'--{task}']
-    score = subprocess.check_output([sys.executable, 'scripts/compare-native-combat.py',
+    score = subprocess.check_output([sys.executable, str(output / 'harness/compare-native-combat.py'),
                                      *scoring_options, fixed, adaptive])
     (output / 'score.agel').write_bytes(score)
     print('Agel score input:', output / 'score.agel', flush=True)
