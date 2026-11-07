@@ -84,6 +84,7 @@ of complete OSRS parity.
 sh scripts/test-osrs-game.sh
 sh scripts/test-osrs-combat.sh
 sh scripts/test-osrs-mining.sh
+sh scripts/test-osrs-mining.sh --bronze
 sh scripts/test-osrs-crafting.sh
 sh scripts/test-osrs-crafting.sh --native
 sh scripts/test-native-network.sh --combat
@@ -150,7 +151,8 @@ saved XP matches the protocol observations at whole-XP precision. NPC removal
 and XP are the outcome signals used here. The crafting test verifies normal
 anvil manufacture from five staged bars and checks saved inventory and Smithing
 XP. The mining test walks a fresh normal account to the tutor, gets a pickaxe
-through dialogue, and verifies its first copper ore and Mining XP.
+through dialogue, and verifies its first copper ore and Mining XP. The
+bronze mode also mines tin and smelts both ores through the furnace menu.
 Maximum stats, training and material acquisition for the adamant recipe,
 quests, money-making and transfer still need their own scores.
 v0.3.17 connects a retained repair actor to polling inference and the native

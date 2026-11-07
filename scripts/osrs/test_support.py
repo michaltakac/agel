@@ -17,13 +17,13 @@ def form(value):
     return str(value)
 
 
-def evaluate(source, port=1):
+def evaluate(source, port=1, timeout=120):
     with tempfile.TemporaryDirectory(prefix="agel-login-", dir="target") as directory:
         path = Path(directory) / "probe.agel"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w") as output:
             output.write(source)
-        return subprocess.run([CLIENT, str(port), str(path)], capture_output=True, text=True, timeout=120)
+        return subprocess.run([CLIENT, str(port), str(path)], capture_output=True, text=True, timeout=timeout)
 
 
 def xtea(data, key, decrypt=False):

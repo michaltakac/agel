@@ -38,6 +38,10 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
       (def original (osrs-game-state '(1 2 3 4)))
       (def used (osrs-use-location original 2097 3188 3424))
       (def location-body (cdr sent))
+      (def operated (osrs-use-location-option original 24009 3226 3256 2))
+      (def second-location-body (cdr sent))
+      (def invalid-option (with-handler (* problem) (get problem 'kind)
+        (osrs-use-location-option original 24009 3226 3256 3)))
       (def opened (decode used 93 '(1 2 3 4 1 184 0)))
       (def clicked (osrs-click-interface opened 312 22))
       (def button-body (cdr sent))
@@ -55,7 +59,7 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
       (def continue-body (cdr sent))
       (def invalid-resume (with-handler (* problem) (get problem 'kind)
         (osrs-resume-dialogue closed 312 22 -1)))
-      (list location-body (osrs-open-interface? opened 312) button-body
+      (list location-body second-location-body invalid-option (osrs-open-interface? opened 312) button-body
         (osrs-open-interface? moved 312) (osrs-open-interface? closed 312) refused
         (osrs-open-interface? resynced 42) (osrs-open-interface? resynced 313)
         (osrs-open-interface? resynced 312) talk-body invalid-talk
@@ -63,6 +67,6 @@ fn clicks_require_an_observed_interface_and_encode_revision_241_actions() {
     "#, &options).unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("((96 13 177 8 0 12 116 0) #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface)")
+        Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface)")
     );
 }

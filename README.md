@@ -5,10 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.22.** Agel starts on a fresh RuneScape account,
-gets a bronze pickaxe through the mining tutor's dialogue, and mines its first
-copper ore. The server verifies the inventory and Mining XP.
-See the [release notes and evidence](docs/release-v0.3.22.md).
+**Current release: v0.3.23.** Agel starts on a fresh RuneScape account,
+gets a tutor pickaxe, mines copper and tin, and smelts its first bronze bar.
+The server verifies the consumed ores, finished bar and XP.
+See the [release notes and evidence](docs/release-v0.3.23.md).
 
 v0.3.21 forged an adamant platebody inside Agel OS with normal account rights.
 See the [staged crafting evidence](docs/release-v0.3.21.md).
