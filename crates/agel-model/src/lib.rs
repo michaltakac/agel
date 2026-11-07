@@ -209,6 +209,13 @@ pub struct CodexProvider {
     sandbox: ProcessSandbox,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CodexUsage {
+    pub input_tokens: u64,
+    pub cached_input_tokens: Option<u64>,
+    pub output_tokens: u64,
+}
+
 impl CodexProvider {
     pub fn new(executable: impl Into<PathBuf>, limits: CommandLimits) -> Self {
         let executable = executable.into();
@@ -228,14 +235,7 @@ impl CodexProvider {
     pub fn audit_log(&self) -> agel_effects::AuditLog {
         self.sandbox.audit_log()
     }
-}
-
-impl Provider for CodexProvider {
-    fn name(&self) -> &str {
-        "codex"
-    }
-
-    fn infer(&self, request: &ModelRequest) -> Result<String, ProviderError> {
+    fn exec(&self, request: &ModelRequest, json: bool) -> Result<String, ProviderError> {
         let mut args = vec![
             "exec".into(),
             "--ephemeral".into(),
@@ -251,6 +251,9 @@ impl Provider for CodexProvider {
         if let Some(model) = &self.model {
             args.extend(["--model".into(), model.clone()]);
         }
+        if json {
+            args.push("--json".into());
+        }
         args.push("-".into());
         run_command(
             &self.executable,
@@ -259,6 +262,67 @@ impl Provider for CodexProvider {
             request,
             &self.sandbox,
         )
+    }
+
+    pub fn infer_with_usage(
+        &self,
+        request: &ModelRequest,
+    ) -> Result<(String, Option<CodexUsage>), ProviderError> {
+        let output = self.exec(request, true)?;
+        let mut answer = None;
+        let mut usage = None;
+        let mut completed = false;
+        for line in output.lines().filter(|line| !line.trim().is_empty()) {
+            let event: serde_json::Value = serde_json::from_str(line)
+                .map_err(|_| ProviderError::Unexpected("invalid Codex JSON event".into()))?;
+            match event["type"].as_str() {
+                Some("item.completed") if event["item"]["type"] == "agent_message" => {
+                    answer = event["item"]["text"].as_str().map(str::to_owned);
+                }
+                Some("turn.completed") if !completed => {
+                    completed = true;
+                    let tokens = &event["usage"];
+                    usage = tokens["input_tokens"].as_u64().and_then(|input_tokens| {
+                        let cached = &tokens["cached_input_tokens"];
+                        let cached_input_tokens = cached.as_u64();
+                        if !cached.is_null()
+                            && !cached_input_tokens.is_some_and(|n| n <= input_tokens)
+                        {
+                            return None;
+                        }
+                        Some(CodexUsage {
+                            input_tokens,
+                            cached_input_tokens,
+                            output_tokens: tokens["output_tokens"].as_u64()?,
+                        })
+                    });
+                }
+                Some("turn.completed" | "turn.failed") => {
+                    return Err(ProviderError::Unexpected(
+                        "ambiguous Codex turn result".into(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if !completed {
+            return Err(ProviderError::Unexpected(
+                "missing Codex turn completion".into(),
+            ));
+        }
+        let answer =
+            answer.ok_or_else(|| ProviderError::Unexpected("missing Codex answer".into()))?;
+        Ok((answer, usage))
+    }
+}
+
+impl Provider for CodexProvider {
+    fn name(&self) -> &str {
+        "codex"
+    }
+
+    fn infer(&self, request: &ModelRequest) -> Result<String, ProviderError> {
+        self.exec(request, false)
     }
 
     fn audit_records(&self) -> Vec<AuditRecord> {
@@ -419,6 +483,30 @@ mod tests {
         assert!(output.contains("<--skip-git-repo-check><--cd>"));
         assert!(output.contains("<--model><gpt-test><->"));
         assert!(output.ends_with("PROMPT:explain (cons 'agent future)"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn codex_usage_comes_from_turn_completion_not_the_answer() {
+        let (directory, executable) = fixture(
+            r#"test "$*" != "${*%--json*}" || exit 2
+cat <<'JSON'
+{"type":"item.completed","item":{"type":"agent_message","text":"draft"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"final answer"}}
+{"type":"turn.completed","usage":{"input_tokens":30,"cached_input_tokens":8,"output_tokens":12}}
+JSON"#,
+        );
+        let provider = CodexProvider::new(&executable, CommandLimits::new(&directory));
+        let (answer, usage) = provider.infer_with_usage(&request("codex")).unwrap();
+        assert_eq!(answer, "final answer");
+        assert_eq!(
+            usage,
+            Some(CodexUsage {
+                input_tokens: 30,
+                cached_input_tokens: Some(8),
+                output_tokens: 12,
+            })
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

@@ -11,6 +11,7 @@ import tempfile
 
 def provider_environment(directory, live, delay=0, proposal=None):
     environment = dict(os.environ)
+    environment.pop('AGEL_CODEX_USAGE', None)
     if live:
         if Path('.env').is_file():
             for line in Path('.env').read_text().splitlines():
@@ -22,6 +23,7 @@ def provider_environment(directory, live, delay=0, proposal=None):
             raise RuntimeError('TYPESAFEAI_API_KEY is required for the real text judge')
         environment.pop('AGEL_CODEX_BIN', None)
         environment.pop('AGEL_CURL_BIN', None)
+        environment['AGEL_CODEX_USAGE'] = '1'
     else:
         environment['TYPESAFEAI_API_KEY'] = 'fixture-secret-never-a-model-name'
         writer = directory / 'codex-fixture'

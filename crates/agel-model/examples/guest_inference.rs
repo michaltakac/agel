@@ -200,6 +200,32 @@ fn request(id: u64, header: &str, body: &str) -> Result<ModelRequest, String> {
     })
 }
 
+fn infer(
+    providers: &ProviderRegistry,
+    metered_writer: Option<&CodexProvider>,
+    request: &ModelRequest,
+) -> Result<String, agel_model::ProviderError> {
+    let Some(writer) = metered_writer.filter(|_| request.provider == "codex") else {
+        return providers.infer(request);
+    };
+    let result = writer.infer_with_usage(request);
+    if let Ok((_, Some(usage))) = &result {
+        let cached = usage
+            .cached_input_tokens
+            .map_or("unknown".to_owned(), |n| n.to_string());
+        println!(
+            "inference-bridge: writer usage job {} input {} cached-input {cached} output {}",
+            request.id, usage.input_tokens, usage.output_tokens
+        );
+    } else {
+        println!(
+            "inference-bridge: writer usage job {} unavailable",
+            request.id
+        );
+    }
+    result.map(|(answer, _)| answer)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args.len() < 4 {
@@ -222,10 +248,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     limits.timeout = Duration::from_secs(90);
     limits.max_output_bytes = 64 * 1024;
     let mut providers = ProviderRegistry::default();
-    providers.register(CodexProvider::new(
+    let writer = CodexProvider::new(
         env::var("AGEL_CODEX_BIN").unwrap_or_else(|_| "codex".into()),
         limits.clone(),
-    ));
+    );
+    let metered_writer =
+        (env::var("AGEL_CODEX_USAGE").as_deref() == Ok("1")).then(|| Arc::new(writer.clone()));
+    providers.register(writer);
     providers.register(
         JevProvider::new(
             env::var("AGEL_CURL_BIN").unwrap_or_else(|_| "curl".into()),
@@ -322,11 +351,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             started.elapsed().as_millis()
                         );
                         let providers = Arc::clone(&providers);
+                        let metered_writer = metered_writer.clone();
                         let journal = Arc::clone(&journal);
                         let (sender, result) = mpsc::channel();
                         // Finish any reserved judge receipt before the bridge exits.
                         scope.spawn(move || {
-                            let outcome = providers.infer(&request);
+                            let outcome = infer(&providers, metered_writer.as_deref(), &request);
                             // A failed durable receipt never becomes an accepted model result.
                             let reply = match journal.check() {
                                 Ok(()) => outcome_reply(outcome),
@@ -337,7 +367,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         job = Some(Job { id, result });
                         Ok(format!("pending {id}"))
                     } else {
-                        let outcome = providers.infer(&request);
+                        let outcome = infer(&providers, metered_writer.as_deref(), &request);
                         journal.check()?;
                         Ok(outcome_reply(outcome))
                     }
