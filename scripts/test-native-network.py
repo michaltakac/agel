@@ -28,6 +28,7 @@ scenario.add_argument('--challenge', action='store_true')
 scenario.add_argument('--craft', action='store_true', help='forge staged adamant stock; use test-osrs-crafting.sh --native')
 parser.add_argument('--craft-fixture', help='dedicated staged account for --craft')
 parser.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
+parser.add_argument('--pace-combat', action='store_true', help='use a three-second keepalive interval in one-rat combat')
 scenario.add_argument('--repair', action='store_true', help='repair a general tool during the same native connection')
 parser.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
 parser.add_argument('--transfer-from', type=Path, help='resume a verified native combat policy on a fresh account from a donor evidence directory')
@@ -40,6 +41,8 @@ parser.add_argument('--source-root', type=Path, default=Path('.'))
 options=parser.parse_args()
 stdlib = options.source_root / 'crates/agel-stdlib'
 examples = options.source_root / 'examples'
+if options.pace_combat and not options.combat:
+    parser.error('--pace-combat requires --combat')
 if options.quest_resume and not options.quest:
     parser.error('--quest-resume requires --quest')
 if options.craft_fixture is not None and not (
@@ -83,6 +86,8 @@ if options.optimize:
 if options.combat:
     manifest['scope']='native one-rat combat on a fresh normal account'
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
+    if options.pace_combat:
+        manifest['keepalive_interval_us']=3_000_000
     manifest['guest_memory_mib']=1024
     manifest['evaluation_fuel']=250_000_000
 
@@ -258,7 +263,7 @@ else:
 '''
     if combat_workload or options.craft or options.economy or options.quest:
         source+="(import agel/record-chain) (def game (assoc game 'history-push record-chain-push))\n"
-    if melee is not None or options.economy or options.quest or options.craft:
+    if 'keepalive_interval_us' in manifest:
         source+=f"""(def game (assoc game 'maintenance
   (assoc (assoc (get game 'maintenance) 'clock-us clock-us)
     'keepalive-interval-us {manifest['keepalive_interval_us']})))

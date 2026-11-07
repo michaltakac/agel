@@ -95,7 +95,8 @@ def main():
     runtime.extend(['--source-root', str(sources)])
     fixed_options, adaptive_options = [f'--{task}'], [f'--{task}', '--optimize', '--live']
     if donor:
-        adaptive_options = ['--combat', '--transfer-from', str(donor)]
+        fixed_options.append('--pace-combat')
+        adaptive_options = ['--combat', '--pace-combat', '--transfer-from', str(donor)]
     if args.craft:
         fixed_options.extend(['--craft-fixture', args.craft[0]])
         adaptive_options.extend(['--craft-fixture', args.craft[1]])
