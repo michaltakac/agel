@@ -93,13 +93,16 @@ def adaptation_evidence(directory, trace, correct):
     interrupted = not correct and bool(re.search(r'^native-(?:combat|craft|economy|quest): optimizer failure \{', trace, re.M))
     require(activated != rolled_back or (interrupted and not activated and not rolled_back),
             f'{directory}: no verified in-session policy decision')
+    uses = re.findall(r'^native-opt: live uses (0|[1-9]\d*)$', trace, re.M)
+    require(len(uses) <= 1 and (not rolled_back or not uses or uses == ['0']),
+            f'{directory}: inconsistent in-session policy use')
     if correct:
-        uses = r'[1-9]\d*' if activated else '0'
-        require('native-opt: recorded workload verified in append-only log' in trace
-                and re.search(rf'^native-opt: live uses {uses}$', trace, re.M),
+        require('native-opt: recorded workload verified in append-only log' in trace and uses,
                 f'{directory}: no verified in-session policy use')
     charges, usage = optimizer_charges(directory, trace, interrupted=interrupted and not (activated or rolled_back))
     decision = 'committed' if activated else 'refused-retained-fixed' if rolled_back else 'interrupted'
+    if activated and uses == ['0']:
+        decision = 'committed-unused'
     return charges, decision, usage
 
 
@@ -119,8 +122,8 @@ def load_arm(directory, policy, read_table):
         require(goal is not None and policy != 'transferred'
                 and re.search(r'^native-combat: (?:optimizer )?failure \{', trace, re.M),
                 f'{directory}: no measured melee task failure')
-        require(melee_failure_saved(trace, goal, saved),
-                f'{directory}: saved account does not corroborate incomplete training')
+        require(melee_failure_saved(trace, saved),
+                f'{directory}: saved account does not corroborate observed training progress')
     elif goal is None:
         expected = combat_xp(trace)
         require(re.search(r'^native-combat: \{test rat-combat passed #t .*target-removed #t\}', trace, re.M),

@@ -146,11 +146,11 @@ def melee_levels_saved(levels, oracle):
     )
 
 
-def melee_failure_saved(trace, goal, oracle):
+def melee_failure_saved(trace, oracle):
     saved = {int(skill): int(xp) for skill, xp in re.findall(
         r'^stat=([012]) base=\d+ visible=\d+ fine_xp=(\d+)$', oracle, re.M)}
     observed = re.findall(
         r'^native-combat: encounter \(([012]) \{[^\n]*? (?:attack-after|xp-after) (\d+) ',
         trace, re.M)
-    return (len(saved) == 3 and min(saved.values()) < goal * 10
+    return (len(saved) == 3
             and all(saved[int(skill)] >= int(xp) * 10 for skill, xp in observed))

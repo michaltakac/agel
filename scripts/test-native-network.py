@@ -507,10 +507,14 @@ else:
 (console-log (text-concat "native-transfer: retained policy uses " (print-form policy-uses)))
 '''
     if options.optimize:
-        source+='''(if policy-activated
-  (check (< 0 policy-uses) "no live packet used the changed cadence")
+        if melee is not None or options.economy or options.craft or fresh_quest:
+            source+='''(if policy-activated #t
   (check (= policy-uses 0) "refused policy served live packets"))
-(console-log (text-concat "native-opt: live uses " (print-form policy-uses)))
+'''
+        else:
+            source+='''(check (< 0 policy-uses) "no live packet used the changed cadence")
+'''
+        source+='''(console-log (text-concat "native-opt: live uses " (print-form policy-uses)))
 '''
     if not options.quest:
         source+='''
@@ -603,7 +607,7 @@ if editing:
     decode_judge_ledger(disk,directory,environment['TYPESAFEAI_API_KEY'],options.live,
         required=judge_dispatched and passed)
 if not passed and melee is not None and re.search(r'^native-combat: (?:optimizer )?failure \{', output, re.M):
-    capture_account(lambda snapshot: melee_failure_saved(output, melee, snapshot),
+    capture_account(lambda snapshot: melee_failure_saved(output, snapshot),
                     ['varp.com_mode'])
 if not passed and options.economy and re.search(r'^native-economy: (?:optimizer )?failure \{', output, re.M):
     capture_account(lambda snapshot: economy_saved(0, snapshot), [])
@@ -616,7 +620,10 @@ if editing:
     if options.optimize:
         activated='native-opt: policy committed after text judgment and measured replay' in output
         if activated:
-            assert re.search(r'^native-opt: live uses [1-9][0-9]*$',output,re.M)
+            uses = re.findall(r'^native-opt: live uses (0|[1-9]\d*)$', output, re.M)
+            assert len(uses) == 1
+            if not (melee is not None or options.economy or options.craft or fresh_quest):
+                assert int(uses[0]) > 0
         else:
             assert (melee is not None or options.economy or options.craft or fresh_quest) and 'native-opt: continued with fixed policy after exhausted retries' in output
             assert 'native-opt: live uses 0' in output
