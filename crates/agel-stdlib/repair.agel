@@ -138,13 +138,16 @@
               (if (= (type-of result) 'map) (assoc result 'probe probe) result))
             (dict 'passed #t 'reason (get probe 'reason) 'probe probe)))
         activate)))
+  (def candidate-cases
+    (fn (state)
+      (append (prediction-cases (get state 'examples) (get (get state 'candidate) 'predictions))
+        (append (get state 'examples) (get state 'held-out)))))
   (def apply-judgment
     (fn (self state receipt probe)
       (let ((before (read-one (get state 'before-text))))
         (let ((versions (evolution-edit-with-activation (get state 'versions) (object-kind state) (get state 'tool)
                 before (get (get state 'candidate) 'after)
-                (append (prediction-cases (get state 'examples) (get (get state 'candidate) 'predictions))
-                  (append (get state 'examples) (get state 'held-out))) (fn (request) receipt)
+                (candidate-cases state) (fn (request) receipt)
                 (activation-with-probe (get state 'activate) probe))))
           (let ((next (assoc state 'versions versions)))
             (if (= (evolution-current versions (object-kind state) (get state 'tool))
@@ -161,9 +164,11 @@
             (if (get state 'probe) (= (nth message 1) (get state 'pending)) #f) #f)
         (let ((result (nth message 2)))
           (if (= (type-of (get result 'reason)) 'string)
-            (let ((next (note state (dict 'event 'activation-probe 'result result))))
-              (if (= (get result 'passed) #t) (apply-judgment self next (get state 'approved-receipt) result)
-                (retry self next (get result 'reason)))) state)) state)))
+            (if (= (get result 'stage) 'recorded-replay)
+              (retry self (note state (dict 'event 'recorded-replay 'result result)) (get result 'reason))
+              (let ((next (note state (dict 'event 'activation-probe 'result result))))
+                (if (= (get result 'passed) #t) (apply-judgment self next (get state 'approved-receipt) result)
+                  (retry self next (get result 'reason))))) state)) state)))
   (def result
     (fn (self state message)
       (if (if (= (nth message 1) (get state 'pending))
@@ -226,17 +231,22 @@
               (if (< 0 remaining) #t (signal 'repair/scheduler "repair actor did not complete"))
               (run 1) (wait-agent-change agent before (- remaining 1))) (get info 'heap))
           (signal 'repair/agent "repair actor stopped")))))
-  (def external-advance
+  (def external-probe
     (fn (agent state append-record)
-      (begin
-        (if (get state 'probe)
+      (let ((replay (evolution-replay (get (get state 'candidate) 'after) (candidate-cases state))))
+        (append-record (dict 'event 'recorded-replay 'id (get state 'pending) 'result replay))
+        (if (= (get replay 'passed) #t)
           (let ((result (with-handler (* problem) (dict 'passed #f 'reason (get problem 'message))
                           (let ((receipt ((get state 'probe) state)))
                             (if (= (type-of (get receipt 'reason)) 'string) receipt
                               (dict 'passed #f 'reason "activation probe omitted its reason"))))))
-            (begin
-              (append-record (dict 'event 'activation-probe 'id (get state 'pending) 'result result))
-              (send agent (list 'repair/probe-result (get state 'pending) result))))
+            (append-record (dict 'event 'activation-probe 'id (get state 'pending) 'result result))
+            (send agent (list 'repair/probe-result (get state 'pending) result)))
+          (send agent (list 'repair/probe-result (get state 'pending) (assoc replay 'stage 'recorded-replay)))))))
+  (def external-advance
+    (fn (agent state append-record)
+      (begin
+        (if (get state 'probe) (external-probe agent state append-record)
           (send agent '(repair/advance)))
         (wait-agent-change agent state 8192))))
   (def repair-agent-exchange

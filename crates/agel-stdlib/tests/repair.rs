@@ -473,6 +473,39 @@ fn batches_report_unexecuted_work_and_use_the_repaired_plan() {
 }
 
 #[test]
+fn recorded_replay_refuses_before_external_probe() {
+    let (mut world, options) = setup();
+    let result = world
+        .evaluate_with(
+            r#"
+            (def probe-calls 0)
+            (def audit-events nil)
+            (def subject (make-repair-agent "replay-before-probe"
+              (assoc (assoc (assoc (repair-state worker) 'model-dispatch 'external) 'defer-activation #t)
+                'probe (fn (_) (begin (def probe-calls (+ probe-calls 1))
+                  (dict 'passed #t 'reason "unexpected probe")))) nil))
+            (def infer (fn (provider _)
+              (if (= provider 'writer)
+                "(dict 'diagnosis \"returns a constant\" 'after '(fn (n size) 2) 'predictions '(2 0))"
+                "patch noul 950 reason choice 5 none 900 900 25 25 25 25")))
+            (def audit (fn (record) (def audit-events (cons (get record 'event) audit-events))))
+            (send subject '(repair/start)) (run)
+            (repair-agent-exchange subject infer audit)
+            (repair-agent-exchange subject infer audit)
+            (repair-agent-exchange subject infer audit)
+            (def state (repair-state subject))
+            (list probe-calls (car audit-events) (get state 'status) (get state 'reason)
+              (evolution-current (get state 'versions) 'cell 'batches))"#,
+            &options,
+        )
+        .unwrap();
+    assert_eq!(
+        result.values.last().unwrap().to_string(),
+        r#"(0 recorded-replay proposing "recorded step differs" 1)"#
+    );
+}
+
+#[test]
 fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
     let (mut world, options) = setup();
     let source = format!(
@@ -481,7 +514,8 @@ fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
       (def probe-calls 0)
       (def candidate (fn (provider prompt) {}))
       (def judge (fn (provider prompt) "patch noul 950 reason choice 5 none 900 900 25 25 25 25"))
-      (def audit (fn (record) #t))
+      (def audit-events nil)
+      (def audit (fn (record) (def audit-events (cons (get record 'event) audit-events))))
       (def subject (make-repair-agent "measured-repair"
         (assoc (assoc (assoc (repair-state worker) 'model-dispatch 'external) 'defer-activation #t)
           'probe (fn (state) (begin (def probe-calls (+ probe-calls 1))
@@ -537,12 +571,12 @@ fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
       (def activation (get (get (get versions 'versions) 2) 'activation))
       (list (get (repair-state subject) 'status) probe-calls
         (evolution-current versions 'cell 'batches) (evolution-valid? versions)
-        (get (get activation 'probe) 'reason))"#,
+        (get (get activation 'probe) 'reason) (car audit-events) (car (cdr audit-events)))"#,
             &options,
         )
         .unwrap();
     assert_eq!(
         result.values.last().unwrap().to_string(),
-        "(done 2 2 #t \"measured replay passed\")"
+        "(done 2 2 #t \"measured replay passed\" activation-probe recorded-replay)"
     );
 }

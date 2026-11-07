@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.102.** A host recovery journal preserves judge receipts
-when the guest loses power. See the [release notes](docs/release-v0.3.102.md).
+**Current release: v0.3.103.** Repair candidates must pass recorded replay
+before an external activation probe. See the [release notes](docs/release-v0.3.103.md).
+
+v0.3.102 preserves judge receipts in a host recovery journal.
+See the [release notes](docs/release-v0.3.102.md).
 
 v0.3.101 records optimizer refusals and projects cadence from the measured bound.
 See the [release notes](docs/release-v0.3.101.md).
