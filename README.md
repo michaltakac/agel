@@ -5,8 +5,12 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.199.** The repair driver can stop between proposal,
-judgment, and replay. See the [release notes](docs/release-v0.3.199.md).
+**Current release: v0.3.200.** A second native one-rat pair records the
+gap between replay savings and live use. See the
+[release notes](docs/release-v0.3.200.md).
+
+v0.3.199 lets the repair driver stop between proposal, judgment, and
+replay. See the [release notes](docs/release-v0.3.199.md).
 
 v0.3.198 stops optimizer preparation when an observation proves the task
 complete. See the [release notes](docs/release-v0.3.198.md).
