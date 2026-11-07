@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.105.** Native runs leave time to drain judge receipts
-after a bridge deadline. See the [release notes](docs/release-v0.3.105.md).
+**Current release: v0.3.106.** The native economy client can observe game
+packets while waiting for inference. See the [release notes](docs/release-v0.3.106.md).
+
+v0.3.105 leaves time to drain judge receipts after a bridge deadline.
+See the [release notes](docs/release-v0.3.105.md).
 
 v0.3.104 checks the origin of external repair completion and probe messages.
 See the [release notes](docs/release-v0.3.104.md).

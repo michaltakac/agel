@@ -2,7 +2,7 @@
 use std::{
     fmt::Write as _,
     fs::File,
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     net::{SocketAddr, TcpStream},
     time::Duration,
 };
@@ -60,6 +60,18 @@ impl Carrier {
                 self.stream = None;
                 Ok("ok".into())
             }
+            "read-ready" if argument.is_empty() => {
+                let stream = self.stream.as_ref().ok_or("stream closed")?;
+                stream.set_nonblocking(true).map_err(|e| e.to_string())?;
+                let readiness = stream.peek(&mut [0]);
+                stream.set_nonblocking(false).map_err(|e| e.to_string())?;
+                match readiness {
+                    Ok(0) => Ok("ok eof".into()),
+                    Ok(_) => Ok("ok ready".into()),
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => Ok("ok idle".into()),
+                    Err(error) => Err(error.to_string()),
+                }
+            }
             "read" | "entropy" => {
                 let size: usize = argument.parse().map_err(|_| "invalid byte count")?;
                 if !(1..=256).contains(&size) {
@@ -115,8 +127,17 @@ mod tests {
         };
         assert_eq!(carrier.exchange("AGEL-BYTES/1 open").unwrap(), "ok");
         assert_eq!(
+            carrier.exchange("AGEL-BYTES/1 read-ready").unwrap(),
+            "ok idle"
+        );
+        assert_eq!(
             carrier.exchange("AGEL-BYTES/1 write 00ff0a80").unwrap(),
             "ok 4"
+        );
+        peer.join().unwrap();
+        assert_eq!(
+            carrier.exchange("AGEL-BYTES/1 read-ready").unwrap(),
+            "ok ready"
         );
         let mut returned = Vec::new();
         while returned.len() < 4 {
@@ -124,7 +145,10 @@ mod tests {
             returned.extend(unhex(reply.strip_prefix("ok ").unwrap()).unwrap());
         }
         assert_eq!(returned, [0, 255, 10, 128]);
-        peer.join().unwrap();
+        assert_eq!(
+            carrier.exchange("AGEL-BYTES/1 read-ready").unwrap(),
+            "ok eof"
+        );
         assert_eq!(carrier.exchange("AGEL-BYTES/1 read 4").unwrap(), "ok ");
         assert!(carrier.exchange("AGEL-BYTES/1 read 257").is_err());
         assert!(carrier.exchange("AGEL-BYTES/1 write ff0").is_err());

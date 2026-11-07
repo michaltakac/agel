@@ -6,10 +6,11 @@
 (def check (fn (ok label) (if ok #t (signal 'session/repair-test label))))
 (def audit (fn (record) (file-append "judge-log" (text-concat (print-form record) "\n"))))
 (def routes (dict 'writer "codex" 'judge "jev"))
+(def inference-observe (fn () nil))
 (def infer
   (fn (provider prompt)
     (let ((result (inference-serviced routes model-request provider prompt
-                    (fn (n) (begin ((get stream 'pulse)) (+ n 1))) 0 1024)))
+                    (fn (n) (begin ((get stream 'pulse)) (inference-observe) (+ n 1))) 0 1024)))
       (begin
         (console-log (text-concat "native-session: serviced inference polls " (print-form (get result 'polls))))
         (if (get result 'error)

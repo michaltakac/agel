@@ -41,6 +41,10 @@
       (dict
         'open (fn () (begin (require (= (call ask "open") "") "invalid open reply") #t))
         'close (fn () (begin (require (= (call ask "close") "") "invalid close reply") #t))
+        'read-ready (fn ()
+          (let ((answer (call ask "read-ready")))
+            (if (= answer "ready") #t
+              (begin (require (if (= answer "idle") #t (= answer "eof")) "invalid readiness reply") #f))))
         'read (fn (n) (begin (bounded n 65536)
           (let ((size (if (< n 256) n 256)))
             (let ((bytes (bytes-from-hex (call ask (text-concat "read " (decimal size))))))

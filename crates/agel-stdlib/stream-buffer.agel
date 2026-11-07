@@ -8,7 +8,7 @@
     (fn (stream size)
       (begin
         (require (if (= (type-of size) 'int) (if (< 0 size) (< size 257) #f) #f) "invalid buffer size")
-        (dict 'read (get stream 'read) 'write (get stream 'write)
+        (dict 'read (get stream 'read) 'write (get stream 'write) 'read-ready (get stream 'read-ready)
           'buffer nil 'ended #f 'reads 0 'size size 'service-fn nil 'service-state nil 'failed nil))))
   (def service
     (fn (state)
@@ -60,6 +60,10 @@
             (begin
               (if (get state 'failed) (signal 'stream/failed "stream failed; close and reopen before reuse") nil)
               (if (= (get message 'operation) 'pulse) (result (service state) (dict 'ok #t))
+                (if (= (get message 'operation) 'read-ready)
+                  (result state (dict 'ready (if (< 0 (count (get state 'buffer))) #t
+                    (if (if (get state 'ended) #f (get state 'read-ready))
+                      ((get state 'read-ready)) #f))))
                 (if (= (get message 'operation) 'start-service)
                   (begin
                     (require (if (get state 'service-fn) #f #t) "service already active; stop it before replacement")
@@ -67,5 +71,5 @@
                   (begin
                     (require (= (get message 'operation) 'read) "unknown buffer operation")
                     (buffer-check-count (get message 'count))
-                    (read-step state message))))))))))
+                    (read-step state message)))))))))))
 )

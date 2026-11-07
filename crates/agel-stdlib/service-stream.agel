@@ -12,6 +12,7 @@
           (dict 'owner id 'service id 'info (fn () (service-info id))
             'open (fn () (let ((answer ((get stream 'open)))) (call (dict 'operation 'reset)) answer))
             'close (fn () (let ((answer ((get stream 'close)))) (call (dict 'operation 'reset)) answer))
+            'read-ready (fn () (get (call (dict 'operation 'read-ready)) 'ready))
             'read (fn (n) (begin (buffer-check-count n) (get (call (dict 'operation 'read 'count n)) 'bytes)))
             'write (get stream 'write) 'entropy (get stream 'entropy)
             'start-service (fn (function state) (call (dict 'operation 'start-service 'function function 'state state)))

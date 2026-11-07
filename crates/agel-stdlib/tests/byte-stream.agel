@@ -3,11 +3,13 @@
 (def stream (byte-stream (fn (request)
   (if (= request "AGEL-BYTES/1 open") "ok"
   (if (= request "AGEL-BYTES/1 close") "ok"
+  (if (= request "AGEL-BYTES/1 read-ready") "ok ready"
   (if (= request "AGEL-BYTES/1 read 256") "ok 00ff"
   (if (= request "AGEL-BYTES/1 entropy 3") "ok 000102"
   (if (= request "AGEL-BYTES/1 write 00ff0a80") "ok 4"
-    (signal 'test/request "unexpected byte request")))))))))
+    (signal 'test/request "unexpected byte request"))))))))))
 (check ((get stream 'open)) "open")
+(check ((get stream 'read-ready)) "carrier readiness")
 (check (= ((get stream 'read) 65536) '(0 255)) "bounded read")
 (check (= ((get stream 'entropy) 3) '(0 1 2)) "entropy")
 (check (= ((get stream 'write) '(0 255 10 128)) 4) "raw write")
@@ -32,7 +34,9 @@
   'write (fn (bytes) (count bytes)) 'entropy (fn (n) nil)) 6 nil))
 ((get buffered 'open))
 (check (with-handler (* problem) #t (begin ((get buffered 'read) 0) #f)) "invalid buffered read is rejected before state changes")
+(check (= ((get buffered 'read-ready)) #f) "no readiness source before refill")
 (check (= ((get buffered 'read) 1) '(1)) "first buffered byte")
+(check ((get buffered 'read-ready)) "buffered bytes are ready without carrier I/O")
 (check (= ((get buffered 'read) 2) '(2 3)) "buffer preserved across calls")
 (check (= ((get buffered 'read) 8) '(4 5 6)) "partial buffered read")
 (check (= (get (get ((get buffered 'info)) 'state) 'reads) 1) "one underlying read")

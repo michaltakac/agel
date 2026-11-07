@@ -283,6 +283,27 @@ else:
         source+=f"(def continue-after-refusal {'#t' if melee is not None or options.economy or options.craft else '#f'})\n"
     if editing and not options.combat:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
+        if options.economy:
+            source+='''(def inference-packets 0)
+(def inference-observation-error nil)
+(def observe-inference-packets
+  (fn (remaining)
+    (if (if (< 0 remaining) ((get stream 'read-ready)) #f)
+      (begin
+        (def ready (get (osrs-next-packet ready) 'state))
+        (def inference-packets (+ inference-packets 1))
+        (observe-inference-packets (- remaining 1)))
+      nil)))
+(def inference-observe
+  (fn ()
+    (if inference-observation-error
+      (signal 'native/observation "inference observation stream failed")
+      (with-handler (* problem)
+        (begin
+          (def inference-observation-error problem)
+          (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+        (observe-inference-packets 4)))))
+'''
         if options.optimize:
             if melee is not None or options.economy or options.craft:
                 source+="(def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get ready 'history)))\n"
@@ -293,6 +314,11 @@ else:
         else:
             source+=(examples / 'native-session-repair-run.agel').read_text()+'\n'
         source+='(def ready (osrs-service-stop ready))\n'
+        if options.economy:
+            source+='''(def inference-observe (fn () nil))
+(check (= inference-observation-error nil) "inference observation stream failed")
+(console-log (text-concat "native-opt: packets observed while awaiting inference " (print-form inference-packets)))
+'''
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
     if options.combat:
@@ -557,6 +583,9 @@ if editing:
             assert (melee is not None or options.economy or options.craft) and 'native-opt: continued with fixed policy after exhausted retries' in output
             assert 'native-opt: live uses 0' in output
         assert 'native-opt: recorded workload verified in append-only log' in output
+        if options.economy:
+            assert re.search(r'^native-opt: packets observed while awaiting inference [1-9]\d*$', output, re.M), (
+                'adaptive economy run did not exercise inference observation')
     else:
         assert 'native-session: tool repaired:' in output, 'live tool repair did not complete'
     assert output.count('operation open ') == 2, 'game session was reopened during repair'

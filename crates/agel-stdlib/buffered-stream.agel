@@ -35,6 +35,7 @@
                   'start-service (fn (function state) (call (dict 'operation 'start-service 'function function 'state state)))
                   'pulse (fn () (call (dict 'operation 'pulse)))
                   'stop-service (fn () (get (call (dict 'operation 'stop-service)) 'state))
+                  'read-ready (fn () (get (call (dict 'operation 'read-ready)) 'ready))
                   'read (fn (n)
                     (begin
                       (buffer-check-count n)
