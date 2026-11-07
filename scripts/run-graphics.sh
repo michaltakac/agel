@@ -61,12 +61,12 @@ for program in boot/desktop/workbench:wb boot/desktop/builder:bd \
   esac
 done
 if test "$features" = doom-demo; then
-  if doom=$(./scripts/build-c-program.sh doom x86_64 2>/dev/null | tail -n 1) && test -f "$doom" \
+  if doom=$(./scripts/build-c-program.sh doom x86_64 examples/doom/c 2>/dev/null | tail -n 1) && test -f "$doom" \
      && wad=$(./scripts/fetch-doom-wad.sh 2>/dev/null) && test -f "$wad"; then
     python3 ./scripts/install-program.py "$desktop_image" c-doom "$doom" >/dev/null
     python3 ./scripts/install-program.py --region data "$desktop_image" doom1.wad "$wad" >/dev/null
   else
-    printf '%s\n' 'DOOM is not installed: build it with scripts/build-c-program.sh doom and fetch the WAD with scripts/fetch-doom-wad.sh' >&2
+    printf '%s\n' 'DOOM is not installed: build it with scripts/build-c-program.sh doom x86_64 examples/doom/c and fetch the WAD with scripts/fetch-doom-wad.sh' >&2
   fi
 fi
 if agel=$(./scripts/build-program.sh agel x86_64 2>/dev/null | tail -n 1) && test -f "$agel"; then

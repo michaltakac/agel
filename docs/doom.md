@@ -108,10 +108,10 @@ is listed here exactly.
    domains, the FPU state saved and restored around every domain entry,
    and a small `math.h`. On AArch64 and RISC-V the same switch, when the
    port reaches them.
-5. **The port.** `boot/posix/c/doom/`: `doomgeneric` unmodified as a
+5. **The port.** `examples/doom/c/doom/`: `doomgeneric` unmodified as a
    third-party source (GPL v2, its licence kept beside it) plus one
    platform file implementing `DG_*` over `agel/window.h`: the surface,
-   the keys, the clock. Built by `scripts/build-c-program.sh doom`,
+   the keys, the clock. Built by `scripts/build-c-program.sh doom x86_64 examples/doom/c`,
    installed with the WAD, started with `:exec c-doom`. The proof is a
    demo played back to a checksum: DOOM's own `-timedemo` reports its
    frame rate, and the test requires the title screen's pixels.
@@ -167,7 +167,7 @@ is proved. The rungs and their state are listed in [`roadmap.md`](roadmap.md).
 
 ## How it runs (v0.2.71)
 
-`boot/posix/c/doom/` is `doomgeneric` (the platform-free Chocolate Doom
+`examples/doom/c/doom/` is `doomgeneric` (the platform-free Chocolate Doom
 fork, GPL v2, its licence beside it) unmodified: eighty sources listed in
 `c/doom.deps`, compiled with the defines in `c/doom.cflags`.
 `c/doom.c` is the platform: `DG_Init` asks for a 640×400 window and a

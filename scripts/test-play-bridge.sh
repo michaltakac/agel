@@ -7,7 +7,7 @@
 set -eu
 wad=$(./scripts/fetch-doom-wad.sh)
 image=$(./scripts/build-boot.sh --features doom-demo | tail -n 1)
-doom=$(./scripts/build-c-program.sh doom x86_64 | tail -n 1)
+doom=$(./scripts/build-c-program.sh doom x86_64 examples/doom/c | tail -n 1)
 out=target/doom-runs/echo
 rm -rf "$out"
 mkdir -p "$out"

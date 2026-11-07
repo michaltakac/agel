@@ -1,4 +1,4 @@
-/* DOOM on Agel: the doomgeneric engine (boot/posix/c/doom/, GPL v2, its
+/* DOOM on Agel: the doomgeneric engine (examples/doom/c/doom/, GPL v2, its
    licence beside it) bound to the desktop's window protocol. The engine
    renders 320 by 200 pixels into a buffer it owns; this file copies each
    frame into the window's canvas and blits it at twice its size, turns the

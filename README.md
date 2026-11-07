@@ -5,13 +5,17 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.91.** Native crafting supports separate staged
-accounts for fixed and adaptive runs. See the [release notes](docs/release-v0.3.91.md).
+**Current release: v0.3.92.** The legacy DOOM port lives under examples.
+See the [release notes](docs/release-v0.3.92.md).
+
+v0.3.91 supports separate staged accounts for fixed and adaptive native crafting.
+See the [release notes](docs/release-v0.3.91.md).
 
 RuneScape and DOOM are example workloads. Keep game protocols, commands,
 agent prompts, task definitions and scoring in the examples or their test
 harnesses. The language, standard library and default OS expose shared
 capabilities such as transport, inspection, replay and live versioning.
+The DOOM port and its agents live in [examples/doom](examples/doom).
 The optional legacy DOOM build still has kernel launch and display hooks.
 
 v0.3.90 scores optimization separately from gameplay.
