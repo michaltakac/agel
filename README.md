@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.128.** The RuneScape client services the connection
-between packet chunks. See the [release notes](docs/release-v0.3.128.md).
+**Current release: v0.3.129.** The native pair runner evaluates scores
+inside Agel OS. See the [release notes](docs/release-v0.3.129.md).
+
+v0.3.128 services the RuneScape connection between packet chunks.
+See the [release notes](docs/release-v0.3.128.md).
 
 v0.3.127 assembles fragmented packets by chunk.
 See the [release notes](docs/release-v0.3.127.md).

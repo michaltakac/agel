@@ -5,9 +5,13 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+import time
+
+import graphical_console as console
 
 
 def run_arm(output, runtime, name, options):
@@ -68,6 +72,44 @@ def pin_transfer(output, evidence):
     return donor, fixed_seed
 
 
+def evaluate_score(output, boot_image, executable):
+    library = output / 'sources/crates/agel-stdlib'
+    sequence = (library / 'stdlib.agel').read_text().split('\n(module agel/result', 1)[0]
+    score = output / 'score.agel'
+    with tempfile.TemporaryDirectory(prefix='agel-score-', dir='/tmp') as scratch:
+        disk = console.prepared_image(boot_image, scratch, blank_sectors=1024)
+        program = Path(scratch) / 'benchmark.agel'
+        program.write_text(sequence + '\n' + (library / 'benchmark.agel').read_text() +
+                           '\n(console-log (text-concat "benchmark-result: " (print-form (begin\n' +
+                           score.read_text() + '\n))))\n')
+        install = [sys.executable, str(output / 'harness/install-program.py')]
+        subprocess.run([*install, disk, 'agel', str(executable)], check=True, capture_output=True)
+        subprocess.run([*install, '--region', 'data', disk, program.name, str(program)],
+                       check=True, capture_output=True)
+        machine = console.Machine(disk, scratch)
+        try:
+            reply = machine.submit(':exec agel -- --no-stdlib /data/benchmark.agel', seconds=120)
+            deadline = time.monotonic() + 120
+            while 'process agel exited with status ' not in reply:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError('guest benchmark evaluator did not exit')
+                try:
+                    chunk = machine.serial.recv(4096)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    raise RuntimeError('guest closed the benchmark connection')
+                reply += chunk.decode('utf-8', errors='replace')
+            (output / 'score-native.log').write_text(reply)
+            reports = [line.removeprefix('benchmark-result: ') for line in reply.splitlines()
+                       if line.startswith('benchmark-result: ')]
+            if 'process agel exited with status 0' not in reply or len(reports) != 1:
+                raise RuntimeError(f'guest benchmark evaluation failed: {output / "score-native.log"}')
+            (output / 'score-result.agel').write_text(reports[0] + '\n')
+        finally:
+            machine.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     tasks = parser.add_mutually_exclusive_group()
@@ -126,6 +168,8 @@ def main():
                                      *scoring_options, fixed, adaptive])
     (output / 'score.agel').write_bytes(score)
     print('Agel score input:', output / 'score.agel', flush=True)
+    evaluate_score(output, output / boot_image.name, output / 'agel')
+    print('Agel OS score:', output / 'score-result.agel', flush=True)
 
 
 if __name__ == '__main__':
