@@ -93,6 +93,10 @@ def load_arm(directory, policy, read_table):
             'goal_xp', 'training_policy_sha256', 'service_policy_sha256',
             'evaluation_fuel', 'keepalive_interval_us')})
         contract['guest_memory_mib'] = manifest.get('guest_memory_mib', 64)
+        pool = re.findall(r'^x86 frame pool ends at (\d+) MiB$', trace, re.M)
+        require(len(pool) <= 1, f'{directory}: ambiguous guest frame pool')
+        if pool:
+            contract['guest_pool_end_mib'] = int(pool[0])
     contract['game_adapter'] = hashlib.sha256(source[start:end].encode()).hexdigest()
     contract.update(boot_identity(directory, read_table))
     return contract, identity[1], int(timings[0]), charges

@@ -205,6 +205,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() < 4 {
         return Err("usage: guest_inference SOCKET WORKSPACE DONE-MARKER COMMAND...".into());
     }
+    let seconds = match env::var("AGEL_GUEST_TIMEOUT_SECONDS") {
+        Ok(value) => value.parse::<u64>()?,
+        Err(env::VarError::NotPresent) => 900,
+        Err(error) => return Err(error.into()),
+    };
+    if !(1..=3600).contains(&seconds) {
+        return Err("guest timeout must be between 1 and 3600 seconds".into());
+    }
     let wire = Wire::connect(&args[0])?;
     let transport = Arc::clone(&wire);
     let journal = Arc::new(GuestJudgeJournal::new(move |command| {
@@ -233,6 +241,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?;
     let mut job: Option<Job> = None;
     wire.wait(0, b"live-desktop> ", 120)?;
+    let mut boot_cursor = 0;
+    print!("{}", wire.lines(&mut boot_cursor));
     for command in &args[3..args.len() - 1] {
         let start = wire.len();
         wire.command(command)?;
@@ -245,7 +255,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut byte_number = None;
     let mut byte_block = String::new();
     let started = Instant::now();
-    let deadline = started + Duration::from_secs(900);
+    let deadline = started + Duration::from_secs(seconds);
     loop {
         let lines = wire.lines(&mut cursor);
         for line in lines.lines() {
@@ -378,8 +388,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 block.push('\n');
             }
         }
-        if wire.closed.load(Ordering::Relaxed) || Instant::now() > deadline {
-            return Err("guest run closed or timed out".into());
+        if wire.closed.load(Ordering::Relaxed) {
+            return Err("guest console closed before completion".into());
+        }
+        if Instant::now() > deadline {
+            return Err(format!("guest run exceeded its {seconds}-second deadline").into());
         }
         thread::sleep(Duration::from_millis(5));
     }

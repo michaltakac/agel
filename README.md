@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.41.** The native encoder reuses its active Agel
+**Current release: v0.3.42.** The native bridge retains boot output and
+supports a bounded deadline. See the [release notes](docs/release-v0.3.42.md).
+
+v0.3.41 reuses the active Agel
 callable across packets. See the [release notes](docs/release-v0.3.41.md).
 
 In v0.3.40, a fresh account earned three coins by mining,
