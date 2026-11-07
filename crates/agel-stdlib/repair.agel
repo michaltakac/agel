@@ -5,7 +5,8 @@
   (import agel/evolution)
   (import agel/judgment)
   (export make-repair-agent repair-state repair-prompt repair-evaluate
-          repair-new repair-start repair-pending repair-complete repair-fail repair-exchange repair-advance repair-agent-exchange)
+          repair-new repair-start repair-pending repair-complete repair-fail repair-exchange repair-advance
+          repair-agent-exchange repair-agent-drive)
 
   (def repair-state (fn (agent) (get (agent-info agent) 'heap)))
   (def nth (fn (values n) (if (= n 0) (car values) (nth (cdr values) (- n 1)))))
@@ -247,6 +248,19 @@
                       (list 'system/model-result (get request 'id) (get request 'provider) (get answer 'text))))
                     (wait-agent-change agent state 8192))))
               (if (= (get state 'status) 'approved) (external-advance agent state append-record) state)))))))
+  (def drive
+    (fn (agent state infer append-record remaining)
+      (let ((status (get state 'status)))
+        (if (if (= status 'approved) #t (if (= status 'proposing) #t (= status 'judging)))
+          (if (< 0 remaining)
+            (drive agent (repair-agent-exchange agent infer append-record) infer append-record (- remaining 1))
+            (signal 'repair/driver "repair transition budget exhausted" status))
+          state))))
+  (def repair-agent-drive
+    (fn (agent infer append-record budget)
+      (if (if (= (type-of budget) 'int) (< -1 budget) #f)
+        (drive agent (repair-state agent) infer append-record budget)
+        (signal 'repair/driver "repair transition budget must be a nonnegative integer"))))
   (def repair-exchange
     (fn (state infer append-record)
       (let ((request (repair-pending state)))

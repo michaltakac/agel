@@ -522,11 +522,17 @@ fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
             &options,
         )
         .unwrap();
+    let exhausted = world
+        .evaluate_with(
+            "(with-handler (repair/driver problem) (get problem 'data) (repair-agent-drive subject judge audit 0))",
+            &options,
+        )
+        .unwrap();
+    assert_eq!(exhausted.values.last().unwrap().to_string(), "judging");
     let result = world
         .evaluate_with(
             r#"
-      (repair-agent-exchange subject judge audit)
-      (repair-agent-exchange subject candidate audit)
+      (repair-agent-drive subject judge audit 2)
       (list (get (repair-state subject) 'status) probe-calls
         (evolution-current (get (repair-state subject) 'versions) 'cell 'batches))"#,
             &options,

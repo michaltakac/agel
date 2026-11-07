@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.58.** The paired melee scorer retains measured
-task failures. See the [release notes](docs/release-v0.3.58.md).
+**Current release: v0.3.59.** Agel can drive repair from the actor’s state
+with a transition budget. See the [release notes](docs/release-v0.3.59.md).
+
+v0.3.58 retains measured failures in the paired melee scorer.
+See the [release notes](docs/release-v0.3.58.md).
 
 v0.3.57 retries the cook interaction from adjacent tiles.
 See the [release notes](docs/release-v0.3.57.md).

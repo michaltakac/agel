@@ -65,6 +65,7 @@ def load_arm(directory, policy, read_table):
     correct = exits[0] == '0'
     goal = manifest.get('goal_xp')
     charges = []
+    decision = policy
     if not correct:
         require(goal is not None and policy != 'transferred'
                 and re.search(r'^native-combat: failure \{', trace, re.M),
@@ -109,7 +110,7 @@ def load_arm(directory, policy, read_table):
         writers = re.findall(r'^inference-bridge: started job \d+ provider codex ', trace, re.M)
         require(writers, f'{directory}: no writer dispatch')
         charges.extend(('model', None) for _ in writers)
-        print(f'; adaptive policy: {"activated" if activated else "retained fixed after refusal"}')
+        decision = 'committed' if activated else 'refused-retained-fixed'
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: evaluation incurred inference')
     if correct:
@@ -148,7 +149,7 @@ def load_arm(directory, policy, read_table):
             contract[key] = hashlib.sha256(source[begin:stop].encode()).hexdigest()
     contract['game_adapter'] = hashlib.sha256(source[start:end].encode()).hexdigest()
     contract.update(boot_identity(directory, read_table))
-    return contract, identity[1], int(timings[0]), charges, correct
+    return contract, identity[1], int(timings[0]), charges, correct, decision
 
 
 def main():
@@ -161,8 +162,8 @@ def main():
     if args.transfer and not args.melee:
         parser.error('--transfer applies to --melee; one-rat comparisons already use transfer')
     read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
-    fixed, fixed_account, fixed_time, fixed_charges, fixed_correct = load_arm(args.fixed, 'fixed', read_table)
-    transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct = load_arm(
+    fixed, fixed_account, fixed_time, fixed_charges, fixed_correct, fixed_decision = load_arm(args.fixed, 'fixed', read_table)
+    transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct, adaptive_decision = load_arm(
         args.candidate, 'adaptive' if args.melee and not args.transfer else 'transferred', read_table)
     require(fixed == transfer, 'world, boot image, Agel executable, game adapter, or combat source differs')
     require(fixed_account != transfer_account, 'combat accounts must differ')
@@ -178,7 +179,8 @@ def main():
                           for kind, cost in charges)
         print(f"(def {arm} (dict 'arm '{arm} 'comparison comparison 'account '{arm}-account "
               f"'correct {'#t' if correct else '#f'} 'elapsed-us {elapsed} 'billing-complete #t 'charges (list {values})))")
-    print("(benchmark-pair fixed adaptive)")
+    print(f"(assoc (benchmark-pair fixed adaptive) 'policy-outcomes "
+          f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision}))")
 
 
 if __name__ == '__main__':
