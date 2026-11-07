@@ -90,7 +90,7 @@ def optimizer_charges(directory, trace, *, interrupted=False):
 def adaptation_evidence(directory, trace, correct):
     activated = 'native-opt: policy committed after text judgment and measured replay' in trace
     rolled_back = 'native-opt: continued with fixed policy after exhausted retries' in trace
-    interrupted = not correct and bool(re.search(r'^native-(?:economy|quest): optimizer failure \{', trace, re.M))
+    interrupted = not correct and bool(re.search(r'^native-(?:combat|craft|economy|quest): optimizer failure \{', trace, re.M))
     require(activated != rolled_back or (interrupted and not activated and not rolled_back),
             f'{directory}: no verified in-session policy decision')
     if correct:
@@ -117,7 +117,7 @@ def load_arm(directory, policy, read_table):
     decision = policy
     if not correct:
         require(goal is not None and policy != 'transferred'
-                and re.search(r'^native-combat: failure \{', trace, re.M),
+                and re.search(r'^native-combat: (?:optimizer )?failure \{', trace, re.M),
                 f'{directory}: no measured melee task failure')
         require(melee_failure_saved(trace, goal, saved),
                 f'{directory}: saved account does not corroborate incomplete training')
@@ -300,7 +300,7 @@ def load_craft(directory, policy, read_table):
                 and craft_saved(trace, before, craft_stock(saved, finished=True)),
                 f'{directory}: crafting report and saved result differ')
     else:
-        require(re.search(r'^native-craft: failure \{', trace, re.M)
+        require(re.search(r'^native-craft: (?:optimizer )?failure \{', trace, re.M)
                 and 'native-craft: {test adamant-platebody passed #t ' not in trace
                 and craft_stock(saved, at_anvil=False) == before,
                 f'{directory}: failure did not leave the original stock and XP intact')

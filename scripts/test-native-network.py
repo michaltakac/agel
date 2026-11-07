@@ -292,8 +292,9 @@ else:
     if options.optimize:
         source+=f"(def continue-after-refusal {'#t' if melee is not None or options.economy or options.craft or fresh_quest else '#f'})\n"
     if editing and not options.combat:
-        if options.economy or fresh_quest:
-            task_label = 'native-economy' if options.economy else 'native-quest'
+        task_label = ('native-combat' if melee is not None else 'native-economy' if options.economy
+                      else 'native-craft' if options.craft else 'native-quest' if fresh_quest else None)
+        if task_label:
             source += f"""(with-handler (* problem)
   (begin
     (console-log (text-concat "{task_label}: optimizer failure " (print-form problem)))
@@ -302,7 +303,7 @@ else:
   (begin
 """
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
-        if options.economy or fresh_quest:
+        if task_label:
             source+='''(def inference-packets 0)
 (def preparation-packets 0)
 (def inference-observation-error nil)
@@ -337,7 +338,7 @@ else:
         else:
             source+=(examples / 'native-session-repair-run.agel').read_text()+'\n'
         source+='(def ready (osrs-service-stop ready))\n'
-        if options.economy or fresh_quest:
+        if task_label:
             source+='''(def inference-observe (fn () nil))
 (check (= inference-observation-error nil) "inference observation stream failed")
 (console-log (text-concat "native-opt: packets observed during preparation " (print-form preparation-packets)))
@@ -345,7 +346,7 @@ else:
 '''
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
-        if options.economy or fresh_quest:
+        if task_label:
             source += "))\n"
     if options.combat:
         source+='''(import agel/osrs-combat-test)
@@ -599,12 +600,12 @@ if editing:
     judge_dispatched=bool(re.search(r'^inference-bridge: started job \d+ provider jev ',output,re.M))
     decode_judge_ledger(disk,directory,environment['TYPESAFEAI_API_KEY'],options.live,
         required=judge_dispatched and passed)
-if not passed and melee is not None and 'native-combat: failure ' in output:
+if not passed and melee is not None and re.search(r'^native-combat: (?:optimizer )?failure \{', output, re.M):
     capture_account(lambda snapshot: melee_failure_saved(output, melee, snapshot),
                     ['varp.com_mode'])
 if not passed and options.economy and re.search(r'^native-economy: (?:optimizer )?failure \{', output, re.M):
     capture_account(lambda snapshot: economy_saved(0, snapshot), [])
-if not passed and options.craft and re.search(r'^native-craft: failure \{', output, re.M):
+if not passed and options.craft and re.search(r'^native-craft: (?:optimizer )?failure \{', output, re.M):
     capture_account(lambda snapshot: craft_stock(snapshot, at_anvil=False) == craft_before, [])
 if not passed and fresh_quest and re.search(r'^native-quest: (?:optimizer )?failure \{', output, re.M):
     capture_account(quest_unfinished, ['varp.cookquest', 'varp.qp'])

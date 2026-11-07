@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.146.** The bootstrap evaluator reuses owned map
-values. See the [release notes](docs/release-v0.3.146.md).
+**Current release: v0.3.147.** Native melee and crafting record optimizer
+interruptions. See the [release notes](docs/release-v0.3.147.md).
+
+v0.3.146 reuses owned map values in the bootstrap evaluator.
+See the [release notes](docs/release-v0.3.146.md).
 
 v0.3.145 traces inventory packets and checks queued pickup updates.
 See the [release notes](docs/release-v0.3.145.md).
