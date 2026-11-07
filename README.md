@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.181.** Agel can estimate writer cost from metered
-tokens and explicitly supplied rates. See the [release notes](docs/release-v0.3.181.md).
+**Current release: v0.3.182.** Native pair scoring accepts explicit
+writer-rate scenarios. See the [release notes](docs/release-v0.3.182.md).
+
+v0.3.181 estimates writer cost from metered tokens and supplied rates. See the [release notes](docs/release-v0.3.181.md).
 
 v0.3.180 scores retained native crafting and bronze-sale pairs. See the [release notes](docs/release-v0.3.180.md).
 

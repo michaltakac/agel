@@ -349,6 +349,12 @@ def writer_forms(usage):
                     for call in usage)
 
 
+def writer_estimate_form(usage, rates):
+    inputs, cached, outputs = rates
+    return (f"(benchmark-writer-estimate (list {writer_forms(usage)}) "
+            f"(dict 'input {inputs} 'cached-input {cached} 'output {outputs}))")
+
+
 def optimizer_score(directory):
     trace = (directory / 'serial.log').read_text()
     require(len(re.findall(r'^process agel exited with status \d+$', trace, re.M)) == 1,
@@ -439,12 +445,18 @@ def main():
     tasks.add_argument('--optimizer', action='store_true', help='score the optimizer decision independently of the game')
     parser.add_argument('--transfer', action='store_true', help='score a melee run using a retained policy')
     parser.add_argument('--donor', type=Path, help='verify and separately score the original transfer donor')
+    parser.add_argument('--writer-rates', type=int, nargs=3, metavar=('INPUT', 'CACHED', 'OUTPUT'),
+                        help='append writer estimates using supplied nanodollars per token')
     args = parser.parse_args()
+    if args.writer_rates is not None:
+        inputs, cached, outputs = args.writer_rates
+        if not (0 <= cached <= inputs <= 2**63 - 1 and 0 <= outputs <= 2**63 - 1):
+            parser.error('--writer-rates requires nonnegative signed 64-bit rates with CACHED <= INPUT')
     if args.transfer and not args.melee:
         parser.error('--transfer applies to --melee; one-rat comparisons already use transfer')
     if args.optimizer:
-        if args.candidate or args.donor:
-            parser.error('--optimizer takes one run directory')
+        if args.candidate or args.donor or args.writer_rates is not None:
+            parser.error('--optimizer takes one run directory; writer estimates require paired scoring')
         optimizer_score(args.fixed)
         return
     if args.candidate is None:
@@ -478,12 +490,16 @@ def main():
     pair = (f"(assoc (assoc (benchmark-pair fixed adaptive) 'policy-outcomes "
             f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision})) "
             f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
+    if args.writer_rates is not None:
+        pair = f"(assoc {pair} 'writer-estimate {writer_estimate_form(usage, args.writer_rates)})"
     if donor_score:
         elapsed, charges, donor_usage = donor_score
+        donor_estimate = (f" 'writer-estimate {writer_estimate_form(donor_usage, args.writer_rates)}"
+                          if args.writer_rates is not None else '')
         pair = (f"(assoc {pair} 'donor-learning (dict "
                 f"'score (benchmark-run (dict 'correct #t 'elapsed-us {elapsed} "
                 f"'billing-complete #t 'charges (list {charge_forms(charges)}))) "
-                f"'writer-usage (benchmark-writer-usage (list {writer_forms(donor_usage)}))))")
+                f"'writer-usage (benchmark-writer-usage (list {writer_forms(donor_usage)})){donor_estimate}))")
     if adaptive_policy == 'transferred':
         recovery = transfer_recovery_time(args.candidate, read_table)
         if recovery is not None:
