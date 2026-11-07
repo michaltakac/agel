@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Stage materials separately, then verify normal-account crafting on the private world."""
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, str(Path(__file__).with_name("osrs")))
+from test_support import evaluate, form
+
+WORLD = "agel-osrs-world"
+ACCOUNT = "agelcraft"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--native", action="store_true", help="run the crafting phase inside Agel OS")
+options = parser.parse_args()
+
+
+def run(*args):
+    return subprocess.run(args, capture_output=True, text=True, check=True).stdout
+
+
+def oracle_program(program, *args):
+    return run("docker", "exec", WORLD, "sh", "-c",
+               'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" "$@"', "probe", program, *args)
+
+
+def notice(message):
+    print(message, flush=True)
+    status = Path("target/osrs-live-os/status.txt")
+    if status.parent.exists():
+        status.write_text(message)
+
+
+compiler = Path(os.environ.get("JAVA_HOME", "")) / "bin/javac"
+if not compiler.is_file():
+    compiler = Path("/opt/homebrew/opt/openjdk@17/bin/javac")
+build = Path("target/osrs-admin")
+build.mkdir(exist_ok=True)
+run(str(compiler) if compiler.is_file() else "javac", "-d", str(build),
+    "scripts/osrs/AccountState.java", "scripts/osrs/SetupAccount.java")
+for name in ("AccountState", "SetupAccount"):
+    run("docker", "cp", str(build / (name + ".class")), f"{WORLD}:/tmp/{name}.class")
+
+directory = Path("target/osrs-login-probes")
+directory.mkdir(mode=0o700, exist_ok=True)
+fixture_lock = (directory / (ACCOUNT + ".lock")).open("a")
+fcntl.flock(fixture_lock, fcntl.LOCK_EX)
+credentials = directory / (ACCOUNT + ".json")
+if not credentials.exists():
+    fd = os.open(credentials, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump({"password": secrets.token_hex(12)}, handle)
+password = json.loads(credentials.read_text())["password"]
+key = run("docker", "exec", WORLD, "cat", "/world/.data/client.key")
+assert key.split("Exponent: ")[1].splitlines()[0].strip() == "10001"
+modulus = key.split("Modulus: ")[1].strip()
+scenario = Path("examples/osrs/crafting-test.agel").read_text()
+
+
+def execute(action=None):
+    source = f"""(begin
+      (import agel/osrs-wire) (import agel/osrs-login)
+      (import agel/osrs-crypto) (import agel/osrs-game)
+      (osrs-js5-open 241 '(1 2 3 4))
+      (def crcs (osrs-cache-crcs (osrs-js5-group 255 255))) (wire-close)
+      (def context (rsa-context {form(modulus)}))
+      (def seed (osrs-random-seed)) (def game (osrs-game-state seed))
+      (osrs-login {form(ACCOUNT)} {form(password)} context crcs seed (entropy-read 24))
+      {scenario}
+      (import agel/osrs-crafting-test)
+      {action or '#t'}
+    )"""
+    for _ in range(12):
+        result = evaluate(source, 43594)
+        assert password not in result.stdout + result.stderr
+        if result.returncode == 0:
+            return result.stdout.strip()
+        if "osrs/login-refused" not in result.stderr or "data: Int(5)" not in result.stderr:
+            raise AssertionError(result.stderr)
+        time.sleep(1)
+    raise AssertionError("previous session did not retire")
+
+
+def await_saved(predicate):
+    for _ in range(45):
+        try:
+            snapshot = oracle_program("AccountState", ACCOUNT)
+        except subprocess.CalledProcessError:
+            time.sleep(1)
+            continue
+        if predicate(snapshot):
+            return snapshot
+        time.sleep(1)
+    raise AssertionError("expected state did not persist")
+
+
+def inventory(snapshot, name):
+    matches = re.findall(rf"^inv=inv\.inv item=obj\.{re.escape(name)} count=(\d+)$", snapshot, re.M)
+    return sum(map(int, matches))
+
+
+def xp(snapshot):
+    return int(re.search(r"^stat=13 base=88 visible=88 fine_xp=(\d+)$", snapshot, re.M)[1])
+
+
+try:
+    oracle_program("AccountState", ACCOUNT)
+except subprocess.CalledProcessError:
+    execute()
+    await_saved(lambda _: True)
+
+notice("RuneScape crafting: staging one hammer and five bars on the dedicated fixture")
+oracle_program("SetupAccount", "craft-grant")
+try:
+    execute("(begin (stage-adamant-stock game) #t)")
+    before = await_saved(lambda s: "x=3187 z=3425 level=0" in s
+                         and "stat=13 base=88 visible=88" in s
+                         and inventory(s, "hammer") == 1
+                         and inventory(s, "adamantite_bar") == 5
+                         and inventory(s, "adamant_platebody") == 0)
+finally:
+    oracle_program("SetupAccount", "craft-revoke")
+
+normal = oracle_program("AccountState", ACCOUNT)
+assert "rights= " in normal and "xp_rate_in_hundreds=100" in normal, normal
+notice("RuneScape crafting: normal-account anvil and platebody button")
+if options.native:
+    command = ["sh", "scripts/test-native-network.sh", "--craft"]
+    with subprocess.Popen(command, stdout=subprocess.PIPE, text=True) as child:
+        lines = []
+        for line in child.stdout:
+            print(line, end="", flush=True)
+            lines.append(line)
+        status = child.wait()
+        if status:
+            raise subprocess.CalledProcessError(status, command)
+    report = "".join(lines)
+else:
+    report = execute("(forge-adamant-platebody game)")
+    print(report)
+assert "test adamant-platebody passed #t" in report, report
+after = await_saved(lambda s: inventory(s, "adamant_platebody") == 1
+                    and inventory(s, "adamantite_bar") == 0
+                    and inventory(s, "hammer") == 1)
+assert "rights= " in after and "xp_rate_in_hundreds=100" in after, after
+saved_before, saved_after = xp(before), xp(after)
+assert saved_after - saved_before == 3125, (saved_before, saved_after)
+observed = re.search(r"smithing-xp-before (\d+) smithing-xp-after (\d+)", report)
+assert observed and tuple(map(int, observed.groups())) == (saved_before // 10, saved_after // 10), report
+print(f"Saved Smithing fine XP: {saved_before} -> {saved_after}")
+print("Saved inventory: five bars consumed, one hammer retained, one adamant platebody produced")
+notice("RuneScape PASS: adamant platebody forged through the anvil interface, saved at normal rights and 1x XP")

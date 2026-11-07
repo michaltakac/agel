@@ -1,0 +1,5 @@
+First native trial, with the anvil action after initial inventory reads.
+native-craft: sending anvil interaction
+native-craft: smithing interface observed, sending platebody button
+agel: error: evaluation error: resource/fuel-exhausted: evaluation exhausted its deterministic fuel budget
+process agel exited with status 1

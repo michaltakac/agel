@@ -5,7 +5,7 @@
   (import agel/osrs-wire)
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
-  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack)
+  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-click-interface)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -15,7 +15,7 @@
   (def osrs-game-state
     (fn (seed) (dict 'out (isaac-bytes-new seed 512)
                      'in (isaac-bytes-new (map (fn (n) (rem (+ n 50) 4294967296)) seed) 512)
-                     'stats (dict) 'inventories (dict) 'active-world 0 'npc-worlds (dict) 'history nil)))
+                     'stats (dict) 'interfaces (dict) 'inventories (dict) 'active-world 0 'npc-worlds (dict) 'history nil)))
   (def full-items
     (fn (bytes capacity slot out)
       (if (= slot capacity) out
@@ -38,6 +38,50 @@
                       (let ((quantity (if (= amount 255) (osrs-uint (take (drop tail 3) 4 nil)) amount)))
                         (partial-items (drop tail (if (= amount 255) 7 3))
                           (assoc out slot (dict 'item id 'count quantity))))))))))))
+  (def read-interface-id
+    (fn (bytes)
+      (+ (* (nth bytes 0) 256) (rem (+ (nth bytes 1) 128) 256))))
+  (def read-subinterfaces
+    (fn (bytes n out)
+      (if (= n 0) out
+        (read-subinterfaces (drop bytes 7) (- n 1)
+          (assoc out (osrs-uint (take bytes 4 nil)) (osrs-uint (take (drop bytes 4) 2 nil)))))))
+  (def resync-interfaces
+    (fn (state bytes)
+      (if (< (count bytes) 4)
+        (signal 'osrs/interface "truncated interface resync header")
+        (let ((n (osrs-uint (take (drop bytes 2) 2 nil))))
+          (if (< (count bytes) (+ 4 (* 7 n)))
+            (signal 'osrs/interface "truncated interface resync")
+            (assoc (assoc state 'top-interface (osrs-uint (take bytes 2 nil))) 'interfaces
+              (read-subinterfaces (drop bytes 4) n (dict))))))))
+  (def observe-interface
+    (fn (state name bytes)
+      (if (= name "IF_OPENSUB")
+        (let ((parent (osrs-uint (list (nth bytes 1) (nth bytes 0) (nth bytes 3) (nth bytes 2)))))
+          (assoc state 'interfaces (assoc (map-or-empty (get state 'interfaces)) parent (read-interface-id (drop bytes 4)))))
+        (if (= name "IF_CLOSESUB")
+          (assoc state 'interfaces (dissoc (map-or-empty (get state 'interfaces)) (osrs-uint bytes)))
+          (if (= name "IF_MOVESUB")
+            (let ((source (osrs-uint (reverse (take bytes 4 nil))))
+                  (destination (osrs-uint (reverse (drop bytes 4))))
+                  (interfaces (map-or-empty (get state 'interfaces))))
+              (if (= source destination) state
+                (let ((remaining (dissoc interfaces source)))
+                  (assoc state 'interfaces (if (has-key? interfaces source)
+                    (assoc remaining destination (get interfaces source))
+                    (dissoc remaining destination))))))
+            (if (= name "IF_OPENTOP")
+              (assoc (assoc state 'top-interface (read-interface-id bytes)) 'interfaces (dict))
+              (if (= name "IF_RESYNC_V2")
+                (resync-interfaces state bytes)
+                state)))))))
+  (def osrs-open-interface?
+    (fn (state interface)
+      (if (if (has-key? state 'top-interface) (= (get state 'top-interface) interface) #f) #t
+        (let ((interfaces (map-or-empty (get state 'interfaces))))
+          (foldl (fn (found parent) (if found #t (= (get interfaces parent) interface)))
+            #f (keys interfaces))))))
   (def observe
     (fn (state packet)
       (let ((name (get packet 'name)) (bytes (get packet 'bytes)))
@@ -65,7 +109,7 @@
                                 (npcs-decode (if (get (get state 'npc-worlds) world)
                                                 (get (get state 'npc-worlds) world) (npcs-new))
                                              bytes (= name "NPC_INFO_LARGE_V6")))))
-                            state))))))))
+                            (observe-interface state name bytes)))))))))
   (def osrs-nearby-npcs
     (fn (state)
       (let ((world (get (get state 'npc-worlds) 0)))
@@ -185,6 +229,21 @@
       (if (if (coordinate? x) (coordinate? z) #f)
           (send state 55 (cons 128 (append (u16-alt2 z) (u16-alt2 x))) #t (dict 'action 'walk 'x x 'z z))
           (signal 'osrs/coordinate "coordinates must fit fourteen bits"))))
+  (def u16 (fn (n) (list (/ n 256) (rem n 256))))
+  (def ushort? (fn (n) (if (= (type-of n) 'int) (if (< -1 n) (< n 65536) #f) #f)))
+  (def osrs-use-location
+    (fn (state id x z)
+      (if (if (ushort? id) (if (coordinate? x) (coordinate? z) #f) #f)
+        (send state 72 (append (reverse (u16 z))
+          (append (reverse (u16-alt2 id)) (cons 0 (append (u16 x) '(0))))) #f
+          (dict 'action 'use-location 'id id 'x x 'z z))
+        (signal 'osrs/location "invalid location id or coordinates"))))
+  (def osrs-click-interface
+    (fn (state interface component)
+      (if (if (ushort? interface) (if (ushort? component) (osrs-open-interface? state interface) #f) #f)
+        (send state 78 (append (u16 interface) (u16 component)) #f
+          (dict 'action 'click-interface 'interface interface 'component component))
+        (signal 'osrs/interface "interface is not observed open or component is invalid"))))
   (def text-loop
     (fn (text at out)
       (if (= at (text-bytes text)) (reverse (cons 0 (cons 0 out)))

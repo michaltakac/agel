@@ -5,10 +5,13 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.20.** The native Agel client can apply an
-agent-written encoder policy during a RuneScape encounter. The test compares
-the fixed and adaptive arms on saved XP, time and model calls. See the
-[release notes and evidence](docs/release-v0.3.20.md).
+**Current release: v0.3.21.** Agel forged an adamant platebody inside
+its OS with normal account rights. The server verified five staged bars
+consumed, one platebody produced and 312.5 Smithing XP gained.
+See the [release notes and evidence](docs/release-v0.3.21.md).
+
+v0.3.20 compared fixed and adaptive native combat.
+See the [paired traces](docs/release-v0.3.20.md).
 
 v0.3.18 installed an agent-written service policy on a live connection
 after text judgment and recorded replay. See the

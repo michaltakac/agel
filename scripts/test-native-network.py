@@ -19,6 +19,7 @@ from test_support import combat_xp, combat_xp_saved
 parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
 scenario.add_argument('--challenge', action='store_true')
+scenario.add_argument('--craft', action='store_true', help='forge staged adamant stock; use test-osrs-crafting.sh --native')
 parser.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
 scenario.add_argument('--repair', action='store_true', help='repair a general tool during the same native connection')
 scenario.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
@@ -26,7 +27,7 @@ parser.add_argument('--live', action='store_true', help='use real providers for 
 options=parser.parse_args()
 editing=options.repair or options.optimize
 shared_carrier=editing or options.combat
-if options.combat and (options.challenge or options.repair):parser.error('--combat can only be combined with --optimize')
+if options.combat and (options.challenge or options.repair or options.craft):parser.error('--combat can only be combined with --optimize')
 if options.live and not editing:parser.error('--live requires --repair or --optimize')
 directory=Path('target')/('native-network-'+str(time.time_ns()))
 directory.mkdir(mode=0o700)
@@ -42,6 +43,8 @@ if options.combat:
     manifest['scope']='native one-rat combat on a fresh normal account'
     manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
 
+if options.craft:manifest['scope']='native adamant platebody from staged bars on a normal account'
+
 catalog=Path('crates/agel-stdlib/stdlib.agel').read_text()
 a=catalog.index('(module agel/sequence\n');b=catalog.find('\n(module ',a+1)
 source=catalog[a:b]+'\n'
@@ -55,11 +58,14 @@ source+='''(import agel/byte-stream)
 '''
 modules=['osrs-wire'] if options.challenge else ['osrs-wire','crypto','osrs-crypto','osrs-login','osrs-packets','osrs-bits','osrs-npcs','osrs-game']
 source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in modules)
+if options.combat or options.craft:
+    source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
+if options.craft:
+    source+=Path('examples/osrs/crafting-test.agel').read_text()+'\n'
 if options.combat:
     combat_module=Path('examples/osrs/combat-test.agel').read_bytes()
     manifest['combat_policy_sha256']=hashlib.sha256(combat_module).hexdigest()
     source+=combat_module.decode()+'\n'
-    source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
 if shared_carrier:
     for name in ['meta','judgment']:
         a=catalog.index('(module agel/'+name+'\n');b=catalog.find('\n(module ',a+1)
@@ -84,6 +90,9 @@ if options.challenge:
 '''
 else:
     account={'username':'nat'+secrets.token_hex(4),'password':secrets.token_hex(12)}
+    if options.craft:
+        fixture=Path('target/osrs-login-probes/agelcraft.json')
+        account={'username':'agelcraft','password':json.loads(fixture.read_text())['password']}
     (directory/'account.json').write_text(json.dumps(account));os.chmod(directory/'account.json',0o600)
     key=subprocess.run(['docker','exec','agel-osrs-world','cat','/world/.data/client.key'],capture_output=True,text=True,check=True).stdout
     assert key.split('Exponent: ')[1].splitlines()[0].strip()=='10001'
@@ -98,13 +107,14 @@ else:
   (dict 'start (get stream 'start-service) 'stop (get stream 'stop-service) 'pulse (get stream 'pulse))))
 (console-log "native-network: cipher state initialized inside Agel OS")
 '''
-    if options.combat:
+    if options.combat or options.craft:
         source+="(import agel/record-chain) (def game (assoc game 'history-push record-chain-push))\n"
     if options.optimize or options.combat:
         source+="(def game (assoc game 'maintenance (assoc (get game 'maintenance) 'quantum retained-quantum)))\n"
     source+='(begin (osrs-login '+json.dumps(account['username'])+' '+json.dumps(account['password'])+' context crcs seed (entropy-read 24)) #t)\n'
-    source+='''(console-log "native-network: password login accepted")
-(def ready (osrs-await game (fn (g) (if (osrs-stat g 13) (if (get (get g 'inventories) 93) #t #f) #f))))
+    source+='(console-log "native-network: password login accepted")\n'
+    if not options.craft:
+        source+='''(def ready (osrs-await game (fn (g) (if (osrs-stat g 13) (if (get (get g 'inventories) 93) #t #f) #f))))
 (if (= (get (osrs-stat ready 13) 'level) 1) #t (signal 'native/test "unexpected initial Smithing level"))
 (console-log (text-concat "native-network: observations " (print-form
   (dict 'smithing-level (get (osrs-stat ready 13) 'level) 'coins (osrs-inventory-count ready 93 995)))))
@@ -152,6 +162,16 @@ else:
 (def retained-count (record-chain-fold (fn (n _) (+ n 1)) 0 (get completed 'history)))
 (console-log (text-concat "native-combat: history-records " (print-form retained-count)))
 '''
+    elif options.craft:
+        source+='''(import agel/osrs-crafting-test)
+(def started (clock-us))
+(def crafted (forge-adamant-platebody-using game
+  (fn (state predicate) (osrs-await-bounded state predicate 320))
+  (fn (phase) (console-log (text-concat "native-craft: " phase)))))
+(def completed (get crafted 'state))
+(console-log (text-concat "native-craft: " (print-form (get crafted 'report))))
+(console-log (text-concat "native-craft: task-us " (print-form (- (clock-us) started))))
+'''
     elif options.repair:
         source+='''(import agel/batches)
 (def execution (run-batches retained-plan (fn (state x) (osrs-walk state x 3218)) ready '(3221 3221 3221 3222 3223) 3))
@@ -176,6 +196,7 @@ else:
 (console-log "native-opt: recorded workload verified in append-only log")
 '''
     completion = 'login, observations and rat combat' if options.combat else 'login, observations, walking packet and tick consumption'
+    if options.craft:completion='login, observations and adamant platebody'
     source+='(console-log "native-network: client completed: '+completion+' inside Agel OS")\n#t\n'
 (directory/'world.json').write_text(json.dumps(manifest,indent=2)+'\n')
 source='(begin\n'+source+'\n#t)\n'
@@ -202,7 +223,7 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
         machine.terminate();machine.wait(timeout=10)
 output=(directory/'serial.log').read_text()
 if not options.challenge:assert account['password'] not in output,'credential appeared in serial output'
-print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
+print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'native-craft:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
 marker='native-network: PASS:' if options.challenge else 'native-network: client completed:'
 passed=result.returncode==0 and marker in output and 'process agel exited with status 0' in output
 if editing:
@@ -230,7 +251,10 @@ if options.combat:
     if not editing:
         assert 'inference-bridge: started job' not in output, 'fixed combat dispatched inference'
         print('External model calls: 0; external judge calls: 0; model cost: $0 (fixed scripted policy)',flush=True)
-if not options.challenge:
+if options.craft:
+    assert 'native-craft: {test adamant-platebody passed #t ' in output
+    assert output.count('operation open ') == output.count('operation close ') == 2
+if not options.challenge and not options.craft:
     compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
     build=directory/'oracle';build.mkdir()
     subprocess.run([str(compiler) if compiler.is_file() else 'javac','-d',str(build),'scripts/osrs/AccountState.java'],check=True,capture_output=True)

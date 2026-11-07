@@ -1,0 +1,6 @@
+RuneScape crafting: staging one hammer and five bars on the dedicated fixture
+RuneScape crafting: normal-account anvil and platebody button
+{test adamant-platebody passed #t bars-before 5 bars-after 0 platebody-before 0 platebody-after 1 smithing-xp-before 4385776 smithing-xp-after 4386088}
+Saved Smithing fine XP: 43857760 -> 43860885
+Saved inventory: five bars consumed, one hammer retained, one adamant platebody produced
+RuneScape PASS: adamant platebody forged through the anvil interface, saved at normal rights and 1x XP
