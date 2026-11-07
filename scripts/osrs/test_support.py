@@ -107,7 +107,7 @@ def craft_stock(snapshot, *, finished=False, at_anvil=True):
     return None
 
 
-def smelt_stock(snapshot, count, *, finished=False):
+def smelt_stock(snapshot, count, *, finished=False, at_furnace=True):
     header = re.search(
         r'^account=(\d+) character=\d+ rights= x=(\d+) z=(\d+) level=0 xp_rate_in_hundreds=100$',
         snapshot, re.M)
@@ -119,7 +119,7 @@ def smelt_stock(snapshot, count, *, finished=False):
     for name, quantity in items:
         amounts[name] = amounts.get(name, 0) + int(quantity)
     expected = {'adamantite_bar': count} if finished else {'adamantite_ore': count, 'coal': 6 * count}
-    if amounts == expected and (finished or header.groups()[1:] == ('3226', '3255')):
+    if amounts == expected and (finished or not at_furnace or header.groups()[1:] == ('3226', '3255')):
         return int(header[1]), int(xp[1])
     return None
 

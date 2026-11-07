@@ -18,6 +18,7 @@ WORLD = "agel-osrs-world"
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
 mode.add_argument("--native", action="store_true", help="run the crafting phase inside Agel OS")
+mode.add_argument("--bank", action="store_true", help="deposit and withdraw staged ore at Varrock West bank")
 mode.add_argument("--smelt", action="store_true", help="smelt adamant bars from staged ore and coal")
 parser.add_argument("--smelt-count", type=int, choices=range(1, 4), default=1)
 mode.add_argument("--prepare-only", action="store_true", help="stage stock and verify normal rights, without crafting")
@@ -72,6 +73,8 @@ key = run("docker", "exec", WORLD, "cat", "/world/.data/client.key")
 assert key.split("Exponent: ")[1].splitlines()[0].strip() == "10001"
 modulus = key.split("Modulus: ")[1].strip()
 scenario = Path("examples/osrs/crafting-test.agel").read_text()
+if options.bank:
+    scenario += "\n" + Path("examples/osrs/osrs-bank.agel").read_text()
 
 
 def execute(action=None):
@@ -126,11 +129,17 @@ except subprocess.CalledProcessError:
     execute()
     await_saved(lambda _: True)
 
-notice("RuneScape crafting: staging ore and coal" if options.smelt else
+notice("RuneScape crafting: staging ore and coal" if options.smelt or options.bank else
        "RuneScape crafting: staging one hammer and five bars on the dedicated fixture")
 oracle_program("SetupAccount", "craft-grant", *fixture_args)
 try:
-    if options.smelt:
+    if options.bank:
+        execute("""(begin
+          (def stock (stage-adamant-ore game))
+          (osrs-wait-ticks (osrs-command stock "tele 3185 3436") 4)
+          #t)""")
+        await_saved(lambda s: "x=3185 z=3436 level=0" in s and inventory(s, "adamantite_ore") == 1)
+    elif options.smelt:
         execute(f"(begin (stage-adamant-ore-batch game {COUNT}) #t)")
         await_saved(lambda s: "x=3226 z=3255 level=0" in s
                     and inventory(s, "adamantite_ore") == COUNT and inventory(s, "coal") == 6 * COUNT)
@@ -148,6 +157,19 @@ normal = oracle_program("AccountState", ACCOUNT)
 assert "rights= " in normal and "xp_rate_in_hundreds=100" in normal, normal
 if options.prepare_only:
     notice(f"RuneScape PASS: {ACCOUNT} has five bars, a hammer, level 88 Smithing, and normal rights")
+    sys.exit(0)
+if options.bank:
+    before_stock = smelt_stock(normal, 1, at_furnace=False)
+    assert before_stock is not None, normal
+    report = execute("""(begin
+      (import agel/osrs-bank)
+      (def bank (osrs-bank-open game osrs-bank-layout-241 10583 3186 3438))
+      (def stored (osrs-bank-deposit bank osrs-bank-layout-241 449 1))
+      (def returned (osrs-bank-withdraw stored osrs-bank-layout-241 449 1))
+      (list (osrs-inventory-count stored 95 449) (osrs-inventory-count returned 93 449)))""")
+    assert report == "(1 1)", report
+    await_saved(lambda s: smelt_stock(s, 1, at_furnace=False) == before_stock)
+    notice("RuneScape PASS: deposited and withdrew adamantite ore with normal rights")
     sys.exit(0)
 if options.smelt:
     notice("RuneScape crafting: normal-account furnace and adamant bar")

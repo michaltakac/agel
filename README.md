@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.216.** The OSRS example adds observed bank
-deposits and withdrawals. See the [release notes](docs/release-v0.3.216.md).
+**Current release: v0.3.217.** The crafting harness can verify a bank
+deposit and withdrawal on the private world. See the [release notes](docs/release-v0.3.217.md).
+
+v0.3.216 adds observed bank deposits and withdrawals.
+See the [release notes](docs/release-v0.3.216.md).
 
 v0.3.215 checks the saved inventory and XP before and after smelting.
 See the [release notes](docs/release-v0.3.215.md).

@@ -1,6 +1,9 @@
 (module agel/osrs-bank
   (import agel/osrs-game)
-  (export osrs-bank-open osrs-bank-withdraw osrs-bank-deposit)
+  (export osrs-bank-layout-241 osrs-bank-open osrs-bank-withdraw osrs-bank-deposit)
+  (def osrs-bank-layout-241
+    (dict 'main-interface 12 'main-component 12 'side-interface 15 'side-component 3
+          'bank-inventory 95))
   (def require
     (fn (ok message) (if ok #t (signal 'osrs/bank message))))
   (def osrs-bank-open
