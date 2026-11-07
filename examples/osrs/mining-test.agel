@@ -8,6 +8,19 @@
     (fn (state)
       (let ((matches (filter (fn (npc) (= (get npc 'type) 3222)) (osrs-nearby-npcs state))))
         (if matches (car matches) nil))))
+  (def look-for-tutor
+    (fn (state batches)
+      (if (if (tutor state) #t (= batches 0)) state
+        (look-for-tutor (osrs-observe-bounded (osrs-keepalive state) tutor 5) (- batches 1)))))
+  (def approach-tutor
+    (fn (state)
+      (let ((first (look-for-tutor (osrs-walk state 3227 3149) 18)))
+        (if (tutor first) first
+          (let ((second (look-for-tutor (osrs-walk first 3229 3149) 12)))
+            (if (tutor second) second
+              (signal 'osrs/mining-test "mining tutor was not visible after two approaches"
+                (dict 'nearby-types (map (fn (npc) (get npc 'type)) (osrs-nearby-npcs second))
+                      'active-world (get second 'active-world)))))))))
   (def wait-live
     (fn (state predicate batches)
       (if (predicate state) state
@@ -25,8 +38,7 @@
       (let ((ready (osrs-await state (fn (g) (if (osrs-stat g 14) (has-key? (get g 'inventories) 93) #f)))))
         (require (= (list (mining-xp ready) (pickaxes ready) (ores ready)) '(0 0 0))
           "expected a fresh account without a pickaxe or ore")
-        (let ((arrived (with-handler (* problem) (signal 'osrs/mining-test "walking to the mining tutor" problem)
-                         (wait-live (osrs-walk ready 3227 3149) tutor 18))))
+        (let ((arrived (approach-tutor ready)))
           (let ((menu (await-interface (osrs-talk arrived (get (tutor arrived) 'index)) 219)))
             (let ((player (await-interface (osrs-resume-dialogue menu 219 1 1) 217)))
               (let ((object (await-interface (osrs-resume-dialogue player 217 5 -1) 193)))
