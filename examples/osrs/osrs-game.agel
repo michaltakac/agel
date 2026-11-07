@@ -5,7 +5,7 @@
   (import agel/osrs-wire)
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
-  (export osrs-observe-bounded osrs-pause-events)
+  (export osrs-observe-bounded osrs-pause-events osrs-map-route)
   (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-take-ground-item osrs-ground-count)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -209,6 +209,15 @@
                     (assoc zones zone (if reset (dict)
                       (ground-zone (map-or-empty (get zones zone)) (drop bytes 3)))))))
               state))))))
+  (def osrs-map-route (fn (state) (get state 'map-route)))
+  (def observe-map-route
+    (fn (state bytes)
+      (let ((packed (osrs-uint bytes)) (prior (osrs-map-route state)))
+        (if (= packed 4294967295)
+          (if prior (assoc state 'map-route (assoc prior 'cleared #t)) state)
+          (assoc state 'map-route
+            (dict 'sequence (if prior (+ 1 (get prior 'sequence)) 1)
+                  'x (rem (/ packed 16384) 16384) 'z (rem packed 16384) 'cleared #f))))))
   (def observe
     (fn (state packet retained)
       (let ((name (get packet 'name)) (bytes (get packet 'bytes)))
@@ -236,7 +245,9 @@
                                 (npcs-decode (if (get (get state 'npc-worlds) world)
                                                 (get (get state 'npc-worlds) world) (npcs-new))
                                              bytes (= name "NPC_INFO_LARGE_V6")))))
-                            (observe-varp (observe-ground state name bytes retained) name bytes)))))))))
+                            (if (= name "SET_MAP_FLAG_V2")
+                              (observe-map-route state bytes)
+                              (observe-varp (observe-ground state name bytes retained) name bytes))))))))))
   (def osrs-nearby-npcs
     (fn (state)
       (let ((world (get (get state 'npc-worlds) 0)))

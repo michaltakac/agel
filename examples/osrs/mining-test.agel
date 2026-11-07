@@ -12,15 +12,28 @@
     (fn (state predicate batches)
       (if (if (predicate state) #t (= batches 0)) state
         (observe-live (osrs-observe-bounded (osrs-keepalive state) predicate 5) predicate (- batches 1)))))
+  (def walk-to-tutor
+    (fn (state x z batches)
+      (let ((prior (osrs-map-route state)))
+        (observe-live (osrs-walk state x z)
+          (fn (observed)
+            (let ((route (osrs-map-route observed)))
+              (if route
+                (if (< (if prior (get prior 'sequence) 0) (get route 'sequence))
+                  (if (get route 'cleared)
+                    (if (= (list x z) (list (get route 'x) (get route 'z))) (tutor observed) #f)
+                    #f)
+                  #f)
+                #f))) batches))))
   (def approach-tutor
     (fn (state)
-      (let ((first (observe-live (osrs-walk state 3227 3149) tutor 18)))
+      (let ((first (walk-to-tutor state 3227 3149 18)))
         (if (tutor first) first
-          (let ((second (observe-live (osrs-walk first 3229 3149) tutor 12)))
+          (let ((second (walk-to-tutor first 3229 3149 12)))
             (if (tutor second) second
               (signal 'osrs/mining-test "mining tutor was not visible after two approaches"
                 (dict 'nearby-types (map (fn (npc) (get npc 'type)) (osrs-nearby-npcs second))
-                      'active-world (get second 'active-world)))))))))
+                      'active-world (get second 'active-world) 'map-route (osrs-map-route second)))))))))
   (def wait-live
     (fn (state predicate batches)
       (if (predicate state) state
@@ -48,7 +61,8 @@
           (let ((nearby (observe-live (osrs-wait-ticks (osrs-walk first 3229 3149) 5) tutor 6)))
             (let ((second (talk-to-tutor nearby)))
               (if (osrs-open-interface? second 219) second
-                (signal 'osrs/mining-test "mining tutor did not open a menu after two talks"))))))))
+                (signal 'osrs/mining-test "mining tutor did not open a menu after two talks"
+                  (osrs-map-route second)))))))))
   (def first-copper-state
     (fn (state)
       (let ((ready (osrs-await state (fn (g) (if (osrs-stat g 14) (has-key? (get g 'inventories) 93) #f)))))

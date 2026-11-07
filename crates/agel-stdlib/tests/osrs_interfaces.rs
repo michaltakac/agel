@@ -208,6 +208,27 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
         pause.values.last().map(Value::to_string).as_deref(),
         Some("(0 1 1 0)")
     );
+    let route = world
+        .evaluate(
+            r#"(def route-packet
+                 (fn (state body)
+                   (let ((first (isaac-bytes-next (get state 'in))))
+                     (let ((second (isaac-bytes-next (get first 'state))))
+                       (let ((a (+ 128 (get first 'value))) (b (+ 139 (get second 'value))))
+                         (def raw (cons (- a (* 256 (/ a 256))) (cons (- b (* 256 (/ b 256))) body)))
+                         (get (osrs-next-packet state) 'state))))))
+              (def empty-route (route-packet original '(255 255 255 255)))
+              (def walking (route-packet empty-route '(3 38 204 77)))
+              (def stopped (route-packet walking '(255 255 255 255)))
+              (def next-route (route-packet stopped '(3 39 76 77)))
+              (list (osrs-map-route empty-route) (osrs-map-route walking)
+                    (osrs-map-route stopped) (osrs-map-route next-route))"#,
+        )
+        .unwrap();
+    assert_eq!(
+        route.values.last().map(Value::to_string).as_deref(),
+        Some("(nil {sequence 1 x 3227 z 3149 cleared #f} {sequence 1 x 3227 z 3149 cleared #t} {sequence 2 x 3229 z 3149 cleared #f})")
+    );
 
     let cadence = world
         .evaluate_with(
