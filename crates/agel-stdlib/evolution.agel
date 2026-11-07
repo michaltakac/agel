@@ -41,12 +41,19 @@
                     (if (has-key? case 'expected)
                         (if (= (get case 'arguments) nil) #t
                             (= (type-of (get case 'arguments)) 'list)) #f) #f)
-              (let ((actual (meta-apply candidate (get case 'arguments))))
-              (if (= actual (get case 'expected))
-                  (replay-cases candidate (cdr cases) (+ checked 1))
-                  (dict 'passed #f 'checked checked 'reason "recorded step differs"
-                        'arguments (get case 'arguments)
-                        'expected (get case 'expected) 'actual actual)))
+              (let ((execution (with-handler (* problem)
+                                 (dict 'problem problem)
+                                 (dict 'actual (meta-apply candidate (get case 'arguments))))))
+                (if (has-key? execution 'problem)
+                  (let ((problem (get execution 'problem)))
+                    (dict 'passed #f 'checked checked 'reason (get problem 'message)
+                          'condition (get problem 'kind)))
+                  (let ((actual (get execution 'actual)))
+                    (if (= actual (get case 'expected))
+                      (replay-cases candidate (cdr cases) (+ checked 1))
+                      (dict 'passed #f 'checked checked 'reason "recorded step differs"
+                            'arguments (get case 'arguments)
+                            'expected (get case 'expected) 'actual actual)))))
               (dict 'passed #f 'checked checked 'reason "invalid recorded step"))))))
   (def committed-replay
     (fn (events version)

@@ -149,10 +149,12 @@
       (let ((checked (get replay 'checked)) (reason (get replay 'reason))
             (displayed (count (get state 'examples))))
         (if (= (type-of checked) 'int)
-          (text-concat
-            (if (< checked displayed) "Displayed prediction: "
-              (if (< checked (+ displayed displayed)) "Displayed contract: " "Held-out contract: "))
-            reason)
+          (if (< checked displayed)
+            (text-concat "Displayed prediction: " reason)
+            (if (< checked (+ displayed displayed))
+              (text-concat "Displayed contract: " reason)
+              (text-concat "Held-out contract: "
+                (if (get replay 'condition) "candidate raised a condition" reason))))
           reason))))
   (def apply-judgment
     (fn (self state receipt probe)

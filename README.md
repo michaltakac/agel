@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.158.** Repair agents distinguish replay failure
-stages when revising a proposal. See the [release notes](docs/release-v0.3.158.md).
+**Current release: v0.3.159.** Replay retains its progress when a candidate
+raises a condition. See the [release notes](docs/release-v0.3.159.md).
+
+v0.3.158 distinguishes replay failure stages when revising a proposal. See the [release notes](docs/release-v0.3.158.md).
 
 v0.3.157 returns live tool gate outcomes to the proposing agent. See the [release notes](docs/release-v0.3.157.md).
 

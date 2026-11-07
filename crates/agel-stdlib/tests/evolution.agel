@@ -44,6 +44,13 @@
 (check (= (evolution-current no-reason 'cell 'x) nil))
 (check (= (get (evolution-cost no-reason) 'microusd) 5))
 (check (= (get (evolution-replay '(fn () nil) (list (dict 'arguments nil))) 'passed) #f))
+(def trapped (evolution-replay '(fn (n) (/ 12 n))
+  (list (dict 'arguments '(3) 'expected 4) (dict 'arguments '(0) 'expected 0))))
+(check (= (get trapped 'passed) #f))
+(check (= (get trapped 'checked) 1))
+(check (= (type-of (get trapped 'condition)) 'symbol))
+(check (= (has-key? trapped 'arguments) #f))
+
 
 ; Retry reads the refusal reason and changes the candidate, within a bound.
 (def repair

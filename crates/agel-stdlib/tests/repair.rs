@@ -101,6 +101,26 @@ fn held_out_failures_and_false_predictions_retry_with_reasons() {
 }
 
 #[test]
+fn held_out_runtime_conditions_are_classified_in_the_retry() {
+    let (mut world, options) = setup();
+    reply(
+        &mut world,
+        &options,
+        "writer",
+        "(dict 'diagnosis \"round up\" 'after '(fn (n size) (if (= n 0) 0 (if (= n 5) 2 (/ 1 0)))) 'predictions '(2 0))",
+    );
+    reply(
+        &mut world,
+        &options,
+        "judge",
+        "patch noul 999 reason choice 5 none 900 900 25 25 25 25",
+    );
+    assert!(world.pending_model_requests()[0]
+        .prompt
+        .contains("Held-out contract: candidate raised a condition"));
+}
+
+#[test]
 fn malformed_reports_and_refused_judges_never_activate() {
     let (mut world, options) = setup();
     reply(
