@@ -2,8 +2,11 @@
   (export bits-new bits-read bits-left)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def powers (dict 0 1 1 2 2 4 3 8 4 16 5 32 6 64 7 128 8 256))
-  (def length (fn (xs n) (if (= xs nil) n (length (cdr xs) (+ n 1)))))
-  (def bits-new (fn (bytes) (dict 'bytes bytes 'offset 0 'left (* 8 (length bytes 0)))))
+  (def bits-new
+    (fn (bytes)
+      (if (if (= bytes nil) #t (= (type-of bytes) 'list))
+        (dict 'bytes bytes 'offset 0 'left (* 8 (count bytes)))
+        (signal 'osrs/bits "bit reader requires a byte list"))))
   (def bits-left (fn (reader) (get reader 'left)))
   (def read-loop
     (fn (reader remaining out)

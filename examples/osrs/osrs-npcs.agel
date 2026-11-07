@@ -2,7 +2,6 @@
   (import agel/sequence)
   (import agel/osrs-bits)
   (export npcs-new npcs-decode)
-  (def count (fn (xs n) (if (= xs nil) n (count (cdr xs) (+ n 1)))))
   (def npcs-new (fn () (dict 'order nil 'npcs (dict))))
   (def retain
     (fn (reader npc order out movement extended)
@@ -59,7 +58,7 @@
               (signal 'osrs/bits "truncated NPC index"))
           (let ((index (bits-read reader 16)))
             (if (= (get index 'value) 65535) (dict 'order (reverse order) 'npcs out 'terminated #t)
-                (if (< (count order 0) 255)
+                (if (< (count order) 255)
                     (let ((next (spawn (get index 'reader) (get index 'value) width)))
                       (additions (get next 'reader) (cons (get index 'value) order)
                         (assoc out (get index 'value) (get next 'npc)) width))

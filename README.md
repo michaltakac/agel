@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.116.** RuneScape exact reads use fewer Agel steps.
+**Current release: v0.3.117.** RuneScape NPC decoding avoids repeated
+list scans. See the [release notes](docs/release-v0.3.117.md).
+
+v0.3.116 reduces the Agel work in RuneScape exact reads.
 See the [release notes](docs/release-v0.3.116.md).
 
 v0.3.115 pins the host harness and journal reader for native pairs.
