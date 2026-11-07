@@ -61,10 +61,15 @@
                     (if alternate (fight-again visible alternate skill tried)
                       (signal 'osrs/training "no alternative rat observed" tried))))
                 (signal 'osrs/training "rat attack did not complete" tried))))))))
+  (def next-rat
+    (fn (state previous)
+      (if (observed-rat state previous) previous
+        (let ((visible (alternate-rat state (list previous))))
+          (if visible visible previous)))))
   (def train
     (fn (state skill goal remaining index fights observe)
       (if (if (< (xp state skill) goal) (< 0 remaining) #f)
-        (let ((encounter (if index (fight-again state index skill nil)
+        (let ((encounter (if index (fight-again state (next-rat state index) skill nil)
                            (test-rat-combat-bounded state await-combat (fn (attacking _) attacking)))))
           (let ((next (get encounter 'state)) (report (get encounter 'report)))
             (if observe (observe skill report) nil)

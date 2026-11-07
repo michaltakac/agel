@@ -531,9 +531,11 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
     "#,
         )
         .unwrap();
-    world
-        .evaluate(include_str!("../../../examples/osrs/combat-training.agel"))
-        .unwrap();
+    let training = include_str!("../../../examples/osrs/combat-training.agel").replace(
+        "(export train-rat-attack",
+        "(export next-rat train-rat-attack",
+    );
+    world.evaluate(&training).unwrap();
     let result = world
         .evaluate(
             r#"
@@ -547,12 +549,14 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (reverse (get (get trained 'state) 'attempts))
         (map (fn (phase) (get (car (get phase 'encounters)) 'target-index)) (get report 'phases))
         (get (get late 'report) 'stance)
-        (reverse (get (get late 'state) 'clicks)))
+        (reverse (get (get late 'state) 'clicks))
+        (next-rat (dict 'npcs (list (dict 'index 2 'type 2854))) 1)
+        (next-rat (dict 'npcs nil) 1))
     "#,
         )
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 1 (10 18 10 18 10 18) (1 1 2 2) (1 2 2) 3 (10 18))")
+        Some("(#t 8 1 (10 18 10 18 10 18) (1 1 2 2) (1 2 2) 3 (10 18) 2 1)")
     );
 }
