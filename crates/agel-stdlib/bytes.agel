@@ -69,9 +69,18 @@
             (let ((n (digit c)))
               (if (= high nil) (decode text (+ at 1) n out)
                 (decode text (+ at 1) nil (cons (+ (* high 16) n) out)))))))))
+  (def decode-pairs
+    (fn (text at length out)
+      (if (= at length) (reverse out)
+        (if (< (+ at 1) length)
+          (let ((high (text-byte text at)) (low (text-byte text (+ at 1))))
+            (if (if (< 32 high) (< 32 low) #f)
+              (decode-pairs text (+ at 2) length (cons (+ (* (digit high) 16) (digit low)) out))
+              (decode text at nil out)))
+          (decode text at nil out)))))
   (def bytes-from-hex
     (fn (text)
-      (decode text 0 nil nil)))
+      (decode-pairs text 0 (text-bytes text) nil)))
   (def hex-pairs
     (fn (pieces out)
       (if (= (count pieces) 0) (reverse out)
