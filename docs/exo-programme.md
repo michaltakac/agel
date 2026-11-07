@@ -54,6 +54,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.42 | Native run evidence | The bridge retains guest boot reports and distinguishes deadline expiry from console closure. |
 | v0.3.43 | Native quest route | The native guest gathers the three ingredients. A dialogue retry passes its fixture, with live hand-in verification pending. |
 | v0.3.44 | Native comparison inputs | The combat scorer verifies installed client source and ties judge receipts to the bridge dispatches. |
+| v0.3.45 | Native web reads | A guest retrieves an allowlisted HTTPS document through the byte carrier and parses it in Agel. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |

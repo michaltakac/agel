@@ -1,6 +1,53 @@
 (module agel/research
   (import agel/browse)
-  (export research-tools)
+  (import agel/sequence)
+  (export research-tools research-stream-fetch)
+
+  (def request-bytes
+    (fn (url at out)
+      (if (= at (text-bytes url)) (reverse (cons 10 out))
+        (let ((byte (text-byte url at)))
+          (if (if (< 32 byte) (< byte 127) #f)
+            (request-bytes url (+ at 1) (cons byte out))
+            (signal 'research/input "URL must use percent-encoded ASCII"))))))
+
+  (def read-response
+    (fn (stream remaining chunks)
+      (let ((part ((get stream 'read) 128)))
+        (if (= part nil)
+          (text-from-bytes (foldl (fn (body chunk) (append chunk body)) nil chunks))
+          (if (< remaining (count part))
+            (signal 'research/limit "research response exceeds 32768 bytes")
+            (read-response stream (- remaining (count part)) (cons part chunks)))))))
+
+  (def decode-response
+    (fn (url response)
+      (if (< (text-bytes response) 5)
+        (signal 'research/fetch "incomplete research response" url)
+        (let ((kind (get (dict "html\n" 'html "text\n" 'text) (text-slice response 0 5))))
+          (if kind
+            (dict 'kind kind 'source url 'body (text-slice response 5 (text-bytes response)))
+            (signal 'research/fetch "research relay refused the URL" url))))))
+
+  (def research-stream-fetch
+    (fn (stream)
+      (fn (url)
+        (if (if (= (type-of url) 'string)
+              (if (< 8 (text-bytes url))
+                (if (< (text-bytes url) 2049) (= (text-slice url 0 8) "https://") #f) #f) #f)
+          (let ((request (request-bytes url 0 nil)))
+            ((get stream 'open))
+            (let ((response
+                    (with-handler (* problem)
+                      (begin
+                        (with-handler (* ignored) nil ((get stream 'close)))
+                        (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+                      (if (= ((get stream 'write) request) (count request))
+                        (read-response stream 32768 nil)
+                        (signal 'research/fetch "short research request")))))
+              ((get stream 'close))
+              (decode-response url response)))
+          (signal 'research/input "expected a bounded HTTPS URL")))))
 
   (def ingest
     (fn (kind source body)

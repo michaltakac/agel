@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.44.** Combat comparisons verify the installed
+**Current release: v0.3.45.** Agel OS can read allowlisted HTTPS documents
+through its byte carrier. See the [release notes](docs/release-v0.3.45.md).
+
+v0.3.44 verifies the installed
 Agel program and judge dispatches. See the [release notes](docs/release-v0.3.44.md).
 
 v0.3.43 retries a missing

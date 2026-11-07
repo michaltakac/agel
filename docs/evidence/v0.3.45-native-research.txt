@@ -1,0 +1,6 @@
+byte-bridge: request 1 operation open at-ms 2710 duration-ms 1 status ok
+byte-bridge: request 9 operation close at-ms 4095 duration-ms 0 status ok
+byte-bridge: request 10 operation open at-ms 4244 duration-ms 0 status ok
+byte-bridge: request 14 operation close at-ms 4262 duration-ms 0 status ok
+("https://example.com/" "Example Domain" external research/fetch)
+process agel exited with status 0

@@ -84,4 +84,18 @@
 (run 2)
 (check (= (get (recv receiver) 'value) "Guide") "replay evidence and activate an Agel tool live")
 (check (= (count (get (live-tools-state researcher) 'calls)) 4) "retain retrieval and custom tool calls")
+
+(import agel/research)
+(def chunks '((116 101 120 116 10 195) (169)))
+(def closed 0)
+(def fetch (research-stream-fetch (dict
+  'open (fn () #t) 'close (fn () (def closed (+ closed 1)))
+  'write (fn (bytes) (def sent bytes) (count bytes))
+  'read (fn (_) (if chunks (let ((part (car chunks))) (def chunks (cdr chunks)) part) nil)))))
+(check (= (get (fetch "https://a.test/") 'body) "é") "decode UTF-8 across transport chunks")
+(check (= (car (reverse sent)) 10) "terminate relay request")
+(check (= closed 1) "close relay after successful retrieval")
+(def refused (with-handler (* problem) (get problem 'kind) (fetch "https://a.test/\n")))
+(check (= refused 'research/input) "reject line injection before opening the relay")
+(check (= closed 1) "invalid URL does not open the stream")
 #t
