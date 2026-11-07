@@ -68,6 +68,15 @@ def combat_xp_saved(expected, oracle, *, minimum=False):
     return all(stats.get(stat, -1) // 10 == xp for stat, xp in expected.items())
 
 
+def economy_saved(coins, snapshot):
+    if coins == 0:
+        return 'item=obj.coins ' not in snapshot
+    return {f'inv=inv.inv item=obj.coins count={coins}',
+            'inv=inv.inv item=obj.bronze_pickaxe count=1',
+            'stat=13 base=1 visible=1 fine_xp=62',
+            'stat=14 base=1 visible=1 fine_xp=350'}.issubset(snapshot.splitlines())
+
+
 def melee_xp(report, goal):
     """Check the guest's three completed phases against its final observation."""
     summary = re.search(

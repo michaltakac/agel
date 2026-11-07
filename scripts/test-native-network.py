@@ -17,7 +17,7 @@ import time
 import graphical_console as console
 
 sys.path.insert(0, str(Path(__file__).with_name("osrs")))
-from test_support import combat_xp, combat_xp_saved, melee_failure_saved, melee_levels_saved, melee_xp
+from test_support import combat_xp, combat_xp_saved, economy_saved, melee_failure_saved, melee_levels_saved, melee_xp
 
 parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
@@ -366,8 +366,13 @@ else:
         source+=f"(def economy-billing-complete {'#f' if editing else '#t'})\n"
         source+='''(import agel/osrs-mining-test) (import agel/benchmark)
 (console-log "native-economy: earning first coins through mining, smelting and sale")
-(def sale (first-bronze-sale-using ready
-  (fn (phase) (console-log (text-concat "native-economy: " phase)))))
+(def sale (with-handler (* problem)
+  (begin
+    (console-log (text-concat "native-economy: failure " (print-form problem)))
+    (console-log (text-concat "native-economy: task-us " (print-form (- (clock-us) task-start))))
+    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+  (first-bronze-sale-using ready
+    (fn (phase) (console-log (text-concat "native-economy: " phase))))))
 (def finished (clock-us))
 (def completed (get sale 'state))
 (def sale-report (get sale 'report))
@@ -501,6 +506,8 @@ if editing:
 if not passed and melee is not None and 'native-combat: failure ' in output:
     capture_account(lambda snapshot: melee_failure_saved(output, melee, snapshot),
                     ['varp.com_mode'])
+if not passed and options.economy and 'native-economy: failure ' in output:
+    capture_account(lambda snapshot: economy_saved(0, snapshot), [])
 if editing:
     assert passed, 'native session failed; disk, serial log and judge records retained'
     if options.optimize:
@@ -552,8 +559,6 @@ if options.economy:
     assert output.count('operation open ') == output.count('operation close ') == 2
     if not editing:
         assert 'inference-bridge: started job' not in output
-    economy_lines={f'inv=inv.inv item=obj.coins count={sale[1]}','inv=inv.inv item=obj.bronze_pickaxe count=1',
-                   'stat=13 base=1 visible=1 fine_xp=62','stat=14 base=1 visible=1 fine_xp=350'}
 oracle_varps=['varp.com_mode'] if melee is not None else []
 if options.quest:
     ingredient_source = 'checkpoint' if options.quest_resume else 'gathered'
@@ -574,7 +579,7 @@ if not options.challenge and not options.craft:
         if combat_workload:
             return combat_xp_saved(expected_xp,snapshot,minimum=melee is not None)
         if options.economy:
-            return economy_lines.issubset(snapshot.splitlines())
+            return economy_saved(int(sale[1]), snapshot)
         if options.quest:
             return quest_saved(snapshot)
         return 'x=3223 z=3218 level=0' in snapshot

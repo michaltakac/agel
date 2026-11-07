@@ -11,7 +11,7 @@ from native_provider_support import (
 )
 
 sys.path.insert(0, str(Path(__file__).with_name('osrs')))
-from test_support import combat_xp, combat_xp_saved, form, melee_failure_saved, melee_levels_saved, melee_xp
+from test_support import combat_xp, combat_xp_saved, economy_saved, form, melee_failure_saved, melee_levels_saved, melee_xp
 
 
 def require(condition, message):
@@ -42,6 +42,29 @@ def installed_client(directory, read_table):
     return source.decode()
 
 
+def adaptation_evidence(directory, trace, correct):
+    charges = []
+    activated = 'native-opt: policy committed after text judgment and measured replay' in trace
+    rolled_back = 'native-opt: continued with fixed policy after exhausted retries' in trace
+    require(activated != rolled_back,
+            f'{directory}: no verified in-session policy decision')
+    if correct:
+        uses = r'[1-9]\d*' if activated else '0'
+        require('native-opt: recorded workload verified in append-only log' in trace
+                and re.search(rf'^native-opt: live uses {uses}$', trace, re.M),
+                f'{directory}: no verified in-session policy use')
+    require((directory / 'mode.txt').read_text().strip() == 'live',
+            f'{directory}: adaptive scoring requires live providers')
+    ledger, _ = verified_judge_ledger(directory)
+    for receipt in judge_receipts_for_trace(ledger, trace):
+        charges.append(('judge', judge_cost(receipt)))
+    writers, usage = writer_usage_for_trace(trace)
+    require(writers, f'{directory}: no writer dispatch')
+    charges.extend(('model', None) for _ in writers)
+    decision = 'committed' if activated else 'refused-retained-fixed'
+    return charges, decision, usage
+
+
 def load_arm(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
@@ -68,24 +91,8 @@ def load_arm(directory, policy, read_table):
         expected, levels = melee_xp(trace, goal)
         require(melee_levels_saved(levels, saved), f'{directory}: saved melee levels or stance differ')
     if policy == 'adaptive':
-        activated = 'native-opt: policy committed after text judgment and measured replay' in trace
-        rolled_back = 'native-opt: continued with fixed policy after exhausted retries' in trace
-        require(goal is not None and activated != rolled_back,
-                f'{directory}: no verified in-session policy decision')
-        if correct:
-            uses = r'[1-9]\d*' if activated else '0'
-            require('native-opt: recorded workload verified in append-only log' in trace
-                    and re.search(rf'^native-opt: live uses {uses}$', trace, re.M),
-                    f'{directory}: no verified in-session policy use')
-        require((directory / 'mode.txt').read_text().strip() == 'live',
-                f'{directory}: adaptive scoring requires live providers')
-        ledger, _ = verified_judge_ledger(directory)
-        for receipt in judge_receipts_for_trace(ledger, trace):
-            charges.append(('judge', judge_cost(receipt)))
-        writers, usage = writer_usage_for_trace(trace)
-        require(writers, f'{directory}: no writer dispatch')
-        charges.extend(('model', None) for _ in writers)
-        decision = 'committed' if activated else 'refused-retained-fixed'
+        require(goal is not None, f'{directory}: missing melee goal')
+        charges, decision, usage = adaptation_evidence(directory, trace, correct)
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: evaluation incurred inference')
     if correct:
@@ -137,33 +144,84 @@ def load_arm(directory, policy, read_table):
     return contract, identity[1], int(timings[0]), charges, correct, decision, usage
 
 
+def load_economy(directory, policy, read_table):
+    manifest = json.loads((directory / 'world.json').read_text())
+    trace = (directory / 'serial.log').read_text()
+    saved = (directory / 'saved-account.txt').read_text()
+    require(manifest['encoder_policy'] == policy, f'{directory}: unexpected economy policy')
+    exits = re.findall(r'^process agel exited with status (\d+)$', trace, re.M)
+    require(len(exits) == 1, f'{directory}: expected one terminal guest exit')
+    correct = exits[0] == '0'
+    sales = re.findall(r'^native-economy: \{test first-sale passed #t .*coins-before 0 coins-after ([1-9]\d*)\}$', trace, re.M)
+    if correct:
+        require(len(sales) == 1 and 'native-network: client completed:' in trace,
+                f'{directory}: missing verified sale')
+        coins = int(sales[0])
+        clocks = re.findall(r'^native-economy: score \{correct #t elapsed-us (\d+) .* coins ' +
+                            str(coins) + r' coins-per-dollar nil\}$', trace, re.M)
+    else:
+        require(not sales and re.search(r'^native-economy: failure \{', trace, re.M),
+                f'{directory}: no measured sale failure')
+        coins = 0
+        clocks = re.findall(r'^native-economy: task-us (\d+)$', trace, re.M)
+    require(len(clocks) == 1 and economy_saved(coins, saved), f'{directory}: sale clock or saved evidence differs')
+    identity = re.search(r'^account=(\d+) character=\d+ rights= x=\d+ z=\d+ level=0 xp_rate_in_hundreds=100$',
+                         saved, re.M)
+    require(identity, f'{directory}: expected saved normal account at 1× XP')
+    charges, decision, usage = [], policy, []
+    if policy == 'adaptive':
+        charges, decision, usage = adaptation_evidence(directory, trace, correct)
+    else:
+        require('inference-bridge: started job' not in trace, f'{directory}: fixed economy incurred inference')
+    contract = {key: manifest[key] for key in (
+        'image', 'manifest', 'scope', 'guest_memory_mib', 'evaluation_fuel',
+        'keepalive_interval_us', 'economy_policy_sha256', 'service_policy_sha256')}
+    source = installed_client(directory, read_table)
+    for key, first, last in (
+        ('stream_adapter', '(module agel/byte-stream\n', '(module agel/osrs-wire\n'),
+        ('game_and_economy', '(module agel/osrs-wire\n', '(module agel/meta\n'),
+        ('starting_encoder', '(def initial-policy ', '(import agel/osrs-wire)\n'),
+        ('task', '(import agel/osrs-mining-test) (import agel/benchmark)', '(if (< 0 (get completed'),
+    ):
+        begin = source.index(first)
+        body = source[begin:source.index(last, begin)].split('\n(if policy-activated', 1)[0].strip()
+        contract[key] = hashlib.sha256(body.encode()).hexdigest()
+    contract.update(boot_identity(directory, read_table))
+    return contract, identity[1], int(clocks[0]), charges, correct, decision, usage, coins
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('fixed', type=Path)
     parser.add_argument('candidate', type=Path)
-    parser.add_argument('--melee', action='store_true', help='compare in-session adaptation on three-skill melee')
+    tasks = parser.add_mutually_exclusive_group()
+    tasks.add_argument('--melee', action='store_true', help='compare in-session adaptation on three-skill melee')
+    tasks.add_argument('--economy', action='store_true', help='compare in-session adaptation on the first bronze sale')
     parser.add_argument('--transfer', action='store_true', help='score a melee run using a retained policy')
     args = parser.parse_args()
     if args.transfer and not args.melee:
         parser.error('--transfer applies to --melee; one-rat comparisons already use transfer')
     read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
-    fixed, fixed_account, fixed_time, fixed_charges, fixed_correct, fixed_decision, _ = load_arm(args.fixed, 'fixed', read_table)
-    transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct, adaptive_decision, usage = load_arm(
-        args.candidate, 'adaptive' if args.melee and not args.transfer else 'transferred', read_table)
-    require(fixed == transfer, 'world, boot image, Agel executable, game adapter, or combat source differs')
-    require(fixed_account != transfer_account, 'combat accounts must differ')
+    load = load_economy if args.economy else load_arm
+    fixed, fixed_account, fixed_time, fixed_charges, fixed_correct, fixed_decision, _, *fixed_coins = load(args.fixed, 'fixed', read_table)
+    adaptive_policy = 'adaptive' if (args.economy or args.melee) and not args.transfer else 'transferred'
+    transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct, adaptive_decision, usage, *adaptive_coins = load(
+        args.candidate, adaptive_policy, read_table)
+    require(fixed == transfer, 'world, boot image, Agel executable, game adapter, or task source differs')
+    require(fixed_account != transfer_account, 'task accounts must differ')
     digest = hashlib.sha256(json.dumps(fixed, sort_keys=True).encode()).hexdigest()
     print("(import agel/benchmark)")
-    task = 'three-skill-melee' if args.melee else 'one-rat'
-    phase = 'in-session-adaptation' if args.melee and not args.transfer else 'fresh-account-evaluation'
+    task = 'first-bronze-sale' if args.economy else 'three-skill-melee' if args.melee else 'one-rat'
+    phase = 'in-session-adaptation' if adaptive_policy == 'adaptive' else 'fresh-account-evaluation'
     print(f"(def comparison (dict 'task '{task} 'phase '{phase} "
           f"'contract {form(digest)} 'randomness 'uncontrolled))")
-    for arm, elapsed, charges, correct in [('fixed', fixed_time, fixed_charges, fixed_correct),
-                                           ('adaptive', transfer_time, adaptive_charges, adaptive_correct)]:
+    for arm, elapsed, charges, correct, coins in [('fixed', fixed_time, fixed_charges, fixed_correct, fixed_coins),
+        ('adaptive', transfer_time, adaptive_charges, adaptive_correct, adaptive_coins)]:
         values = ' '.join(f"(dict 'kind '{kind} 'cost-nanousd {cost if cost is not None else 'nil'})"
                           for kind, cost in charges)
+        proceeds = f" 'coins-before 0 'coins-after {coins[0]}" if coins else ''
         print(f"(def {arm} (dict 'arm '{arm} 'comparison comparison 'account '{arm}-account "
-              f"'correct {'#t' if correct else '#f'} 'elapsed-us {elapsed} 'billing-complete #t 'charges (list {values})))")
+              f"'correct {'#t' if correct else '#f'} 'elapsed-us {elapsed} 'billing-complete #t 'charges (list {values}){proceeds}))")
     usage_forms = ' '.join('nil' if call is None else
                            f"(dict 'input {call[0]} 'cached-input {call[1] if call[1] is not None else 'nil'} 'output {call[2]})"
                            for call in usage)
