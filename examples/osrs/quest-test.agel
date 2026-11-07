@@ -1,0 +1,58 @@
+(module agel/osrs-quest-test
+  (import agel/sequence)
+  (import agel/osrs-game)
+  (export stage-cook-ingredients finish-cooks-assistant)
+  (def require (fn (ok reason) (if ok #t (signal 'osrs/quest-test reason))))
+  (def xp (fn (g) (get (osrs-stat g 7) 'xp)))
+  (def ingredients
+    (fn (g)
+      (map (fn (item) (osrs-inventory-count g 93 item)) '(1927 1944 1933))))
+  (def ready
+    (fn (state)
+      (osrs-await state (fn (g) (if (osrs-stat g 7) (has-key? (get g 'inventories) 93) #f)))))
+  (def stage-cook-ingredients
+    (fn (state)
+      (let ((stocked (osrs-command (osrs-command (osrs-command (ready state)
+                       "item 1927 1") "item 1944 1") "item 1933 1")))
+        (osrs-await stocked (fn (g) (= (ingredients g) '(1 1 1)))))))
+  (def cook
+    (fn (state)
+      (let ((matches (filter (fn (npc) (= (get npc 'type) 4626)) (osrs-nearby-npcs state))))
+        (if matches (car matches) nil))))
+  (def complete?
+    (fn (state)
+      (if (= (xp state) 300)
+        (if (= (osrs-varp state 101) 1) (osrs-open-interface? state 153) #f) #f)))
+  (def page
+    (fn (state previous)
+      (foldl (fn (found id)
+        (if found found
+          (if (osrs-open-interface? state id)
+            (if (< (osrs-interface-opens previous id) (osrs-interface-opens state id)) id nil)
+            nil))) nil '(219 217 231 11))))
+  (def run-dialogue
+    (fn (state previous choices pages)
+      (require (< 0 pages) "Cook's Assistant exceeded the dialogue bound")
+      (let ((next (with-handler (* problem) (signal 'osrs/quest-test "waiting for the next cook dialogue"
+                     (dict 'choices choices 'pages-left pages 'problem problem))
+                    (osrs-await-bounded (osrs-keepalive state)
+                      (fn (g) (if (complete? g) #t (page g previous))) 20))))
+        (if (complete? next)
+          (begin (require (= choices 2) "unexpected cook choice count") next)
+          (let ((id (page next previous)))
+            (if (= id 219)
+              (begin
+                (require (< choices 2) "unexpected cook dialogue menu")
+                (run-dialogue (osrs-resume-dialogue next id 1 1) next (+ choices 1) (- pages 1)))
+              (run-dialogue (osrs-resume-dialogue next id (if (= id 11) 4 5) -1)
+                next choices (- pages 1))))))))
+  (def finish-cooks-assistant
+    (fn (state)
+      (let ((stock (ready state)))
+        (require (= (ingredients stock) '(1 1 1)) "expected exactly one of each staged ingredient")
+        (require (= (xp stock) 0) "expected no starting Cooking XP")
+        (let ((nearby (osrs-await (osrs-walk stock 3211 3218) cook)))
+          (let ((finished (run-dialogue (osrs-talk nearby (get (cook nearby) 'index)) nearby 0 40)))
+            (require (= (ingredients finished) '(0 0 0)) "the cook did not consume all ingredients")
+            (dict 'test 'cooks-assistant 'passed #t 'choices 2 'quest-points (osrs-varp finished 101)
+              'cooking-xp (xp finished) 'ingredients-after (ingredients finished))))))))

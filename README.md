@@ -5,10 +5,13 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.24.** Agel starts on a fresh RuneScape account,
-makes a bronze bar, and sells it at the Lumbridge General Store. The server
-verifies the saved coins and removal of the bar.
-See the [release notes and evidence](docs/release-v0.3.24.md).
+**Current release: v0.3.25.** Agel completes Cook's Assistant through
+ordinary dialogue on a fresh normal account with staged ingredients. The
+server verifies the quest stage, quest point, and Cooking XP.
+See the [release notes and evidence](docs/release-v0.3.25.md).
+
+v0.3.24 verified the first coins from a fresh account's bronze-bar sale.
+See the [economy evidence](docs/release-v0.3.24.md).
 
 v0.3.21 forged an adamant platebody inside Agel OS with normal account rights.
 See the [staged crafting evidence](docs/release-v0.3.21.md).

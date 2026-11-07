@@ -1,0 +1,27 @@
+{
+  "image": "sha256:609cf52fca5ef4f3486dc8f15690799d903730413c459445ed0d292a0e3cbba5",
+  "ports": {
+    "43594/tcp": [
+      {
+        "HostIp": "127.0.0.1",
+        "HostPort": "43594"
+      }
+    ]
+  },
+  "manifest": {
+    "server": "c4cd45ef2d38a0badcc7a9f89773f8f1c29bb16f",
+    "revision": 241,
+    "quest_mode": "respect-progress",
+    "login_pow": "disabled-private-profile",
+    "jre_sha256": "b1734db7ade49c3f6acc6ae06233b8c2dd90e3e2f00f67000ae1c972aaa64d8c",
+    "postgres_sha256": "60dd44d00ff2aaf62c43137e4c8bdb89b0ca044f4eac285eefc39c051468781d",
+    "base": "python:3.12-slim-bookworm@sha256:e0b3f8d16a5ccfbe602d5c94297e5dbcda2ec256edca2b80fcd44e39e1ff6feb",
+    "patch_sha256": "dd2b106e2911d37b55d87346f132c76a68f7ddd24e1cd539303c71e3951cf2f8",
+    "admin_patch_sha256": "7ac87bbbad41e1f0b528ea24c6719b0d94f5c7207f7c167b5c4d02224ab75b92",
+    "cache_tree_sha256": "a49f700e3b8bff17f3e08850819f0f2747da0680132f892a66138fe048ae7b70",
+    "cache_files": 25
+  },
+  "loaded_profile": "21:06:18 [INFO] - Loaded world 255 configuration: RealmConfig(id=255, loginMessage=Welcome to OpenRune., loginBroadcast=null, baseXpRate=1.0, globalXpRate=1.0, spawnCoord=CoordGrid(0_50_50_21_18), respawnCoord=CoordGrid(0_50_50_21_18), devMode=false, requireRegistration=false, autoAssignDisplayNames=true)",
+  "scope": "hosted fresh normal account completes Cook's Assistant from separately staged ingredients",
+  "policy_sha256": "3114e98e36414ac648fc08bc446ab1e24fd3094ee50f97dba02ae691536f86b1"
+}

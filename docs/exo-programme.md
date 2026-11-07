@@ -34,6 +34,7 @@ Version labels below are planned until a corresponding tag exists.
 | v0.3.22 | Fresh-account material acquisition | Agel walks to the mining tutor, acquires a pickaxe through ordinary dialogue, and mines copper. The hosted run verifies saved XP and inventory under normal rights. |
 | v0.3.23 | Fresh-account bronze production | Agel obtains its pickaxe, mines both ores, and smelts a bronze bar. The hosted run verifies consumed ores and saved Mining and Smithing XP. |
 | v0.3.24 | First economy outcome | Agel sells a bar it made from freshly mined ores at the Lumbridge General Store. The hosted test checks observed and saved coins and confirms the bar was consumed by the sale. |
+| v0.3.25 | Verified quest completion | Agel accepts and completes Cook's Assistant under normal rights from staged ingredients. The hosted test checks dialogue, the quest scroll, the saved stage and hand-ins, one quest point, and Cooking XP. |
 | Next: guardian and canonical history | Protected append authority and actual activation | Missing-result reconciliation; whole-program isolated replay; durable commit/recovery |
 | Following: native agents and content coverage | Extend the live integration to required combat/crafting/economy/quest actions | Model-controlled continuation, normal-account coverage tests and protected episode history |
 | Following: agents and experiment runner | Prompts, context selection, tools, learned code and reports in Agel | Frozen control and repeated paired tasks |

@@ -8,12 +8,15 @@ public class SetupAccount {
     public static void main(String[] args) throws Exception {
         String account = "agelsetup";
         String rights = "ADMINISTRATOR";
-        if (args.length != 0) {
-            if (args.length != 1 || !(args[0].equals("craft-grant") || args[0].equals("craft-revoke"))) {
-                throw new IllegalArgumentException("expected no argument, craft-grant or craft-revoke");
-            }
+        if (args.length == 1 && (args[0].equals("craft-grant") || args[0].equals("craft-revoke"))) {
             account = "agelcraft";
             if (args[0].equals("craft-revoke")) rights = "";
+        } else if (args.length == 2 && args[1].matches("aq[0-9a-f]{8}")
+                && (args[0].equals("quest-grant") || args[0].equals("quest-revoke"))) {
+            account = args[1];
+            if (args[0].equals("quest-revoke")) rights = "";
+        } else if (args.length != 0) {
+            throw new IllegalArgumentException("invalid dedicated fixture request");
         }
         String port = Files.readAllLines(Paths.get("/world/.data/postgres/postmaster.pid")).get(3).trim();
         if (!port.matches("[0-9]+")) throw new IllegalStateException("invalid PostgreSQL port");

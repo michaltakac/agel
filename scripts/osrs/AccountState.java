@@ -7,8 +7,11 @@ import java.sql.ResultSet;
 
 public class AccountState {
     public static void main(String[] args) throws Exception {
-        if (args.length != 1 || !args[0].matches("[a-z0-9_]{1,12}")) {
-            throw new IllegalArgumentException("one probe username required");
+        if (args.length == 0 || !args[0].matches("[a-z0-9_]{1,12}")) {
+            throw new IllegalArgumentException("probe username required before optional varp keys");
+        }
+        for (int i = 1; i < args.length; i++) {
+            if (!args[i].matches("varp\\.[a-z0-9_]+")) throw new IllegalArgumentException("invalid varp key");
         }
         String port = Files.readAllLines(Paths.get("/world/.data/postgres/postmaster.pid")).get(3).trim();
         if (!port.matches("[0-9]+")) throw new IllegalStateException("invalid PostgreSQL port");
@@ -37,6 +40,18 @@ public class AccountState {
                         inv.setLong(1, character);
                         try (ResultSet values = inv.executeQuery()) {
                             while (values.next()) System.out.println("inv=" + values.getString(1) + " item=" + values.getString(2) + " count=" + values.getLong(3));
+                        }
+                    }
+                    if (args.length > 1) {
+                        try (PreparedStatement varp = db.prepareStatement(
+                                "SELECT value FROM main.character_varps WHERE character_id=? AND varp=?")) {
+                            varp.setLong(1, character);
+                            for (int i = 1; i < args.length; i++) {
+                                varp.setString(2, args[i]);
+                                try (ResultSet value = varp.executeQuery()) {
+                                    if (value.next()) System.out.println(args[i] + "=" + value.getLong(1));
+                                }
+                            }
                         }
                     }
                     if (row.next()) throw new IllegalStateException("ambiguous probe character");

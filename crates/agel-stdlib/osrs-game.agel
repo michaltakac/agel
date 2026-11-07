@@ -5,7 +5,7 @@
   (import agel/osrs-wire)
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
-  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item)
+  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-interface-opens osrs-varp)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def count (fn (xs) (foldl (fn (n _) (+ n 1)) 0 xs)))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
@@ -55,11 +55,20 @@
             (signal 'osrs/interface "truncated interface resync")
             (assoc (assoc state 'top-interface (osrs-uint (take bytes 2 nil))) 'interfaces
               (read-subinterfaces (drop bytes 4) n (dict))))))))
+  (def osrs-interface-opens
+    (fn (state interface)
+      (let ((n (get (map-or-empty (get state 'interface-opens)) interface)))
+        (if n n 0))))
+  (def remember-interface-open
+    (fn (state parent id)
+      (assoc (assoc state 'interfaces (assoc (map-or-empty (get state 'interfaces)) parent id))
+        'interface-opens (assoc (map-or-empty (get state 'interface-opens)) id
+          (+ 1 (osrs-interface-opens state id))))))
   (def observe-interface
     (fn (state name bytes)
       (if (= name "IF_OPENSUB")
         (let ((parent (osrs-uint (list (nth bytes 1) (nth bytes 0) (nth bytes 3) (nth bytes 2)))))
-          (assoc state 'interfaces (assoc (map-or-empty (get state 'interfaces)) parent (read-interface-id (drop bytes 4)))))
+          (remember-interface-open state parent (read-interface-id (drop bytes 4))))
         (if (= name "IF_CLOSESUB")
           (assoc state 'interfaces (dissoc (map-or-empty (get state 'interfaces)) (osrs-uint bytes)))
           (if (= name "IF_MOVESUB")
@@ -82,6 +91,30 @@
         (let ((interfaces (map-or-empty (get state 'interfaces))))
           (foldl (fn (found parent) (if found #t (= (get interfaces parent) interface)))
             #f (keys interfaces))))))
+  (def signed (fn (n limit) (if (< n (/ limit 2)) n (- n limit))))
+  (def osrs-varp
+    (fn (state id) (get (map-or-empty (get state 'varps)) id)))
+  (def remember-varp
+    (fn (state id value)
+      (assoc state 'varps (assoc (map-or-empty (get state 'varps)) id value))))
+  (def varp-word
+    (fn (bytes at)
+      (osrs-uint (list (nth bytes (+ at 1)) (nth bytes at)
+                       (nth bytes (+ at 3)) (nth bytes (+ at 2))))))
+  (def observe-varp
+    (fn (state name bytes)
+      (if (= name "VARP_SMALL")
+        (remember-varp state (+ (nth bytes 1) (* 256 (nth bytes 2)))
+          (signed (rem (- 384 (nth bytes 0)) 256) 256))
+        (if (= name "VARP_LARGE")
+          (remember-varp state (+ (rem (+ (nth bytes 0) 128) 256) (* 256 (nth bytes 1)))
+            (signed (varp-word bytes 2) 4294967296))
+          (if (= name "VARP_LONG")
+            (remember-varp state (osrs-uint (drop bytes 8))
+              (+ (* (signed (varp-word bytes 0) 4294967296) 4294967296) (varp-word bytes 4)))
+            (if (= name "VARP_RESET")
+              (assoc state 'varps (dict))
+              (observe-interface state name bytes)))))))
   (def observe
     (fn (state packet)
       (let ((name (get packet 'name)) (bytes (get packet 'bytes)))
@@ -109,7 +142,7 @@
                                 (npcs-decode (if (get (get state 'npc-worlds) world)
                                                 (get (get state 'npc-worlds) world) (npcs-new))
                                              bytes (= name "NPC_INFO_LARGE_V6")))))
-                            (observe-interface state name bytes)))))))))
+                            (observe-varp state name bytes)))))))))
   (def osrs-nearby-npcs
     (fn (state)
       (let ((world (get (get state 'npc-worlds) 0)))
