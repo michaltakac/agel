@@ -32,14 +32,23 @@
             (if (if (= active-encoder-version 2) (< 64 quantum) #f)
               (def policy-uses (+ policy-uses 1)) nil)
             quantum))))))
+(def replay-size?
+  (fn (size) (if (< 1023 size) (< size 8193) #f)))
+(def replay-field-size
+  (fn (record field)
+    (let ((packed (if (= (type-of record) 'map) (get record field) nil)))
+      (let ((data (if (= (type-of packed) 'map) (get packed 'data) nil)))
+        (if (= (type-of data) 'string)
+          (let ((length (text-bytes data)))
+            (let ((size (/ length 2)))
+              (if (= length (* 2 size)) size 0)))
+          0)))))
 (def largest-field-step
   (fn (field)
     (fn (largest record)
-      (let ((packed (get record field)))
-        (if packed
-          (if largest
-            (if (< (text-bytes (get (get largest field) 'data)) (text-bytes (get packed 'data))) record largest)
-            record) largest)))))
+      (let ((size (replay-field-size record field)))
+        (if (if (replay-size? size) (< (replay-field-size largest field) size) #f)
+          record largest)))))
 (def largest-field
   (fn (records field)
     (foldl (largest-field-step field) nil records)))

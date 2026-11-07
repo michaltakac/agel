@@ -1,9 +1,9 @@
 (def optimizer-started (clock-us))
-(check recorded-field "no recorded byte field")
+(check recorded-field "no suitably sized recorded byte field")
 (def recorded-hex (get (get recorded-field 'bytes) 'data))
 (def recorded-hex-length (text-bytes recorded-hex))
 (def observed-length (/ recorded-hex-length 2))
-(check (if (< 1023 observed-length) (< observed-length 8193) #f) "no suitably sized recorded workload")
+(check (replay-size? observed-length) "no suitably sized recorded workload")
 (def require-optimization
   (fn ()
     (if (optimization-needed?) nil

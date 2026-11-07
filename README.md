@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.202.** Native melee scoring verifies the timing
-of adaptation. See the [release notes](docs/release-v0.3.202.md).
+**Current release: v0.3.203.** The native optimizer selects a replay
+workload within its supported size. See the [release notes](docs/release-v0.3.203.md).
+
+v0.3.202 verifies the timing of native melee adaptation.
+See the [release notes](docs/release-v0.3.202.md).
 
 v0.3.201 starts three-skill melee adaptation after Attack training.
 See the [release notes](docs/release-v0.3.201.md).
