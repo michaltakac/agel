@@ -1,7 +1,7 @@
 //! Agel plays DOOM, and the loop is Agel in the OS.
 //!
 //! Since v0.2.74 the perceive-decide-act loop is an Agel program in the
-//! desktop's own native evaluator (`boot/desktop/doom-agent.agel`, or
+//! desktop's own native evaluator (`examples/doom/doom-agent.agel`, or
 //! `doom-agent-model.agel` when a model decides). The desktop pauses the
 //! game, shows the program the window and the engine's state line through
 //! its `look` words, asks it which keys to hold, and injects them. This

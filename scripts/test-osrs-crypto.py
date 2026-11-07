@@ -47,7 +47,7 @@ for modulus in ["00", "01", "0001", "04", "ffg1"]:
     result = evaluate('(import agel/osrs-crypto) (rsa-context "' + modulus + '")')
     assert result.returncode != 0 and 'osrs/rsa' in result.stderr, result.stderr
 print("OSRS crypto: 1024-bit RSA boundaries/Python pow, XTEA vectors/tails and invalid moduli passed")
-vectors = json.loads(Path('crates/agel-stdlib/tests/osrs-isaac-vectors.json').read_text())
+vectors = json.loads(Path('examples/osrs/osrs-isaac-vectors.json').read_text())
 for vector in vectors['vectors']:
     source = "(import agel/osrs-crypto) (import agel/sequence) "
     source += "(def draw (fn (state n out) (if (= n 0) (reverse out) "

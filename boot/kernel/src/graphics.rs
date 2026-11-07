@@ -2571,36 +2571,42 @@ const PROGRAMS: &[Program] = &[
         file: b"/data/wb.agel",
         ready: b"WORKBENCH READY - CLICK OR TAB",
     },
+    #[cfg(feature = "doom-demo")]
     Program {
         name: b"doom-agent",
         prefix: b"da-",
         file: b"/data/da.agel",
         ready: b"DOOM AGENT READY - :PLAY STEPS",
     },
+    #[cfg(feature = "doom-demo")]
     Program {
         name: b"doom-agent-model",
         prefix: b"dm-",
         file: b"/data/dm.agel",
         ready: b"DOOM MODEL AGENT READY - :PLAY STEPS",
     },
+    #[cfg(feature = "doom-demo")]
     Program {
         name: b"doom-agent-judge",
         prefix: b"dj-",
         file: b"/data/dj.agel",
         ready: b"DOOM JUDGE AGENT READY - :PLAY STEPS",
     },
+    #[cfg(feature = "doom-demo")]
     Program {
         name: b"desktop-agent",
         prefix: b"dk-",
         file: b"/data/dk.agel",
         ready: b"DESKTOP AGENT READY - :DRIVE STEPS",
     },
+    #[cfg(feature = "doom-demo")]
     Program {
         name: b"review",
         prefix: b"rv-",
         file: b"/data/rv.agel",
         ready: b"REVIEW AGENT READY - :AGENTS STEPS",
     },
+    #[cfg(feature = "doom-demo")]
     Program {
         name: b"lookup",
         prefix: b"lk-",
@@ -4781,6 +4787,7 @@ fn perform_handover(
     }
     // The game prints its first frame when it is ready to be played; up
     // to a bounded wait for that line.
+    #[cfg(feature = "doom-demo")]
     if let Some(run) = running.as_deref_mut() {
         let mut waited = 0;
         while waited < 200
@@ -4814,6 +4821,7 @@ fn perform_handover(
             .copied()
             .find(|slot| listening(slot));
     }
+    #[cfg(feature = "doom-demo")]
     if with_agents {
         let joined = execute_workshop(
             machine,
@@ -5167,8 +5175,8 @@ fn agents(
             }
             let Some(mut decision) = evaluate!(step_name.get()) else {
                 return StatusLine::new(match mode {
-                    LoopMode::Drive => b"DRIVE-STEP FAILED - :LOAD DESKTOP-AGENT",
-                    LoopMode::Play => b"PLAY-STEP FAILED - :LOAD DOOM-AGENT",
+                    LoopMode::Drive => b"DRIVE-STEP FAILED - LOAD A DRIVE AGENT",
+                    LoopMode::Play => b"PLAY-STEP FAILED - LOAD A PLAY AGENT",
                     LoopMode::Agents => b"STEP FAILED - :LOAD THE AGENT AGAIN",
                 });
             };

@@ -1,5 +1,9 @@
 # Does it run DOOM?
 
+Launch the legacy desktop demo with `./scripts/run-graphics.sh --doom-demo`.
+For a seed image, use `./scripts/build-boot.sh --features doom-demo`.
+The Agel demo sources live in `examples/doom`.
+
 **Yes, since v0.2.71.** The shareware episode's demo plays in a window
 on the Agel desktop at 49 frames per second under QEMU's emulation, the
 engine an ordinary C program in a protection domain, the data a
@@ -256,7 +260,7 @@ it. No steering while it runs, no speech.
 ## The loop in the OS (v0.2.74)
 
 Now the loop is Agel, in the OS. The perceive-decide-act cycle is an Agel
-program, [`boot/desktop/doom-agent.agel`](../boot/desktop/doom-agent.agel),
+program, [`examples/doom/doom-agent.agel`](../examples/doom/doom-agent.agel),
 loaded into the desktop's own native evaluator with `:load doom-agent`
 and run with `:play STEPS [HOLD]`. The desktop is the substrate the
 language cannot be: each step it pauses the game with the key
@@ -290,7 +294,7 @@ reaches the workshop while the game holds the keyboard, because it opens
 with a colon, so `:play` can be typed at a game in focus.
 
 A model decides through the same words, in
-[`doom-agent-model.agel`](../boot/desktop/doom-agent-model.agel): each
+[`doom-agent-model.agel`](../examples/doom/doom-agent-model.agel): each
 step it `model-request`s what it saw, and until an answer arrives it
 holds nothing. The desktop prints the request, the state line and the
 window as shades on the serial console between `model-request N:` and
@@ -306,7 +310,7 @@ with its observation and the reply are proven; driving a whole model
 episode is by hand, not yet a tested path.
 
 A System One model judges through the same words since v0.2.91, in
-[`doom-agent-judge.agel`](../boot/desktop/doom-agent-judge.agel): each
+[`doom-agent-judge.agel`](../examples/doom/doom-agent-judge.agel): each
 step it sends typed questions as a `(judge ...)` form — the best next
 move among six, whether an enemy is in view, how dangerous it is — and
 `agel-play --policy jev` carries them with the state line and the window

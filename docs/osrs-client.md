@@ -7,8 +7,8 @@ NPC discovery, tracking and attack are also Agel. The combat scenario is in
 `examples/osrs/combat-test.agel`.
 Rust supplies bounded loopback streams, entropy bytes and the existing seed
 interpreter. Packet formats, RSA/XTEA/ISAAC, snapshots, action history and
-the smoke-test logic are Agel. These optional modules are loaded by the
-`osrs` example rather than installed into every default Agel world.
+the smoke-test logic are Agel. The client modules live in `examples/osrs`
+and load explicitly through the example runner.
 
 ## Native client
 

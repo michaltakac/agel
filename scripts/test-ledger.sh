@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
+image=$(./scripts/build-boot.sh --features doom-demo | tail -n 1)
 seed=$(mktemp "${TMPDIR:-/tmp}/agel-ledger-seed.XXXXXX")
 trap 'rm -f "$seed"' EXIT HUP INT TERM
 cp "$image" "$seed"

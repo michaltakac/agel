@@ -47,7 +47,7 @@ operator, and runs only while the operator's `:drive` does.
 
 ## The program: `desktop-agent`
 
-[`boot/desktop/desktop-agent.agel`](../boot/desktop/desktop-agent.agel)
+[`examples/doom/desktop-agent.agel`](../examples/doom/desktop-agent.agel)
 (`:load desktop-agent`) asks two questions a step:
 
 ```lisp

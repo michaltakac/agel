@@ -4,7 +4,7 @@
 # frame rate the engine reports, and the window's pixels read back.
 set -eu
 wad=$(./scripts/fetch-doom-wad.sh)
-image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
+image=$(./scripts/build-boot.sh --features doom-demo | tail -n 1)
 doom=$(./scripts/build-c-program.sh doom x86_64 | tail -n 1)
 wadcheck=$(./scripts/build-c-program.sh wadcheck x86_64 | tail -n 1)
 disk=$(mktemp "${TMPDIR:-/tmp}/agel-doom.XXXXXX")

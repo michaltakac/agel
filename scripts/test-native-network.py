@@ -89,8 +89,11 @@ source+='''(import agel/byte-stream)
 (def wire-read (get stream 'read)) (def wire-write (get stream 'write))
 (def entropy-read (get stream 'entropy))
 '''
-modules=['osrs-wire'] if options.challenge else ['osrs-wire','crypto','osrs-crypto','osrs-login','osrs-packets','osrs-bits','osrs-npcs','osrs-game']
-source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in modules)
+source += Path('examples/osrs/osrs-wire.agel').read_text() + '\n'
+if not options.challenge:
+    source += Path('crates/agel-stdlib/crypto.agel').read_text() + '\n'
+    modules = ('osrs-crypto', 'osrs-login', 'osrs-packets', 'osrs-bits', 'osrs-npcs', 'osrs-game')
+    source += ''.join(Path(f'examples/osrs/{name}.agel').read_text() + '\n' for name in modules)
 if combat_workload or options.craft or options.economy or options.quest:
     source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
 if options.craft:

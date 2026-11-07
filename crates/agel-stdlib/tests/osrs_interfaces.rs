@@ -65,12 +65,12 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     for source in [
         include_str!("../bytes.agel"),
         include_str!("../crypto.agel"),
-        include_str!("../osrs-wire.agel"),
-        include_str!("../osrs-crypto.agel"),
-        include_str!("../osrs-packets.agel"),
-        include_str!("../osrs-bits.agel"),
-        include_str!("../osrs-npcs.agel"),
-        include_str!("../osrs-game.agel"),
+        include_str!("../../../examples/osrs/osrs-wire.agel"),
+        include_str!("../../../examples/osrs/osrs-crypto.agel"),
+        include_str!("../../../examples/osrs/osrs-packets.agel"),
+        include_str!("../../../examples/osrs/osrs-bits.agel"),
+        include_str!("../../../examples/osrs/osrs-npcs.agel"),
+        include_str!("../../../examples/osrs/osrs-game.agel"),
     ] {
         world.evaluate(source).unwrap();
     }

@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.50.** The OS can preserve outstanding judge receipts
-after the requesting process exits. See the [release notes](docs/release-v0.3.50.md).
+**Current release: v0.3.51.** RuneScape client code lives in the example and
+DOOM is an opt-in desktop demo. See the [release notes](docs/release-v0.3.51.md).
+
+v0.3.50 preserves outstanding judge receipts after the requesting process
+exits. See the [release notes](docs/release-v0.3.50.md).
 
 v0.3.49 services the game connection during replay setup.
 See the [release notes](docs/release-v0.3.49.md).
@@ -265,12 +268,10 @@ C programs need a clang with `lld` (`brew install llvm lld`).
 ```
 
 QEMU opens its own window at 1920×1080 on a persistent desktop disk with the
-game, the hosted runtime and the browser's site installed. The pointer is
-your own, nothing is captured; `--web` adds a host-side console with layout
-composition and paste. Click the desktop to open the workbench. A sentence
-typed at the prompt summons the desktop agent, which needs a judge on the
-host to answer it: `--agent` runs the window with the judge attached
-(`TYPESAFEAI_API_KEY` in the environment; `set -a; . ./.env; set +a`).
+Agel runtime and browser examples. Click the desktop to open the workbench.
+`--web` adds a host-side console with layout composition and paste.
+`--doom-demo` loads the legacy DOOM example. `--agent` adds that demo's
+host judge using `TYPESAFEAI_API_KEY` from the environment.
 `python3 scripts/record-demo.py OUT.mp4` records the video above, live. Try:
 
 ```lisp

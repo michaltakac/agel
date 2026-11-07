@@ -6,7 +6,7 @@
 # the same path the Claude and Codex providers take — recording each step.
 set -eu
 wad=$(./scripts/fetch-doom-wad.sh)
-image=$(./scripts/build-boot.sh --features native-graphics | tail -n 1)
+image=$(./scripts/build-boot.sh --features doom-demo | tail -n 1)
 doom=$(./scripts/build-c-program.sh doom x86_64 | tail -n 1)
 out=target/doom-runs/echo
 rm -rf "$out"
