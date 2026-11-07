@@ -6,7 +6,7 @@
 (def check (fn (ok label) (if ok #t (signal 'native/repair-test label))))
 (def audit (fn (record) (file-append "judge-log" (text-concat (print-form record) "\n"))))
 (def adapter (dict 'geometry (program-region) 'read program-sector-read 'write program-sector-write
-  'flush program-flush 'run exec-canary 'prefix "m" 'fuel 1000000
+  'flush program-flush 'run exec-canary 'run-verified exec-canary 'prefix "m" 'fuel 1000000
   'trace (fn (event) (console-log (text-concat "native-repair: activation " (print-form event))))))
 (def before '(fn (n size) (/ n size)))
 (def baseline (native-program-edit (evolution-new) 'batches nil before

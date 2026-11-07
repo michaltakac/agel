@@ -640,18 +640,33 @@ fn exec(arguments: &[Value]) -> Result<Value, HostError> {
 }
 
 fn exec_canary(arguments: &[Value]) -> Result<Value, HostError> {
-    expect_arguments("exec-canary", arguments, 1)?;
+    let image = match arguments {
+        [_] => None,
+        [_, Value::Int(start), Value::Int(length), Value::Int(checksum)] => {
+            let word = |n| {
+                u32::try_from(n).map_err(|_| fail("process/error", "invalid image identity".into()))
+            };
+            Some([word(*start)?, word(*length)?, word(*checksum)?])
+        }
+        _ => {
+            return Err(fail(
+                "process/error",
+                "expected name or name, start, length, and CRC".into(),
+            ))
+        }
+    };
     let name = text_argument("exec-canary", arguments, 0)?;
     let process = process();
     let (reader, writer) = process
         .pipe()
         .map_err(|e| fail("process/error", format!("pipe: {e}")))?;
-    let child = process.spawn(
+    let child = process.spawn_with_image(
         name.as_bytes(),
         b"",
         abi::NO_DESCRIPTOR,
         writer,
         abi::SPAWN_NO_FILES,
+        image,
     );
     process.close(writer);
     if child < 0 {

@@ -611,6 +611,7 @@ pub mod process {
     pub const NO_DESCRIPTOR: u64 = 0xffff;
     pub const SPAWN_READ_ONLY: u64 = 1;
     pub const SPAWN_NO_FILES: u64 = 2;
+    pub const SPAWN_MATCH_IMAGE: u64 = 4;
     /// Set in a `wait` answer when the child did not exit but was stopped:
     /// the low byte is then the signal a POSIX parent would see.
     pub const WAIT_SIGNALED: u64 = 0x100;

@@ -10,6 +10,11 @@
   (def require (fn (ok reason) (if ok #t (signal 'program/activation reason))))
   (def rem (fn (a b) (- a (* b (/ a b)))))
   (def status (fn (n) (let ((r (rem n 256))) (if (< r 0) (+ r 256) r))))
+  (def dispatch
+    (fn (adapter program)
+      (let ((name (get program 'name)) (verified (get adapter 'run-verified)))
+        (if verified (verified name (get program 'start) (get program 'length) (get program 'crc))
+          ((get adapter 'run) name)))))
   (def checked-ir
     (fn (source cases)
       (begin
@@ -31,7 +36,7 @@
             (if (get adapter 'trace) ((get adapter 'trace) (dict 'phase 'emit 'case index 'name name)) nil)
             (let ((entry (program-install-hex (get adapter 'geometry) name (native-x86-emit-limited ir (get plan 'arguments) (get adapter 'fuel))
                           (get adapter 'read) (get adapter 'write) (get adapter 'flush))))
-              (let ((actual ((get adapter 'run) name)) (expected (get plan 'expected)))
+              (let ((actual (dispatch adapter entry)) (expected (get plan 'expected)))
                 (let ((artifact (dict 'program entry 'arguments (get plan 'arguments) 'expected expected 'actual actual)))
                   (if (= actual (list (status expected) (text-concat (int->text expected) "\n")))
                     (stage adapter stem ir (cdr remaining) (+ index 1) (cons artifact completed))
@@ -75,7 +80,7 @@
             (let ((row (get (get table 'entries) name)))
               (require (= (dissoc program 'name) (if row (dissoc row 'end) nil))
                 "installed program differs from the activated artifact")
-              ((get adapter 'run) name)))))))
+              (dispatch adapter program)))))))
   (def run-active
     (fn (state kind name arguments adapter)
       (let ((version (evolution-current state kind name)))

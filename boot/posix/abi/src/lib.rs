@@ -75,6 +75,7 @@ pub const O_APPEND: u64 = 0o2000;
 pub const NO_DESCRIPTOR: u64 = 0xffff;
 pub const SPAWN_READ_ONLY: u64 = 1;
 pub const SPAWN_NO_FILES: u64 = 2;
+pub const SPAWN_MATCH_IMAGE: u64 = 4;
 /// Set in a `wait` answer when the child was stopped rather than exiting;
 /// the low byte is then the signal a POSIX parent would see.
 pub const WAIT_SIGNALED: u64 = 0x100;
@@ -226,13 +227,39 @@ impl Process {
         stdout: u64,
         flags: u64,
     ) -> i64 {
+        self.spawn_with_image(program, arguments, stdin, stdout, flags, None)
+    }
+
+    pub fn spawn_with_image(
+        &self,
+        program: &[u8],
+        arguments: &[u8],
+        stdin: u64,
+        stdout: u64,
+        flags: u64,
+        image: Option<[u32; 3]>,
+    ) -> i64 {
         let take = program.len().min(16);
         let payload = (self.page as usize + PAYLOAD_OFFSET) as *mut u8;
         for (offset, byte) in program.iter().take(take).enumerate() {
             unsafe { payload.add(offset).write_volatile(*byte) };
         }
         unsafe { payload.add(take).write_volatile(0) };
-        let room = PAYLOAD_BYTES - take - 1;
+        let mut room = PAYLOAD_BYTES - take - 1;
+        let mut flags = flags;
+        if let Some(image) = image {
+            flags |= SPAWN_MATCH_IMAGE;
+            room -= 12;
+            for (word, value) in image.iter().enumerate() {
+                for (offset, byte) in value.to_le_bytes().iter().enumerate() {
+                    unsafe {
+                        payload
+                            .add(PAYLOAD_BYTES - 12 + word * 4 + offset)
+                            .write_volatile(*byte)
+                    };
+                }
+            }
+        }
         let block = arguments.len().min(room);
         for (offset, byte) in arguments.iter().take(block).enumerate() {
             unsafe { payload.add(take + 1 + offset).write_volatile(*byte) };

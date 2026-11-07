@@ -1893,7 +1893,7 @@ fn spawn(
     let Some(free) = table.processes.iter().position(|slot| slot.is_none()) else {
         return error(EAGAIN);
     };
-    let (name, name_length, block, block_length, namespace, stdin, stdout) = {
+    let (name, name_length, block, block_length, namespace, stdin, stdout, image) = {
         let Some(parent) = table.processes[index].as_mut() else {
             return error(EBADF);
         };
@@ -1905,7 +1905,19 @@ fn spawn(
         // The child's arguments follow the name in the parent's payload:
         // `arguments[3]`'s upper bits say how many bytes. Without any, the
         // child's one argument is its name.
-        let block_length = ((arguments[3] >> 16) as usize).min(PAYLOAD_BYTES - length - 1);
+        let mut room = PAYLOAD_BYTES - length - 1;
+        let image = if arguments[3] & process::SPAWN_MATCH_IMAGE != 0 {
+            room -= 12;
+            let core = parent.domain.core();
+            Some(core::array::from_fn(|word| {
+                u32::from_le_bytes(core::array::from_fn(|offset| {
+                    core.read_payload(PAYLOAD_BYTES - 12 + word * 4 + offset)
+                }))
+            }))
+        } else {
+            None
+        };
+        let block_length = ((arguments[3] >> 16) as usize).min(room);
         let mut block = [0_u8; PAYLOAD_BYTES];
         if block_length == 0 {
             block[..length].copy_from_slice(&name[..length]);
@@ -1952,6 +1964,7 @@ fn spawn(
             namespace,
             given[0],
             given[1],
+            image,
         )
     };
     let program = match find(services.storage, &name[..name_length]) {
@@ -1959,6 +1972,9 @@ fn spawn(
         Ok(None) => return error(fs::ENOENT as i64),
         Err(_) => return error(EIO),
     };
+    if image.is_some_and(|expected| expected != [program.start, program.length, program.checksum]) {
+        return error(EIO);
+    }
     let (mut domain, brk) = match load(machine, services.storage, program) {
         Ok(loaded) => loaded,
         Err(_) => return error(EIO),
