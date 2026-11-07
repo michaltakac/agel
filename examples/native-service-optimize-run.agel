@@ -38,6 +38,8 @@
       (get measurement 'metrics))))
 (def baseline (run-control))
 (prepare-service)
+(if (optimization-needed?) nil
+  (signal 'native/optimization-complete "task completed during optimizer preparation"))
 (def work-budget 3000000)
 (def gap-budget 6000000)
 (def policy-bound (profile-limit baseline 64 work-budget 4 512))

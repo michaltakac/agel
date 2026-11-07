@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.194.** Native scoring separates task source from
-adaptive bookkeeping in retained runs. See the [release notes](docs/release-v0.3.194.md).
+**Current release: v0.3.195.** Native combat can stop optimization before
+inference when the task completes during preparation. See the [release notes](docs/release-v0.3.195.md).
+
+v0.3.194 separates task source from adaptive bookkeeping. See the [release notes](docs/release-v0.3.194.md).
 
 v0.3.193 checks installed combat policy against the run manifest. See the [release notes](docs/release-v0.3.193.md).
 

@@ -291,7 +291,7 @@ else:
     if combat_workload or options.economy or options.craft or options.quest:
         source+='(def task-start (clock-us))\n'
     if options.optimize:
-        source+="(def optimization-skipped #f)\n"
+        source+="(def optimization-skipped #f) (def optimization-needed? (fn () #t))\n"
         source+=f"(def continue-after-refusal {'#t' if task_adaptation else '#f'})\n"
     observation_hooks='''(def inference-packets 0)
 (def preparation-packets 0)
@@ -366,19 +366,29 @@ else:
 '''
         if options.optimize:
             source+=observation_hooks
-            source+='''(def optimize-during-combat (fn (attacking)
+            source+='''(def skip-completed-combat
+  (fn (state)
+    (def optimization-skipped #t)
+    (console-log "native-opt: skipped because combat already completed")
+    state))
+(def optimize-during-combat (fn (attacking needed)
   (with-handler (* problem)
     (begin
       (console-log (text-concat "native-combat: optimizer failure " (print-form problem)))
       (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
-    (begin
-      (def ready attacking)
-      (osrs-service-start ready)
-      (def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get attacking 'history)))
+    (with-handler (native/optimization-complete problem)
+      (begin
+        (console-log "native-opt: task completed during preparation")
+        (skip-completed-combat (osrs-service-stop ready)))
+      (begin
+        (def ready attacking)
+        (def optimization-needed? needed)
+        (osrs-service-start ready)
+        (def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get attacking 'history)))
 '''
             source+=(examples / 'native-service-optimize-run.agel').read_text()+'\n'
             source+=observation_finish
-            source+="(def policy-uses 0) (osrs-service-stop ready)))))\n"
+            source+="(def policy-uses 0) (osrs-service-stop ready))))))\n"
             source+="(def allow-combat-skip "+("#t" if options.live else "#f")+")\n"
             source+='''(def combat-after-attack
   (fn (attacking target)
@@ -389,12 +399,9 @@ else:
         (let ((complete (fn (g) (rat-combat-complete? g target attack-before hp-before))))
           (let ((observed (osrs-observe-ready attacking complete 32)))
             (if (complete observed)
-              (begin
-                (def optimization-skipped #t)
-                (console-log "native-opt: skipped because combat already completed")
-                observed)
-              (optimize-during-combat observed)))))
-      (optimize-during-combat attacking))))
+              (skip-completed-combat observed)
+              (optimize-during-combat observed (fn () (if (complete ready) #f #t)))))))
+      (optimize-during-combat attacking (fn () #t)))))
 '''
         else:
             source+="(def combat-after-attack (fn (attacking target) (report-target target) attacking))\n"
