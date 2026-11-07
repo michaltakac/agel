@@ -1,4 +1,4 @@
-"""Package verified native combat runs as input for Agel's paired scorer."""
+"""Package verified native task runs and optimizer receipts for Agel scoring."""
 import argparse
 import hashlib
 import json
@@ -42,8 +42,18 @@ def installed_client(directory, read_table):
     return source.decode()
 
 
+def optimizer_charges(directory, trace):
+    require((directory / 'mode.txt').read_text().strip() == 'live',
+            f'{directory}: adaptive scoring requires live providers')
+    ledger, _ = verified_judge_ledger(directory)
+    charges = [('judge', judge_cost(receipt)) for receipt in judge_receipts_for_trace(ledger, trace)]
+    writers, usage = writer_usage_for_trace(trace)
+    require(writers, f'{directory}: no writer dispatch')
+    charges.extend(('model', None) for _ in writers)
+    return charges, usage
+
+
 def adaptation_evidence(directory, trace, correct):
-    charges = []
     activated = 'native-opt: policy committed after text judgment and measured replay' in trace
     rolled_back = 'native-opt: continued with fixed policy after exhausted retries' in trace
     require(activated != rolled_back,
@@ -53,14 +63,7 @@ def adaptation_evidence(directory, trace, correct):
         require('native-opt: recorded workload verified in append-only log' in trace
                 and re.search(rf'^native-opt: live uses {uses}$', trace, re.M),
                 f'{directory}: no verified in-session policy use')
-    require((directory / 'mode.txt').read_text().strip() == 'live',
-            f'{directory}: adaptive scoring requires live providers')
-    ledger, _ = verified_judge_ledger(directory)
-    for receipt in judge_receipts_for_trace(ledger, trace):
-        charges.append(('judge', judge_cost(receipt)))
-    writers, usage = writer_usage_for_trace(trace)
-    require(writers, f'{directory}: no writer dispatch')
-    charges.extend(('model', None) for _ in writers)
+    charges, usage = optimizer_charges(directory, trace)
     decision = 'committed' if activated else 'refused-retained-fixed'
     return charges, decision, usage
 
@@ -190,17 +193,68 @@ def load_economy(directory, policy, read_table):
     return contract, identity[1], int(clocks[0]), charges, correct, decision, usage, coins
 
 
+def charge_forms(charges):
+    return ' '.join(f"(dict 'kind '{kind} 'cost-nanousd {cost if cost is not None else 'nil'})"
+                    for kind, cost in charges)
+
+
+def writer_forms(usage):
+    return ' '.join('nil' if call is None else
+                    f"(dict 'input {call[0]} 'cached-input {call[1] if call[1] is not None else 'nil'} 'output {call[2]})"
+                    for call in usage)
+
+
+def optimizer_score(directory):
+    trace = (directory / 'serial.log').read_text()
+    require(len(re.findall(r'^process agel exited with status \d+$', trace, re.M)) == 1,
+            f'{directory}: expected a terminal guest')
+    activated = 'native-opt: policy committed after text judgment and measured replay' in trace
+    refused = 'native-opt: last refusal ' in trace
+    require(activated != refused, f'{directory}: no resolved optimizer decision')
+    if activated:
+        require(re.search(r'^native-opt: probe \{passed #t ', trace, re.M),
+                f'{directory}: missing successful measured probe')
+    charges, usage = optimizer_charges(directory, trace)
+    clocks = re.findall(r'^native-opt: task-us (\d+)$', trace, re.M)
+    require(len(clocks) <= 1, f'{directory}: ambiguous optimizer clock')
+    if clocks:
+        elapsed, clock = int(clocks[0]), 'guest-optimization'
+    else:
+        started = re.findall(r'^inference-bridge: started job (\d+) provider (?:codex|jev) at-ms (\d+)$', trace, re.M)
+        ended = re.findall(r'^inference-bridge: completed job (\d+) at-ms (\d+) status \w+$', trace, re.M)
+        require(started and [job for job, _ in started] == [job for job, _ in ended],
+                f'{directory}: legacy inference window is incomplete')
+        require(all(int(stop) >= int(begin) for (_, begin), (_, stop) in zip(started, ended)),
+                f'{directory}: legacy inference clock went backwards')
+        elapsed = (int(ended[-1][1]) - int(started[0][1])) * 1000
+        clock = 'bridge-inference-window'
+    print("(import agel/benchmark)")
+    print(f"(dict 'task 'encoder-optimization 'clock '{clock} "
+          f"'decision '{'committed' if activated else 'refused'} "
+          f"'score (benchmark-run (dict 'correct {'#t' if activated else '#f'} "
+          f"'elapsed-us {elapsed} 'billing-complete #t 'charges (list {charge_forms(charges)}))) "
+          f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('fixed', type=Path)
-    parser.add_argument('candidate', type=Path)
+    parser.add_argument('candidate', type=Path, nargs='?')
     tasks = parser.add_mutually_exclusive_group()
     tasks.add_argument('--melee', action='store_true', help='compare in-session adaptation on three-skill melee')
     tasks.add_argument('--economy', action='store_true', help='compare in-session adaptation on the first bronze sale')
+    tasks.add_argument('--optimizer', action='store_true', help='score the optimizer decision independently of the game')
     parser.add_argument('--transfer', action='store_true', help='score a melee run using a retained policy')
     args = parser.parse_args()
     if args.transfer and not args.melee:
         parser.error('--transfer applies to --melee; one-rat comparisons already use transfer')
+    if args.optimizer:
+        if args.candidate:
+            parser.error('--optimizer takes one run directory')
+        optimizer_score(args.fixed)
+        return
+    if args.candidate is None:
+        parser.error('paired scoring requires two run directories')
     read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
     load = load_economy if args.economy else load_arm
     fixed, fixed_account, fixed_time, fixed_charges, fixed_correct, fixed_decision, _, *fixed_coins = load(args.fixed, 'fixed', read_table)
@@ -217,17 +271,13 @@ def main():
           f"'contract {form(digest)} 'randomness 'uncontrolled))")
     for arm, elapsed, charges, correct, coins in [('fixed', fixed_time, fixed_charges, fixed_correct, fixed_coins),
         ('adaptive', transfer_time, adaptive_charges, adaptive_correct, adaptive_coins)]:
-        values = ' '.join(f"(dict 'kind '{kind} 'cost-nanousd {cost if cost is not None else 'nil'})"
-                          for kind, cost in charges)
+        values = charge_forms(charges)
         proceeds = f" 'coins-before 0 'coins-after {coins[0]}" if coins else ''
         print(f"(def {arm} (dict 'arm '{arm} 'comparison comparison 'account '{arm}-account "
               f"'correct {'#t' if correct else '#f'} 'elapsed-us {elapsed} 'billing-complete #t 'charges (list {values}){proceeds}))")
-    usage_forms = ' '.join('nil' if call is None else
-                           f"(dict 'input {call[0]} 'cached-input {call[1] if call[1] is not None else 'nil'} 'output {call[2]})"
-                           for call in usage)
     print(f"(assoc (assoc (benchmark-pair fixed adaptive) 'policy-outcomes "
           f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision})) "
-          f"'writer-usage (benchmark-writer-usage (list {usage_forms})))")
+          f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
 
 
 if __name__ == '__main__':

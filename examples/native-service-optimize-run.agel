@@ -1,3 +1,4 @@
+(def optimizer-started (clock-us))
 (check recorded-field "no recorded byte field")
 (def recorded-hex (get (get recorded-field 'bytes) 'data))
 (def observed-length (/ (text-bytes recorded-hex) 2))
@@ -93,6 +94,7 @@
 (check (= (evolution-source policy-versions 1) initial-policy) "frozen policy source was lost")
 (check (= retained-owner (get stream 'owner)) "stream owner changed")
 (audit (dict 'event 'live-policy-versions 'versions policy-versions))
+(console-log (text-concat "native-opt: task-us " (print-form (- (clock-us) optimizer-started))))
 (if policy-activated
   (begin
     (check (= (evolution-current policy-versions 'cell 'service-quantum) 2) "policy version did not change")
