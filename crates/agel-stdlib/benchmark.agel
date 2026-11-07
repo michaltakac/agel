@@ -1,6 +1,6 @@
 (module agel/benchmark
   (import agel/sequence)
-  (export benchmark-run benchmark-pair benchmark-transfer benchmark-writer-usage benchmark-writer-estimate)
+  (export benchmark-run benchmark-pair benchmark-transfer benchmark-transfer-time benchmark-writer-usage benchmark-writer-estimate)
 
   (def require
     (fn (ok reason) (if ok #t (signal 'benchmark/invalid reason))))
@@ -116,6 +116,15 @@
               'elapsed-delta-us time 'cost-delta-nanousd cost
               'cost-time-outcome (pair-outcome control candidate time cost)))))))
 
+  (def benchmark-transfer-time
+    (fn (pair recovery-us)
+      (require (natural? recovery-us) "transfer recovery time must be nonnegative")
+      (let ((control (get pair 'fixed)) (candidate (get pair 'adaptive)))
+        (let ((elapsed (+ (get candidate 'elapsed-us) recovery-us)))
+          (let ((delta (- elapsed (get control 'elapsed-us))))
+            (assoc (assoc pair 'transfer-recovery-us recovery-us)
+              'recovery-inclusive-time (dict 'adaptive-elapsed-us elapsed 'elapsed-delta-us delta
+                'cost-time-outcome (pair-outcome control candidate delta (get pair 'cost-delta-nanousd)))))))))
   (def benchmark-transfer
     (fn (prior fresh)
       (require (if (get prior 'account) (if (get fresh 'account)

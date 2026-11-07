@@ -40,6 +40,13 @@
 (check (rejected (fn () (benchmark-pair fixed (assoc adaptive 'comparison (assoc shared 'seed 43))))) "different seeds")
 (check (rejected (fn () (benchmark-pair fixed (assoc adaptive 'account 'control)))) "reused account")
 
+(def transfer-time (benchmark-transfer-time (benchmark-pair fixed (assoc adaptive 'charges nil)) 250))
+(check (= (get transfer-time 'cost-time-outcome) 'adaptive-dominates) "task-only verdict stays visible")
+(check (= (get transfer-time 'recovery-inclusive-time)
+  (dict 'adaptive-elapsed-us 550 'elapsed-delta-us 50 'cost-time-outcome 'fixed-dominates))
+  "recovery can reverse a task-only time advantage")
+(check (rejected (fn () (benchmark-transfer-time score -1))) "reject negative recovery time")
+
 (def saved (dict 'policy "v2" 'history "head-7"))
 (def prior (assoc adaptive 'retained-state saved))
 (def fresh (assoc (assoc (assoc adaptive 'fresh-account #t) 'account 'transfer) 'initial-state saved))

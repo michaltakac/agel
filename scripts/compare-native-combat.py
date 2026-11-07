@@ -503,7 +503,7 @@ def main():
     if adaptive_policy == 'transferred':
         recovery = transfer_recovery_time(args.candidate, read_table)
         if recovery is not None:
-            pair = f"(assoc {pair} 'transfer-recovery-us {recovery})"
+            pair = f"(benchmark-transfer-time {pair} {recovery})"
     print(pair)
 
 

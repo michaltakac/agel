@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.182.** Native pair scoring accepts explicit
-writer-rate scenarios. See the [release notes](docs/release-v0.3.182.md).
+**Current release: v0.3.183.** Native transfer scoring compares task
+time with and without donor recovery. See the [release notes](docs/release-v0.3.183.md).
+
+v0.3.182 accepts explicit writer-rate scenarios in native pair scoring. See the [release notes](docs/release-v0.3.182.md).
 
 v0.3.181 estimates writer cost from metered tokens and supplied rates. See the [release notes](docs/release-v0.3.181.md).
 
