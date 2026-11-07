@@ -358,6 +358,42 @@ def optimizer_score(directory):
           f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
 
 
+def verify_transfer_donor(donor, recipient, evaluation_accounts):
+    origin = json.loads((donor / 'world.json').read_text())
+    target = json.loads((recipient / 'world.json').read_text())
+    require(origin.get('encoder_policy') == 'adaptive' and target.get('encoder_policy') == 'transferred',
+            'expected an adaptive donor and a transferred recipient')
+    for key in ('image', 'manifest', 'combat_policy_sha256', 'goal_xp'):
+        require(origin.get(key) == target.get(key), f'donor differs from recipient on {key}')
+    with (donor / 'disk.img').open('rb') as image:
+        digest = hashlib.file_digest(image, 'sha256').hexdigest()
+    require(target.get('donor_disk_sha256') == digest, 'recipient names a different donor disk')
+    _, frames = verified_judge_ledger(donor)
+    require(frames and frames == judge_frames(recipient / 'disk.img'),
+            'recipient does not retain the donor judge journal')
+    trace = (donor / 'serial.log').read_text()
+    saved = (donor / 'saved-account.txt').read_text()
+    identity = re.search(r'^account=(\d+) character=\d+ rights= x=\d+ z=\d+ level=0 xp_rate_in_hundreds=100$',
+                         saved, re.M)
+    require(identity and identity[1] not in evaluation_accounts,
+            'donor must be a distinct normal account')
+    require(re.findall(r'^process agel exited with status (\d+)$', trace, re.M) == ['0'],
+            'donor combat did not complete')
+    goal = origin.get('goal_xp')
+    if goal is None:
+        xp = combat_xp(trace)
+        require(re.search(r'^native-combat: \{test rat-combat passed #t .*target-removed #t\}$', trace, re.M),
+                'donor has no successful combat report')
+    else:
+        xp, levels = melee_xp(trace, goal)
+        require(melee_levels_saved(levels, saved), 'donor melee levels differ from its report')
+    require(combat_xp_saved(xp, saved, minimum=goal is not None), 'donor XP differs from its report')
+    charges, decision, usage = adaptation_evidence(donor, trace, True)
+    clocks = re.findall(r'^native-combat: task-us ([1-9]\d*)$', trace, re.M)
+    require(decision == 'committed' and len(clocks) == 1, 'donor has no timed committed policy')
+    return int(clocks[0]), charges, usage
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('fixed', type=Path)
@@ -369,11 +405,12 @@ def main():
     tasks.add_argument('--quest', action='store_true', help='compare fresh Cook’s Assistant runs')
     tasks.add_argument('--optimizer', action='store_true', help='score the optimizer decision independently of the game')
     parser.add_argument('--transfer', action='store_true', help='score a melee run using a retained policy')
+    parser.add_argument('--donor', type=Path, help='verify and separately score the original transfer donor')
     args = parser.parse_args()
     if args.transfer and not args.melee:
         parser.error('--transfer applies to --melee; one-rat comparisons already use transfer')
     if args.optimizer:
-        if args.candidate:
+        if args.candidate or args.donor:
             parser.error('--optimizer takes one run directory')
         optimizer_score(args.fixed)
         return
@@ -387,6 +424,10 @@ def main():
         args.candidate, adaptive_policy, read_table)
     require(fixed == transfer, 'world, runtime, game adapter, task source, or starting state differs')
     require(fixed_account != transfer_account, 'task accounts must differ')
+    donor_score = None
+    if args.donor:
+        require(adaptive_policy == 'transferred', '--donor requires a transferred policy')
+        donor_score = verify_transfer_donor(args.donor, args.candidate, {fixed_account, transfer_account})
     digest = hashlib.sha256(json.dumps(fixed, sort_keys=True).encode()).hexdigest()
     print("(import agel/benchmark)")
     task = 'first-bronze-sale' if args.economy else 'adamant-platebody' if args.craft else 'cooks-assistant' if args.quest else 'three-skill-melee' if args.melee else 'one-rat'
@@ -399,9 +440,17 @@ def main():
         proceeds = f" 'coins-before 0 'coins-after {coins[0]}" if coins else ''
         print(f"(def {arm} (dict 'arm '{arm} 'comparison comparison 'account '{arm}-account "
               f"'correct {'#t' if correct else '#f'} 'elapsed-us {elapsed} 'billing-complete #t 'charges (list {values}){proceeds}))")
-    print(f"(assoc (assoc (benchmark-pair fixed adaptive) 'policy-outcomes "
-          f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision})) "
-          f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
+    pair = (f"(assoc (assoc (benchmark-pair fixed adaptive) 'policy-outcomes "
+            f"(dict 'fixed '{fixed_decision} 'adaptive '{adaptive_decision})) "
+            f"'writer-usage (benchmark-writer-usage (list {writer_forms(usage)})))")
+    if donor_score:
+        elapsed, charges, donor_usage = donor_score
+        pair = (f"(assoc {pair} 'donor-learning (dict "
+                f"'score (benchmark-run (dict 'correct #t 'elapsed-us {elapsed} "
+                f"'billing-complete #t 'charges (list {charge_forms(charges)}))) "
+                f"'writer-usage (benchmark-writer-usage (list {writer_forms(donor_usage)}))))")
+    print(pair)
+
 
 
 if __name__ == '__main__':

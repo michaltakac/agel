@@ -101,7 +101,7 @@ def main():
         adaptive_options.extend(['--craft-fixture', args.craft[1]])
     fixed = run_arm(output, runtime, 'fixed', fixed_options)
     adaptive = run_arm(output, runtime, 'adaptive', adaptive_options)
-    scoring_options = [] if donor else [f'--{task}']
+    scoring_options = ['--donor', str(donor)] if donor else [f'--{task}']
     score = subprocess.check_output([sys.executable, 'scripts/compare-native-combat.py',
                                      *scoring_options, fixed, adaptive])
     (output / 'score.agel').write_bytes(score)
