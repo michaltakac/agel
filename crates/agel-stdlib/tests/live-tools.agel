@@ -60,6 +60,18 @@
 (check (= (count (get (live-tools-state worker) 'calls)) 8) "retain calls through macro activation and revert")
 (check (= (evolution-source (get (live-tools-state worker) 'versions) 1) old) "line 56")
 
+(def after-revert (live-tools-state worker))
+(send worker (dict 'operation 'replay 'name 'attack-target 'version 3 'reply-to receiver))
+(send worker (dict 'operation 'replay 'name 'attack-target 'version 4 'reply-to receiver))
+(send worker (dict 'operation 'replay 'name 'other-tool 'version 3 'reply-to receiver))
+(run 3)
+(def macro-replay (recv receiver))
+(def revert-replay (recv receiver))
+(check (= (list (get macro-replay 'passed) (get macro-replay 'checked)) '(#t 2)) "replay inactive macro-built tool")
+(check (= (list (get revert-replay 'passed) (get revert-replay 'checked)) '(#t 2)) "replay active revert")
+(check (= (get (recv receiver) 'passed) #f) "reject replay under another tool name")
+(check (= (live-tools-state worker) after-revert) "replay leaves active code and history unchanged")
+
 (check (= (get (live-tools-inspect state 'web-search) 'available) #f) "unbound search is visible")
 (check (= (get (live-tools-inspect state 'attack-target) 'source) new) "inspect active Agel source")
 (check (= (count (live-tools-catalog state)) 4) "discover standard and custom tools")

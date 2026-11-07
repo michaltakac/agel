@@ -1,6 +1,15 @@
 #!/bin/sh
 set -eu
 
+# The legacy demo selects the ordinary graphics kernel and adds example files.
+doom_demo=false
+case "${1-}:${2-}" in
+  --features:doom-demo)
+    doom_demo=true
+    shift 2
+    set -- --features native-graphics "$@" ;;
+esac
+
 rustup target add x86_64-unknown-none >/dev/null
 kernel_dir=$(CDPATH= cd -- "$(dirname "$0")/../boot/kernel" && pwd)
 project_dir=$(CDPATH= cd -- "$kernel_dir/../.." && pwd)
@@ -79,10 +88,8 @@ done
 for program in boot/desktop/workbench:wb boot/desktop/builder:bd \
   examples/doom/doom-agent:da examples/doom/doom-agent-model:dm examples/doom/doom-agent-judge:dj \
   examples/doom/desktop-agent:dk examples/doom/review:rv examples/doom/lookup:lk; do
-  case " $* " in
-    *doom-demo*) install=true ;;
-    *native-graphics*)
-      case "$program" in boot/desktop/*) install=true ;; *) install=false ;; esac ;;
+  case "$doom_demo:$*:$program" in
+    true:*|*native-graphics*:boot/desktop/*) install=true ;;
     *) install=false ;;
   esac
   if "$install"; then
@@ -94,11 +101,10 @@ for program in boot/desktop/workbench:wb boot/desktop/builder:bd \
   fi
 done
 
-case " $* " in
-  *doom-demo*)
-    python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" apps.cfg "$project_dir/examples/doom/apps.cfg" >/dev/null ;;
-  *)
-    python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" --remove apps.cfg >/dev/null ;;
-esac
+if "$doom_demo"; then
+  python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" apps.cfg "$project_dir/examples/doom/apps.cfg" >/dev/null
+else
+  python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" --remove apps.cfg >/dev/null
+fi
 
 printf '%s\n' "$disk_image"

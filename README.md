@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.152.** Native benchmark scoring verifies judge
-receipt order. See the [release notes](docs/release-v0.3.152.md).
+**Current release: v0.3.153.** Agents can replay a retained tool version
+while their current tools stay active. See the [release notes](docs/release-v0.3.153.md).
+
+v0.3.152 verifies judge receipt order in native benchmark scoring. See the [release notes](docs/release-v0.3.152.md).
 
 v0.3.151 supports either native benchmark arm order.
 See the [release notes](docs/release-v0.3.151.md).
@@ -566,6 +568,16 @@ Inside the REPL, `:help` lists the commands; `:propose FILE`, `:promote` and
 ```
 
 The division error leaves both definitions uncommitted.
+
+### Workloads and platform code
+
+Keep game clients, policies, task definitions and scoring in
+[examples/osrs](examples/osrs), [examples/doom](examples/doom) and
+[examples/benchmarks](examples/benchmarks), with their launchers in
+`scripts/`. The language, standard library and OS expose reusable
+capabilities such as I/O, program inspection, research, live tool edits,
+judgment, replay and rollback. Each workload supplies its own protocol,
+observations, prompts and success criteria.
 
 ### The native desktop
 
