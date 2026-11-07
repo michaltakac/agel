@@ -32,7 +32,13 @@ parser.add_argument('--optimize', action='store_true', help='optimize the live b
 parser.add_argument('--transfer-from', type=Path, help='resume a verified native combat policy on a fresh account from a donor evidence directory')
 parser.add_argument('--live', action='store_true', help='use real providers for --repair or --optimize')
 parser.add_argument('--quest-resume', type=Path, help='isolate quest hand-in on a previously gathered account')
+parser.add_argument('--boot-image', type=Path, default=Path('target/boot/agel-v1.img'))
+parser.add_argument('--agel-executable', type=Path, default=Path('boot/posix/target/x86_64-unknown-none/release/agel'))
+parser.add_argument('--inference-bridge', type=Path, default=Path('target/release/examples/guest_inference'))
+parser.add_argument('--source-root', type=Path, default=Path('.'))
 options=parser.parse_args()
+stdlib = options.source_root / 'crates/agel-stdlib'
+examples = options.source_root / 'examples'
 if options.quest_resume and not options.quest:
     parser.error('--quest-resume requires --quest')
 melee=options.melee_xp
@@ -101,10 +107,10 @@ if options.quest:
         manifest['scope']="native Cook's Assistant hand-in on a retained normal account"
         manifest['checkpoint_trace_sha256']=hashlib.sha256(trace.encode()).hexdigest()
 
-catalog=Path('crates/agel-stdlib/stdlib.agel').read_text()
+catalog=(stdlib / 'stdlib.agel').read_text()
 a=catalog.index('(module agel/sequence\n');b=catalog.find('\n(module ',a+1)
 source=catalog[a:b]+'\n'
-source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in ['bytes','byte-stream','stream-buffer','services','service-stream'])
+source+=''.join((stdlib / f'{name}.agel').read_text()+'\n' for name in ['bytes','byte-stream','stream-buffer','services','service-stream'])
 source+='''(import agel/byte-stream)
 (import agel/service-stream)
 (def stream (service-stream (byte-stream byte-request) 256))
@@ -112,30 +118,30 @@ source+='''(import agel/byte-stream)
 (def wire-read (get stream 'read)) (def wire-write (get stream 'write))
 (def entropy-read (get stream 'entropy))
 '''
-source += Path('examples/osrs/osrs-wire.agel').read_text() + '\n'
+source += (examples / 'osrs/osrs-wire.agel').read_text() + '\n'
 if not options.challenge:
-    source += Path('crates/agel-stdlib/crypto.agel').read_text() + '\n'
+    source += (stdlib / 'crypto.agel').read_text() + '\n'
     modules = ('osrs-crypto', 'osrs-login', 'osrs-packets', 'osrs-bits', 'osrs-npcs', 'osrs-game')
-    source += ''.join(Path(f'examples/osrs/{name}.agel').read_text() + '\n' for name in modules)
+    source += ''.join((examples / f'osrs/{name}.agel').read_text() + '\n' for name in modules)
 if combat_workload or options.craft or options.economy or options.quest:
-    source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
+    source+=(stdlib / 'record-chain.agel').read_text()+'\n'
 if options.craft:
-    source+=Path('examples/osrs/crafting-test.agel').read_text()+'\n'
+    source+=(examples / 'osrs/crafting-test.agel').read_text()+'\n'
 if options.economy or options.quest:
-    economy_policy=Path('examples/osrs/mining-test.agel').read_bytes()
+    economy_policy=(examples / 'osrs/mining-test.agel').read_bytes()
     manifest['economy_policy_sha256']=hashlib.sha256(economy_policy).hexdigest()
     source+=economy_policy.decode()+'\n'
-    source+=Path('crates/agel-stdlib/benchmark.agel').read_text()+'\n'
+    source+=(stdlib / 'benchmark.agel').read_text()+'\n'
 if options.quest:
-    quest_policy=Path('examples/osrs/quest-test.agel').read_bytes()
+    quest_policy=(examples / 'osrs/quest-test.agel').read_bytes()
     manifest['quest_policy_sha256']=hashlib.sha256(quest_policy).hexdigest()
     source+=quest_policy.decode()+'\n'
 if options.combat or melee is not None:
-    combat_module=Path('examples/osrs/combat-test.agel').read_bytes()
+    combat_module=(examples / 'osrs/combat-test.agel').read_bytes()
     manifest['combat_policy_sha256']=hashlib.sha256(combat_module).hexdigest()
     source+=combat_module.decode()+'\n'
 if melee is not None:
-    training_module=Path('examples/osrs/combat-training.agel').read_bytes()
+    training_module=(examples / 'osrs/combat-training.agel').read_bytes()
     manifest['training_policy_sha256']=hashlib.sha256(training_module).hexdigest()
     source+=training_module.decode()+'\n'
 if options.transfer_from:
@@ -178,17 +184,17 @@ if shared_carrier:
     for name in ['meta','judgment','browse']:
         a=catalog.index('(module agel/'+name+'\n');b=catalog.find('\n(module ',a+1)
         source+=catalog[a:b if b>=0 else len(catalog)]+'\n'
-    source+='(module agel/native-reader (export native-read) (def native-read '+Path('crates/agel-stdlib/native-reader.agel').read_text()+'))\n'
-    source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in ['evolution','judge-log','repair','inference','research','live-tools','batches'])
-    source+=Path('examples/native-session-support.agel').read_text()+'\n'
+    source+='(module agel/native-reader (export native-read) (def native-read '+(stdlib / 'native-reader.agel').read_text()+'))\n'
+    source+=''.join((stdlib / f'{name}.agel').read_text()+'\n' for name in ['evolution','judge-log','repair','inference','research','live-tools','batches'])
+    source+=(examples / 'native-session-support.agel').read_text()+'\n'
     if encoder_workload:
-        source+=Path('crates/agel-stdlib/work-profile.agel').read_text()+'\n'
+        source+=(stdlib / 'work-profile.agel').read_text()+'\n'
         if options.transfer_from:
-            source+=Path('crates/agel-stdlib/benchmark.agel').read_text()+'\n'
-            source+=Path('examples/native-combat-transfer.agel').read_text()+'\n'
+            source+=(stdlib / 'benchmark.agel').read_text()+'\n'
+            source+=(examples / 'native-combat-transfer.agel').read_text()+'\n'
         else:
             source+="(def retained-policy nil)\n"
-        service_policy=Path('examples/native-service-optimize.agel').read_bytes()
+        service_policy=(examples / 'native-service-optimize.agel').read_bytes()
         if melee is not None or options.economy:
             manifest['service_policy_sha256']=hashlib.sha256(service_policy).hexdigest()
             if options.transfer_from:
@@ -198,7 +204,7 @@ if shared_carrier:
                         raise SystemExit('donor differs from current melee contract: '+field)
         source+=service_policy.decode()+'\n'
     else:
-        source+=Path('examples/native-session-repair.agel').read_text()+'\n'
+        source+=(examples / 'native-session-repair.agel').read_text()+'\n'
 source+='''(import agel/osrs-wire)
 (osrs-js5-open 241 '(1 2 3 4))
 (def master (osrs-js5-group 255 255))
@@ -267,10 +273,10 @@ else:
                 source+="(def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get ready 'history)))\n"
             else:
                 source+="(def recorded-field (largest-field (get ready 'history) 'bytes))\n"
-            source+=Path('examples/native-service-optimize-run.agel').read_text()+'\n'
+            source+=(examples / 'native-service-optimize-run.agel').read_text()+'\n'
             source+='(def policy-uses 0)\n'
         else:
-            source+=Path('examples/native-session-repair-run.agel').read_text()+'\n'
+            source+=(examples / 'native-session-repair-run.agel').read_text()+'\n'
         source+='(def ready (osrs-service-stop ready))\n'
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
@@ -286,7 +292,7 @@ else:
   (osrs-service-start attacking)
   (def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get attacking 'history)))
 '''
-            source+=Path('examples/native-service-optimize-run.agel').read_text()+'\n'
+            source+=(examples / 'native-service-optimize-run.agel').read_text()+'\n'
             source+="(def policy-uses 0) (osrs-service-stop attacking)))\n"
         else:
             source+="(def combat-after-attack (fn (attacking target) (report-target target) attacking))\n"
@@ -450,8 +456,8 @@ if options.transfer_from:
     with open(disk,'rb') as image:
         assert hashlib.file_digest(image,'sha256').hexdigest() == donor_hash
 else:
-    disk=console.prepared_image('target/boot/agel-v1.img',directory,blank_sectors=1024)
-for cmd in [['python3','scripts/install-program.py',disk,'agel','boot/posix/target/x86_64-unknown-none/release/agel'],
+    disk=console.prepared_image(options.boot_image,directory,blank_sectors=1024)
+for cmd in [['python3','scripts/install-program.py',disk,'agel',str(options.agel_executable)],
             ['python3','scripts/install-program.py','--region','data',disk,'client',str(script)]]:
     subprocess.run(cmd,check=True,capture_output=True)
 run_started=time.monotonic()
@@ -471,7 +477,7 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
             guest_command=':exec agel -- --no-stdlib /data/client'
             if 'evaluation_fuel' in manifest:
                 guest_command=f":exec agel -- --no-stdlib --fuel {manifest['evaluation_fuel']} /data/client"
-            command=['target/release/examples/guest_inference',str(serial),str(directory.resolve()),'process agel exited with status',*setup,guest_command] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',guest_command]
+            command=[str(options.inference_bridge),str(serial),str(directory.resolve()),'process agel exited with status',*setup,guest_command] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',guest_command]
             result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=1800 if melee is not None or options.quest else 960)
     finally:
         machine.terminate();machine.wait(timeout=10)
