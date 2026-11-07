@@ -52,7 +52,7 @@ def pin_transfer(output, evidence):
     donor = output / 'donor'
     donor.mkdir()
     for name in ('account.json', 'world.json', 'serial.log', 'saved-account.txt',
-                 'judge.agel', 'judge.frames', 'disk.img'):
+                 'judge.agel', 'judge.frames', 'disk.img', 'mode.txt', 'client.agel'):
         shutil.copy2(evidence / name, donor / name)
     recovery = evidence / 'judge-recovery.agel'
     if recovery.is_file():
