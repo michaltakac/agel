@@ -348,6 +348,12 @@ else:
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
         if task_label:
             source += "))\n"
+    if options.optimize:
+        source+='''(def report-policy-use
+  (fn () (console-log (text-concat "native-opt: live uses " (print-form policy-uses)))))
+'''
+    else:
+        source+="(def report-policy-use (fn () nil))\n"
     if options.combat:
         source+='''(import agel/osrs-combat-test)
 (def report-target (fn (target)
@@ -370,6 +376,7 @@ else:
 (def combat (with-handler (* problem)
   (begin
     (console-log (text-concat "native-combat: failure " (print-form problem)))
+    (report-policy-use)
     (console-log (text-concat "native-combat: task-us " (print-form (- (clock-us) task-start))))
     (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
   (test-rat-combat-bounded ready
@@ -393,6 +400,7 @@ else:
 (def trained (with-handler (* problem)
   (begin
     (console-log (text-concat "native-combat: failure " (print-form problem)))
+    (report-policy-use)
     (console-log (text-concat "native-combat: task-us " (print-form (- (clock-us) task-start))))
     (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
   (train-rat-melee-with-progress ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter log-training)))
@@ -415,6 +423,7 @@ else:
     (with-handler (* problem)
       (begin
         (log-quest (text-concat "failure " (print-form problem)))
+        (report-policy-use)
         (log-quest (text-concat "task-us " (print-form (- (clock-us) task-start))))
         (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
       (scenario quest-start-state log-quest))))
@@ -457,6 +466,7 @@ else:
 (def sale (with-handler (* problem)
   (begin
     (console-log (text-concat "native-economy: failure " (print-form problem)))
+    (report-policy-use)
     (console-log (text-concat "native-economy: task-us " (print-form (- (clock-us) task-start))))
     (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
   (first-bronze-sale-using ready
@@ -476,6 +486,7 @@ else:
 (def crafted (with-handler (* problem)
   (begin
     (console-log (text-concat "native-craft: failure " (print-form problem)))
+    (report-policy-use)
     (console-log (text-concat "native-craft: task-us " (print-form (- (clock-us) task-start))))
     (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
   (forge-adamant-platebody-using ready
@@ -519,8 +530,7 @@ else:
         else:
             source+='''(check (< 0 policy-uses) "no live packet used the changed cadence")
 '''
-        source+='''(console-log (text-concat "native-opt: live uses " (print-form policy-uses)))
-'''
+        source+="(report-policy-use)\n"
     if not options.quest:
         source+='''
 (if (< 0 (get completed 'keepalives)) #t (signal 'native/test "keepalive path was not exercised"))

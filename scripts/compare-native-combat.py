@@ -101,8 +101,11 @@ def adaptation_evidence(directory, trace, correct):
                 f'{directory}: no verified in-session policy use')
     charges, usage = optimizer_charges(directory, trace, interrupted=interrupted and not (activated or rolled_back))
     decision = 'committed' if activated else 'refused-retained-fixed' if rolled_back else 'interrupted'
-    if activated and uses == ['0']:
-        decision = 'committed-unused'
+    if activated:
+        if not uses:
+            decision = 'committed-use-unknown'
+        elif uses == ['0']:
+            decision = 'committed-unused'
     return charges, decision, usage
 
 
