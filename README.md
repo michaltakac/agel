@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.223.** The latest melee pair records separate
-guest and server outcomes. See the [release notes](docs/release-v0.3.223.md).
+**Current release: v0.3.224.** The adamant fixture stages raw materials
+without a formatter dependency. See the [release notes](docs/release-v0.3.224.md).
+
+v0.3.223 records separate guest and server outcomes for the melee pair.
+See the [release notes](docs/release-v0.3.223.md).
 
 v0.3.222 distinguishes the saved melee goal from the guest verdict.
 See the [release notes](docs/release-v0.3.222.md).
