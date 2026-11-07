@@ -2,7 +2,7 @@
   (import agel/sequence)
   (import agel/osrs-game)
   (import agel/osrs-combat-test)
-  (export train-rat-attack)
+  (export train-rat-attack train-rat-melee)
 
   (def read-until
     (fn (state ready ticks service packets)
@@ -19,7 +19,8 @@
     (fn (state ready)
       (let ((observed (wait-ticks state ready 48)))
         (if (ready observed) observed (signal 'osrs/training "combat observation timed out")))))
-  (def attack (fn (state) (get (osrs-stat state 0) 'xp)))
+  (def xp (fn (state skill) (get (osrs-stat state skill) 'xp)))
+  (def attack (fn (state) (xp state 0)))
   (def hitpoints (fn (state) (get (osrs-stat state 3) 'xp)))
 
   (def observed-rat
@@ -39,36 +40,77 @@
                 (if (complete reset) reset
                   (attack-with-retry reset index complete (- remaining 1))))))))))
   (def fight-again
-    (fn (state index)
+    (fn (state index skill)
       (let ((complete (fn (g)
-                        (if (< (attack state) (attack g))
+                        (if (< (xp state skill) (xp g skill))
                           (if (< (hitpoints state) (hitpoints g))
                             (= (observed-rat g index) nil) #f) #f))))
         (let ((finished (attack-with-retry state index complete 3)))
           (dict 'state finished 'report
-            (dict 'target-index index 'attack-before (attack state) 'attack-after (attack finished)
-              'hitpoints-before (hitpoints state) 'hitpoints-after (hitpoints finished)
-              'target-removed #t))))))
+            (if (= skill 0)
+              (dict 'target-index index 'attack-before (attack state) 'attack-after (attack finished)
+                'hitpoints-before (hitpoints state) 'hitpoints-after (hitpoints finished) 'target-removed #t)
+              (dict 'target-index index 'skill skill 'xp-before (xp state skill) 'xp-after (xp finished skill)
+                'hitpoints-before (hitpoints state) 'hitpoints-after (hitpoints finished) 'target-removed #t)))))))
   (def train
-    (fn (state goal remaining index fights)
-      (if (if (< (attack state) goal) (< 0 remaining) #f)
-        (let ((encounter (if index (fight-again state index)
+    (fn (state skill goal remaining index fights)
+      (if (if (< (xp state skill) goal) (< 0 remaining) #f)
+        (let ((encounter (if index (fight-again state index skill)
                            (test-rat-combat-bounded state await-combat (fn (attacking _) attacking)))))
           (let ((next (get encounter 'state)) (report (get encounter 'report)))
-            (train next goal (- remaining 1) (get report 'target-index) (cons report fights))))
-        (dict 'state state 'fights (reverse fights)))))
+            (train next skill goal (- remaining 1) (get report 'target-index) (cons report fights))))
+        (dict 'state state 'index index 'fights (reverse fights)))))
+
+  (def check-training-bound
+    (fn (goal max-fights)
+      (if (if (= (type-of goal) 'int) (if (< 0 goal) (if (= (type-of max-fights) 'int)
+          (if (< 0 max-fights) (< max-fights 65) #f) #f) #f) #f)
+        #t
+        (signal 'osrs/training "expected positive XP goal and a fight bound of 1..64"))))
 
   (def train-rat-attack
     (fn (state goal max-fights)
-      (if (if (= (type-of goal) 'int) (if (< 0 goal) (if (= (type-of max-fights) 'int)
-          (if (< 0 max-fights) (< max-fights 65) #f) #f) #f) #f)
-        (let ((ready (await-combat state (fn (g) (if (osrs-stat g 0) (osrs-stat g 3) #f)))))
-          (let ((result (train ready goal max-fights nil nil)))
-            (let ((finished (get result 'state)) (fights (get result 'fights)))
-              (dict 'test 'rat-training 'passed (if (< (attack finished) goal) #f #t)
-                'goal-attack-xp goal 'fights (count fights)
-                'attack-before (attack ready) 'attack-after (attack finished)
-                'hitpoints-before (hitpoints ready) 'hitpoints-after (hitpoints finished)
-                'attack-level (get (osrs-stat finished 0) 'level) 'encounters fights))))
-        (signal 'osrs/training "expected positive XP goal and a fight bound of 1..64"))))
+      (check-training-bound goal max-fights)
+      (let ((ready (await-combat state (fn (g) (if (osrs-stat g 0) (osrs-stat g 3) #f)))))
+        (let ((result (train ready 0 goal max-fights nil nil)))
+          (let ((finished (get result 'state)) (fights (get result 'fights)))
+            (dict 'test 'rat-training 'passed (if (< (attack finished) goal) #f #t)
+              'goal-attack-xp goal 'fights (count fights)
+              'attack-before (attack ready) 'attack-after (attack finished)
+              'hitpoints-before (hitpoints ready) 'hitpoints-after (hitpoints finished)
+              'attack-level (get (osrs-stat finished 0) 'level) 'encounters fights))))))
+
+  (def stance
+    (fn (state component mode)
+      (let ((ready (await-combat state (fn (g) (osrs-open-interface? g 593)))))
+        (await-combat (osrs-click-interface ready 593 component)
+          (fn (g) (= (osrs-varp g 43) mode))))))
+  (def phase
+    (fn (state skill goal max-fights index)
+      (let ((result (train state skill goal max-fights index nil)))
+        (let ((finished (get result 'state)))
+          (if (< (xp finished skill) goal)
+            (signal 'osrs/training "melee phase did not reach its XP goal" skill)
+            (assoc result 'report
+              (dict 'skill skill 'xp-before (xp state skill) 'xp-after (xp finished skill)
+                'level (get (osrs-stat finished skill) 'level) 'fights (count (get result 'fights))
+                'encounters (get result 'fights))))))))
+  (def train-rat-melee
+    (fn (state goal max-fights)
+      (check-training-bound goal max-fights)
+      (let ((ready (await-combat state (fn (g)
+        (if (osrs-stat g 0) (if (osrs-stat g 1) (if (osrs-stat g 2) (osrs-stat g 3) #f) #f) #f)))))
+        (if (= (list (xp ready 0) (xp ready 1) (xp ready 2) (hitpoints ready)) '(0 0 0 1154))
+          (let ((accurate (phase ready 0 goal max-fights nil)))
+            (let ((aggressive (phase (stance (get accurate 'state) 10 1) 2 goal max-fights
+                                (get accurate 'index))))
+              (let ((defensive (phase (stance (get aggressive 'state) 18 3) 1 goal max-fights
+                                 (get aggressive 'index))))
+                (let ((finished (get defensive 'state)))
+                  (dict 'test 'rat-melee 'passed #t 'goal-xp goal 'stance (osrs-varp finished 43)
+                    'attack-xp (xp finished 0) 'strength-xp (xp finished 2) 'defence-xp (xp finished 1)
+                    'hitpoints-xp (hitpoints finished) 'phases
+                    (map (fn (result) (get result 'report)) (list accurate aggressive defensive)))))))
+          (signal 'osrs/training "melee training requires fresh combat stats")))))
+
 )

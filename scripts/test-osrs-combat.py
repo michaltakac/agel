@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify Agel rat combat or bounded Attack training on a fresh normal account."""
+"""Verify Agel rat combat or bounded melee training on a fresh normal account."""
 import argparse
 import json
 import os
@@ -24,9 +24,11 @@ parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
 mode.add_argument('--live-tools', action='store_true')
 mode.add_argument('--attack-xp', type=int, help='train against rats until this Attack XP')
+mode.add_argument('--melee-xp', type=int, help='train Attack, Strength and Defence to this XP')
 options = parser.parse_args()
-if options.attack_xp is not None and not 1 <= options.attack_xp <= 512:
-    parser.error('--attack-xp must be between 1 and 512')
+goal = options.melee_xp if options.melee_xp is not None else options.attack_xp
+if goal is not None and not 1 <= goal <= 512:
+    parser.error('training XP must be between 1 and 512')
 
 username = 'agel' + secrets.token_hex(4)
 password = secrets.token_hex(8)
@@ -46,28 +48,39 @@ if options.live_tools:
     source += Path('crates/agel-stdlib/live-tools.agel').read_text()
     source += Path('examples/osrs/live-tools-test.agel').read_text()
     source += "\n(import agel/osrs-live-tools-test) (get (test-live-combat game) 'report)"
-elif options.attack_xp is not None:
+elif goal is not None:
+    source += Path('crates/agel-stdlib/record-chain.agel').read_text()
     source += Path('examples/osrs/combat-training.agel').read_text()
-    max_fights = min(64, (options.attack_xp + 7) // 8 + 3)
-    source += f"\n(import agel/osrs-combat-training) (train-rat-attack game {options.attack_xp} {max_fights})"
+    max_fights = min(64, (goal + 7) // 8 + 3)
+    train = 'train-rat-melee' if options.melee_xp is not None else 'train-rat-attack'
+    source += "\n(import agel/record-chain) (import agel/osrs-combat-training) "
+    source += f"({train} (assoc game 'history-push record-chain-push) {goal} {max_fights})"
 else:
     source += "\n(import agel/osrs-combat-test) (get (test-rat-combat game) 'report)"
 notice('RuneScape combat: discovering targets, attacking and waiting for XP and removal')
 started = time.monotonic()
-result = evaluate(source, 43594, timeout=120 if options.attack_xp is None else 30 + max_fights * 300)
+phases = 3 if options.melee_xp is not None else 1
+result = evaluate(source, 43594, timeout=120 if goal is None else 30 + phases * max_fights * 300)
 assert password not in result.stdout + result.stderr, 'credential output'
 assert result.returncode == 0, result.stderr
 assert 'passed #t' in result.stdout and 'target-removed #t' in result.stdout, result.stdout
 if options.live_tools:
     assert 'live-tool-version 2' in result.stdout and 'preserved-calls 3' in result.stdout, result.stdout
-expected_xp = combat_xp(result.stdout)
+if options.melee_xp is not None:
+    outcome = re.search(r'test rat-melee passed #t goal-xp (\d+) stance 3 attack-xp (\d+) strength-xp (\d+) defence-xp (\d+) hitpoints-xp (\d+)', result.stdout)
+    assert outcome and int(outcome[1]) == goal, result.stdout
+    expected_xp = {0: int(outcome[2]), 2: int(outcome[3]), 1: int(outcome[4]), 3: int(outcome[5])}
+    assert all(expected_xp[skill] >= goal for skill in (0, 1, 2)), result.stdout
+    assert expected_xp[3] > 1154, result.stdout
+else:
+    expected_xp = combat_xp(result.stdout)
 if options.attack_xp is not None:
     outcome = re.search(r'test rat-training passed #t goal-attack-xp (\d+) fights (\d+) ', result.stdout)
     assert outcome and int(outcome[1]) == options.attack_xp, result.stdout
     fights = int(outcome[2])
     assert 1 <= fights <= max_fights and expected_xp[0] >= options.attack_xp, result.stdout
 print(result.stdout.strip(), flush=True)
-notice('RuneScape combat: kill observed; verifying persisted Attack and Hitpoints XP')
+notice('RuneScape combat: verifying saved XP and normal account rights')
 
 compiler = Path(os.environ.get('JAVA_HOME', '')) / 'bin/javac'
 if not compiler.is_file():
@@ -78,7 +91,7 @@ subprocess.run([str(compiler) if compiler.is_file() else 'javac', '-d', 'target/
 subprocess.run(['docker', 'cp', 'target/osrs-admin/AccountState.class', 'agel-osrs-world:/tmp/AccountState.class'], check=True, capture_output=True)
 for _ in range(45):
     oracle = subprocess.run(['docker', 'exec', 'agel-osrs-world', 'sh', '-c',
-        'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$1"', 'probe', username], capture_output=True, text=True)
+        'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$@"', 'probe', username, 'varp.com_mode'], capture_output=True, text=True)
     if oracle.returncode == 0 and combat_xp_saved(expected_xp, oracle.stdout):
         break
     time.sleep(1)
@@ -86,8 +99,17 @@ else:
     raise AssertionError('combat XP did not persist: ' + oracle.stdout + oracle.stderr)
 identity = dict(part.split('=', 1) for part in oracle.stdout.splitlines()[0].split())
 assert identity['rights'] == '' and int(identity['xp_rate_in_hundreds']) == 100, oracle.stdout
-print('persisted:', '\n'.join(line for line in oracle.stdout.splitlines() if line.startswith(('account=', 'stat=0 ', 'stat=3 '))), flush=True)
-if options.attack_xp is not None:
+print('persisted:', '\n'.join(line for line in oracle.stdout.splitlines() if line.startswith(('account=', 'stat=0 ', 'stat=1 ', 'stat=2 ', 'stat=3 ', 'varp.com_mode='))), flush=True)
+if options.melee_xp is not None:
+    assert 'varp.com_mode=3' in oracle.stdout.splitlines(), oracle.stdout
+    reported = re.findall(r'\{skill (\d+) xp-before 0 xp-after (\d+) level (\d+) fights (\d+) encounters ', result.stdout)
+    assert len(reported) == 3 and {int(phase[0]) for phase in reported} == {0, 1, 2}, result.stdout
+    for skill, xp, level, fights in reported:
+        assert int(xp) == expected_xp[int(skill)] and 1 <= int(fights) <= max_fights, result.stdout
+        assert re.search(rf'^stat={skill} base={level} visible={level} ', oracle.stdout, re.M), oracle.stdout
+    print(f'Training and verification elapsed seconds: {time.monotonic() - started:.3f}', flush=True)
+    notice(f'RuneScape PASS: saved Attack, Strength and Defence each reached at least {goal} XP')
+elif options.attack_xp is not None:
     level = re.search(r' attack-level (\d+) encounters ', result.stdout)
     assert level and re.search(rf'^stat=0 base={level[1]} visible={level[1]} ', oracle.stdout, re.M), oracle.stdout
     print(f'Training and verification elapsed seconds: {time.monotonic() - started:.3f}', flush=True)
