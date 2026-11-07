@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.175.** The Agel OS viewer shows native melee
-stance changes and quest milestones. See the [release notes](docs/release-v0.3.175.md).
+**Current release: v0.3.176.** The OSRS melee example waits for a tick
+between its stance reset and retry. See the [release notes](docs/release-v0.3.176.md).
+
+v0.3.175 shows native melee stance and quest milestones in the viewer. See the [release notes](docs/release-v0.3.175.md).
 
 v0.3.174 streams hosted OSRS quest phases. See the [release notes](docs/release-v0.3.174.md).
 

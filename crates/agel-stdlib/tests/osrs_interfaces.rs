@@ -517,7 +517,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
             r#"
       (module agel/osrs-game
         (export osrs-keepalive osrs-observe-bounded osrs-observe-ready osrs-stat osrs-nearby-npcs osrs-attack
-          osrs-walk osrs-open-interface? osrs-click-interface osrs-varp)
+          osrs-walk osrs-open-interface? osrs-click-interface osrs-varp osrs-wait-ticks)
         (def rat-one (dict 'index 1 'type 2854))
         (def rat-two (dict 'index 2 'type 2854))
         (def osrs-keepalive (fn (state) state))
@@ -533,10 +533,16 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (def osrs-nearby-npcs (fn (state) (get state 'npcs)))
         (def osrs-walk (fn (state x z) state))
         (def osrs-open-interface? (fn (state interface) #t))
+        (def osrs-wait-ticks
+          (fn (state ticks)
+            (assoc (assoc state 'reset-ticks (+ ticks (if (get state 'reset-ticks)
+              (get state 'reset-ticks) 0))) 'reset-settled #t)))
         (def osrs-click-interface
           (fn (state interface component)
-            (let ((clicked (assoc (assoc state 'clicks (cons component (get state 'clicks)))
-                                  'server-stance (if (= component 10) 1 3))))
+            (if (if (= (count (get state 'clicks)) 2) #t (= (count (get state 'clicks)) 5))
+              (if (get state 'reset-settled) nil (signal 'test "retried before reset tick")) nil)
+            (let ((clicked (assoc (assoc (assoc state 'clicks (cons component (get state 'clicks)))
+                                  'server-stance (if (= component 10) 1 3)) 'reset-settled #f)))
               (if (if (get state 'late) #t (get state 'clicks))
                 (assoc (if (if (get state 'late) #f
                                (if (= component 10) #t (< 4 (count (get state 'clicks)))))
@@ -578,6 +584,7 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         (reverse (get (get trained 'state) 'clicks))
         (reverse (get (get trained 'state) 'attempts))
         (map (fn (phase) (get (car (get phase 'encounters)) 'target-index)) (get report 'phases))
+        (get (get trained 'state) 'reset-ticks)
         (get (get late 'report) 'stance)
         (reverse (get (get late 'state) 'clicks))
         (next-rat (dict 'npcs (list (dict 'index 2 'type 2854))) 1)
@@ -587,6 +594,6 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 3 (10 18) 2 1 (training stance-requested training stance-requested training))")
+        Some("(#t 8 3 (10 18 10 18 10 18) (1 1 1 2 2) (1 2 2) 2 3 (10 18) 2 1 (training stance-requested training stance-requested training))")
     );
 }
