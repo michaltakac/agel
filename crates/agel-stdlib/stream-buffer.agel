@@ -29,24 +29,27 @@
       (let ((bytes ((get state 'read) (get state 'size))))
         (begin
           (require (if (= bytes nil) #t (= (type-of bytes) 'list)) "expected byte list")
-          (require (< (count bytes) (+ 1 (get state 'size))) "oversized read")
-          (foldl validate-byte #t bytes)
-          bytes))))
+          (let ((length (count bytes)))
+            (require (< length (+ 1 (get state 'size))) "oversized read")
+            (foldl validate-byte #t bytes)
+            (if (= length 0) nil bytes))))))
   (def split-prefix
     (fn (bytes n prefix)
       (if (= n 0) (dict 'bytes (reverse prefix) 'rest bytes)
         (split-prefix (cdr bytes) (- n 1) (cons (car bytes) prefix)))))
   (def read-step
     (fn (state message)
-      (let ((refill (if (= (count (get state 'buffer)) 0) (if (get state 'ended) #f #t) #f)))
+      (let ((refill (if (= (get state 'buffer) nil) (if (get state 'ended) #f #t) #f)))
         (let ((prepared (if refill (service state) state)))
           (with-handler (* problem) (failed prepared problem)
             (let ((bytes (if refill (refill-bytes prepared) (get prepared 'buffer)))
                   (n (get message 'count)))
-              (let ((split (if (< n (count bytes)) (split-prefix bytes n nil)
-                            (dict 'bytes (if (= (count bytes) 0) nil bytes) 'rest nil))))
+              (let ((split (if (< n (count bytes))
+                            (if (= n 1) (dict 'bytes (list (car bytes)) 'rest (cdr bytes))
+                              (split-prefix bytes n nil))
+                            (dict 'bytes bytes 'rest nil))))
                 (result
-                  (assoc (assoc (assoc prepared 'buffer (get split 'rest)) 'ended (= (count bytes) 0))
+                  (assoc (assoc (assoc prepared 'buffer (get split 'rest)) 'ended (= bytes nil))
                     'reads (+ (get prepared 'reads) (if refill 1 0)))
                   (dict 'bytes (get split 'bytes))))))))))
   (def buffer-request
@@ -61,7 +64,7 @@
               (if (get state 'failed) (signal 'stream/failed "stream failed; close and reopen before reuse") nil)
               (if (= (get message 'operation) 'pulse) (result (service state) (dict 'ok #t))
                 (if (= (get message 'operation) 'read-ready)
-                  (result state (dict 'ready (if (< 0 (count (get state 'buffer))) #t
+                  (result state (dict 'ready (if (get state 'buffer) #t
                     (if (if (get state 'ended) #f (get state 'read-ready))
                       ((get state 'read-ready)) #f))))
                 (if (= (get message 'operation) 'start-service)
