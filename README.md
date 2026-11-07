@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.57.** The native quest example changes its
-approach when the cook does not respond. See the [release notes](docs/release-v0.3.57.md).
+**Current release: v0.3.58.** The paired melee scorer retains measured
+task failures. See the [release notes](docs/release-v0.3.58.md).
+
+v0.3.57 retries the cook interaction from adjacent tiles.
+See the [release notes](docs/release-v0.3.57.md).
 
 v0.3.56 records dialogue packets and continuation actions.
 See the [release notes](docs/release-v0.3.56.md).

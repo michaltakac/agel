@@ -15,7 +15,7 @@ import time
 import graphical_console as console
 
 sys.path.insert(0, str(Path(__file__).with_name("osrs")))
-from test_support import combat_xp, combat_xp_saved, melee_levels_saved, melee_xp
+from test_support import combat_xp, combat_xp_saved, melee_failure_saved, melee_levels_saved, melee_xp
 
 parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
@@ -294,6 +294,7 @@ else:
 (def trained (with-handler (* problem)
   (begin
     (console-log (text-concat "native-combat: failure " (print-form problem)))
+    (console-log (text-concat "native-combat: task-us " (print-form (- (clock-us) task-start))))
     (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
   (train-rat-melee-result ready {melee} {min(64, (melee + 7) // 8 + 3)} log-encounter)))
 (def finish (clock-us))
@@ -456,10 +457,33 @@ if not options.challenge:assert account['password'] not in output,'credential ap
 print('\n'.join(line for line in output.splitlines() if 'native-network:' in line or 'native-session:' in line or 'native-opt:' in line or 'native-combat:' in line or 'native-transfer:' in line or 'native-craft:' in line or 'native-economy:' in line or 'native-quest:' in line or 'inference-bridge:' in line or 'agel:' in line or 'exited with status' in line),flush=True)
 marker='native-network: PASS:' if options.challenge else 'native-network: client completed:'
 passed=result.returncode==0 and marker in output and 'process agel exited with status 0' in output
+
+
+def capture_account(predicate, varps):
+    compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
+    build=directory/'oracle';build.mkdir()
+    subprocess.run([str(compiler) if compiler.is_file() else 'javac','-d',str(build),'scripts/osrs/AccountState.java'],check=True,capture_output=True)
+    subprocess.run(['docker','cp',str(build/'AccountState.class'),'agel-osrs-world:/tmp/AccountState.class'],check=True,capture_output=True)
+    deadline=time.monotonic()+45
+    while True:
+        saved=subprocess.run(['docker','exec','agel-osrs-world','sh','-c',
+            'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$@"','probe',account['username'],
+            *varps],capture_output=True,text=True)
+        if saved.returncode==0 and predicate(saved.stdout):
+            (directory/'saved-account.txt').write_text(saved.stdout)
+            return saved.stdout
+        if time.monotonic()>deadline:raise AssertionError('expected state was not saved: '+saved.stdout+saved.stderr)
+        time.sleep(1)
+
+
 if editing:
     judge_dispatched=bool(re.search(r'^inference-bridge: started job \d+ provider jev ',output,re.M))
     decode_judge_ledger(disk,directory,environment['TYPESAFEAI_API_KEY'],options.live,
         required=judge_dispatched and passed)
+if not passed and melee is not None and 'native-combat: failure ' in output:
+    capture_account(lambda snapshot: melee_failure_saved(output, melee, snapshot),
+                    ['varp.com_mode'])
+if editing:
     assert passed, 'native session failed; disk, serial log and judge records retained'
     if options.optimize:
         activated='native-opt: policy committed after text judgment and measured replay' in output
@@ -524,42 +548,31 @@ if options.quest:
                 and 'stat=7 base=4 visible=4 fine_xp=3000' in snapshot
                 and all(f'item=obj.{item} ' not in snapshot for item in ('bucket_milk','egg','pot_flour')))
 if not options.challenge and not options.craft:
-    compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
-    build=directory/'oracle';build.mkdir()
-    subprocess.run([str(compiler) if compiler.is_file() else 'javac','-d',str(build),'scripts/osrs/AccountState.java'],check=True,capture_output=True)
-    subprocess.run(['docker','cp',str(build/'AccountState.class'),'agel-osrs-world:/tmp/AccountState.class'],check=True,capture_output=True)
-    deadline=time.monotonic()+45
-    while True:
-        saved=subprocess.run(['docker','exec','agel-osrs-world','sh','-c',
-            'exec "$JAVA_HOME/bin/java" -cp "/tmp:/world/app/lib/*" AccountState "$@"','probe',account['username'],
-            *oracle_varps],capture_output=True,text=True)
-        if saved.returncode==0:
-            if options.combat or melee is not None:
-                if combat_xp_saved(expected_xp,saved.stdout):break
-            elif options.economy:
-                if economy_lines.issubset(saved.stdout.splitlines()):break
-            elif options.quest:
-                if quest_saved(saved.stdout):break
-            elif 'x=3223 z=3218 level=0' in saved.stdout:break
-        if time.monotonic()>deadline:raise AssertionError('expected state was not saved: '+saved.stdout+saved.stderr)
-        time.sleep(1)
-    assert 'rights= ' in saved.stdout and 'xp_rate_in_hundreds=100' in saved.stdout,saved.stdout
+    def expected_outcome(snapshot):
+        if combat_workload:
+            return combat_xp_saved(expected_xp,snapshot)
+        if options.economy:
+            return economy_lines.issubset(snapshot.splitlines())
+        if options.quest:
+            return quest_saved(snapshot)
+        return 'x=3223 z=3218 level=0' in snapshot
+    saved=capture_account(expected_outcome,oracle_varps)
+    assert 'rights= ' in saved and 'xp_rate_in_hundreds=100' in saved,saved
     if melee is not None:
-        assert melee_levels_saved(melee_levels,saved.stdout),saved.stdout
+        assert melee_levels_saved(melee_levels,saved),saved
     if options.economy:
-        assert all(f'item=obj.{item} ' not in saved.stdout for item in ('bronze_bar','copper_ore','tin_ore'))
-    (directory/'saved-account.txt').write_text(saved.stdout)
-    print('Persisted native client:',saved.stdout.splitlines()[0],flush=True)
+        assert all(f'item=obj.{item} ' not in saved for item in ('bronze_bar','copper_ore','tin_ore'))
+    print('Persisted native client:',saved.splitlines()[0],flush=True)
     if options.combat:
-        print('Persisted combat XP:', '\n'.join(line for line in saved.stdout.splitlines() if line.startswith(('stat=0 ', 'stat=3 '))),flush=True)
+        print('Persisted combat XP:', '\n'.join(line for line in saved.splitlines() if line.startswith(('stat=0 ', 'stat=3 '))),flush=True)
     if melee is not None:
-        print('Persisted melee XP:', '\n'.join(line for line in saved.stdout.splitlines()
+        print('Persisted melee XP:', '\n'.join(line for line in saved.splitlines()
               if line.startswith(('stat=0 ', 'stat=1 ', 'stat=2 ', 'stat=3 ', 'varp.com_mode='))),flush=True)
     if options.economy:
-        print('Persisted economy:', '\n'.join(line for line in saved.stdout.splitlines()
+        print('Persisted economy:', '\n'.join(line for line in saved.splitlines()
               if line in economy_lines),flush=True)
     if options.quest:
-        print('Persisted quest:', '\n'.join(line for line in saved.stdout.splitlines()
+        print('Persisted quest:', '\n'.join(line for line in saved.splitlines()
               if line.startswith(('stat=7 ', *oracle_varps))),flush=True)
     saved_outcome='combat XP' if combat_workload else 'sale proceeds and XP' if options.economy else 'quest and reward' if options.quest else 'movement'
     print('PASS: native client '+saved_outcome+' saved with normal rights and 1x XP',flush=True)

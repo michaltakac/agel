@@ -11,7 +11,7 @@ import tempfile
 from native_provider_support import decode_judge_frames, judge_cost, judge_frames
 
 sys.path.insert(0, str(Path(__file__).with_name('osrs')))
-from test_support import combat_xp, combat_xp_saved, form, melee_levels_saved, melee_xp
+from test_support import combat_xp, combat_xp_saved, form, melee_failure_saved, melee_levels_saved, melee_xp
 
 
 def require(condition, message):
@@ -60,10 +60,18 @@ def load_arm(directory, policy, read_table):
     trace = (directory / 'serial.log').read_text()
     saved = (directory / 'saved-account.txt').read_text()
     require(manifest['encoder_policy'] == policy, f'{directory}: unexpected policy')
-    require('process agel exited with status 0' in trace, f'{directory}: no successful guest exit')
+    exits = re.findall(r'^process agel exited with status (\d+)$', trace, re.M)
+    require(len(exits) == 1, f'{directory}: expected one terminal guest exit')
+    correct = exits[0] == '0'
     goal = manifest.get('goal_xp')
     charges = []
-    if goal is None:
+    if not correct:
+        require(goal is not None and policy != 'transferred'
+                and re.search(r'^native-combat: failure \{', trace, re.M),
+                f'{directory}: no measured melee task failure')
+        require(melee_failure_saved(trace, goal, saved),
+                f'{directory}: saved account does not corroborate incomplete training')
+    elif goal is None:
         expected = combat_xp(trace)
         require(re.search(r'^native-combat: \{test rat-combat passed #t .*target-removed #t\}', trace, re.M),
                 f'{directory}: no verified combat report')
@@ -71,13 +79,15 @@ def load_arm(directory, policy, read_table):
         expected, levels = melee_xp(trace, goal)
         require(melee_levels_saved(levels, saved), f'{directory}: saved melee levels or stance differ')
     if policy == 'adaptive':
-        activated = ('native-opt: policy committed after text judgment and measured replay' in trace
-                     and re.search(r'^native-opt: live uses [1-9]\d*$', trace, re.M))
-        rolled_back = ('native-opt: continued with fixed policy after exhausted retries' in trace
-                       and re.search(r'^native-opt: live uses 0$', trace, re.M))
-        require(goal is not None and 'native-opt: recorded workload verified in append-only log' in trace
-                and bool(activated) != bool(rolled_back),
+        activated = 'native-opt: policy committed after text judgment and measured replay' in trace
+        rolled_back = 'native-opt: continued with fixed policy after exhausted retries' in trace
+        require(goal is not None and activated != rolled_back,
                 f'{directory}: no verified in-session policy decision')
+        if correct:
+            uses = r'[1-9]\d*' if activated else '0'
+            require('native-opt: recorded workload verified in append-only log' in trace
+                    and re.search(rf'^native-opt: live uses {uses}$', trace, re.M),
+                    f'{directory}: no verified in-session policy use')
         require((directory / 'mode.txt').read_text().strip() == 'live',
                 f'{directory}: adaptive scoring requires live providers')
         ledger = installed_judge_ledger(directory)
@@ -102,7 +112,8 @@ def load_arm(directory, policy, read_table):
         print(f'; adaptive policy: {"activated" if activated else "retained fixed after refusal"}')
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: evaluation incurred inference')
-    require(combat_xp_saved(expected, saved), f'{directory}: saved XP differs from observations')
+    if correct:
+        require(combat_xp_saved(expected, saved), f'{directory}: saved XP differs from observations')
     identity = re.search(r'^account=(\d+) character=\d+ rights= x=\d+ z=\d+ level=0 xp_rate_in_hundreds=100$',
                          saved, re.M)
     require(identity, f'{directory}: expected saved normal account at 1× XP')
@@ -137,7 +148,7 @@ def load_arm(directory, policy, read_table):
             contract[key] = hashlib.sha256(source[begin:stop].encode()).hexdigest()
     contract['game_adapter'] = hashlib.sha256(source[start:end].encode()).hexdigest()
     contract.update(boot_identity(directory, read_table))
-    return contract, identity[1], int(timings[0]), charges
+    return contract, identity[1], int(timings[0]), charges, correct
 
 
 def main():
@@ -150,8 +161,8 @@ def main():
     if args.transfer and not args.melee:
         parser.error('--transfer applies to --melee; one-rat comparisons already use transfer')
     read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
-    fixed, fixed_account, fixed_time, fixed_charges = load_arm(args.fixed, 'fixed', read_table)
-    transfer, transfer_account, transfer_time, adaptive_charges = load_arm(
+    fixed, fixed_account, fixed_time, fixed_charges, fixed_correct = load_arm(args.fixed, 'fixed', read_table)
+    transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct = load_arm(
         args.candidate, 'adaptive' if args.melee and not args.transfer else 'transferred', read_table)
     require(fixed == transfer, 'world, boot image, Agel executable, game adapter, or combat source differs')
     require(fixed_account != transfer_account, 'combat accounts must differ')
@@ -161,11 +172,12 @@ def main():
     phase = 'in-session-adaptation' if args.melee and not args.transfer else 'fresh-account-evaluation'
     print(f"(def comparison (dict 'task '{task} 'phase '{phase} "
           f"'contract {form(digest)} 'randomness 'uncontrolled))")
-    for arm, elapsed, charges in [('fixed', fixed_time, fixed_charges), ('adaptive', transfer_time, adaptive_charges)]:
+    for arm, elapsed, charges, correct in [('fixed', fixed_time, fixed_charges, fixed_correct),
+                                           ('adaptive', transfer_time, adaptive_charges, adaptive_correct)]:
         values = ' '.join(f"(dict 'kind '{kind} 'cost-nanousd {cost if cost is not None else 'nil'})"
                           for kind, cost in charges)
         print(f"(def {arm} (dict 'arm '{arm} 'comparison comparison 'account '{arm}-account "
-              f"'correct #t 'elapsed-us {elapsed} 'billing-complete #t 'charges (list {values})))")
+              f"'correct {'#t' if correct else '#f'} 'elapsed-us {elapsed} 'billing-complete #t 'charges (list {values})))")
     print("(benchmark-pair fixed adaptive)")
 
 
