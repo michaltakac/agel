@@ -28,6 +28,17 @@ def boot_identity(directory, read_table):
     return {'boot': boot, 'kernel_slot_a': kernel, 'agel': executable}
 
 
+def installed_client(directory, read_table):
+    disk = directory / 'disk.img'
+    row = next(entry for entry in read_table(disk, 'data') if entry['name'] == 'client')
+    with disk.open('rb') as image:
+        image.seek(row['start'] * 512)
+        source = image.read(row['length'])
+    require(source == (directory / 'client.agel').read_bytes(),
+            f'{directory}: installed Agel program differs from recorded source')
+    return source.decode()
+
+
 def load_arm(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
@@ -59,12 +70,13 @@ def load_arm(directory, policy, read_table):
         identity_pattern = re.compile(r'^\(judge-(?:start|result) id "([^"]+)".*? attempt (\d+)\b')
         started = [identity_pattern.match(line) for line in starts]
         completed = [identity_pattern.match(line) for line in receipts]
-        judge_dispatched = re.search(r'^inference-bridge: started job \d+ provider jev ', trace, re.M)
-        require((not judge_dispatched or starts) and all(started) and all(completed),
-                f'{directory}: missing judge call identity')
+        dispatched = re.findall(r'^inference-bridge: started job (\d+) provider jev ', trace, re.M)
+        require(all(started) and all(completed), f'{directory}: missing judge call identity')
         keys = [match.groups() for match in started]
         require(len(set(keys)) == len(keys) and sorted(keys) == sorted(match.groups() for match in completed),
                 f'{directory}: unmatched or duplicate judge receipts')
+        receipt_jobs = {identity.rsplit('/', 1)[-1] for identity, _ in keys}
+        require(receipt_jobs == set(dispatched), f'{directory}: judge ledger differs from bridge dispatches')
         for receipt in receipts:
             cost = re.search(r'\bcost-nanousd (\d+)', receipt)
             charges.append(('judge', int(cost[1]) if cost else None))
@@ -84,7 +96,7 @@ def load_arm(directory, policy, read_table):
                 f'{directory}: no successful live use of the retained policy')
     timings = re.findall(r'^native-combat: task-us (\d+)$', trace, re.M)
     require(len(timings) == 1, f'{directory}: expected one task clock')
-    source = (directory / 'client.agel').read_text()
+    source = installed_client(directory, read_table)
     start = source.index('(module agel/osrs-wire\n')
     end = source.index('(module agel/record-chain\n', start)
     contract = {key: manifest[key] for key in ('image', 'manifest', 'combat_policy_sha256')}
@@ -97,6 +109,16 @@ def load_arm(directory, policy, read_table):
         require(len(pool) <= 1, f'{directory}: ambiguous guest frame pool')
         if pool:
             contract['guest_pool_end_mib'] = int(pool[0])
+        boundaries = (
+            ('stream_adapter', '(module agel/byte-stream\n', '(module agel/osrs-wire\n'),
+            ('combat_source', '(module agel/osrs-combat-test\n', '(module agel/osrs-combat-training\n'),
+            ('training_source', '(module agel/osrs-combat-training\n', '(module agel/meta\n'),
+            ('starting_encoder', '(def initial-policy ', '(import agel/osrs-wire)\n'),
+        )
+        for key, first, last in boundaries:
+            begin = source.index(first)
+            stop = source.index(last, begin)
+            contract[key] = hashlib.sha256(source[begin:stop].encode()).hexdigest()
     contract['game_adapter'] = hashlib.sha256(source[start:end].encode()).hexdigest()
     contract.update(boot_identity(directory, read_table))
     return contract, identity[1], int(timings[0]), charges
