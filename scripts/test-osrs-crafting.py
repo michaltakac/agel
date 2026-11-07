@@ -22,6 +22,7 @@ mode.add_argument("--bank-forge", action="store_true", help="bank staged bars an
 mode.add_argument("--bank", action="store_true", help="deposit and withdraw staged ore at Varrock West bank")
 mode.add_argument("--smelt", action="store_true", help="smelt adamant bars from staged ore and coal")
 parser.add_argument("--smelt-count", type=int, choices=range(1, 4), default=1)
+mode.add_argument("--prepare-ore-chain", action="store_true", help="stage two raw-material batches for platebody production")
 mode.add_argument("--prepare-only", action="store_true", help="stage stock and verify normal rights, without crafting")
 parser.add_argument("--fixture", default="agelcraft", help="dedicated account, agelcraft or ac followed by eight hex digits")
 options = parser.parse_args()
@@ -74,8 +75,10 @@ key = run("docker", "exec", WORLD, "cat", "/world/.data/client.key")
 assert key.split("Exponent: ")[1].splitlines()[0].strip() == "10001"
 modulus = key.split("Modulus: ")[1].strip()
 scenario = Path("examples/osrs/crafting-test.agel").read_text()
-if options.bank or options.bank_forge:
+if options.bank or options.bank_forge or options.prepare_ore_chain:
     scenario += "\n" + Path("examples/osrs/osrs-bank.agel").read_text()
+if options.prepare_ore_chain:
+    scenario += "\n" + Path("examples/osrs/adamant-production.agel").read_text()
 
 
 def execute(action=None):
@@ -124,17 +127,36 @@ def xp(snapshot):
     return int(re.search(r"^stat=13 base=88 visible=88 fine_xp=(\d+)$", snapshot, re.M)[1])
 
 
+def ore_chain_stock(snapshot):
+    expected = sorted((
+        'inv=inv.inv item=obj.adamantite_ore count=3',
+        'inv=inv.inv item=obj.coal count=18',
+        'inv=inv.inv item=obj.hammer count=1',
+        'inv=inv.bank item=obj.adamantite_ore count=2',
+        'inv=inv.bank item=obj.coal count=12',
+    ))
+    return ('x=3226 z=3255 level=0' in snapshot
+            and 'stat=13 base=88 visible=88' in snapshot
+            and sorted(line for line in snapshot.splitlines() if line.startswith('inv=')) == expected)
+
+
 try:
     oracle_program("AccountState", ACCOUNT)
 except subprocess.CalledProcessError:
     execute()
     await_saved(lambda _: True)
 
-notice("RuneScape crafting: staging ore and coal" if options.smelt or options.bank else
+notice("RuneScape crafting: staging ore and coal" if options.smelt or options.bank or options.prepare_ore_chain else
        "RuneScape crafting: staging one hammer and five bars on the dedicated fixture")
 oracle_program("SetupAccount", "craft-grant", *fixture_args)
 try:
-    if options.bank:
+    if options.prepare_ore_chain:
+        execute("""(begin
+          (import agel/osrs-adamant-production)
+          (stage-adamant-production game)
+          #t)""")
+        await_saved(ore_chain_stock)
+    elif options.bank:
         execute("""(begin
           (def stock (stage-adamant-ore game))
           (osrs-wait-ticks (osrs-command stock "tele 3185 3436") 4)
@@ -161,6 +183,10 @@ finally:
 
 normal = oracle_program("AccountState", ACCOUNT)
 assert "rights= " in normal and "xp_rate_in_hundreds=100" in normal, normal
+if options.prepare_ore_chain:
+    assert ore_chain_stock(normal), normal
+    notice("RuneScape PASS: two raw batches and one hammer staged, no bars, normal rights")
+    sys.exit(0)
 if options.prepare_only:
     notice(f"RuneScape PASS: {ACCOUNT} has five bars, a hammer, level 88 Smithing, and normal rights")
     sys.exit(0)
