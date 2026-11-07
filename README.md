@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.163.** Native byte traces record transfer sizes and
-end-of-stream observations. See the [release notes](docs/release-v0.3.163.md).
+**Current release: v0.3.164.** Native transfer keeps its initial audit snapshot
+and fragmented OSRS reads take fewer evaluator steps. See the [release notes](docs/release-v0.3.164.md).
+
+v0.3.163 records byte counts and end-of-stream observations. See the [release notes](docs/release-v0.3.163.md).
 
 v0.3.162 retains timed native one-rat failures and the server save. See the [release notes](docs/release-v0.3.162.md).
 
