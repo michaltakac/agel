@@ -102,7 +102,7 @@
   (def observe-stance
     (fn (state ready batches)
       (let ((observed (wait-ticks state ready batches)))
-        (if (ready observed) observed (osrs-observe-ready observed ready 128)))))
+        (if (ready observed) observed (osrs-observe-ready observed ready 512)))))
   (def stance
     (fn (state component mode progress)
       (let ((ready (wait-ticks state (fn (g) (osrs-open-interface? g 593)) 8))

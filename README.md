@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.207.** The native optimizer reports encoder
-service calls avoided during live use. See the [release notes](docs/release-v0.3.207.md).
+**Current release: v0.3.208.** Melee training can read more queued
+packets when confirming a stance. See the [release notes](docs/release-v0.3.208.md).
+
+v0.3.207 reports encoder service calls avoided during live policy use.
+See the [release notes](docs/release-v0.3.207.md).
 
 v0.3.206 handles disappearing melee targets and delayed XP.
 See the [release notes](docs/release-v0.3.206.md).

@@ -546,8 +546,8 @@ fn melee_retargets_a_stalled_rat_and_reports_the_confirmed_target() {
           (fn (state _ready _ticks)
             (if (get state 'pending-credit) (assoc (assoc state 0 8) 3 1156) state)))
         (def osrs-observe-ready
-          (fn (state ready _limit)
-            (if (get state 'late)
+          (fn (state ready limit)
+            (if (if (get state 'late) (< 128 limit) #f)
               (let ((next (assoc state 'stance (get state 'server-stance))))
                 (if (ready next) next state))
               state)))
