@@ -73,7 +73,7 @@ def verify_optimizer_approval(directory, trace, receipts):
             f'{directory}: final protected judge receipt did not approve the edit')
 
 
-def optimizer_charges(directory, trace):
+def optimizer_charges(directory, trace, *, interrupted=False):
     require((directory / 'mode.txt').read_text().strip() == 'live',
             f'{directory}: adaptive scoring requires live providers')
     ledger, _ = verified_judge_ledger(directory)
@@ -82,7 +82,7 @@ def optimizer_charges(directory, trace):
         verify_optimizer_approval(directory, trace, receipts)
     charges = [('judge', judge_cost(receipt)) for receipt in receipts]
     writers, usage = writer_usage_for_trace(trace)
-    require(writers, f'{directory}: no writer dispatch')
+    require(writers or interrupted, f'{directory}: no writer dispatch')
     charges.extend(('model', None) for _ in writers)
     return charges, usage
 
@@ -90,15 +90,16 @@ def optimizer_charges(directory, trace):
 def adaptation_evidence(directory, trace, correct):
     activated = 'native-opt: policy committed after text judgment and measured replay' in trace
     rolled_back = 'native-opt: continued with fixed policy after exhausted retries' in trace
-    require(activated != rolled_back,
+    interrupted = not correct and bool(re.search(r'^native-(?:economy|quest): optimizer failure \{', trace, re.M))
+    require(activated != rolled_back or (interrupted and not activated and not rolled_back),
             f'{directory}: no verified in-session policy decision')
     if correct:
         uses = r'[1-9]\d*' if activated else '0'
         require('native-opt: recorded workload verified in append-only log' in trace
                 and re.search(rf'^native-opt: live uses {uses}$', trace, re.M),
                 f'{directory}: no verified in-session policy use')
-    charges, usage = optimizer_charges(directory, trace)
-    decision = 'committed' if activated else 'refused-retained-fixed'
+    charges, usage = optimizer_charges(directory, trace, interrupted=interrupted and not (activated or rolled_back))
+    decision = 'committed' if activated else 'refused-retained-fixed' if rolled_back else 'interrupted'
     return charges, decision, usage
 
 
@@ -202,7 +203,7 @@ def load_economy(directory, policy, read_table):
             rf'^native-economy: score \{{correct #t elapsed-us ([1-9]\d*) .* '
             rf'cost-nanousd {guest_cost} coins {coins} coins-per-dollar nil\}}$', trace, re.M)
     else:
-        require(not sales and re.search(r'^native-economy: failure \{', trace, re.M),
+        require(not sales and re.search(r'^native-economy: (?:optimizer )?failure \{', trace, re.M),
                 f'{directory}: no measured sale failure')
         coins = 0
         clocks = re.findall(r'^native-economy: task-us (\d+)$', trace, re.M)
@@ -250,7 +251,7 @@ def load_quest(directory, policy, read_table):
         clocks = re.findall(rf'^native-quest: score \{{correct #t elapsed-us ([1-9]\d*) .* '
                             rf'cost-nanousd {guest_cost} coins nil coins-per-dollar nil\}}$', trace, re.M)
     else:
-        require(report not in trace and 'native-quest: failure {' in trace and quest_unfinished(saved),
+        require(report not in trace and re.search(r'^native-quest: (?:optimizer )?failure \{', trace, re.M) and quest_unfinished(saved),
                 f'{directory}: expected a measured failure with no saved quest reward')
         clocks = re.findall(r'^native-quest: task-us ([1-9]\d*)$', trace, re.M)
     identity = re.search(r'^account=(\d+) character=\d+ rights= x=\d+ z=\d+ level=0 xp_rate_in_hundreds=100$',

@@ -292,6 +292,15 @@ else:
     if options.optimize:
         source+=f"(def continue-after-refusal {'#t' if melee is not None or options.economy or options.craft or fresh_quest else '#f'})\n"
     if editing and not options.combat:
+        if options.economy or fresh_quest:
+            task_label = 'native-economy' if options.economy else 'native-quest'
+            source += f"""(with-handler (* problem)
+  (begin
+    (console-log (text-concat "{task_label}: optimizer failure " (print-form problem)))
+    (console-log (text-concat "{task_label}: task-us " (print-form (- (clock-us) task-start))))
+    (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+  (begin
+"""
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
         if options.economy or fresh_quest:
             source+='''(def inference-packets 0)
@@ -336,6 +345,8 @@ else:
 '''
         label='native-opt: optimization-stage service writes ' if options.optimize else 'native-session: model-wait service writes '
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
+        if options.economy or fresh_quest:
+            source += "))\n"
     if options.combat:
         source+='''(import agel/osrs-combat-test)
 (def report-target (fn (target)
@@ -588,11 +599,11 @@ if editing:
 if not passed and melee is not None and 'native-combat: failure ' in output:
     capture_account(lambda snapshot: melee_failure_saved(output, melee, snapshot),
                     ['varp.com_mode'])
-if not passed and options.economy and 'native-economy: failure ' in output:
+if not passed and options.economy and re.search(r'^native-economy: (?:optimizer )?failure \{', output, re.M):
     capture_account(lambda snapshot: economy_saved(0, snapshot), [])
 if not passed and options.craft and re.search(r'^native-craft: failure \{', output, re.M):
     capture_account(lambda snapshot: craft_stock(snapshot, at_anvil=False) == craft_before, [])
-if not passed and fresh_quest and 'native-quest: failure ' in output:
+if not passed and fresh_quest and re.search(r'^native-quest: (?:optimizer )?failure \{', output, re.M):
     capture_account(quest_unfinished, ['varp.cookquest', 'varp.qp'])
 if editing:
     assert passed, 'native session failed; disk, serial log and judge records retained'
