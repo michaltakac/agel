@@ -48,27 +48,30 @@
       (let ((observed (observe-live state (fn (g) (osrs-open-interface? g interface)) 12)))
         (if (osrs-open-interface? observed interface) observed
           (signal 'osrs/mining-test "expected tutor dialogue" interface)))))
-  (def tutor-menu-open? (fn (state) (osrs-open-interface? state 219)))
+  (def fresh-tutor-menu?
+    (fn (state previous)
+      (if (osrs-open-interface? state 219)
+        (if (< (osrs-interface-opens previous 219) (osrs-interface-opens state 219))
+          (< (osrs-pause-events previous 219 1) (osrs-pause-events state 219 1)) #f)
+        #f)))
   (def talk-to-tutor
     (fn (state observe)
-      (if (tutor-menu-open? state) state
-        (begin
-          (require (tutor state) "mining tutor left before dialogue")
-          (observe (assoc (tutor-state state) 'phase 'tutor-interaction))
-          (let ((talked (osrs-talk state (get (tutor state) 'index))))
-            (let ((observed (observe-live talked tutor-menu-open? 13)))
-              (observe (assoc (assoc (tutor-state observed) 'menu (tutor-menu-open? observed))
-                'phase 'tutor-response))
-              observed))))))
+      (require (tutor state) "mining tutor left before dialogue")
+      (observe (assoc (tutor-state state) 'phase 'tutor-interaction))
+      (let ((talked (osrs-talk state (get (tutor state) 'index))))
+        (let ((observed (observe-live talked (fn (g) (fresh-tutor-menu? g state)) 13)))
+          (let ((fresh (fresh-tutor-menu? observed state)))
+            (observe (assoc (assoc (tutor-state observed) 'menu fresh) 'phase 'tutor-response))
+            (dict 'state observed 'fresh fresh))))))
   (def tutor-menu
     (fn (state observe)
       (let ((first (talk-to-tutor (approach-tutor state observe) observe)))
-        (if (tutor-menu-open? first) first
-          (let ((nearby (walk-to-tutor first 3229 3149 13 observe)))
+        (if (get first 'fresh) (get first 'state)
+          (let ((nearby (walk-to-tutor (get first 'state) 3229 3149 13 observe)))
             (let ((second (talk-to-tutor nearby observe)))
-              (if (tutor-menu-open? second) second
+              (if (get second 'fresh) (get second 'state)
                 (signal 'osrs/mining-test "mining tutor did not open a menu after two talks"
-                  (tutor-state second)))))))))
+                  (tutor-state (get second 'state))))))))))
   (def copper-ready? (fn (g) (if (= (ores g) 1) (< 0 (mining-xp g)) #f)))
   (def mine-copper-rock
     (fn (state observe)

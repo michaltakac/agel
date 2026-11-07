@@ -1,6 +1,42 @@
 use agel_core::{Value, World};
 
 #[test]
+fn mining_tutor_waits_for_a_new_actionable_menu() {
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    world
+        .evaluate(
+            r#"
+      (module agel/osrs-game
+        (export osrs-open-interface? osrs-interface-opens osrs-pause-events)
+        (def osrs-open-interface? (fn (state _) (get state 'open)))
+        (def osrs-interface-opens (fn (state _) (get state 'opens)))
+        (def osrs-pause-events (fn (state _id _component) (get state 'pauses))))"#,
+        )
+        .unwrap();
+    let source = include_str!("../../../examples/osrs/mining-test.agel").replace(
+        "(export mine-first-copper",
+        "(export fresh-tutor-menu? mine-first-copper",
+    );
+    world.evaluate(&source).unwrap();
+    let result = world
+        .evaluate(
+            r#"
+      (import agel/osrs-mining-test)
+      (def stale (dict 'open #t 'opens 1 'pauses 1))
+      (def opened (assoc stale 'opens 2))
+      (def enabled (assoc opened 'pauses 2))
+      (list (fresh-tutor-menu? stale stale) (fresh-tutor-menu? opened stale)
+            (fresh-tutor-menu? enabled stale) (fresh-tutor-menu? (assoc enabled 'open #f) stale))"#,
+        )
+        .unwrap();
+    assert_eq!(
+        result.values.last().map(Value::to_string).as_deref(),
+        Some("(#f #f #t #f)")
+    );
+}
+
+#[test]
 fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
     let mut world = World::default();
     agel_stdlib::install(&mut world, &Default::default()).unwrap();

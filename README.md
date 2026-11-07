@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.110.** Native adaptation scores check protected
-judge approval against the installed policy. See the [release notes](docs/release-v0.3.110.md).
+**Current release: v0.3.111.** The mining tutor interaction requires a fresh
+menu and input event. See the [release notes](docs/release-v0.3.111.md).
+
+v0.3.110 verifies protected judge approval before scoring adaptation.
+See the [release notes](docs/release-v0.3.110.md).
 
 v0.3.109 adds matched fixed and adaptive Cook’s Assistant arms.
 See the [release notes](docs/release-v0.3.109.md).
