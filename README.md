@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.123.** The RuneScape client waits for a tutor
-response after a route change. See the [release notes](docs/release-v0.3.123.md).
+**Current release: v0.3.124.** Agel reduces the work needed to prepare an
+RSA public context. See the [release notes](docs/release-v0.3.124.md).
+
+v0.3.123 waits for a tutor response after a route change.
+See the [release notes](docs/release-v0.3.123.md).
 
 v0.3.122 reduces the shared stream buffer’s single-byte read steps.
 See the [release notes](docs/release-v0.3.122.md).

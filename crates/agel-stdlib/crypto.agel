@@ -50,6 +50,10 @@
     (fn (x n remaining)
       (if (= remaining 0) x
           (doubling (reduce (mul-add x x 1 0 nil) n) n (- remaining 1)))))
+  ; For an odd modulus of size limbs, radix^(size - 1) is already below n.
+  (def montgomery-r2
+    (fn (n size)
+      (doubling (zeros (- size 1) '(1 0 0)) n (* (+ size 1) 31))))
   (def inverse
     (fn (n x remaining)
       (if (= remaining 0) (mod (- 0 x) radix)
@@ -66,7 +70,7 @@
                 (let ((size (count raw)))
                   (let ((n (pad raw (+ size 2))))
                     (dict 'n n 'size size 'inverse (inverse (car n) 1 5)
-                          'width (count decoded) 'radix radix 'r2 (doubling (pad '(1) (+ size 2)) n (* size 62)))))
+                          'width (count decoded) 'radix radix 'r2 (montgomery-r2 n size))))
                 (signal 'crypto/rsa "RSA modulus must be odd"))
               (signal 'crypto/rsa "modulus must be canonical and greater than one"))))
           (signal 'crypto/rsa "modulus requires 1 to 128 complete bytes"))))
