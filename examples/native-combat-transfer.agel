@@ -1,30 +1,36 @@
 (import agel/bytes)
+(import agel/sequence)
 (import agel/native-reader)
 (import agel/benchmark)
 (import agel/meta)
 (import agel/work-profile)
 
-(def audit-line
-  (fn (log prefix)
-    (let ((size (text-bytes log)) (width (text-bytes prefix)))
-      (let ((line-end (fn (self at)
-                        (if (= at size) at
-                          (if (= (text-byte log at) 10) at (self self (+ at 1)))))))
-        (let ((find (fn (self start found)
-                      (if (= start size) found
-                        (let ((end (line-end line-end start)))
-                          (let ((match (if (< (- end start) width) #f
-                                         (= (text-slice log start (+ start width)) prefix))))
-                            (if (= end size) found
-                              (self self (+ end 1) (if match (text-slice log start end) found)))))))))
-          (let ((line (find find 0 nil)))
-            (check line "required record missing from retained audit log")
-            line))))))
-
-(def donor-audit (file-read "judge-log"))
-(def version-line (audit-line donor-audit "{event live-policy-versions "))
-(def workload-line (audit-line donor-audit "(recorded-workload "))
-(def profile-line (audit-line donor-audit "{event runtime-observation "))
+(def audit-prefixes
+  (dict 'version "{event live-policy-versions "
+        'workload "(recorded-workload "
+        'profile "{event runtime-observation "))
+(def audit-records
+  (fn (log)
+    (let ((size (text-bytes log)) (fields (keys audit-prefixes)))
+      (let ((scan (fn (self start at found)
+                    (if (= at size) found
+                      (if (= (text-byte log at) 10)
+                        (let ((next (foldl (fn (matches field)
+                                            (let ((prefix (get audit-prefixes field)))
+                                              (let ((end (+ start (text-bytes prefix))))
+                                                (if (if (< at end) #f (= (text-slice log start end) prefix))
+                                                  (assoc matches field (text-slice log start at))
+                                                  matches))))
+                                      found fields)))
+                          (self self (+ at 1) (+ at 1) next))
+                        (self self start (+ at 1) found))))))
+        (scan scan 0 0 (dict))))))
+(def donor-records (audit-records (file-read "judge-log")))
+(def version-line (get donor-records 'version))
+(def workload-line (get donor-records 'workload))
+(def profile-line (get donor-records 'profile))
+(check (if version-line (if workload-line profile-line #f) #f)
+  "required record missing from retained audit log")
 (def retained-policy (get (car (native-read version-line 8192 64)) 'versions))
 (def retained-profile (get (car (native-read profile-line 8192 64)) 'profile))
 (def retained-workload (car (native-read workload-line 32768 8)))

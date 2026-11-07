@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.135.** The melee trainer uses maintained packet
-observation. See the [release notes](docs/release-v0.3.135.md).
+**Current release: v0.3.136.** Combat transfer scans the donor audit log
+once. See the [release notes](docs/release-v0.3.136.md).
+
+v0.3.135 maintains the connection during melee observation.
+See the [release notes](docs/release-v0.3.135.md).
 
 v0.3.134 runs matched three-skill melee and transfer benchmarks.
 See the [release notes](docs/release-v0.3.134.md).
