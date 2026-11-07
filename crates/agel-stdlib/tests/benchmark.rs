@@ -26,12 +26,13 @@ fn encoder_refresh_switches_the_callable_with_the_active_version() {
               (def observed-length 512)
               (def policy-bound 327)
               (refresh-encoder)
-              (list before (retained-quantum 256) (retained-quantum 513) policy-uses)"#,
+              (list before (retained-quantum 0) (retained-quantum 64)
+                    (retained-quantum 256) (retained-quantum 513) policy-uses)"#,
         )
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(64 320 64 1)")
+        Some("(64 64 64 320 64 1)")
     );
 }
 

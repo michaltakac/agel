@@ -25,12 +25,13 @@
         "policy exceeded the trusted work bound or returned an invalid quantum") quantum)))
 (def retained-quantum
   (fn (length)
-    (let ((limit (if (< observed-length length) 64 policy-bound)))
-      (let ((quantum (meta-apply active-encoder (list limit))))
-        (begin
-          (if (if (= active-encoder-version 2) (if (< 64 quantum) (< 64 length) #f) #f)
-            (def policy-uses (+ policy-uses 1)) nil)
-          (check-quantum quantum limit))))))
+    (if (< length 65) 64
+      (let ((limit (if (< observed-length length) 64 policy-bound)))
+        (if (= limit 64) 64
+          (let ((quantum (check-quantum (meta-apply active-encoder (list limit)) limit)))
+            (if (if (= active-encoder-version 2) (< 64 quantum) #f)
+              (def policy-uses (+ policy-uses 1)) nil)
+            quantum))))))
 (def largest-field-step
   (fn (field)
     (fn (largest record)

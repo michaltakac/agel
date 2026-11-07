@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.143.** Agel retries tutor advice on a fresh menu.
+**Current release: v0.3.144.** Agel skips cadence evaluation when only
+the fixed cadence can apply. See the [release notes](docs/release-v0.3.144.md).
+
+v0.3.143 retries tutor advice on a fresh menu.
 See the [release notes](docs/release-v0.3.143.md).
 
 v0.3.142 reads up to 1 KiB per native carrier request.
