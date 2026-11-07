@@ -111,7 +111,7 @@
         "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff")))
   (def encode-bytes
     (fn (bytes part size pieces service quantum since)
-      (if (= (count bytes) 0) (hex-join (reverse (if (= size 0) pieces (cons part pieces))))
+      (if (= bytes nil) (hex-join (reverse (if (= size 0) pieces (cons part pieces))))
         (if (= size 64)
           (begin
             (if (= since quantum) (service) nil)
@@ -129,8 +129,11 @@
         (if (if (= (type-of quantum) 'int)
               (if (< 63 quantum) (if (< quantum 4097) (= (* 64 (/ quantum 64)) quantum) #f) #f) #f)
           #t (signal 'bytes/quantum "quantum must be a multiple of 64 between 64 and 4096"))
-        (if (< (count bytes) 64) nil (service))
-        (encode-bytes bytes "" 0 nil service quantum 0))))
+        (let ((length (count bytes)))
+          (if (= length 0) ""
+            (begin
+              (if (< length 64) nil (service))
+              (encode-bytes bytes "" 0 nil service quantum 0)))))))
   (def bytes-hex-serviced (fn (bytes service) (bytes-hex-quantum bytes service 64)))
   (def bytes-hex (fn (bytes) (bytes-hex-serviced bytes (fn () #t))))
   (def field-require (fn (ok reason) (if ok #t (signal 'bytes/field reason))))
