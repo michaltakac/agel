@@ -5,7 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.197.** A matched native one-rat run measures replay
+**Current release: v0.3.198.** Live optimizer preparation can stop as soon as
+an observation proves the task complete. See the [release notes](docs/release-v0.3.198.md).
+
+v0.3.197 reports a matched native one-rat run that measures replay
 savings and the cost of a policy that saw no live use. See the
 [release notes](docs/release-v0.3.197.md).
 

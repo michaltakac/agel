@@ -4,6 +4,10 @@
 (def recorded-hex-length (text-bytes recorded-hex))
 (def observed-length (/ recorded-hex-length 2))
 (check (if (< 1023 observed-length) (< observed-length 8193) #f) "no suitably sized recorded workload")
+(def require-optimization
+  (fn ()
+    (if (optimization-needed?) nil
+      (signal 'native/optimization-complete "task completed during optimizer preparation"))))
 (def next-preparation-observation optimizer-started)
 (def prepare-service
   (fn ()
@@ -12,6 +16,7 @@
       (if (< now next-preparation-observation) nil
         (begin
           (preparation-observe)
+          (require-optimization)
           (def next-preparation-observation (+ (clock-us) 3000000)))))))
 (prepare-service)
 (def replay-chunks
@@ -38,8 +43,7 @@
       (get measurement 'metrics))))
 (def baseline (run-control))
 (prepare-service)
-(if (optimization-needed?) nil
-  (signal 'native/optimization-complete "task completed during optimizer preparation"))
+(require-optimization)
 (def work-budget 3000000)
 (def gap-budget 6000000)
 (def policy-bound (profile-limit baseline 64 work-budget 4 512))
@@ -103,6 +107,8 @@
     'max-attempts 2 'threshold 800 'proposal-provider 'writer 'judge-provider 'judge
     'model-dispatch 'external 'defer-activation #t 'probe probe) nil))
 (def retained-owner (get stream 'owner))
+(prepare-service)
+(require-optimization)
 (send worker '(repair/start)) (run 1)
 (def session (repair-agent-drive worker infer audit 6))
 (map (fn (event)
