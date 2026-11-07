@@ -8,7 +8,7 @@
     (fn (chain record)
       (if chain
         (let ((size (get chain 'size)) (records (get chain 'records)) (previous (get chain 'previous)))
-          (if (= size 32)
+          (if (< 7 size)
             (dict 'size 1 'records (list record) 'previous (seal records previous))
             (dict 'size (+ size 1) 'records (cons record records) 'previous previous)))
         (dict 'size 1 'records (list record) 'previous nil))))
