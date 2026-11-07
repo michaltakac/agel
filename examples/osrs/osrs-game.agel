@@ -6,7 +6,7 @@
   (import agel/osrs-packets)
   (import agel/osrs-npcs)
   (export osrs-observe-bounded osrs-observe-ready osrs-pause-events osrs-map-route osrs-route-cleared?)
-  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-varp-updates osrs-take-ground-item osrs-ground-count)
+  (export osrs-service-start osrs-service-stop osrs-game-state osrs-walk osrs-command osrs-keepalive osrs-next-packet osrs-wait-ticks osrs-await osrs-await-bounded osrs-stat osrs-inventory-count osrs-inventory-updates osrs-nearby-npcs osrs-attack osrs-open-interface? osrs-use-location osrs-use-location-option osrs-click-interface osrs-talk osrs-trade osrs-resume-dialogue osrs-click-inventory-item osrs-click-inventory-item-offset osrs-interface-opens osrs-varp osrs-varp-updates osrs-take-ground-item osrs-ground-count)
   (def rem (fn (n d) (- n (* d (/ n d)))))
   (def take (fn (xs n out) (if (= n 0) (reverse out) (take (cdr xs) (- n 1) (cons (car xs) out)))))
   (def drop (fn (xs n) (if (= n 0) xs (drop (cdr xs) (- n 1)))))
@@ -230,6 +230,15 @@
           (assoc state 'map-route
             (dict 'sequence (if prior (+ 1 (get prior 'sequence)) 1)
                   'x (rem (/ packed 16384) 16384) 'z (rem packed 16384) 'cleared #f))))))
+  (def osrs-inventory-updates
+    (fn (state id)
+      (let ((updates (get (map-or-empty (get state 'inventory-updates)) id)))
+        (if updates updates 0))))
+  (def remember-inventory
+    (fn (state id items)
+      (assoc (assoc state 'inventories (assoc (get state 'inventories) id items))
+        'inventory-updates
+        (assoc (map-or-empty (get state 'inventory-updates)) id (+ 1 (osrs-inventory-updates state id))))))
   (def observe
     (fn (state packet retained)
       (let ((name (get packet 'name)) (bytes (get packet 'bytes)))
@@ -242,13 +251,12 @@
                 (let ((inv (osrs-uint (take (drop bytes 4) 2 nil)))
                       (capacity (osrs-uint (take (drop bytes 6) 2 nil))))
                   (if (< capacity 4097)
-                      (assoc state 'inventories (assoc (get state 'inventories) inv
-                        (full-items (drop bytes 8) capacity 0 (dict))))
+                      (remember-inventory state inv (full-items (drop bytes 8) capacity 0 (dict)))
                       (signal 'osrs/inventory "inventory capacity exceeds bound")))
                 (if (= name "UPDATE_INV_PARTIAL")
                     (let ((inv (osrs-uint (take (drop bytes 4) 2 nil))))
-                      (assoc state 'inventories (assoc (get state 'inventories) inv
-                        (partial-items (drop bytes 6) (map-or-empty (get (get state 'inventories) inv))))))
+                      (remember-inventory state inv
+                        (partial-items (drop bytes 6) (map-or-empty (get (get state 'inventories) inv)))))
                     (if (= name "SET_ACTIVE_WORLD_V2")
                         (assoc state 'active-world (osrs-uint (take bytes 2 nil)))
                         (if (if (= name "NPC_INFO_SMALL_V6") #t (= name "NPC_INFO_LARGE_V6"))

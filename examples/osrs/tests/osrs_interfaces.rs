@@ -398,6 +398,23 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
         result.values.last().map(Value::to_string).as_deref(),
         Some("((96 13 177 8 0 12 116 0) (128 12 184 93 73 0 12 154) osrs/location (235 12 92 12 0 37 50 128) (0 12 154 7 152 229 12 128) osrs/item #t (1 56 0 22) #t #f osrs/interface #t #t #f (128 116 1 0) osrs/npc (2 0 22 0 56 1) (255 255 22 0 56 1) osrs/interface (244 1 0 128) osrs/npc (1 56 0 22 0 0 9 45 2) (1 56 0 22 0 1 9 45 2) osrs/interface osrs/interface osrs/interface 1 2 -1 -257 -9223372036854775807 nil 0 2 (nil 1 3 0 0 3 nil nil))")
     );
+    let inventory_updates = world
+        .evaluate_with(
+            "(def full (decode original 126 '(0 8 0 0 0 0 0 95 0 0)))
+             (def partial (decode full 28 '(0 6 0 0 0 0 0 95)))
+             (list (osrs-inventory-updates original 95) (osrs-inventory-updates full 95)
+                   (osrs-inventory-updates partial 95) (osrs-inventory-updates partial 93))",
+            &options,
+        )
+        .unwrap();
+    assert_eq!(
+        inventory_updates
+            .values
+            .last()
+            .map(Value::to_string)
+            .as_deref(),
+        Some("(0 1 2 0)")
+    );
     let pause = world
         .evaluate(
             "(def cook-opened (decode original 93 '(162 0 56 2 0 103 128)))
