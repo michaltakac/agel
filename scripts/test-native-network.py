@@ -552,7 +552,8 @@ else:
 '''
     if options.optimize:
         if task_adaptation:
-            source+='''(if (if optimization-skipped #t policy-activated) #t
+            guard = '(if optimization-skipped #t policy-activated)' if options.combat else 'policy-activated'
+            source+=f'''(if {guard} #t
   (check (= policy-uses 0) "refused policy served live packets"))
 '''
         else:

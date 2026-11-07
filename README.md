@@ -5,8 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.193.** Native combat scoring checks installed
-policy source against each run manifest. See the [release notes](docs/release-v0.3.193.md).
+**Current release: v0.3.194.** Native scoring separates task source from
+adaptive bookkeeping in retained runs. See the [release notes](docs/release-v0.3.194.md).
+
+v0.3.193 checks installed combat policy against the run manifest. See the [release notes](docs/release-v0.3.193.md).
 
 v0.3.192 skips one-rat inference when queued packets confirm completion. See the [release notes](docs/release-v0.3.192.md).
 

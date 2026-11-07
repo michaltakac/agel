@@ -222,6 +222,11 @@ def load_arm(directory, policy, read_table):
     return contract, identity[1], int(timings[0]), charges, correct, decision, usage
 
 
+def shared_task_source(source):
+    return re.split(r'\n\(if (?:policy-activated|\(if optimization-skipped #t policy-activated\))(?=\s)',
+                    source, maxsplit=1)[0].strip()
+
+
 def load_economy(directory, policy, read_table):
     manifest = json.loads((directory / 'world.json').read_text())
     trace = (directory / 'serial.log').read_text()
@@ -264,7 +269,7 @@ def load_economy(directory, policy, read_table):
         ('task', '(import agel/osrs-mining-test) (import agel/benchmark)', '(if (< 0 (get completed'),
     ):
         begin = source.index(first)
-        body = source[begin:source.index(last, begin)].split('\n(if policy-activated', 1)[0].strip()
+        body = shared_task_source(source[begin:source.index(last, begin)])
         contract[key] = hashlib.sha256(body.encode()).hexdigest()
     contract.update(boot_identity(directory, read_table))
     return contract, identity[1], int(clocks[0]), charges, correct, decision, usage, coins
@@ -303,13 +308,13 @@ def load_quest(directory, policy, read_table):
     source = installed_client(directory, read_table)
     common = shared_setup(directory, source)
     start = source.index('(import agel/osrs-quest-test)')
-    end = source.index('\n(if policy-activated', start) if policy == 'adaptive' else source.index('\n(wire-close)', start)
+    end = source.index('\n(wire-close)', start)
     contract = {key: manifest[key] for key in (
         'image', 'manifest', 'scope', 'guest_memory_mib', 'evaluation_fuel',
         'keepalive_interval_us', 'quest_policy_sha256', 'economy_policy_sha256', 'service_policy_sha256')}
     contract.update(boot_identity(directory, read_table))
     contract['common_setup'] = hashlib.sha256(common.encode()).hexdigest()
-    contract['task'] = hashlib.sha256(source[start:end].strip().encode()).hexdigest()
+    contract['task'] = hashlib.sha256(shared_task_source(source[start:end]).encode()).hexdigest()
     return contract, identity[1], int(clocks[0]), charges, correct, decision, usage
 
 
@@ -351,7 +356,7 @@ def load_craft(directory, policy, read_table):
     common = shared_setup(directory, source)
     start = source.index('(import agel/osrs-crafting-test)')
     end = source.index('\n(if (< 0 (get completed', start)
-    task = source[start:end].split('\n(if policy-activated', 1)[0].strip()
+    task = shared_task_source(source[start:end])
     contract = {key: manifest[key] for key in (
         'image', 'manifest', 'scope', 'guest_memory_mib', 'evaluation_fuel',
         'keepalive_interval_us', 'craft_policy_sha256', 'service_policy_sha256')}
