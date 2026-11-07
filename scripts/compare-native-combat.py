@@ -138,7 +138,6 @@ def load_arm(directory, policy, read_table):
         expected, levels = melee_xp(trace, goal)
         require(melee_levels_saved(levels, saved), f'{directory}: saved melee levels or stance differ')
     if policy == 'adaptive':
-        require(goal is not None, f'{directory}: missing melee goal')
         charges, decision, usage = adaptation_evidence(directory, trace, correct)
     else:
         require('inference-bridge: started job' not in trace, f'{directory}: evaluation incurred inference')
@@ -432,6 +431,7 @@ def main():
     parser.add_argument('fixed', type=Path)
     parser.add_argument('candidate', type=Path, nargs='?')
     tasks = parser.add_mutually_exclusive_group()
+    tasks.add_argument('--combat', action='store_true', help='compare in-session one-rat combat adaptation')
     tasks.add_argument('--melee', action='store_true', help='compare in-session adaptation on three-skill melee')
     tasks.add_argument('--economy', action='store_true', help='compare in-session adaptation on the first bronze sale')
     tasks.add_argument('--craft', action='store_true', help='compare measured adamant platebody runs')
@@ -452,9 +452,11 @@ def main():
     read_table = runpy.run_path(str(Path(__file__).with_name('install-program.py')))['read_table']
     load = load_economy if args.economy else load_craft if args.craft else load_quest if args.quest else load_arm
     fixed, fixed_account, fixed_time, fixed_charges, fixed_correct, fixed_decision, _, *fixed_coins = load(args.fixed, 'fixed', read_table)
-    adaptive_policy = 'adaptive' if (args.economy or args.melee or args.craft or args.quest) and not args.transfer else 'transferred'
+    adaptive_policy = 'adaptive' if (args.combat or args.economy or args.melee or args.craft or args.quest) and not args.transfer else 'transferred'
     transfer, transfer_account, transfer_time, adaptive_charges, adaptive_correct, adaptive_decision, usage, *adaptive_coins = load(
         args.candidate, adaptive_policy, read_table)
+    if args.combat:
+        require('goal_xp' not in fixed and 'goal_xp' not in transfer, '--combat requires one-rat arms')
     require(fixed == transfer, 'world, runtime, game adapter, task source, or starting state differs')
     require(fixed_account != transfer_account, 'task accounts must differ')
     donor_score = None

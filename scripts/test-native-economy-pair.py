@@ -115,6 +115,7 @@ def main():
     tasks = parser.add_mutually_exclusive_group()
     tasks.add_argument('--transfer', type=Path, metavar='DONOR',
                        help='compare a retained combat policy against a fresh fixed account')
+    tasks.add_argument('--combat', action='store_true', help='compare in-session one-rat combat adaptation')
     tasks.add_argument('--melee-xp', type=int, metavar='GOAL',
                        help='compare fixed and adaptive three-skill melee training')
     tasks.add_argument('--quest', action='store_true', help='compare fresh Cook’s Assistant runs')
@@ -144,7 +145,7 @@ def main():
                 parser.error(f'donor policy differs from {path}; select its matching source tree')
     if melee_goal is not None and (type(melee_goal) is not int or not 1 <= melee_goal <= 512):
         parser.error('melee goal must be between 1 and 512 XP')
-    task = ('melee' if melee_goal is not None else 'combat' if args.transfer else
+    task = ('melee' if melee_goal is not None else 'combat' if args.transfer or args.combat else
             'craft' if args.craft else 'quest' if args.quest else 'economy')
     if args.craft and args.craft[0] == args.craft[1]:
         parser.error('--craft requires two distinct fixtures')
@@ -195,7 +196,7 @@ def main():
     }, indent=2) + '\n')
     results = {arm: run_arm(output, runtime, arm, arms[arm]) for arm in order}
     fixed, adaptive = results['fixed'], results['adaptive']
-    scoring_options = [f'--{task}'] if task != 'combat' else []
+    scoring_options = [f'--{task}'] if task != 'combat' or args.combat else []
     if donor:
         scoring_options.extend(['--donor', str(donor)])
         if task == 'melee':

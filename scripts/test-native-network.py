@@ -58,7 +58,8 @@ if options.optimize and (options.challenge or options.repair or options.quest_re
 editing=options.repair or options.optimize
 combat_workload=options.combat or melee is not None
 fresh_quest = options.quest and not options.quest_resume
-encoder_workload=options.optimize or combat_workload or options.economy or options.craft or fresh_quest
+task_adaptation=combat_workload or options.economy or options.craft or fresh_quest
+encoder_workload=options.optimize or task_adaptation
 shared_carrier=options.repair or encoder_workload
 if options.combat and (options.challenge or options.repair or options.craft or options.economy or options.quest):parser.error('--combat can only be combined with --optimize')
 if options.transfer_from and (not combat_workload or editing):
@@ -290,7 +291,7 @@ else:
     if combat_workload or options.economy or options.craft or options.quest:
         source+='(def task-start (clock-us))\n'
     if options.optimize:
-        source+=f"(def continue-after-refusal {'#t' if melee is not None or options.economy or options.craft or fresh_quest else '#f'})\n"
+        source+=f"(def continue-after-refusal {'#t' if task_adaptation else '#f'})\n"
     if editing and not options.combat:
         task_label = ('native-combat' if melee is not None else 'native-economy' if options.economy
                       else 'native-craft' if options.craft else 'native-quest' if fresh_quest else None)
@@ -363,11 +364,16 @@ else:
         if options.optimize:
             source+='''(def combat-after-attack (fn (attacking target)
   (report-target target)
-  (osrs-service-start attacking)
-  (def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get attacking 'history)))
+  (with-handler (* problem)
+    (begin
+      (console-log (text-concat "native-combat: optimizer failure " (print-form problem)))
+      (signal (get problem 'kind) (get problem 'message) (get problem 'data)))
+    (begin
+      (osrs-service-start attacking)
+      (def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get attacking 'history)))
 '''
             source+=(examples / 'native-service-optimize-run.agel').read_text()+'\n'
-            source+="(def policy-uses 0) (osrs-service-stop attacking)))\n"
+            source+="(def policy-uses 0) (osrs-service-stop attacking)))))\n"
         else:
             source+="(def combat-after-attack (fn (attacking target) (report-target target) attacking))\n"
         source+='''
@@ -523,7 +529,7 @@ else:
 (console-log (text-concat "native-transfer: retained policy uses " (print-form policy-uses)))
 '''
     if options.optimize:
-        if melee is not None or options.economy or options.craft or fresh_quest:
+        if task_adaptation:
             source+='''(if policy-activated #t
   (check (= policy-uses 0) "refused policy served live packets"))
 '''
@@ -639,10 +645,10 @@ if editing:
         if activated:
             uses = re.findall(r'^native-opt: live uses (0|[1-9]\d*)$', output, re.M)
             assert len(uses) == 1
-            if not (melee is not None or options.economy or options.craft or fresh_quest):
+            if not task_adaptation:
                 assert int(uses[0]) > 0
         else:
-            assert (melee is not None or options.economy or options.craft or fresh_quest) and 'native-opt: continued with fixed policy after exhausted retries' in output
+            assert task_adaptation and 'native-opt: continued with fixed policy after exhausted retries' in output
             assert 'native-opt: live uses 0' in output
         assert 'native-opt: recorded workload verified in append-only log' in output
         if options.economy or fresh_quest:
