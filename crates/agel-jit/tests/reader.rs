@@ -52,7 +52,10 @@ fn read(reader: &Native, text: &str) -> Result<Value, Fault> {
                 Value::Int(65536),
                 Value::Int(64),
             ],
-            Limits::default(),
+            Limits {
+                fuel: 20_000_000,
+                ..Limits::default()
+            },
         )
         .map(|o| o.value)
 }

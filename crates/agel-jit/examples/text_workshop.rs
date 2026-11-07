@@ -10,7 +10,10 @@ fn read_one(reader: &Native, source: &str) -> Result<Value, Box<dyn std::error::
             Value::Int(65536),
             Value::Int(64),
         ],
-        Limits::default(),
+        Limits {
+            fuel: 20_000_000,
+            ..Limits::default()
+        },
     )?;
     let Value::List(mut forms) = result.value else {
         return Err("expected one function".into());

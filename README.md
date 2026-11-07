@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.220.** The live melee optimizer reads game
-observations between replay measurements. See the [release notes](docs/release-v0.3.220.md).
+**Current release: v0.3.221.** The native text workshop can rebuild its
+reader and compiler with map syntax. See the [release notes](docs/release-v0.3.221.md).
+
+v0.3.220 reads game observations between replay measurements.
+See the [release notes](docs/release-v0.3.220.md).
 
 v0.3.219 checks queued combat XP before retargeting.
 See the [release notes](docs/release-v0.3.219.md).
