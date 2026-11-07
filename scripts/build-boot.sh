@@ -94,4 +94,11 @@ for program in boot/desktop/workbench:wb boot/desktop/builder:bd \
   fi
 done
 
+case " $* " in
+  *doom-demo*)
+    python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" apps.cfg "$project_dir/examples/doom/apps.cfg" >/dev/null ;;
+  *)
+    python3 "$project_dir/scripts/install-program.py" --region data "$disk_image" --remove apps.cfg >/dev/null ;;
+esac
+
 printf '%s\n' "$disk_image"

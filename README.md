@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.118.** Cook’s Assistant checks already available
-packets before retrying dialogue. See the [release notes](docs/release-v0.3.118.md).
+**Current release: v0.3.119.** The desktop loads optional application
+registrations from disk. See the [release notes](docs/release-v0.3.119.md).
+
+v0.3.118 checks already available Cook’s Assistant packets before retrying
+dialogue. See the [release notes](docs/release-v0.3.118.md).
 
 v0.3.117 removes repeated list scans from RuneScape NPC decoding.
 See the [release notes](docs/release-v0.3.117.md).

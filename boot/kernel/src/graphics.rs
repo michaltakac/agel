@@ -2550,68 +2550,21 @@ fn scene_command(line: &[u8]) -> bool {
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"(title \""))
 }
 
-/// An Agel program the desktop carries, by the name `:load` takes: the
-/// source, each form a cell named by the prefix, and the status shown when
-/// it is in.
-/// A program the desktop carries: its source lives in the image's data
-/// region (installed by `scripts/build-boot.sh` from `boot/desktop/`), read
-/// through the filesystem service when loaded, so the kernel image holds
-/// only its name, its cell prefix, its file and its ready status.
-struct Program {
-    name: &'static [u8],
-    prefix: &'static [u8],
-    file: &'static [u8],
-    ready: &'static [u8],
+/// A desktop program, with one source form per cell. Optional applications
+/// supply these fields in the disk catalog.
+struct Program<'a> {
+    name: &'a [u8],
+    prefix: &'a [u8],
+    file: &'a [u8],
+    ready: &'a [u8],
 }
 
-const PROGRAMS: &[Program] = &[
+const PROGRAMS: &[Program<'static>] = &[
     Program {
         name: b"workbench",
         prefix: b"wb-",
         file: b"/data/wb.agel",
         ready: b"WORKBENCH READY - CLICK OR TAB",
-    },
-    #[cfg(feature = "doom-demo")]
-    Program {
-        name: b"doom-agent",
-        prefix: b"da-",
-        file: b"/data/da.agel",
-        ready: b"DOOM AGENT READY - :PLAY STEPS",
-    },
-    #[cfg(feature = "doom-demo")]
-    Program {
-        name: b"doom-agent-model",
-        prefix: b"dm-",
-        file: b"/data/dm.agel",
-        ready: b"DOOM MODEL AGENT READY - :PLAY STEPS",
-    },
-    #[cfg(feature = "doom-demo")]
-    Program {
-        name: b"doom-agent-judge",
-        prefix: b"dj-",
-        file: b"/data/dj.agel",
-        ready: b"DOOM JUDGE AGENT READY - :PLAY STEPS",
-    },
-    #[cfg(feature = "doom-demo")]
-    Program {
-        name: b"desktop-agent",
-        prefix: b"dk-",
-        file: b"/data/dk.agel",
-        ready: b"DESKTOP AGENT READY - :DRIVE STEPS",
-    },
-    #[cfg(feature = "doom-demo")]
-    Program {
-        name: b"review",
-        prefix: b"rv-",
-        file: b"/data/rv.agel",
-        ready: b"REVIEW AGENT READY - :AGENTS STEPS",
-    },
-    #[cfg(feature = "doom-demo")]
-    Program {
-        name: b"lookup",
-        prefix: b"lk-",
-        file: b"/data/lk.agel",
-        ready: b"LOOKUP AGENT READY - :AGENTS STEPS",
     },
     Program {
         name: b"builder",
@@ -2620,6 +2573,45 @@ const PROGRAMS: &[Program] = &[
         ready: b"BUILDER AGENT READY - :AGENTS STEPS",
     },
 ];
+
+const APP_CATALOG_BYTES: usize = 1024;
+
+#[inline(never)]
+fn find_program<'a>(
+    name: &[u8],
+    host: &mut EffectHost<'_>,
+    catalog: &'a mut [u8; APP_CATALOG_BYTES],
+) -> Result<Option<Program<'a>>, &'static [u8]> {
+    if let Some(program) = PROGRAMS.iter().find(|program| program.name == name) {
+        return Ok(Some(Program { ..*program }));
+    }
+    let length = match host.read_file(b"/data/apps.cfg", catalog) {
+        Ok(length) if length < catalog.len() => length,
+        Ok(_) => return Err(b"APP CATALOG IS TOO LONG"),
+        Err(2 | 38) => return Ok(None),
+        Err(_) => return Err(b"APP CATALOG COULD NOT BE READ"),
+    };
+    for row in catalog[..length].split(|byte| *byte == b'\n') {
+        let mut fields = row.split(|byte| *byte == b'|');
+        if fields.next() != Some(name) {
+            continue;
+        }
+        if let (Some(prefix), Some(file), Some(ready), None) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        {
+            if !prefix.is_empty() && file.starts_with(b"/data/") && !ready.is_empty() {
+                return Ok(Some(Program {
+                    name: &row[..name.len()],
+                    prefix,
+                    file,
+                    ready,
+                }));
+            }
+        }
+        return Err(b"INVALID APP CATALOG ENTRY");
+    }
+    Ok(None)
+}
 
 /// How long the play loop holds a step's keys, in passes of the run, unless
 /// `:play STEPS HOLD` says otherwise; how long it waits for the program to
@@ -2889,7 +2881,7 @@ const PROGRAM_SOURCE_BYTES: usize = 8192;
 /// A program's source, read from its file in the data region.
 #[inline(never)]
 fn program_source(
-    program: &Program,
+    program: &Program<'_>,
     host: &mut EffectHost<'_>,
     source: &mut [u8; PROGRAM_SOURCE_BYTES],
 ) -> Result<usize, &'static [u8]> {
@@ -2908,7 +2900,7 @@ fn program_source(
 
 #[inline(never)]
 fn load_program(
-    program: &Program,
+    program: &Program<'_>,
     evaluator: &mut arch::Domain,
     evaluator_revision: &mut u64,
     workspace: &mut Workspace,
@@ -2980,7 +2972,7 @@ fn program_cells_only(workspace: &Workspace) -> bool {
 /// summonable beside the workbench; a program already joined is ready.
 #[inline(never)]
 fn join_program(
-    program: &Program,
+    program: &Program<'_>,
     evaluator: &mut arch::Domain,
     evaluator_revision: &mut u64,
     workspace: &mut Workspace,
@@ -3462,9 +3454,6 @@ fn execute_workshop(
     // `:join NAME`: a program the desktop carries joins the world beside
     // what is in it, under its own prefix, as a sentence joins the agent.
     if let Some(name) = command_argument(line, b":join ") {
-        let Some(program) = PROGRAMS.iter().find(|program| program.name == name) else {
-            return StatusLine::new(b"NO SUCH PROGRAM TO JOIN");
-        };
         let mut tee = Tee {
             serial: &mut *serial,
             terminal: &mut current.terminal,
@@ -3475,8 +3464,14 @@ fn execute_workshop(
             console: &mut tee,
             clock: clock.as_deref_mut(),
         };
+        let mut catalog = [0; APP_CATALOG_BYTES];
+        let program = match find_program(name, &mut host, &mut catalog) {
+            Ok(Some(program)) => program,
+            Ok(None) => return StatusLine::new(b"NO SUCH PROGRAM TO JOIN"),
+            Err(message) => return StatusLine::new(message),
+        };
         return join_program(
-            program,
+            &program,
             evaluator,
             evaluator_revision,
             workspace,
@@ -3605,7 +3600,7 @@ fn execute_workshop(
     let mut load_path: Option<StatusLine> =
         command_argument(line, b":load-file ").map(StatusLine::new);
     if let Some(name) = program {
-        if let Some(program) = PROGRAMS.iter().find(|program| program.name == name) {
+        {
             let mut tee = Tee {
                 serial: &mut *serial,
                 terminal: &mut current.terminal,
@@ -3616,14 +3611,21 @@ fn execute_workshop(
                 console: &mut tee,
                 clock: clock.as_deref_mut(),
             };
-            return load_program(
-                program,
-                evaluator,
-                evaluator_revision,
-                workspace,
-                dirty,
-                &mut host,
-            );
+            let mut catalog = [0; APP_CATALOG_BYTES];
+            match find_program(name, &mut host, &mut catalog) {
+                Ok(Some(program)) => {
+                    return load_program(
+                        &program,
+                        evaluator,
+                        evaluator_revision,
+                        workspace,
+                        dirty,
+                        &mut host,
+                    )
+                }
+                Ok(None) => {}
+                Err(message) => return StatusLine::new(message),
+            }
         }
         let mut path = StatusLine::new(b"/");
         path.push(name);
@@ -4219,14 +4221,14 @@ fn execute_workshop(
                     return loaded;
                 }
             }
-            let Some(agent) = PROGRAMS
-                .iter()
-                .find(|program| program.name == b"desktop-agent")
-            else {
-                return StatusLine::new(b"NO AGENT IN THE IMAGE");
+            let mut catalog = [0; APP_CATALOG_BYTES];
+            let agent = match find_program(b"desktop-agent", &mut host, &mut catalog) {
+                Ok(Some(program)) => program,
+                Ok(None) => return StatusLine::new(b"NO AGENT IN THE IMAGE"),
+                Err(message) => return StatusLine::new(message),
             };
             let joined = join_program(
-                agent,
+                &agent,
                 evaluator,
                 evaluator_revision,
                 workspace,
@@ -4752,47 +4754,56 @@ fn perform_handover(
     let mut words = rest
         .split(|byte| *byte == b' ')
         .filter(|word| !word.is_empty());
-    let mut load = StatusLine::new(b":load ");
-    load.push(words.next().unwrap_or(b""));
+    let name = words.next().unwrap_or(b"");
     let steps = words.next().unwrap_or(b"1");
-    // `:handover NAME STEPS agents`: the reviewer joins and the two run
-    // as agents instead of the one playing alone.
-    let with_agents = words.next() == Some(b"agents");
+    let mut wait_prefix = None;
+    let mut companion = None;
+    for option in words {
+        if let Some(prefix) = option.strip_prefix(b"wait=") {
+            wait_prefix = Some(prefix);
+        } else if let Some(name) = option.strip_prefix(b"join=") {
+            companion = Some(name);
+        } else {
+            return StatusLine::new(b"USE :HANDOVER NAME STEPS [WAIT=PREFIX] [JOIN=NAME]");
+        }
+    }
+    let with_agents = companion.is_some();
     let mut play_line = StatusLine::new(if with_agents { b":agents " } else { b":play " });
     play_line.push(steps);
-    let status = execute_workshop(
-        machine,
-        compositor,
-        inputs.as_deref_mut(),
-        evaluator,
-        storage,
-        filesystem.as_deref_mut(),
-        serial,
-        clock.as_deref_mut(),
-        recovery,
-        kernel,
-        current,
-        previous,
-        scene_revision,
-        evaluator_revision,
-        workspace,
-        committed_workspace,
-        generation,
-        dirty,
-        running,
-        load.get(),
-    );
-    if !status.get().ends_with(b"READY - :PLAY STEPS") {
-        return status;
+    {
+        let mut tee = Tee {
+            serial: &mut *serial,
+            terminal: &mut current.terminal,
+        };
+        let mut host = EffectHost {
+            storage: &mut *storage,
+            filesystem: filesystem.as_deref_mut(),
+            console: &mut tee,
+            clock: clock.as_deref_mut(),
+        };
+        let mut catalog = [0; APP_CATALOG_BYTES];
+        let program = match find_program(name, &mut host, &mut catalog) {
+            Ok(Some(program)) => program,
+            Ok(None) => return StatusLine::new(b"NO SUCH PROGRAM TO HAND OVER TO"),
+            Err(message) => return StatusLine::new(message),
+        };
+        let status = load_program(
+            &program,
+            evaluator,
+            evaluator_revision,
+            workspace,
+            dirty,
+            &mut host,
+        );
+        if status.get() != program.ready {
+            return status;
+        }
     }
-    // The game prints its first frame when it is ready to be played; up
-    // to a bounded wait for that line.
-    #[cfg(feature = "doom-demo")]
-    if let Some(run) = running.as_deref_mut() {
+    if let (Some(prefix), Some(run)) = (wait_prefix, running.as_deref_mut()) {
         let mut waited = 0;
         while waited < 200
             && !current.terminal.last[..usize::from(current.terminal.last_length)]
-                .starts_with(b"doom:")
+                .starts_with(prefix)
         {
             if play_passes(
                 machine,
@@ -4821,31 +4832,32 @@ fn perform_handover(
             .copied()
             .find(|slot| listening(slot));
     }
-    #[cfg(feature = "doom-demo")]
-    if with_agents {
-        let joined = execute_workshop(
-            machine,
-            compositor,
-            inputs.as_deref_mut(),
+    if let Some(name) = companion {
+        let mut tee = Tee {
+            serial: &mut *serial,
+            terminal: &mut current.terminal,
+        };
+        let mut host = EffectHost {
+            storage: &mut *storage,
+            filesystem: filesystem.as_deref_mut(),
+            console: &mut tee,
+            clock: clock.as_deref_mut(),
+        };
+        let mut catalog = [0; APP_CATALOG_BYTES];
+        let program = match find_program(name, &mut host, &mut catalog) {
+            Ok(Some(program)) => program,
+            Ok(None) => return StatusLine::new(b"NO SUCH PROGRAM TO JOIN"),
+            Err(message) => return StatusLine::new(message),
+        };
+        let joined = join_program(
+            &program,
             evaluator,
-            storage,
-            filesystem.as_deref_mut(),
-            serial,
-            clock.as_deref_mut(),
-            recovery,
-            kernel,
-            current,
-            previous,
-            scene_revision,
             evaluator_revision,
             workspace,
-            committed_workspace,
-            generation,
             dirty,
-            running,
-            b":join review",
+            &mut host,
         );
-        if !joined.get().starts_with(b"REVIEW AGENT READY") {
+        if joined.get() != program.ready {
             return joined;
         }
     }

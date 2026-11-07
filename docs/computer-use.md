@@ -113,14 +113,14 @@ desktop's own disk had no game installed. Now:
   when they are built (the script says what is missing otherwise).
 - The agent's menu is `help files start-doom play-doom maximize close wait done`:
   `start-doom` is `:exec c-doom -- -iwad /data/doom1.wad -mb 8 -warp 1 -skill 2`,
-  and `play-doom` is `:handover doom-agent-judge 60`. Named `doom` and
+  and `play-doom` is `:handover doom-agent-judge 60 wait=doom:`. Named `doom` and
   `play` at first, the judge started the game and then chose `wait` eight
   times: the names say what they do now.
-- `:handover NAME STEPS` is a desktop command: the program named is
+- `:handover NAME STEPS [wait=PREFIX] [join=NAME]` is a desktop command: the program named is
   loaded over the world — a load replaces a world that holds nothing but
   programs the desktop carries, and keeps one with the operator's own
-  cells — the game is given up to a bounded number of passes to print its
-  first frame, and `:play STEPS` runs. A driving program cannot run a loop
+  cells. If supplied, `wait=PREFIX` gives the application a bounded
+  number of passes to print a matching line. Then `:play STEPS` runs. A driving program cannot run a loop
   inside its own, so when the agent decides on a handover the drive loop
   ends with `HANDOVER NAME STEPS` as its status and the desktop's console
   loop performs it after; the same status is what a typed `:handover`
@@ -163,8 +163,8 @@ agent; forty cells hold the workbench, a player and a reviewer.
 A sentence heard between steps is also written to the file `task`
 (v0.3.0), so `(needs (file "task"))` is a watch on the operator and any
 step can read what was said; the DOOM agent reads it and asks the judge
-what it asks for. `:handover NAME STEPS agents` loads NAME, joins the
-reviewer and runs `:agents` instead of `:play`; the desktop agent's
+what it asks for. `:handover NAME STEPS join=review` loads NAME, joins the
+reviewer and runs `:agents`. The desktop agent's
 `review-doom` command is that handover. A lookup is a request too (v0.3.1):
 `(model-request "(fetch \"URL\" \"NAME\")")` is served by the bridge
 rather than the judge, and the page's text lands in the file NAME through

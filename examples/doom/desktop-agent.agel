@@ -17,7 +17,7 @@
 ; workbench's eight are in: a sentence at the desktop's prompt summons it.
 (begin (def drive-reason "waiting for the judge") (def ask (fn () (model-request questions))) (def doom-line ":exec c-doom -- -iwad /data/doom1.wad -mb 8 -warp 1 -skill 2"))
 (def questions "(judge (choice act \"Next desktop command for the task\" help files start-doom play-doom review-doom maximize close wait done) (noul done \"Is the task complete?\"))")
-(def commands (list (list "help" ":help") (list "files" ":fs-ls /") (list "start-doom" doom-line) (list "play-doom" ":handover doom-agent-judge 60") (list "review-doom" ":handover doom-agent-judge 120 agents") (list "maximize" ":maximize 0") (list "close" ":close 0") (list "done" "done")))
+(def commands (list (list "help" ":help") (list "files" ":fs-ls /") (list "start-doom" doom-line) (list "play-doom" ":handover doom-agent-judge 60 wait=doom:") (list "review-doom" ":handover doom-agent-judge 120 wait=doom: join=review") (list "maximize" ":maximize 0") (list "close" ":close 0") (list "done" "done")))
 (begin (def find-command (fn (t a) (if (= t nil) "wait" (if (= (car (car t)) a) (car (cdr (car t))) (find-command (cdr t) a))))) (def command-for (fn (a) (find-command commands (if (if (= a "play-doom") #t (= a "review-doom")) (if (= (look-field 0) 0) "start-doom" a) a)))))
 (def number (fn (a n d) (if (= (text-field a n) nil) d (if (= (text-int (text-field a n)) nil) d (text-int (text-field a n))))))
 (def decide (fn (answer) (begin (def drive-reason answer) (if (< 500 (number answer 16 0)) "done" (if (< (number answer 4 0) 200) "wait" (command-for (text-field answer 3)))))))

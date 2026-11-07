@@ -264,7 +264,7 @@ def captions(events):
             names = {":fs-ls /": "lists the files", ":help": "shows the help", "wait": "waits", "done": "is done"}
             if command.startswith(":exec c-doom"):
                 what = "starts DOOM in a window"
-            elif command.startswith(":handover") and command.endswith(" agents"):
+            elif command.startswith(":handover") and " join=" in command:
                 what = "hands the desktop to its DOOM agent and a reviewer, side by side"
             elif command.startswith(":handover"):
                 what = "hands the desktop to its DOOM-playing agent"

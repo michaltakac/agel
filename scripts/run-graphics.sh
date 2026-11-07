@@ -61,6 +61,7 @@ for program in boot/desktop/workbench:wb boot/desktop/builder:bd \
   esac
 done
 if test "$features" = doom-demo; then
+  python3 ./scripts/install-program.py --region data "$desktop_image" apps.cfg examples/doom/apps.cfg >/dev/null
   if doom=$(./scripts/build-c-program.sh doom x86_64 examples/doom/c 2>/dev/null | tail -n 1) && test -f "$doom" \
      && wad=$(./scripts/fetch-doom-wad.sh 2>/dev/null) && test -f "$wad"; then
     python3 ./scripts/install-program.py "$desktop_image" c-doom "$doom" >/dev/null
@@ -68,6 +69,8 @@ if test "$features" = doom-demo; then
   else
     printf '%s\n' 'DOOM is not installed: build it with scripts/build-c-program.sh doom x86_64 examples/doom/c and fetch the WAD with scripts/fetch-doom-wad.sh' >&2
   fi
+else
+  python3 ./scripts/install-program.py --region data "$desktop_image" --remove apps.cfg >/dev/null
 fi
 if agel=$(./scripts/build-program.sh agel x86_64 2>/dev/null | tail -n 1) && test -f "$agel"; then
   python3 ./scripts/install-program.py "$desktop_image" agel "$agel" >/dev/null
