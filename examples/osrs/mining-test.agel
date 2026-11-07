@@ -48,9 +48,14 @@
   (def mining-xp (fn (g) (get (osrs-stat g 14) 'xp)))
   (def await-interface
     (fn (state interface)
-      (let ((observed (observe-live state (fn (g) (osrs-open-interface? g interface)) 12)))
-        (if (osrs-open-interface? observed interface) observed
-          (signal 'osrs/mining-test "expected tutor dialogue" interface)))))
+      (let ((ready (fn (g) (osrs-open-interface? g interface))))
+        (let ((bounded (observe-live state ready 12)))
+          (let ((observed (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))
+            (if (ready observed) observed
+              (signal 'osrs/mining-test "expected tutor dialogue"
+                (dict 'interface interface 'opens-before (osrs-interface-opens state interface)
+                  'opens-after (osrs-interface-opens observed interface)
+                  'tutor (tutor-state observed)))))))))
   (def fresh-tutor-menu?
     (fn (state previous)
       (if (osrs-open-interface? state 219)
@@ -64,10 +69,15 @@
       (let ((talked (osrs-talk state (get (tutor state) 'index)))
             (ready (fn (g) (fresh-tutor-menu? g state))))
         (let ((bounded (observe-live talked ready 13)))
-          (let ((observed (if (ready bounded) bounded (osrs-observe-ready bounded ready 128))))
-            (let ((fresh (ready observed)))
-              (observe (assoc (assoc (tutor-state observed) 'menu fresh) 'phase 'tutor-response))
-              (dict 'state observed 'fresh fresh)))))))
+          (let ((route (osrs-map-route bounded)) (before (osrs-map-route state)))
+            (let ((settled (if (if (ready bounded) #f
+                                  (if route (< (if before (get before 'sequence) 0) (get route 'sequence)) #f))
+                               (observe-live bounded ready 13)
+                               bounded)))
+              (let ((observed (if (ready settled) settled (osrs-observe-ready settled ready 128))))
+                (let ((fresh (ready observed)))
+                  (observe (assoc (assoc (tutor-state observed) 'menu fresh) 'phase 'tutor-response))
+                  (dict 'state observed 'fresh fresh)))))))))
   (def tutor-menu
     (fn (state observe)
       (let ((first (talk-to-tutor (approach-tutor state observe) observe)))

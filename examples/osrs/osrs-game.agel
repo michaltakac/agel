@@ -324,13 +324,16 @@
       (let ((next (isaac-next (get progress 'cipher))))
         (dict 'state (assoc (assoc progress 'cipher (get next 'state)) 'used (+ 1 (get progress 'used)))
               'bytes (list (rem (+ 75 (get next 'value)) 256))))))
+  (def keepalive-due?
+    (fn (now last interval)
+      (if last (if (< (- now last) interval) #f #t) #t)))
   (def paced-keepalive
     (fn (clock interval)
       (fn (progress)
-        (let ((now (clock)) (last (get progress 'last-write)))
-          (if (if last (< (- now last) interval) #f)
-              (dict 'state progress 'bytes nil)
-              (keepalive-service (assoc progress 'last-write now)))))))
+        (let ((now (clock)))
+          (if (keepalive-due? now (get progress 'last-write) interval)
+              (keepalive-service (assoc progress 'last-write now))
+              (dict 'state progress 'bytes nil))))))
   (def osrs-service-start
     (fn (state)
       (let ((maintenance (get state 'maintenance)))
@@ -338,13 +341,16 @@
           (let ((clock (get maintenance 'clock-us)))
             ((get maintenance 'start)
               (if clock (paced-keepalive clock (get maintenance 'keepalive-interval-us)) keepalive-service)
-              (dict 'cipher (get state 'out) 'used 0)))
+              (dict 'cipher (get state 'out) 'used 0 'last-write (get state 'last-keepalive-us))))
           (signal 'osrs/wait "no maintenance service configured")))))
   (def osrs-service-stop
     (fn (state)
       (let ((progress ((get (get state 'maintenance) 'stop))))
-        (assoc (assoc state 'out (get progress 'cipher)) 'keepalives
-          (+ (if (get state 'keepalives) (get state 'keepalives) 0) (get progress 'used))))))
+        (let ((updated (assoc (assoc state 'out (get progress 'cipher)) 'keepalives
+                         (+ (if (get state 'keepalives) (get state 'keepalives) 0) (get progress 'used)))))
+          (if (get progress 'last-write)
+              (assoc updated 'last-keepalive-us (get progress 'last-write))
+              updated)))))
   (def maintained-read
     (fn (state action)
       (if (get state 'maintenance)
@@ -514,4 +520,15 @@
             (send state 44 (list 128 128 (rem (+ (rem index 256) 128) 256) (/ index 256)) #f
                   (dict 'action 'attack 'index index 'type (get (get (get world 'npcs) index) 'type)))
             (signal 'osrs/npc "attack target is not currently observed")))))
-  (def osrs-keepalive (fn (state) (send state 75 nil #f (dict 'action 'keepalive)))))
+  (def send-keepalive (fn (state) (send state 75 nil #f (dict 'action 'keepalive))))
+  (def osrs-keepalive
+    (fn (state)
+      (let ((maintenance (get state 'maintenance)))
+        (let ((clock (if maintenance (get maintenance 'clock-us) nil)))
+          (if clock
+              (let ((now (clock)))
+                (if (keepalive-due? now (get state 'last-keepalive-us)
+                      (get maintenance 'keepalive-interval-us))
+                    (assoc (send-keepalive state) 'last-keepalive-us now)
+                    state))
+              (send-keepalive state)))))))

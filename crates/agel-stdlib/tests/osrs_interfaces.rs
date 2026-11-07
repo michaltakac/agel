@@ -8,7 +8,18 @@ fn mining_tutor_waits_for_a_new_actionable_menu() {
         .evaluate(
             r#"
       (module agel/osrs-game
-        (export osrs-open-interface? osrs-interface-opens osrs-pause-events)
+        (export osrs-open-interface? osrs-interface-opens osrs-pause-events
+                osrs-map-route osrs-nearby-npcs osrs-talk osrs-keepalive osrs-observe-bounded)
+        (def osrs-map-route (fn (state) (get state 'route)))
+        (def osrs-nearby-npcs (fn (_) (list (dict 'type 3222 'index 7))))
+        (def osrs-talk (fn (state _) (assoc state 'talks (+ 1 (get state 'talks)))))
+        (def osrs-keepalive (fn (state) state))
+        (def osrs-observe-bounded
+          (fn (state _ready _ticks)
+            (let ((window (+ 1 (get state 'window))))
+              (let ((next (assoc (assoc state 'window window) 'route (dict 'sequence 2))))
+                (if (= window 14) (assoc (assoc (assoc next 'open #t) 'opens 2) 'pauses 2)
+                  next)))))
         (def osrs-open-interface? (fn (state _) (get state 'open)))
         (def osrs-interface-opens (fn (state _) (get state 'opens)))
         (def osrs-pause-events (fn (state _id _component) (get state 'pauses))))"#,
@@ -16,7 +27,7 @@ fn mining_tutor_waits_for_a_new_actionable_menu() {
         .unwrap();
     let source = include_str!("../../../examples/osrs/mining-test.agel").replace(
         "(export mine-first-copper",
-        "(export fresh-tutor-menu? mine-first-copper",
+        "(export fresh-tutor-menu? talk-to-tutor mine-first-copper",
     );
     world.evaluate(&source).unwrap();
     let result = world
@@ -26,13 +37,16 @@ fn mining_tutor_waits_for_a_new_actionable_menu() {
       (def stale (dict 'open #t 'opens 1 'pauses 1))
       (def opened (assoc stale 'opens 2))
       (def enabled (assoc opened 'pauses 2))
+      (def before (assoc (assoc (assoc stale 'route (dict 'sequence 1)) 'window 0) 'talks 0))
+      (def reply (talk-to-tutor before (fn (_) nil)))
       (list (fresh-tutor-menu? stale stale) (fresh-tutor-menu? opened stale)
-            (fresh-tutor-menu? enabled stale) (fresh-tutor-menu? (assoc enabled 'open #f) stale))"#,
+            (fresh-tutor-menu? enabled stale) (fresh-tutor-menu? (assoc enabled 'open #f) stale)
+            (get reply 'fresh) (get (get reply 'state) 'talks) (get (get reply 'state) 'window))"#,
         )
         .unwrap();
     assert_eq!(
         result.values.last().map(Value::to_string).as_deref(),
-        Some("(#f #f #t #f)")
+        Some("(#f #f #t #f #t 1 14)")
     );
 }
 
@@ -335,18 +349,30 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
       (def direct (osrs-keepalive original))
       (def first-byte sent)
       (def direct (osrs-keepalive direct))
+      (def second-byte sent)
+      (def skipped-direct (osrs-keepalive stopped))
+      (osrs-service-start stopped)
+      (def skipped-restart (run-step progress))
+      (def now 6000000)
+      (def sent-direct (osrs-keepalive stopped))
+      (osrs-service-start sent-direct)
+      (def skipped-after-direct (run-step progress))
       (list (= (get first-pulse 'bytes) first-byte)
         (= (get skipped 'bytes) nil)
-        (= (get second-pulse 'bytes) sent)
+        (= (get second-pulse 'bytes) second-byte)
         (= (get stopped 'out) (get direct 'out))
-        (get stopped 'keepalives))
+        (get stopped 'keepalives)
+        (= skipped-direct stopped)
+        (= (get skipped-restart 'bytes) nil)
+        (= (get sent-direct 'last-keepalive-us) 6000000)
+        (= (get skipped-after-direct 'bytes) nil))
     "#,
             &options,
         )
         .unwrap();
     assert_eq!(
         cadence.values.last().map(Value::to_string).as_deref(),
-        Some("(#t #t #t #t 2)")
+        Some("(#t #t #t #t 2 #t #t #t #t)")
     );
     let ready = world
         .evaluate_with(
