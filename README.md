@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.107.** The native transfer benchmark can pin the
-donor and fixed control together. See the [release notes](docs/release-v0.3.107.md).
+**Current release: v0.3.108.** The Cook’s Assistant hand-in allows more time
+for its first actionable dialogue page. See the [release notes](docs/release-v0.3.108.md).
+
+v0.3.107 pins the donor and fixed control for native transfer.
+See the [release notes](docs/release-v0.3.107.md).
 
 v0.3.106 observes native economy packets while waiting for inference.
 See the [release notes](docs/release-v0.3.106.md).

@@ -170,16 +170,24 @@
         (let ((arrived (osrs-observe-bounded (osrs-keepalive (osrs-walk state x z))
                          (fn (g) (if (osrs-route-cleared? g state x z) (cook g) #f)) 40)))
           (wait-live arrived cook 4)))))
+  (def observe-first-page
+    (fn (state previous windows)
+      (if (if (page state previous) #t (= windows 0)) state
+        (observe-first-page
+          (osrs-observe-bounded (osrs-keepalive state) (fn (g) (page g previous)) 20)
+          previous (- windows 1)))))
   (def start-cook-dialogue
     (fn (state approaches observe)
       (require approaches "cook did not open a dialogue after three approaches")
       (let ((nearby (approach-cook state (car approaches))))
         (observe "talking to the observed cook")
         (let ((asked (osrs-talk nearby (get (cook nearby) 'index))))
-          (let ((attempt (osrs-observe-bounded asked (fn (g) (page g nearby)) 20)))
+          (let ((attempt (observe-first-page asked nearby 3)))
             (if (page attempt nearby)
               (run-dialogue attempt nearby 0 40 observe)
-              (start-cook-dialogue attempt (cdr approaches) observe)))))))
+              (begin
+                (observe "no fresh cook page with a pause event before the observation limit")
+                (start-cook-dialogue attempt (cdr approaches) observe))))))))
 
   (def finish-cooks-assistant
     (fn (state) (finish-cooks-assistant-using state (fn (_) nil))))

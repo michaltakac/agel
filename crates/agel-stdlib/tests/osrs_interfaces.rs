@@ -23,11 +23,13 @@ fn cook_dialogue_retries_the_talk_after_a_missing_first_page() {
                        (let ((arrived (assoc state 'arrived #t)))
                          (if (ready arrived) arrived (signal 'test/route "arrival was missed")))
                        (if (= (get state 'talks) 2)
-                       (let ((opened (assoc state 'page 1)))
-                         (if (ready opened) (signal 'test/wait "page was used before its pause event")
-                           (let ((enabled (assoc opened 'enabled #t)))
-                             (if (ready enabled) enabled (signal 'test/wait "pause event was missed")))))
-                       state))))
+                         (if (get state 'waited)
+                           (let ((opened (assoc state 'page 1)))
+                             (if (ready opened) (signal 'test/wait "page was used before its pause event")
+                               (let ((enabled (assoc opened 'enabled #t)))
+                                 (if (ready enabled) enabled (signal 'test/wait "pause event was missed")))))
+                           (assoc state 'waited #t))
+                         state))))
                  (def osrs-nearby-npcs (fn (state) (list (dict 'type 4626 'index 7))))
                  (def osrs-varp (fn (state varp) (if (= (get state 'page) 3) 1 0)))
                  (def osrs-open-interface?
@@ -205,15 +207,17 @@ fn revision_241_interfaces_and_ground_items_follow_server_observations() {
     );
     let pause = world
         .evaluate(
-            "(def advertised (decode original 75 '(0 1 0 0 127 255 255 255 0 231 0 5 0 0 0 0)))
+            "(def cook-opened (decode original 93 '(162 0 56 2 0 103 128)))
+             (def advertised (decode cook-opened 75 '(0 1 0 0 127 255 255 255 0 231 0 5 0 0 0 0)))
              (def unrelated (decode advertised 75 '(0 0 0 128 127 255 255 255 0 231 0 5 0 0 0 0)))
-             (list (osrs-pause-events original 231 5) (osrs-pause-events advertised 231 5)
+             (list (osrs-open-interface? cook-opened 231) (osrs-interface-opens cook-opened 231)
+                   (osrs-pause-events cook-opened 231 5) (osrs-pause-events advertised 231 5)
                    (osrs-pause-events unrelated 231 5) (osrs-pause-events unrelated 231 6))",
         )
         .unwrap();
     assert_eq!(
         pause.values.last().map(Value::to_string).as_deref(),
-        Some("(0 1 1 0)")
+        Some("(#t 1 0 1 1 0)")
     );
     let route = world
         .evaluate(
