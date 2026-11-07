@@ -1,6 +1,6 @@
 (module agel/osrs-crafting-test
   (import agel/osrs-game)
-  (export stage-adamant-stock stage-adamant-ore smelt-adamant-bar
+  (export stage-adamant-stock stage-adamant-ore stage-adamant-ore-batch smelt-adamant-bar smelt-adamant-bars
           forge-adamant-platebody forge-adamant-platebody-using)
   (def assert-craft
     (fn (ok message) (if ok #t (signal 'osrs/craft-test message))))
@@ -14,32 +14,52 @@
   (def xp (fn (state) (get (osrs-stat state 13) 'xp)))
   (def ore (fn (state) (osrs-inventory-count state 93 449)))
   (def coal (fn (state) (osrs-inventory-count state 93 453)))
-  (def stage-adamant-ore
-    (fn (state)
+  (def check-batch
+    (fn (count)
+      (assert-craft (if (= (type-of count) 'int) (if (< 0 count) (< count 4) #f) #f)
+        "adamant furnace batch must contain one to three bars")))
+  (def stage-adamant-ore-batch
+    (fn (state count)
+      (check-batch count)
       (let ((ready (initial state)))
         (let ((reset (osrs-await (osrs-command ready "setlevel smithing 1")
                        (fn (g) (= (smithing g) 1)))))
           (let ((stocked (osrs-await
                           (osrs-command (osrs-command (osrs-command (osrs-command reset "invclear")
-                            "setlevel smithing 88") "item 449 1") "item 453 6")
-                          (fn (g) (if (= (smithing g) 88) (= (list (ore g) (coal g)) '(1 6)) #f)))))
+                            "setlevel smithing 88") (text-concat "item 449 " (int->text count)))
+                            (text-concat "item 453 " (int->text (* 6 count))))
+                          (fn (g) (if (= (smithing g) 88) (= (list (ore g) (coal g)) (list count (* 6 count))) #f)))))
             (assert-craft (= (list (bars stocked) (platebody stocked)) '(0 0)) "setup left finished stock")
             (osrs-wait-ticks (osrs-command stocked "tele 3226 3255") 4))))))
-  (def smelt-adamant-bar
-    (fn (state)
+  (def stage-adamant-ore
+    (fn (state) (stage-adamant-ore-batch state 1)))
+  (def smelt-batch
+    (fn (state count)
+      (let ((opens (osrs-interface-opens state 270)) (next-bars (+ count (bars state))))
+        (let ((menu (osrs-await (osrs-use-location-option state 24009 3226 3256 2)
+                      (fn (g) (if (osrs-open-interface? g 270) (< opens (osrs-interface-opens g 270)) #f)))))
+          (let ((finished (osrs-await (osrs-resume-dialogue menu 270 15 count)
+                            (fn (g) (if (= (bars g) next-bars) (< (xp state) (xp g)) #f)))))
+            (assert-craft (= (list (ore finished) (coal finished) (platebody finished)) '(0 0 0))
+              "smelting did not consume the exact recipe")
+            finished)))))
+  (def smelt-adamant-bars
+    (fn (state count)
+      (check-batch count)
       (let ((ready (initial state)))
-        (assert-craft (= (list (smithing ready) (ore ready) (coal ready) (bars ready) (platebody ready))
-                         '(88 1 6 0 0)) "unexpected initial furnace stock")
-        (let ((menu (osrs-await (osrs-use-location-option ready 24009 3226 3256 2)
-                      (fn (g) (osrs-open-interface? g 270)))))
-          (let ((finished (osrs-await (osrs-resume-dialogue menu 270 15 1)
-                            (fn (g) (if (= (bars g) 1) (< (xp ready) (xp g)) #f)))))
-            (assert-craft (= (list (ore finished) (coal finished) (bars finished) (platebody finished))
-                             '(0 0 1 0)) "smelting did not consume the exact recipe")
+        (assert-craft (= (list (smithing ready) (ore ready) (coal ready) (platebody ready))
+                         (list 88 count (* 6 count) 0)) "unexpected initial furnace stock")
+        (let ((finished (smelt-batch ready count)))
+          (dict 'state finished 'report
             (dict 'test 'adamant-bar 'passed #t 'ore-before (ore ready) 'ore-after (ore finished)
               'coal-before (coal ready) 'coal-after (coal finished)
               'bars-before (bars ready) 'bars-after (bars finished)
               'smithing-xp-before (xp ready) 'smithing-xp-after (xp finished)))))))
+  (def smelt-adamant-bar
+    (fn (state)
+      (let ((ready (initial state)))
+        (assert-craft (= (bars ready) 0) "unexpected initial furnace bars")
+        (get (smelt-adamant-bars ready 1) 'report))))
   (def stage-adamant-stock
     (fn (state)
       (let ((ready (initial state)))

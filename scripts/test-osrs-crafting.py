@@ -18,10 +18,14 @@ WORLD = "agel-osrs-world"
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
 mode.add_argument("--native", action="store_true", help="run the crafting phase inside Agel OS")
-mode.add_argument("--smelt", action="store_true", help="smelt an adamant bar from staged ore and coal")
+mode.add_argument("--smelt", action="store_true", help="smelt adamant bars from staged ore and coal")
+parser.add_argument("--smelt-count", type=int, choices=range(1, 4), default=1)
 mode.add_argument("--prepare-only", action="store_true", help="stage stock and verify normal rights, without crafting")
 parser.add_argument("--fixture", default="agelcraft", help="dedicated account, agelcraft or ac followed by eight hex digits")
 options = parser.parse_args()
+if not options.smelt and options.smelt_count != 1:
+    parser.error("--smelt-count requires --smelt")
+COUNT = options.smelt_count
 ACCOUNT = options.fixture
 if ACCOUNT != "agelcraft" and not re.fullmatch(r"ac[0-9a-f]{8}", ACCOUNT):
     parser.error("fixture must be agelcraft or ac followed by eight hex digits")
@@ -127,11 +131,11 @@ notice("RuneScape crafting: staging ore and coal" if options.smelt else
 oracle_program("SetupAccount", "craft-grant", *fixture_args)
 try:
     if options.smelt:
-        execute("(begin (stage-adamant-ore game) #t)")
+        execute(f"(begin (stage-adamant-ore-batch game {COUNT}) #t)")
         before = await_saved(lambda s: "x=3226 z=3255 level=0" in s
                              and "stat=13 base=88 visible=88" in s
-                             and inventory(s, "adamantite_ore") == 1
-                             and inventory(s, "coal") == 6
+                             and inventory(s, "adamantite_ore") == COUNT
+                             and inventory(s, "coal") == 6 * COUNT
                              and inventory(s, "adamantite_bar") == 0
                              and inventory(s, "adamant_platebody") == 0)
     else:
@@ -151,20 +155,20 @@ if options.prepare_only:
     sys.exit(0)
 if options.smelt:
     notice("RuneScape crafting: normal-account furnace and adamant bar")
-    report = execute("(smelt-adamant-bar game)")
+    report = execute(f"(get (smelt-adamant-bars game {COUNT}) 'report)")
     print(report)
     assert "test adamant-bar passed #t" in report, report
-    after = await_saved(lambda s: inventory(s, "adamantite_bar") == 1
+    after = await_saved(lambda s: inventory(s, "adamantite_bar") == COUNT
                         and inventory(s, "adamantite_ore") == 0
                         and inventory(s, "coal") == 0
                         and inventory(s, "adamant_platebody") == 0)
     assert "rights= " in after and "xp_rate_in_hundreds=100" in after, after
     saved_before, saved_after = xp(before), xp(after)
-    assert saved_after - saved_before == 375, (saved_before, saved_after)
+    assert saved_after - saved_before == 375 * COUNT, (saved_before, saved_after)
     observed = re.search(r"smithing-xp-before (\d+) smithing-xp-after (\d+)", report)
     assert observed and tuple(map(int, observed.groups())) == (saved_before // 10, saved_after // 10), report
     print(f"Saved Smithing fine XP: {saved_before} -> {saved_after}")
-    notice("RuneScape PASS: one ore and six coal consumed, one adamant bar saved at normal rights and 1x XP")
+    notice(f"RuneScape PASS: {COUNT} ore and {6 * COUNT} coal consumed, {COUNT} adamant bars saved at normal rights and 1x XP")
     sys.exit(0)
 notice("RuneScape crafting: normal-account anvil and platebody button")
 if options.native:
