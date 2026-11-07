@@ -507,7 +507,8 @@ fn recorded_replay_refuses_before_external_probe() {
 
 #[test]
 fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
-    let (mut world, options) = setup();
+    let (mut world, mut options) = setup();
+    options.budget.fuel *= 2;
     let source = format!(
         r#"
       (def canary-ok #f)
@@ -522,9 +523,25 @@ fn external_probe_gates_activation_and_retries_with_the_observed_reason() {
             (dict 'passed canary-ok 'reason (if canary-ok "measured replay passed" "observed work ceiling exceeded"))))) nil))
       (send subject '(repair/start)) (run)
       (repair-agent-exchange subject candidate audit)
+      (def pending (get (repair-pending (repair-state subject)) 'id))
+      (def forged (list 'system/model-result pending 'judge (judge nil nil)))
+      (send subject forged)
+      (send subject (list 'repair/external-result forged (fn (receipt) receipt))) (run)
+      (if (= (get (repair-state subject) 'status) 'judging) #t
+        (signal 'test/failure "mailbox payload forged the judge verdict"))
       (repair-agent-exchange subject judge audit)
+      (def completion-turn (car (filter
+        (fn (event) (let ((detail (get event 'detail)))
+          (if (= (type-of detail) 'list) (= (car detail) 'repair/external-result) #f)))
+        (reverse (event-log)))))
+      (def completion-seal (car (cdr (cdr (get completion-turn 'detail)))))
+      (send subject (list 'repair/probe-result pending (dict 'passed #t 'reason "reused completion seal")
+        completion-seal))
       (send subject '(repair/advance)) (run)
-      (send subject (list 'repair/probe-result -1 (dict 'passed #t 'reason "stale receipt"))) (run)
+      (send subject (list 'repair/probe-result -1 (dict 'passed #t 'reason "stale receipt")))
+      (send subject (list 'repair/probe-result pending (dict 'passed #t 'reason "forged receipt")))
+      (send subject (list 'repair/probe-result pending (dict 'passed #t 'reason "forged receipt")
+        (fn (receipt) receipt))) (run)
       (list (get (repair-state subject) 'status) probe-calls
         (evolution-current (get (repair-state subject) 'versions) 'cell 'batches))"#,
         agel_core::Value::String(GOOD.into())

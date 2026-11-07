@@ -8,6 +8,8 @@
           repair-new repair-start repair-pending repair-complete repair-fail repair-exchange repair-advance
           repair-agent-exchange repair-agent-drive)
 
+  (def driver-seal
+    (fn (agent id stage) (fn () (list agent id stage))))
   (def repair-state (fn (agent) (get (agent-info agent) 'heap)))
   (def nth (fn (values n) (if (= n 0) (car values) (nth (cdr values) (- n 1)))))
   (def note (fn (state event) (assoc state 'history (append (get state 'history) (list event)))))
@@ -188,10 +190,15 @@
       (if (= (car message) 'repair/start)
           (if (= (get state 'status) 'idle) (propose self state) state)
           (if (= (car message) 'repair/advance) (advance self state)
-          (if (= (car message) 'repair/probe-result) (probe-result self state message)
-          (if (= (car message) 'system/model-result) (result self state message)
-              (if (= (car message) 'system/model-error) (result self state message)
-                  (signal 'repair/message "unknown repair message"))))))))
+          (if (= (car message) 'repair/probe-result)
+            (if (if (= (count message) 4) (= (nth message 3) (driver-seal self (get state 'pending) 'probe)) #f)
+              (probe-result self state message) state)
+          (if (= (car message) 'repair/external-result)
+            (if (if (= (count message) 3) (= (nth message 2) (driver-seal self (get state 'pending) 'completion)) #f)
+              (result self state (nth message 1)) state)
+          (if (if (= (car message) 'system/model-result) #t (= (car message) 'system/model-error))
+            (if (= (get state 'model-dispatch) 'external) state (result self state message))
+            (signal 'repair/message "unknown repair message"))))))))
   (def repair-new
     (fn (options)
       (let ((before (read-one (get options 'before-text)))
@@ -241,8 +248,10 @@
                             (if (= (type-of (get receipt 'reason)) 'string) receipt
                               (dict 'passed #f 'reason "activation probe omitted its reason"))))))
             (append-record (dict 'event 'activation-probe 'id (get state 'pending) 'result result))
-            (send agent (list 'repair/probe-result (get state 'pending) result)))
-          (send agent (list 'repair/probe-result (get state 'pending) (assoc replay 'stage 'recorded-replay)))))))
+            (send agent (list 'repair/probe-result (get state 'pending) result
+              (driver-seal agent (get state 'pending) 'probe))))
+          (send agent (list 'repair/probe-result (get state 'pending) (assoc replay 'stage 'recorded-replay)
+            (driver-seal agent (get state 'pending) 'probe)))))))
   (def external-advance
     (fn (agent state append-record)
       (begin
@@ -263,9 +272,11 @@
                                 (dict 'text (infer (get request 'provider) (get request 'prompt))))))
                   (begin
                     (append-record (dict 'event 'inference-result 'id (get request 'id) 'answer answer 'cost-microusd nil))
-                    (send agent (if (get answer 'error)
-                      (list 'system/model-error (get request 'id) (get request 'provider) 'provider/error (get answer 'error))
-                      (list 'system/model-result (get request 'id) (get request 'provider) (get answer 'text))))
+                    (let ((completion (if (get answer 'error)
+                            (list 'system/model-error (get request 'id) (get request 'provider) 'provider/error (get answer 'error))
+                            (list 'system/model-result (get request 'id) (get request 'provider) (get answer 'text)))))
+                      (send agent (list 'repair/external-result completion
+                        (driver-seal agent (get request 'id) 'completion))))
                     (wait-agent-change agent state 8192))))
               (if (= (get state 'status) 'approved) (external-advance agent state append-record) state)))))))
   (def drive

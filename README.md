@@ -5,8 +5,11 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.103.** Repair candidates must pass recorded replay
-before an external activation probe. See the [release notes](docs/release-v0.3.103.md).
+**Current release: v0.3.104.** External repair actors check the origin of
+completion and probe messages. See the [release notes](docs/release-v0.3.104.md).
+
+v0.3.103 requires recorded replay before external activation probes.
+See the [release notes](docs/release-v0.3.103.md).
 
 v0.3.102 preserves judge receipts in a host recovery journal.
 See the [release notes](docs/release-v0.3.102.md).
