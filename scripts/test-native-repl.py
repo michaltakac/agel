@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import queue
 import subprocess
 import sys
@@ -622,7 +623,7 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     finally:
         third.close()
 
-    # A signed, interactive candidate can still fail semantic replay.
+    # A signed, interactive candidate cannot substitute its own trial.
     trial = (Path(__file__).resolve().parent.parent / "boot/kernel/agel/kernel-trial.agel").read_bytes()
     assert good_kernel.count(trial) == 1
     wrong_trial = trial.replace(b"21) 42 0)", b"21) 41 0)")
@@ -630,12 +631,13 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
     wrong_kernel = good_kernel.replace(trial, wrong_trial)
     assert stage_kernel.stage(image, wrong_kernel, stage_kernel.sign(wrong_kernel)) == 0
     admission_boot("A", "B", "B")
+    assert stage_kernel.read_selector(image)["trial_digest"] == hashlib.sha512(trial).digest()
     wrong = Harness(image, persistent=True)
     try:
         wrong.expect_until(b"kernel: running slot A; trusted slot B; candidate slot A (unverified, boots 1)")
         wrong.expect_until(b"agel-native[0]> ")
         send_kernel_healthy(wrong, "(+ 1 1)", "2", "A", 1)
-        wrong.send(":kernel-promote", "denied: candidate failed Agel kernel replay", 1)
+        wrong.send(":kernel-promote", "denied: Agel kernel replay differs from the admitted trial", 1)
         shutdown(wrong)
     finally:
         wrong.close()
@@ -647,7 +649,7 @@ def kernel_rollback_test(image: str, kernel_path: str) -> None:
         shutdown(replay_rollback)
     finally:
         replay_rollback.close()
-    print("PASS: failed Agel replay refused promotion and returned to the trusted kernel")
+    print("PASS: trusted kernel pinned the trial and refused a candidate with a changed corpus")
 
     # A candidate without a valid signature is refused by the running kernel
     # and cleared, so the stage never loads it.

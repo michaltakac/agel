@@ -345,6 +345,7 @@ pub struct KernelSelector {
     /// Bytes of the candidate slot the signature covers.
     pub length: u32,
     pub signature: [u8; 64],
+    pub trial_digest: [u8; 64],
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -359,6 +360,7 @@ impl KernelSelector {
         admitted: false,
         length: 0,
         signature: [0; 64],
+        trial_digest: [0; 64],
     };
 
     /// Forget the candidate entirely.
@@ -369,6 +371,7 @@ impl KernelSelector {
         self.admitted = false;
         self.length = 0;
         self.signature = [0; 64];
+        self.trial_digest = [0; 64];
     }
 }
 
@@ -388,6 +391,8 @@ pub fn load_selector(storage: &mut ServiceDomain) -> Result<KernelSelector, &'st
     }
     let mut signature = [0_u8; 64];
     signature.copy_from_slice(&sector[64..128]);
+    let mut trial_digest = [0_u8; 64];
+    trial_digest.copy_from_slice(&sector[128..192]);
     Ok(KernelSelector {
         trusted,
         candidate,
@@ -396,6 +401,7 @@ pub fn load_selector(storage: &mut ServiceDomain) -> Result<KernelSelector, &'st
         admitted: sector[9] != 0,
         length: u32::from_le_bytes([sector[12], sector[13], sector[14], sector[15]]),
         signature,
+        trial_digest,
     })
 }
 
@@ -433,6 +439,7 @@ pub fn save_selector(
     sector[9] = u8::from(selector.admitted);
     sector[12..16].copy_from_slice(&selector.length.to_le_bytes());
     sector[64..128].copy_from_slice(&selector.signature);
+    sector[128..192].copy_from_slice(&selector.trial_digest);
     write_sector(storage, KERNEL_SELECTOR_SECTOR, &sector)?;
     flush(storage)?;
     if load_selector(storage)? != *selector {

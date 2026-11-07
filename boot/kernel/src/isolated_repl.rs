@@ -21,7 +21,7 @@ use crate::native_session::{
     ReplayFailure,
 };
 #[cfg(target_arch = "x86_64")]
-use crate::recovery::{slot_name, Admission, KernelRecovery};
+use crate::recovery::{slot_name, Admission, KernelRecovery, KERNEL_TRIAL};
 use crate::recovery::{BootPlan, LiveRecovery};
 use crate::service::{ServiceDomain, ServiceKind, ServiceWriter};
 use crate::workspace::{Workspace, MAX_CELL_NAME};
@@ -331,7 +331,7 @@ pub fn run() -> ! {
                     let replay = evaluator_request_raw(
                         trial,
                         shared::COMMAND_EVALUATE,
-                        include_bytes!("../agel/kernel-trial.agel"),
+                        KERNEL_TRIAL,
                     )?;
                     if replay.error || &replay.bytes[..replay.length] != b"42" {
                         return Err("denied: candidate failed Agel kernel replay");

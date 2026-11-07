@@ -46,7 +46,7 @@ VERSION = 2
 BUDGET = 3
 
 
-def read_selector(image: str) -> dict[str, int]:
+def read_selector(image: str) -> dict[str, int | bytes]:
     with open(image, "rb") as disk:
         disk.seek(SELECTOR_SECTOR * SECTOR)
         sector = disk.read(SECTOR)
@@ -60,6 +60,7 @@ def read_selector(image: str) -> dict[str, int]:
         "admitted": sector[9],
         "length": int.from_bytes(sector[12:16], "little"),
         "signature": bytes(sector[64:128]),
+        "trial_digest": bytes(sector[128:192]),
     }
 
 
@@ -71,6 +72,7 @@ EMPTY = {
     "admitted": 0,
     "length": 0,
     "signature": bytes(64),
+    "trial_digest": bytes(64),
 }
 
 
