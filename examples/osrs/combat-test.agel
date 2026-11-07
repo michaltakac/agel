@@ -10,15 +10,14 @@
     (fn (candidates)
       (foldl (fn (best npc) (if best (if (< (distance npc) (distance best)) npc best) npc)) nil candidates)))
   (def combat
-    (fn (state choose await observe)
+    (fn (state choose await after-attack)
       (let ((ready (await state (fn (g) (if (osrs-stat g 0) (if (osrs-stat g 3) #t #f) #f)))))
         (let ((visible (await ready (fn (g) (if (= (rats g) nil) #f #t)))))
           (let ((target (choose visible))
                 (attack-before (get (osrs-stat visible 0) 'xp))
                 (hp-before (get (osrs-stat visible 3) 'xp)))
-            (observe target)
             (let ((finished
-                    (await (osrs-attack visible (get target 'index))
+                    (await (after-attack (osrs-attack visible (get target 'index)) target)
                       (fn (g)
                         (if (< attack-before (get (osrs-stat g 0) 'xp))
                             (if (< hp-before (get (osrs-stat g 3) 'xp))
@@ -30,10 +29,10 @@
                       'hitpoints-before hp-before 'hitpoints-after (get (osrs-stat finished 3) 'xp)
                       'target-removed #t))))))))
   (def test-rat-combat-bounded
-    (fn (state await observe)
-      (combat state (fn (visible) (nearest (rats visible))) await observe)))
+    (fn (state await after-attack)
+      (combat state (fn (visible) (nearest (rats visible))) await after-attack)))
   (def test-rat-combat
-    (fn (state) (test-rat-combat-bounded state osrs-await (fn (_) nil))))
+    (fn (state) (test-rat-combat-bounded state osrs-await (fn (attacking _) attacking))))
   (def test-rat-combat-using
-    (fn (state choose) (combat state choose osrs-await (fn (_) nil))))
+    (fn (state choose) (combat state choose osrs-await (fn (attacking _) attacking))))
 )

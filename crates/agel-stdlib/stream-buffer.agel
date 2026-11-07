@@ -1,5 +1,5 @@
 (module agel/stream-buffer
-  (import agel/bytes)
+  (import agel/sequence)
   (export buffer-new buffer-request buffer-check-count)
   (def require (fn (ok reason) (if ok #t (signal 'stream/buffer reason))))
   (def buffer-check-count
@@ -9,7 +9,7 @@
       (begin
         (require (if (= (type-of size) 'int) (if (< 0 size) (< size 257) #f) #f) "invalid buffer size")
         (dict 'read (get stream 'read) 'write (get stream 'write)
-          'buffer "" 'ended #f 'reads 0 'size size 'service-fn nil 'service-state nil 'failed nil))))
+          'buffer nil 'ended #f 'reads 0 'size size 'service-fn nil 'service-state nil 'failed nil))))
   (def service
     (fn (state)
       (if (get state 'service-fn)
@@ -21,22 +21,39 @@
             (assoc state 'service-state (get effect 'state)))) state)))
   (def result (fn (state reply) (dict 'state state 'reply reply)))
   (def failed (fn (state problem) (result (assoc state 'failed problem) (dict 'error problem))))
+  (def validate-byte
+    (fn (_ byte)
+      (require (if (= (type-of byte) 'int) (if (< -1 byte) (< byte 256) #f) #f) "expected byte")))
+  (def refill-bytes
+    (fn (state)
+      (let ((bytes ((get state 'read) (get state 'size))))
+        (begin
+          (require (if (= bytes nil) #t (= (type-of bytes) 'list)) "expected byte list")
+          (require (< (count bytes) (+ 1 (get state 'size))) "oversized read")
+          (foldl validate-byte #t bytes)
+          bytes))))
+  (def split-prefix
+    (fn (bytes n prefix)
+      (if (= n 0) (dict 'bytes (reverse prefix) 'rest bytes)
+        (split-prefix (cdr bytes) (- n 1) (cons (car bytes) prefix)))))
   (def read-step
     (fn (state message)
-      (let ((refill (if (= (text-bytes (get state 'buffer)) 0) (if (get state 'ended) #f #t) #f)))
+      (let ((refill (if (= (count (get state 'buffer)) 0) (if (get state 'ended) #f #t) #f)))
         (let ((prepared (if refill (service state) state)))
           (with-handler (* problem) (failed prepared problem)
-            (let ((bytes (if refill (bytes-hex ((get prepared 'read) (get prepared 'size))) (get prepared 'buffer))))
-              (let ((n (if (< (/ (text-bytes bytes) 2) (get message 'count)) (/ (text-bytes bytes) 2) (get message 'count))))
+            (let ((bytes (if refill (refill-bytes prepared) (get prepared 'buffer)))
+                  (n (get message 'count)))
+              (let ((split (if (< n (count bytes)) (split-prefix bytes n nil)
+                            (dict 'bytes (if (= (count bytes) 0) nil bytes) 'rest nil))))
                 (result
-                  (assoc (assoc (assoc prepared 'buffer (text-slice bytes (* n 2) (text-bytes bytes))) 'ended (= (text-bytes bytes) 0))
+                  (assoc (assoc (assoc prepared 'buffer (get split 'rest)) 'ended (= (count bytes) 0))
                     'reads (+ (get prepared 'reads) (if refill 1 0)))
-                  (dict 'bytes (bytes-from-hex (text-slice bytes 0 (* n 2))))))))))))
+                  (dict 'bytes (get split 'bytes))))))))))
   (def buffer-request
     (fn (state message)
       (with-handler (* problem) (failed state problem)
         (if (= (get message 'operation) 'reset)
-          (result (assoc (assoc (assoc (assoc (assoc state 'buffer "") 'ended #f) 'service-fn nil) 'service-state nil) 'failed nil)
+          (result (assoc (assoc (assoc (assoc (assoc state 'buffer nil) 'ended #f) 'service-fn nil) 'service-state nil) 'failed nil)
             (dict 'ok #t))
           (if (= (get message 'operation) 'stop-service)
             (result (assoc (assoc state 'service-fn nil) 'service-state nil) (dict 'state (get state 'service-state)))

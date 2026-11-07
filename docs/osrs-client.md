@@ -84,6 +84,7 @@ of complete OSRS parity.
 sh scripts/test-osrs-game.sh
 sh scripts/test-osrs-combat.sh
 sh scripts/test-native-network.sh --combat
+sh scripts/test-native-network.sh --combat --optimize --live
 ```
 
 This runs the Agel scenarios and checks authoritative persisted server state:

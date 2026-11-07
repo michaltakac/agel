@@ -170,3 +170,43 @@ fn a_larger_quantum_preserves_bytes_and_validates_before_service() {
         "(#t #t 13 4 0 bytes/quantum)"
     );
 }
+
+#[test]
+fn small_reads_reuse_validated_bytes_without_recoding_each_refill() {
+    let options = EvaluationOptions {
+        budget: agel_core::Budget {
+            fuel: 350_000,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut world = World::default();
+    agel_stdlib::install(&mut world, &Default::default()).unwrap();
+    for source in [
+        include_str!("../bytes.agel"),
+        include_str!("../stream-buffer.agel"),
+        include_str!("../services.agel"),
+        include_str!("../service-stream.agel"),
+    ] {
+        world.evaluate(source).unwrap();
+    }
+    let result = world
+        .evaluate_with(
+            r#"
+      (import agel/service-stream)
+      (def make-sample (fn (n out) (if (= n 0) out (make-sample (- n 1) (cons (- n 1) out)))))
+      (def sample (make-sample 256 nil))
+      (def stream (service-stream (dict 'read (fn (_) sample)) 256))
+      (def read-byte (get stream 'read))
+      (def check-bytes (fn (n)
+        (if (= n 512) n
+          (if (= (car (read-byte 1)) (- n (* 256 (/ n 256))))
+            (check-bytes (+ n 1))
+            (signal 'test "byte out of order")))))
+      (list (check-bytes 0) (get (get ((get stream 'info)) 'state) 'reads))
+    "#,
+            &options,
+        )
+        .unwrap();
+    assert_eq!(result.values.last().unwrap().to_string(), "(512 2)");
+}

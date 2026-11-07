@@ -38,8 +38,8 @@ at the top level under the controller's authority; they share its protection
 domain. Calling their mutation operations from a bootstrap actor is refused.
 
 The returned `owner`/`service` handle identifies the service; `info()` returns
-its state and counters. Buffer bytes are compact hex text. Small reads reuse
-the buffer. Open/close clear it and the EOF latch. An I/O/service failure
+its state and counters. The buffer keeps up to 256 validated bytes per
+refill. Small reads consume the retained bytes directly. Open/close clear it and the EOF latch. An I/O/service failure
 latches failure; close/reopen is required before the stream can be read again.
 These are serialized single-owner streams.
 

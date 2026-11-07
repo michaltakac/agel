@@ -24,11 +24,14 @@
           (if (if (= (get active 'version) 2) (if (< 64 (get active 'value)) (< 64 length) #f) #f)
             (def policy-uses (+ policy-uses 1)) nil)
           (check-quantum (get active 'value) limit))))))
-(def largest-field
-  (fn (records field)
-    (foldl (fn (largest record)
+(def largest-field-step
+  (fn (field)
+    (fn (largest record)
       (let ((packed (get record field)))
         (if packed
           (if largest
             (if (< (text-bytes (get (get largest field) 'data)) (text-bytes (get packed 'data))) record largest)
-            record) largest))) nil records)))
+            record) largest)))))
+(def largest-field
+  (fn (records field)
+    (foldl (largest-field-step field) nil records)))

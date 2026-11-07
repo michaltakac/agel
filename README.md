@@ -5,10 +5,10 @@ in which agents are first-class values. It began as a safe hosted runtime
 and keeps replacing host components with code written in Agel, on research
 kernels of its own and on an unmodified seL4.
 
-**Current release: v0.3.19.** The fixed combat policy completed a native
-RuneScape encounter in Agel OS. The server confirmed the saved XP and the
-guest retained the packet and action history using general Agel code.
-See the [release notes and evidence](docs/release-v0.3.19.md).
+**Current release: v0.3.20.** The native Agel client can apply an
+agent-written encoder policy during a RuneScape encounter. The test compares
+the fixed and adaptive arms on saved XP, time and model calls. See the
+[release notes and evidence](docs/release-v0.3.20.md).
 
 v0.3.18 installed an agent-written service policy on a live connection
 after text judgment and recorded replay. See the

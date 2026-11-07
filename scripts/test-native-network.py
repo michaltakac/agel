@@ -19,24 +19,28 @@ from test_support import combat_xp, combat_xp_saved
 parser=argparse.ArgumentParser(description=__doc__)
 scenario=parser.add_mutually_exclusive_group()
 scenario.add_argument('--challenge', action='store_true')
-scenario.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
+parser.add_argument('--combat', action='store_true', help='kill one rat on a fresh normal account inside Agel OS')
 scenario.add_argument('--repair', action='store_true', help='repair a general tool during the same native connection')
 scenario.add_argument('--optimize', action='store_true', help='optimize the live byte service policy from a recorded observation')
 parser.add_argument('--live', action='store_true', help='use real providers for --repair or --optimize')
 options=parser.parse_args()
 editing=options.repair or options.optimize
+shared_carrier=editing or options.combat
+if options.combat and (options.challenge or options.repair):parser.error('--combat can only be combined with --optimize')
 if options.live and not editing:parser.error('--live requires --repair or --optimize')
 directory=Path('target')/('native-network-'+str(time.time_ns()))
 directory.mkdir(mode=0o700)
 print('Evidence:', directory, flush=True)
 proposal="(dict 'diagnosis \"fixed cadence pays for more service calls than the observed work bound requires\" 'after '(fn (limit) (* 64 (/ limit 64))) 'predictions '(64 192))" if options.optimize else None
-environment=provider_environment(directory, options.live, delay=20, proposal=proposal) if editing else dict(os.environ)
+environment=provider_environment(directory, options.live, delay=20, proposal=proposal) if shared_carrier else dict(os.environ)
 environment['AGEL_BYTE_ENDPOINT']='127.0.0.1:43594'
 if editing:print('Providers:', 'real' if options.live else 'fixtures; writer delayed 20 seconds', flush=True)
 manifest=json.loads(subprocess.run(['python3','scripts/osrs/world_manifest.py'],capture_output=True,text=True,check=True).stdout)
 manifest['scope']='native OS login, live observations, seeded general tool repair and saved movement; no Exo task score' if options.repair else 'native OS login, live observations and movement smoke test; no Exo task score'
 if options.optimize:manifest['scope']='native measured byte policy optimization, recorded byte replay and saved movement; no Exo task score'
-if options.combat:manifest['scope']='native one-rat combat on a fresh normal account with fixed encoder cadence'
+if options.combat:
+    manifest['scope']='native one-rat combat on a fresh normal account'
+    manifest['encoder_policy']='adaptive' if options.optimize else 'fixed'
 
 catalog=Path('crates/agel-stdlib/stdlib.agel').read_text()
 a=catalog.index('(module agel/sequence\n');b=catalog.find('\n(module ',a+1)
@@ -56,14 +60,14 @@ if options.combat:
     manifest['combat_policy_sha256']=hashlib.sha256(combat_module).hexdigest()
     source+=combat_module.decode()+'\n'
     source+=Path('crates/agel-stdlib/record-chain.agel').read_text()+'\n'
-if editing:
+if shared_carrier:
     for name in ['meta','judgment']:
         a=catalog.index('(module agel/'+name+'\n');b=catalog.find('\n(module ',a+1)
         source+=catalog[a:b if b>=0 else len(catalog)]+'\n'
     source+='(module agel/native-reader (export native-read) (def native-read '+Path('crates/agel-stdlib/native-reader.agel').read_text()+'))\n'
     source+=''.join(Path('crates/agel-stdlib/'+name+'.agel').read_text()+'\n' for name in ['evolution','judge-log','repair','inference','live-tools','batches'])
     source+=Path('examples/native-session-support.agel').read_text()+'\n'
-    if options.optimize:
+    if options.optimize or options.combat:
         source+=Path('crates/agel-stdlib/work-profile.agel').read_text()+'\n'
         source+=Path('examples/native-service-optimize.agel').read_text()+'\n'
     else:
@@ -96,7 +100,7 @@ else:
 '''
     if options.combat:
         source+="(import agel/record-chain) (def game (assoc game 'history-push record-chain-push))\n"
-    if options.optimize:
+    if options.optimize or options.combat:
         source+="(def game (assoc game 'maintenance (assoc (get game 'maintenance) 'quantum retained-quantum)))\n"
     source+='(begin (osrs-login '+json.dumps(account['username'])+' '+json.dumps(account['password'])+' context crcs seed (entropy-read 24)) #t)\n'
     source+='''(console-log "native-network: password login accepted")
@@ -107,7 +111,7 @@ else:
 '''
     if options.combat:
         source+='(def task-start (clock-us))\n'
-    if editing:
+    if editing and not options.combat:
         source+="(def prior-services (get ready 'keepalives))\n(osrs-service-start ready)\n"
         if options.optimize:
             source+="(def recorded-field (largest-field (get ready 'history) 'bytes))\n"
@@ -120,11 +124,26 @@ else:
         source+="(console-log (text-concat "+json.dumps(label)+" (print-form (- (get ready 'keepalives) prior-services))))\n"
     if options.combat:
         source+='''(import agel/osrs-combat-test)
+(def report-target (fn (target)
+  (console-log "native-combat: attack packet acknowledged by the byte carrier")
+  (console-log (text-concat "native-combat: target " (print-form target)))))
+'''
+        if options.optimize:
+            source+='''(def combat-after-attack (fn (attacking target)
+  (report-target target)
+  (osrs-service-start attacking)
+  (def recorded-field (record-chain-fold (largest-field-step 'bytes) nil (get attacking 'history)))
+'''
+            source+=Path('examples/native-service-optimize-run.agel').read_text()+'\n'
+            source+="(def policy-uses 0) (osrs-service-stop attacking)))\n"
+        else:
+            source+="(def combat-after-attack (fn (attacking target) (report-target target) attacking))\n"
+        source+='''
 (def started (clock-us))
 (console-log "native-combat: searching for a rat")
 (def combat (test-rat-combat-bounded ready
   (fn (state predicate) (osrs-await-bounded state predicate 320))
-  (fn (target) (console-log (text-concat "native-combat: target " (print-form target))))))
+  combat-after-attack))
 (def finish (clock-us))
 (def completed (get combat 'state))
 (console-log (text-concat "native-combat: " (print-form (get combat 'report))))
@@ -177,7 +196,7 @@ with tempfile.TemporaryDirectory(prefix='agel-native-network-',dir='/tmp') as so
             if machine.poll() is not None or time.monotonic()>deadline:raise RuntimeError('serial unavailable')
             time.sleep(.05)
         with (directory/'serial.log').open('w') as log:
-            command=['target/release/examples/guest_inference',str(serial),str(directory.resolve()),'process agel exited with status',':fs-format',':exec agel -- --no-stdlib /data/client'] if editing else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',':exec agel -- --no-stdlib /data/client']
+            command=['target/release/examples/guest_inference',str(serial),str(directory.resolve()),'process agel exited with status',':fs-format',':exec agel -- --no-stdlib /data/client'] if shared_carrier else ['target/release/examples/byte_bridge',str(serial),'127.0.0.1:43594',':exec agel -- --no-stdlib /data/client']
             result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,env=environment,timeout=960)
     finally:
         machine.terminate();machine.wait(timeout=10)
@@ -208,7 +227,9 @@ if options.combat:
     assert re.search(r'native-combat: \{test rat-combat passed #t .*target-removed #t\}',output)
     assert output.count('operation open ') == output.count('operation close ') == 2
     expected_xp=combat_xp(output)
-    print('Model calls: 0; judge calls: 0; model cost: $0 (fixed scripted policy)',flush=True)
+    if not editing:
+        assert 'inference-bridge: started job' not in output, 'fixed combat dispatched inference'
+        print('External model calls: 0; external judge calls: 0; model cost: $0 (fixed scripted policy)',flush=True)
 if not options.challenge:
     compiler=Path('/opt/homebrew/opt/openjdk@17/bin/javac')
     build=directory/'oracle';build.mkdir()

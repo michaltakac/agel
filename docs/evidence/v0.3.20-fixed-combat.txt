@@ -1,0 +1,28 @@
+Evidence: target/native-network-1794023388455467000
+native-network: cache negotiation and master index received inside Agel OS
+native-network: RSA public context computed inside Agel OS
+native-network: cipher state initialized inside Agel OS
+native-network: password login accepted
+native-network: observations {smithing-level 1 coins 0}
+native-combat: searching for a rat
+native-combat: attack packet acknowledged by the byte carrier
+native-combat: target {index 20014 type 2854 spawn-dx 2 spawn-dz -6 direction 6 jump #t extended #f movement nil}
+native-combat: {test rat-combat passed #t target-index 20014 target-type 2854 attack-before 0 attack-after 8 hitpoints-before 1154 hitpoints-after 1156 target-removed #t}
+native-combat: action-us 146764484
+native-combat: task-us 146764675
+native-combat: history-records 2511
+native-network: keepalives 175
+native-network: client completed: login, observations and rat combat inside Agel OS
+agel: 1 forms, 44164967 steps, revision 1
+process agel exited with status 0
+External model calls: 0; external judge calls: 0; model cost: $0 (fixed scripted policy)
+Persisted native client: account=[omitted] character=[omitted] rights= x=3221 z=3218 level=0 xp_rate_in_hundreds=100
+Persisted combat XP: stat=0 base=1 visible=1 fine_xp=80
+stat=3 base=10 visible=10 fine_xp=11566
+PASS: native client combat XP saved with normal rights and 1x XP
+Elapsed seconds: 319.576
+
+byte-bridge: request 1 operation open at-ms 318 duration-ms 0 status ok
+byte-bridge: request 6 operation close at-ms 3677 duration-ms 0 status ok
+byte-bridge: request 9 operation open at-ms 33742 duration-ms 1 status ok
+byte-bridge: request 281 operation close at-ms 311221 duration-ms 0 status ok

@@ -80,3 +80,8 @@
 (check (= (get (bytes-unpack-field (bytes-pack-field (dict 'bytes nil) 'bytes) 'bytes) 'bytes) nil) "packed nil stays nil")
 (check (with-handler (* problem) #t (begin (bytes-unpack-field (dict 'bytes (dict 'encoding 'hex 'nil? #t 'data "01")) 'bytes) #f)) "invalid packed nil rejected")
 #t
+(def malformed-read (buffered-stream (dict 'read (fn (_) '(1 256))) 2 nil))
+(check (= (with-handler (* problem) (get problem 'message) ((get malformed-read 'read) 1))
+  "expected byte") "invalid unread bytes refuse the entire refill")
+(check (= (with-handler (* problem) (get problem 'kind) ((get malformed-read 'read) 1))
+  'stream/failed) "invalid refill latches failure")
